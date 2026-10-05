@@ -1,21 +1,22 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import { useApp } from "@/lib/context";
 import { ArrowLeftRight, Edit3, Smile, Mail, Calendar, X } from "lucide-react";
-
-const actions = [
-  { label: "Сделка", icon: ArrowLeftRight },
-  { label: "Заметка", icon: Edit3 },
-  { label: "Эмоция", icon: Smile },
-  { label: "Пост", icon: Mail },
-  { label: "Событие", icon: Calendar },
-];
+import { formatString } from "@/lib/i18n";
 
 export function AddModal() {
-  const { isAddModalOpen, setAddModalOpen, showToast } = useApp();
+  const { isAddModalOpen, setAddModalOpen, showToast, dict } = useApp();
 
   if (!isAddModalOpen) return null;
+
+  const actions = [
+    { label: dict.addModal.actions.trade, icon: ArrowLeftRight },
+    { label: dict.addModal.actions.note, icon: Edit3 },
+    { label: dict.addModal.actions.emotion, icon: Smile },
+    { label: dict.addModal.actions.post, icon: Mail },
+    { label: dict.addModal.actions.event, icon: Calendar },
+  ];
 
   return (
     <div
@@ -28,13 +29,13 @@ export function AddModal() {
         <button
           onClick={() => setAddModalOpen(false)}
           className="absolute right-4 top-4 text-mu hover:text-tx"
-          aria-label="Закрыть"
+          aria-label={dict.addModal.close}
         >
           <X size={18} />
         </button>
 
-        <h3 className="font-serif text-lg font-semibold text-tx">Что добавить?</h3>
-        <p className="mt-1 text-xs text-mu">Выберите действие для мгновенного ввода</p>
+        <h3 className="font-serif text-lg font-semibold text-tx">{dict.addModal.title}</h3>
+        <p className="mt-1 text-xs text-mu">{dict.addModal.subtitle}</p>
 
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
           {actions.map((act) => {
@@ -44,7 +45,7 @@ export function AddModal() {
                 key={act.label}
                 onClick={() => {
                   setAddModalOpen(false);
-                  showToast(`Откроется форма: ${act.label}`);
+                  showToast(formatString(dict.search.formToast, { action: act.label }));
                 }}
                 className="flex flex-col items-center gap-2 rounded-xl border border-line bg-s2 p-4 text-center transition-all hover:border-vi hover:bg-pri/20"
               >

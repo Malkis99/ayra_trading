@@ -1,8 +1,13 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from "react";
+import { Language, Dictionary } from "@/lib/i18n/types";
+import { getDictionary } from "@/lib/i18n";
 
 interface AppContextType {
+  lang: Language;
+  setLanguage: (l: Language) => void;
+  dict: Dictionary;
   focusMode: boolean;
   setFocusMode: (f: boolean | ((prev: boolean) => boolean)) => void;
   isAddModalOpen: boolean;
@@ -17,12 +22,52 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-export function AppProvider({ children }: { children: React.ReactNode }) {
+export function AppProvider({
+  children,
+  initialLang = "ru",
+}: {
+  children: React.ReactNode;
+  initialLang?: Language;
+}) {
+  const [lang, setLangState] = useState<Language>(initialLang);
   const [focusMode, setFocusMode] = useState<boolean>(false);
   const [isAddModalOpen, setAddModalOpen] = useState<boolean>(false);
   const [isSearchOpen, setSearchOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [userPlan, setUserPlan] = useState<"Free" | "Pro" | "Elite">("Free");
+
+  const dict = getDictionary(lang);
+
+  const setLanguage = (newLang: Language) => {
+    setLangState(newLang);
+    try {
+      localStorage.setItem("ayra_lang", newLang);
+      document.cookie = `NEXT_LOCALE=${newLang}; path=/; max-age=31536000; SameSite=Lax`;
+      document.documentElement.lang = newLang;
+    } catch {
+      // ignore storage errors
+    }
+  };
+
+  useEffect(() => {
+    try {
+      const savedLang = localStorage.getItem("ayra_lang") as Language | null;
+      if (savedLang && (savedLang === "ru" || savedLang === "en")) {
+        setLangState(savedLang);
+      } else {
+        const browserLang = navigator.language.toLowerCase().startsWith("ru")
+          ? "ru"
+          : "en";
+        setLangState(browserLang);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -54,6 +99,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   return (
     <AppContext.Provider
       value={{
+        lang,
+        setLanguage,
+        dict,
         focusMode,
         setFocusMode,
         isAddModalOpen,

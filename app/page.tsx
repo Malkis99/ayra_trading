@@ -3,24 +3,37 @@
 import React from "react";
 import Link from "next/link";
 import { useApp } from "@/lib/context";
-import { Plus, CheckSquare, BarChart2, Zap } from "lucide-react";
+import { Plus, CheckSquare, BarChart2 } from "lucide-react";
+import { formatString, getPlural, formatNumber } from "@/lib/i18n";
 
 export default function HomePage() {
-  const { setAddModalOpen, showToast, userPlan } = useApp();
+  const { setAddModalOpen, showToast, userPlan, dict, lang } = useApp();
+
+  const questsWord = getPlural(lang, 10, dict.plurals.quests);
 
   return (
     <div className="space-y-6">
       {/* Welcome Banner */}
       <div className="card bg-gradient-to-r from-s1 via-[#1c1b28] to-s1">
-        <div className="text-xs text-mu">Добрый день</div>
+        <div className="text-xs text-mu">{dict.home.greeting}</div>
         <h1 className="font-serif text-2xl font-bold text-tx md:text-3xl mt-1">
-          TraderOne, твой путь продолжается
+          {dict.home.title}
         </h1>
 
         <div className="mt-3 flex flex-wrap gap-2">
-          <span className="chip">Задания: 0/3</span>
-          <span className="chip">Lv 1 · 0/120 XP</span>
-          <span className="chip">Coins: 0</span>
+          <span className="chip">
+            {formatString(dict.home.stats.quests, { count: formatNumber(lang, 0) })}
+          </span>
+          <span className="chip">
+            {formatString(dict.home.stats.levelXp, {
+              level: formatNumber(lang, 1),
+              xp: formatNumber(lang, 0),
+              nextXp: formatNumber(lang, 120),
+            })}
+          </span>
+          <span className="chip">
+            {formatString(dict.home.stats.coins, { coins: formatNumber(lang, 0) })}
+          </span>
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2.5">
@@ -29,15 +42,15 @@ export default function HomePage() {
             className="btn text-xs py-2 px-3.5 flex items-center gap-1.5"
           >
             <Plus size={15} />
-            <span>Добавить сделку</span>
+            <span>{dict.home.quickActions.addTrade}</span>
           </button>
           <Link href="/quests" className="btn-ghost text-xs flex items-center gap-1.5">
             <CheckSquare size={15} />
-            <span>К заданиям</span>
+            <span>{dict.home.quickActions.toQuests}</span>
           </Link>
           <Link href="/market" className="btn-ghost text-xs flex items-center gap-1.5">
             <BarChart2 size={15} />
-            <span>Рынок сегодня</span>
+            <span>{dict.home.quickActions.marketToday}</span>
           </Link>
         </div>
       </div>
@@ -48,26 +61,36 @@ export default function HomePage() {
         <div className="space-y-4 lg:col-span-7">
           {/* Daily Quests */}
           <div className="card space-y-3">
-            <h4 className="h4">Задания дня</h4>
+            <h4 className="h4">{dict.home.dailyQuests.title}</h4>
             <div className="space-y-2">
               <div className="flex items-center justify-between rounded-xl border border-line bg-s2/60 p-3 text-xs">
-                <span>Daily Bias перед сессией</span>
-                <span className="text-mu">+40 XP · Trading</span>
+                <span>{dict.home.dailyQuests.bias}</span>
+                <span className="text-mu">{dict.home.dailyQuests.biasTag}</span>
               </div>
               <div className="flex items-center justify-between rounded-xl border border-line bg-s2/60 p-3 text-xs">
-                <span>Запись сделки в журнал</span>
-                <span className="text-mu">+40 XP · Discipline</span>
+                <span>{dict.home.dailyQuests.tradeLog}</span>
+                <span className="text-mu">{dict.home.dailyQuests.tradeLogTag}</span>
               </div>
               <div className="flex items-center justify-between rounded-xl border border-line bg-s2/60 p-3 text-xs">
-                <span>10 минут рефлексии</span>
-                <span className="text-mu">+40 XP · Psychology</span>
+                <span>{dict.home.dailyQuests.reflection}</span>
+                <span className="text-mu">{dict.home.dailyQuests.reflectionTag}</span>
               </div>
             </div>
 
             <div className="pt-2">
               <div className="flex justify-between text-xs text-mu mb-1.5">
-                <span>Испытание недели: 10 заданий</span>
-                <span>0 из 10</span>
+                <span>
+                  {formatString(dict.home.dailyQuests.challengeTitle, {
+                    count: formatNumber(lang, 10),
+                    questsWord,
+                  })}
+                </span>
+                <span>
+                  {formatString(dict.home.dailyQuests.challengeProgress, {
+                    current: formatNumber(lang, 0),
+                    total: formatNumber(lang, 10),
+                  })}
+                </span>
               </div>
               <div className="xp">
                 <i className="bg-gradient-to-r from-pri to-vi" style={{ width: "0%" }} />
@@ -77,7 +100,7 @@ export default function HomePage() {
 
           {/* 7-Day Reward */}
           <div className="card space-y-3">
-            <h4 className="h4">Ежедневная награда</h4>
+            <h4 className="h4">{dict.home.dailyReward.title}</h4>
             <div className="grid grid-cols-7 gap-1.5 text-center text-[10px]">
               {[10, 10, 15, 15, 20, 25, 50].map((coins, idx) => (
                 <div
@@ -86,16 +109,24 @@ export default function HomePage() {
                     idx === 0 ? "border-go bg-go/10 text-go font-bold" : "border-line text-mu"
                   }`}
                 >
-                  <div>День {idx + 1}</div>
+                  <div>
+                    {formatString(dict.home.dailyReward.day, { day: formatNumber(lang, idx + 1) })}
+                  </div>
                   <b className="block text-xs mt-0.5">{coins}</b>
                 </div>
               ))}
             </div>
             <button
-              onClick={() => showToast("Забрать награду (+10 Coins)")}
+              onClick={() =>
+                showToast(
+                  formatString(dict.home.dailyReward.claimToast, {
+                    coins: formatNumber(lang, 10),
+                  })
+                )
+              }
               className="btn w-full text-xs mt-2"
             >
-              Забрать награду
+              {dict.home.dailyReward.claim}
             </button>
           </div>
         </div>
@@ -104,35 +135,38 @@ export default function HomePage() {
         <div className="space-y-4 lg:col-span-5">
           {/* Character Mini Card */}
           <div className="card text-center space-y-3">
-            <h4 className="h4">Твой персонаж</h4>
+            <h4 className="h4">{dict.home.characterCard.title}</h4>
             <div className="grid place-items-center h-40 rounded-xl bg-s2/40 border border-line border-dashed">
               <div className="lvbadge text-lg">1</div>
             </div>
             <div>
               <b className="text-sm text-tx">TraderOne</b>
-              <div className="text-xs text-mu">Lv 1 · Resting</div>
+              <div className="text-xs text-mu">
+                {formatString(dict.home.characterCard.levelStatus, {
+                  level: formatNumber(lang, 1),
+                })}
+              </div>
             </div>
             <Link href="/profile" className="btn-ghost w-full text-xs block">
-              Открыть профиль
+              {dict.home.characterCard.openProfile}
             </Link>
           </div>
 
           {/* AI Brief */}
           <div className="card space-y-2">
-            <h4 className="h4">AI-бриф дня</h4>
+            <h4 className="h4">{dict.home.aiBrief.title}</h4>
             {userPlan === "Free" ? (
               <>
-                <p className="text-xs text-mu">
-                  Доступно в Pro и Elite: разбор событий дня и сценарии «если/то».
-                </p>
-                <Link href="/plans" className="text-xs font-semibold text-go hover:underline block pt-1">
-                  Смотреть тарифы →
+                <p className="text-xs text-mu">{dict.home.aiBrief.freeText}</p>
+                <Link
+                  href="/plans"
+                  className="text-xs font-semibold text-go hover:underline block pt-1"
+                >
+                  {dict.home.aiBrief.viewPlans}
                 </Link>
               </>
             ) : (
-              <p className="text-xs text-mu">
-                Демо: сегодня важны CPI и реакция доллара. Сценарии, не signals.
-              </p>
+              <p className="text-xs text-mu">{dict.home.aiBrief.paidText}</p>
             )}
           </div>
         </div>

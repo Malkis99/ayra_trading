@@ -9,10 +9,17 @@ import { Starfield } from "@/components/Starfield";
 import { AddModal } from "@/components/AddModal";
 import { SearchModal } from "@/components/SearchModal";
 import { Toast } from "@/components/Toast";
+import { Language } from "@/lib/i18n/types";
 
-export function Shell({ children }: { children: React.ReactNode }) {
+export function Shell({
+  children,
+  initialLang = "ru",
+}: {
+  children: React.ReactNode;
+  initialLang?: Language;
+}) {
   return (
-    <AppProvider>
+    <AppProvider initialLang={initialLang}>
       <div className="flex h-screen overflow-hidden bg-ink text-tx">
         {/* Fixed Desktop Sidebar */}
         <Sidebar />

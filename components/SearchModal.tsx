@@ -4,30 +4,31 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/lib/context";
 import { Search, X } from "lucide-react";
-
-const searchTargets = [
-  { label: "Перейти: Home", href: "/" },
-  { label: "Перейти: Journal", href: "/journal" },
-  { label: "Перейти: Journal › Trades", href: "/journal?tab=trades" },
-  { label: "Перейти: Market", href: "/market" },
-  { label: "Перейти: Quests", href: "/quests" },
-  { label: "Перейти: Community", href: "/community" },
-  { label: "Перейти: Academy", href: "/academy" },
-  { label: "Перейти: Профиль", href: "/profile" },
-  { label: "Перейти: Тарифы", href: "/plans" },
-  { label: "Добавить: Сделка", action: "Сделка" },
-  { label: "Добавить: Заметка", action: "Заметка" },
-  { label: "Добавить: Эмоция", action: "Эмоция" },
-  { label: "Добавить: Пост", action: "Пост" },
-  { label: "Добавить: Событие", action: "Событие" },
-];
+import { formatString } from "@/lib/i18n";
 
 export function SearchModal() {
   const router = useRouter();
-  const { isSearchOpen, setSearchOpen, showToast } = useApp();
+  const { isSearchOpen, setSearchOpen, showToast, dict } = useApp();
   const [query, setQuery] = useState("");
 
   if (!isSearchOpen) return null;
+
+  const searchTargets = [
+    { label: dict.search.targets.home, href: "/" },
+    { label: dict.search.targets.journal, href: "/journal" },
+    { label: dict.search.targets.journalTrades, href: "/journal?tab=trades" },
+    { label: dict.search.targets.market, href: "/market" },
+    { label: dict.search.targets.quests, href: "/quests" },
+    { label: dict.search.targets.community, href: "/community" },
+    { label: dict.search.targets.academy, href: "/academy" },
+    { label: dict.search.targets.profile, href: "/profile" },
+    { label: dict.search.targets.plans, href: "/plans" },
+    { label: dict.search.targets.addTrade, action: dict.addModal.actions.trade },
+    { label: dict.search.targets.addNote, action: dict.addModal.actions.note },
+    { label: dict.search.targets.addEmotion, action: dict.addModal.actions.emotion },
+    { label: dict.search.targets.addPost, action: dict.addModal.actions.post },
+    { label: dict.search.targets.addEvent, action: dict.addModal.actions.event },
+  ];
 
   const filtered = searchTargets
     .filter((item) => item.label.toLowerCase().includes(query.toLowerCase()))
@@ -39,7 +40,7 @@ export function SearchModal() {
     if (item.href) {
       router.push(item.href);
     } else if (item.action) {
-      showToast(`Откроется форма: ${item.action}`);
+      showToast(formatString(dict.search.formToast, { action: item.action }));
     }
   };
 
@@ -61,7 +62,7 @@ export function SearchModal() {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Перейти или добавить…"
+            placeholder={dict.search.placeholder}
             className="w-full rounded-xl border border-line bg-s2 py-2.5 pl-10 pr-10 text-sm text-tx placeholder-mu focus:border-vi focus:outline-none"
           />
           <button
@@ -70,6 +71,7 @@ export function SearchModal() {
               setQuery("");
             }}
             className="absolute right-3 text-mu hover:text-tx"
+            aria-label={dict.addModal.close}
           >
             <X size={18} />
           </button>
@@ -77,7 +79,7 @@ export function SearchModal() {
 
         <div className="mt-3 flex flex-col gap-1">
           {filtered.length === 0 ? (
-            <div className="py-6 text-center text-xs text-mu">Ничего не найдено</div>
+            <div className="py-6 text-center text-xs text-mu">{dict.search.empty}</div>
           ) : (
             filtered.map((item, idx) => (
               <button

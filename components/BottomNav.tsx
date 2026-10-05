@@ -11,18 +11,20 @@ import {
   Users,
   GraduationCap,
 } from "lucide-react";
-
-const mobileItems = [
-  { href: "/", label: "Home", icon: Home },
-  { href: "/journal", label: "Journal", icon: BookOpen },
-  { href: "/market", label: "Market", icon: TrendingUp },
-  { href: "/quests", label: "Quests", icon: CheckSquare },
-  { href: "/community", label: "Community", icon: Users },
-  { href: "/academy", label: "Academy", icon: GraduationCap },
-];
+import { useApp } from "@/lib/context";
 
 export function BottomNav() {
   const pathname = usePathname();
+  const { dict } = useApp();
+
+  const mobileItems = [
+    { href: "/", label: dict.nav.home, icon: Home },
+    { href: "/journal", label: dict.nav.journal, icon: BookOpen },
+    { href: "/market", label: dict.nav.market, icon: TrendingUp },
+    { href: "/quests", label: dict.nav.quests, icon: CheckSquare },
+    { href: "/community", label: dict.nav.community, icon: Users },
+    { href: "/academy", label: dict.nav.academy, icon: GraduationCap },
+  ];
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-20 flex border-t border-line bg-[#121117f2] backdrop-blur-md md:hidden">
@@ -42,7 +44,7 @@ export function BottomNav() {
             }`}
           >
             <Icon size={18} />
-            <span>{item.label}</span>
+            <span className="truncate max-w-[50px]">{item.label}</span>
           </Link>
         );
       })}

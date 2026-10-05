@@ -2,63 +2,64 @@
 
 import React from "react";
 import { useApp } from "@/lib/context";
-
-const plansList = [
-  {
-    name: "Free",
-    price: "$0",
-    desc: "Для старта и ознакомления",
-    features: [
-      "Журнал сделок с лимитами",
-      "Квесты, XP и базовый персонаж",
-      "Overview и Calendar (базовые)",
-      "Weekly Review без AI",
-    ],
-    color: "text-mu",
-    borderColor: "border-line",
-  },
-  {
-    name: "Pro",
-    price: "$9 / мес",
-    desc: "Для регулярной торговли",
-    features: [
-      "Расширенные отчёты и Trade DNA",
-      "AI Weekly Review и News Intelligence",
-      "Scanner с лимитом правил",
-      "Больше счетов и импортов",
-    ],
-    color: "text-vi",
-    borderColor: "border-vi",
-  },
-  {
-    name: "Elite",
-    price: "$19 / мес",
-    desc: "Максимум аналитики и инструментария",
-    features: [
-      "Все AI-ассистенты без ограничений",
-      "Scanner без лимитов",
-      "Prop Rules Tracker с алертами",
-      "Эксклюзивная косметика и ранний доступ",
-    ],
-    color: "text-go",
-    borderColor: "border-go",
-  },
-];
+import { formatString } from "@/lib/i18n";
 
 export default function PlansPage() {
-  const { userPlan, setUserPlan, showToast } = useApp();
+  const { userPlan, setUserPlan, showToast, dict } = useApp();
+
+  const plansList = [
+    {
+      name: "Free" as const,
+      price: dict.plans.free.price,
+      desc: dict.plans.free.desc,
+      features: [
+        dict.plans.free.f1,
+        dict.plans.free.f2,
+        dict.plans.free.f3,
+        dict.plans.free.f4,
+      ],
+      color: "text-mu",
+      borderColor: "border-line",
+    },
+    {
+      name: "Pro" as const,
+      price: dict.plans.pro.price,
+      desc: dict.plans.pro.desc,
+      features: [
+        dict.plans.pro.f1,
+        dict.plans.pro.f2,
+        dict.plans.pro.f3,
+        dict.plans.pro.f4,
+      ],
+      color: "text-vi",
+      borderColor: "border-vi",
+    },
+    {
+      name: "Elite" as const,
+      price: dict.plans.elite.price,
+      desc: dict.plans.elite.desc,
+      features: [
+        dict.plans.elite.f1,
+        dict.plans.elite.f2,
+        dict.plans.elite.f3,
+        dict.plans.elite.f4,
+      ],
+      color: "text-go",
+      borderColor: "border-go",
+    },
+  ];
 
   const handleSelectPlan = (planName: "Free" | "Pro" | "Elite") => {
     setUserPlan(planName);
-    showToast(`Выбран тариф ${planName} (демо, без оплаты)`);
+    showToast(formatString(dict.plans.selectedToast, { name: planName }));
   };
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
       <div className="text-center">
-        <h1 className="font-serif text-3xl font-bold text-tx">Тарифные планы</h1>
+        <h1 className="font-serif text-3xl font-bold text-tx">{dict.plans.title}</h1>
         <p className="text-xs text-mu mt-2 max-w-md mx-auto">
-          Подписка расширяет аналитические инструменты и косметику. На XP, рейтинг и репутацию она не влияет. Цены демонстрационные.
+          {dict.plans.subtitle}
         </p>
       </div>
 
@@ -90,14 +91,14 @@ export default function PlansPage() {
               <div className="mt-6">
                 {isCurrent ? (
                   <div className="chip w-full justify-center py-2 text-center font-semibold">
-                    Текущий тариф
+                    {dict.plans.currentPlan}
                   </div>
                 ) : (
                   <button
-                    onClick={() => handleSelectPlan(p.name as "Free" | "Pro" | "Elite")}
+                    onClick={() => handleSelectPlan(p.name)}
                     className="btn w-full text-xs"
                   >
-                    Выбрать {p.name}
+                    {formatString(dict.plans.selectPlan, { name: p.name })}
                   </button>
                 )}
               </div>
