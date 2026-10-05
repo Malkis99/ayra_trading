@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -14,19 +14,20 @@ import {
   HelpCircle,
 } from "lucide-react";
 import { useApp } from "@/lib/context";
-
-const navItems = [
-  { href: "/", label: "Home", icon: Home },
-  { href: "/journal", label: "Journal", icon: BookOpen },
-  { href: "/market", label: "Market", icon: TrendingUp },
-  { href: "/quests", label: "Quests", icon: CheckSquare },
-  { href: "/community", label: "Community", icon: Users },
-  { href: "/academy", label: "Academy", icon: GraduationCap },
-];
+import { formatString } from "@/lib/i18n";
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { showToast } = useApp();
+  const { dict } = useApp();
+
+  const navItems = [
+    { href: "/", label: dict.nav.home, icon: Home },
+    { href: "/journal", label: dict.nav.journal, icon: BookOpen },
+    { href: "/market", label: dict.nav.market, icon: TrendingUp },
+    { href: "/quests", label: dict.nav.quests, icon: CheckSquare },
+    { href: "/community", label: dict.nav.community, icon: Users },
+    { href: "/academy", label: dict.nav.academy, icon: GraduationCap },
+  ];
 
   return (
     <aside className="hidden h-full w-[220px] flex-col border-r border-line bg-gradient-to-b from-[#17161e] to-[#121117] p-3 md:flex">
@@ -86,11 +87,13 @@ export function Sidebar() {
             <span className="truncate text-xs font-semibold text-tx">
               TraderOne
             </span>
-            <span className="text-[11px] text-mu">Lv 1 · Новичок пути</span>
+            <span className="text-[11px] text-mu">
+              {dict.topbar.level} 1 · {dict.topbar.noviceTitle}
+            </span>
             <div className="xp h-1 w-full bg-white/10">
               <i className="block h-full bg-vi" style={{ width: "40%" }} />
             </div>
-            <span className="text-[10px] text-mu">Репутация: Растёт</span>
+            <span className="text-[10px] text-mu">{dict.topbar.reputation}</span>
           </div>
         </Link>
 
@@ -101,14 +104,14 @@ export function Sidebar() {
             className="flex items-center gap-2 rounded-lg px-3 py-1.5 hover:bg-s2 hover:text-tx"
           >
             <Settings size={15} />
-            <span>Settings</span>
+            <span>{dict.nav.settings}</span>
           </Link>
           <Link
             href="/help"
             className="flex items-center gap-2 rounded-lg px-3 py-1.5 hover:bg-s2 hover:text-tx"
           >
             <HelpCircle size={15} />
-            <span>Help</span>
+            <span>{dict.nav.help}</span>
           </Link>
         </div>
       </div>
