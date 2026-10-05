@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+body { @apply bg-ink text-tx antialiased; background-image: radial-gradient(900px 480px at 78% -8%, #50348f26, transparent 70%); }
+* { scrollbar-width: thin; scrollbar-color: #3a3750 transparent; }
+:focus-visible { outline: 2px solid #a38ad1; outline-offset: 2px; }
+
+@layer components {
+  .card { @apply rounded-2xl border border-line p-4; background: linear-gradient(180deg, #1c1b24, #18171f); box-shadow: inset 0 1px 0 #ffffff0a; }
+  .card .card { @apply rounded-xl; background: #ffffff06; box-shadow: none; }
+  .h4 { @apply mb-2 text-xs font-medium text-mu; }
+  .chip { @apply inline-flex items-center rounded-full border border-line bg-s2 px-3 py-0.5 text-[11px] text-mu; }
+  .btn { @apply rounded-xl px-4 py-2 font-semibold text-white transition hover:brightness-110 disabled:opacity-50; background: linear-gradient(180deg, #6443b4, #50348f); box-shadow: 0 6px 18px #50348f55; }
+  .btn-ghost { @apply rounded-xl border border-line bg-s1 px-3 py-2 text-sm transition hover:border-vi; }
+  .xp { @apply h-[5px] overflow-hidden rounded bg-white/10; }
+  .xp > i { @apply block h-full rounded; }
+  .tabs { @apply mb-4 flex gap-5 overflow-x-auto border-b border-line; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { @apply -mb-px whitespace-nowrap border-b-2 border-transparent py-2 text-sm text-mu; }
+  .tab.on { @apply border-vi text-tx; }
+}
+
+.slot { width: 58px; height: 58px; padding: 1.5px; background: var(--bc, #2c2a38); cursor: pointer; clip-path: polygon(24% 0, 76% 0, 100% 24%, 100% 76%, 76% 100%, 24% 100%, 0 76%, 0 24%); }
+.slot > i { display: grid; place-items: center; width: 100%; height: 100%; padding: 3px; font-style: normal; font-size: 10px; line-height: 1.15; text-align: center; background: #1a1922; clip-path: inherit; color: #a09eb2; transition: background .15s; }
+.slot:hover > i { background: #3a2a68; }
+.lvbadge { position: relative; display: grid; place-items: center; width: 60px; height: 60px; flex: none; font: 700 24px var(--font-serif, Georgia, serif); color: #efe9ff; background: linear-gradient(135deg, #a38ad1, #50348f); clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%); }
+.lvbadge::before { content: ""; position: absolute; inset: 1.5px; background: #1d1b2a; clip-path: inherit; z-index: -1; }
+.ring { position: absolute; left: 50%; bottom: 70px; border-radius: 50%; border: 1px solid #a38ad199; transform: translateX(-50%) rotateX(72deg); }
+@keyframes rspin { to { transform: translateX(-50%) rotateX(72deg) rotate(360deg); } }
+@keyframes bob { 50% { transform: translateY(-6px); } }
+.bob { animation: bob 2.4s ease-in-out infinite; }
+.ring-a { width: 250px; height: 250px; border-style: dashed; opacity: .55; animation: rspin 20s linear infinite; }
+.ring-b { width: 180px; height: 180px; box-shadow: 0 0 26px #a38ad166; }
+@media (prefers-reduced-motion: reduce) { .ring-a, .bob { animation: none; } }
