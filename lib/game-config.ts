@@ -8,4 +8,12 @@ export const GAME_CONFIG = {
   QUEST_XP: 40,
   QUEST_COINS: 10,
   MAX_CUSTOM_GOALS: 5,
+
+  // Level unlock thresholds (placeholders for T4)
+  LEVEL_UNLOCKS: {
+    FRAME_BLUE_LEVEL: 3,
+    FRAME_GOLD_LEVEL: 4,
+    TITLE_DISCIPLINED_LEVEL: 3,
+    TITLE_STRATEGIST_LEVEL: 5,
+  },
 };
