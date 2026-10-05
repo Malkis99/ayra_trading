@@ -11,7 +11,7 @@ import { Sparkline } from "@/components/Sparkline";
 import { xpForNextLevel, ChronicleEntry } from "@/lib/game";
 import { DEMO_MARKETS, DEMO_EVENTS } from "@/lib/demo-data";
 import { getDeterministicDailyQuests } from "@/lib/quests";
-import { TITLES, FRAMES } from "@/lib/items";
+import { TITLES, FRAMES, ITEMS } from "@/lib/items";
 
 export default function HomePage() {
   const { setAddModalOpen, showToast, dict, lang } = useApp();
@@ -60,13 +60,13 @@ export default function HomePage() {
   const currentRewardDayIndex = gameState.dailyRewardIndex % 7;
 
   const frameColor = FRAMES[gameState.frame]?.color || "#a38ad1";
-  const titleKey = TITLES[gameState.title]?.nameRu;
+  const titleKey = TITLES[gameState.title]?.nameKey;
   const titleText =
-    gameState.title === 1
+    titleKey === "titles.titleNovice"
       ? dict.titles.titleNovice
-      : gameState.title === 2
+      : titleKey === "titles.titleDisciplined"
       ? dict.titles.titleDisciplined
-      : gameState.title === 3
+      : titleKey === "titles.titleStrategist"
       ? dict.titles.titleStrategist
       : "";
 
@@ -94,13 +94,34 @@ export default function HomePage() {
         case "planChanged":
           text = formatString(dict.chronicleEvents.planChanged, { plan: entry.plan });
           break;
-        case "itemEquipped":
-          text = formatString(dict.chronicleEvents.itemEquipped, { name: entry.name });
+        case "itemEquipped": {
+          const itemObj = entry.itemId != null ? ITEMS[entry.itemId] : null;
+          const nameKeyShort = itemObj ? itemObj.nameKey.replace("items.", "") : "";
+          const name =
+            itemObj && (dict.items as any)[nameKeyShort]
+              ? (dict.items as any)[nameKeyShort]
+              : entry.name || "";
+          text = formatString(dict.chronicleEvents.itemEquipped, { name });
           break;
-        case "achievementUnlocked":
+        }
+        case "itemUnequipped": {
+          const slotName = (dict.slots as any)[entry.slot] || entry.slot;
+          text = formatString(dict.chronicleEvents.itemUnequipped, { name: slotName });
+          break;
+        }
+        case "achievementUnlocked": {
+          const achKey = entry.achievementId || "";
+          const achTitle =
+            achKey && (dict.profile.achievements as any)[achKey]
+              ? (dict.profile.achievements as any)[achKey]
+              : entry.title || "";
           text = formatString(dict.chronicleEvents.achievementUnlocked, {
-            title: entry.title,
+            title: achTitle,
           });
+          break;
+        }
+        case "profileUpdated":
+          text = dict.chronicleEvents.profileUpdated;
           break;
         case "postPublished":
           text = dict.chronicleEvents.postPublished;

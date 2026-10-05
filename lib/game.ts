@@ -1,4 +1,5 @@
 import { GAME_CONFIG } from "./game-config";
+import { ITEMS } from "./items";
 
 export const DAILY_REWARDS = GAME_CONFIG.DAILY_REWARD_VALUES;
 export const QUEST_XP = GAME_CONFIG.QUEST_XP;
@@ -10,9 +11,11 @@ export type ChronicleEventType =
   | { type: "levelUp"; level: number }
   | { type: "dailyReward"; coins: number }
   | { type: "planChanged"; plan: "Free" | "Pro" | "Elite" }
-  | { type: "itemEquipped"; name: string }
-  | { type: "achievementUnlocked"; title: string }
+  | { type: "itemEquipped"; itemId: number; name?: string }
+  | { type: "itemUnequipped"; slot: string; itemId?: number }
+  | { type: "achievementUnlocked"; achievementId: string; title?: string }
   | { type: "postPublished" }
+  | { type: "profileUpdated" }
   | { type: "legacy"; text: string };
 
 export type ChronicleEntry = ChronicleEventType | string;
@@ -44,7 +47,11 @@ export interface GameState {
   frame: number;
   title: number;
   background: number;
+  loadouts: Record<string, Record<string, number>>;
+  activeLoadout: string;
+  itemsEquippedCount: number;
   achievements: Record<string, boolean>;
+  posts: string[];
   chronicle: ChronicleEntry[];
   currentStreak: number;
   bestStreak: number;
@@ -82,7 +89,14 @@ export const INITIAL_GAME_STATE: GameState = {
   frame: 1,
   title: 1,
   background: 0,
+  loadouts: {
+    Сессия: {},
+    Сообщество: {},
+  },
+  activeLoadout: "Сессия",
+  itemsEquippedCount: 0,
   achievements: {},
+  posts: [],
   chronicle: [{ type: "characterCreated" }],
   currentStreak: 0,
   bestStreak: 0,
@@ -146,6 +160,11 @@ export function migrateState(rawState: any): GameState {
   return {
     ...INITIAL_GAME_STATE,
     ...rawState,
+    loadouts: rawState.loadouts || INITIAL_GAME_STATE.loadouts,
+    activeLoadout: rawState.activeLoadout || "Сессия",
+    itemsEquippedCount: rawState.itemsEquippedCount || 0,
+    achievements: rawState.achievements || {},
+    posts: rawState.posts || [],
     chronicle: chronicleMigrated,
     completedQuestsToday: rawState.completedQuestsToday || {},
     passedQuestsToday: rawState.passedQuestsToday || {},
@@ -210,6 +229,82 @@ export function checkAndApplyDateResets(
   return updated;
 }
 
+export function checkAchievements(
+  state: GameState
+): { state: GameState; newlyUnlocked: string[] } {
+  const newlyUnlocked: string[] = [];
+  let updatedState = { ...state };
+  let chronicle = [...updatedState.chronicle];
+
+  // 1. firstQuest: completed >= 1 quest
+  const hasFirstQuest =
+    updatedState.history.length >= 1 ||
+    Object.keys(updatedState.completedQuestsToday).length >= 1 ||
+    updatedState.weeklyQuestCount >= 1;
+
+  if (hasFirstQuest && !updatedState.achievements["firstQuest"]) {
+    updatedState.achievements = { ...updatedState.achievements, firstQuest: true };
+    chronicle = addChronicleEvent(chronicle, {
+      type: "achievementUnlocked",
+      achievementId: "firstQuest",
+    });
+    newlyUnlocked.push("firstQuest");
+  }
+
+  // 2. stylist: itemsEquippedCount >= 1 or Object.keys(equipment).length >= 1
+  const hasStylist =
+    updatedState.itemsEquippedCount >= 1 ||
+    Object.keys(updatedState.equipment).length >= 1;
+
+  if (hasStylist && !updatedState.achievements["stylist"]) {
+    updatedState.achievements = { ...updatedState.achievements, stylist: true };
+    chronicle = addChronicleEvent(chronicle, {
+      type: "achievementUnlocked",
+      achievementId: "stylist",
+    });
+    newlyUnlocked.push("stylist");
+  }
+
+  // 3. streakDay: 3 quests completed today
+  const hasStreakDay = Object.keys(updatedState.completedQuestsToday).length >= 3;
+
+  if (hasStreakDay && !updatedState.achievements["streakDay"]) {
+    updatedState.achievements = { ...updatedState.achievements, streakDay: true };
+    chronicle = addChronicleEvent(chronicle, {
+      type: "achievementUnlocked",
+      achievementId: "streakDay",
+    });
+    newlyUnlocked.push("streakDay");
+  }
+
+  // 4. level3: level >= 3
+  const hasLevel3 = updatedState.level >= 3;
+
+  if (hasLevel3 && !updatedState.achievements["level3"]) {
+    updatedState.achievements = { ...updatedState.achievements, level3: true };
+    chronicle = addChronicleEvent(chronicle, {
+      type: "achievementUnlocked",
+      achievementId: "level3",
+    });
+    newlyUnlocked.push("level3");
+  }
+
+  // 5. author: posts.length >= 1
+  const hasAuthor = updatedState.posts.length >= 1;
+
+  if (hasAuthor && !updatedState.achievements["author"]) {
+    updatedState.achievements = { ...updatedState.achievements, author: true };
+    chronicle = addChronicleEvent(chronicle, {
+      type: "achievementUnlocked",
+      achievementId: "author",
+    });
+    newlyUnlocked.push("author");
+  }
+
+  updatedState.chronicle = chronicle;
+  return { state: updatedState, newlyUnlocked };
+}
+
 export function completeQuest(
   state: GameState,
   questId: string,
@@ -218,11 +313,16 @@ export function completeQuest(
   xpAmount: number = QUEST_XP,
   coinsAmount: number = QUEST_COINS,
   currentDate: Date = new Date()
-): { state: GameState; leveledUp: boolean; newLevel?: number } {
+): {
+  state: GameState;
+  leveledUp: boolean;
+  newLevel?: number;
+  newlyUnlocked: string[];
+} {
   let newState = checkAndApplyDateResets(state, currentDate);
 
   if (newState.completedQuestsToday[questId]) {
-    return { state: newState, leveledUp: false };
+    return { state: newState, leveledUp: false, newlyUnlocked: [] };
   }
 
   const updatedCompletedToday = {
@@ -274,7 +374,14 @@ export function completeQuest(
     history: newHistory,
   };
 
-  return { state: newState, leveledUp, newLevel: leveledUp ? newLevel : undefined };
+  const { state: finalState, newlyUnlocked } = checkAchievements(newState);
+
+  return {
+    state: finalState,
+    leveledUp,
+    newLevel: leveledUp ? newLevel : undefined,
+    newlyUnlocked,
+  };
 }
 
 export function passQuest(
@@ -369,6 +476,130 @@ export function changePlan(
   return {
     ...state,
     plan,
+    chronicle,
+  };
+}
+
+export function equipItem(
+  state: GameState,
+  itemId: number
+): { state: GameState; newlyUnlocked: string[] } {
+  const item = ITEMS[itemId];
+  if (!item || state.level < item.reqLevel) {
+    return { state, newlyUnlocked: [] };
+  }
+
+  const newEq = { ...state.equipment, [item.slot]: itemId };
+  let chronicle = addChronicleEvent(state.chronicle, {
+    type: "itemEquipped",
+    itemId,
+  });
+
+  const nextState: GameState = {
+    ...state,
+    equipment: newEq,
+    itemsEquippedCount: state.itemsEquippedCount + 1,
+    chronicle,
+  };
+
+  return checkAchievements(nextState);
+}
+
+export function unequipSlot(
+  state: GameState,
+  slot: string
+): { state: GameState; newlyUnlocked: string[] } {
+  if (state.equipment[slot] == null) {
+    return { state, newlyUnlocked: [] };
+  }
+
+  const itemId = state.equipment[slot];
+  const newEq = { ...state.equipment };
+  delete newEq[slot];
+
+  let chronicle = addChronicleEvent(state.chronicle, {
+    type: "itemUnequipped",
+    slot,
+    itemId,
+  });
+
+  const nextState: GameState = {
+    ...state,
+    equipment: newEq,
+    chronicle,
+  };
+
+  return checkAchievements(nextState);
+}
+
+export function applyLoadout(
+  state: GameState,
+  loadoutName: string
+): { state: GameState; newlyUnlocked: string[] } {
+  const targetEq = state.loadouts[loadoutName] || {};
+  const nextState: GameState = {
+    ...state,
+    equipment: { ...targetEq },
+    activeLoadout: loadoutName,
+  };
+
+  return checkAchievements(nextState);
+}
+
+export function saveLoadout(state: GameState, loadoutName: string): GameState {
+  return {
+    ...state,
+    loadouts: {
+      ...state.loadouts,
+      [loadoutName]: { ...state.equipment },
+    },
+    activeLoadout: loadoutName,
+  };
+}
+
+export function addPost(
+  state: GameState,
+  content: string
+): { state: GameState; newlyUnlocked: string[] } {
+  const trimmed = content.trim();
+  if (!trimmed || trimmed.length > 280) {
+    return { state, newlyUnlocked: [] };
+  }
+
+  let chronicle = addChronicleEvent(state.chronicle, {
+    type: "postPublished",
+  });
+
+  const nextState: GameState = {
+    ...state,
+    posts: [trimmed, ...state.posts],
+    chronicle,
+  };
+
+  return checkAchievements(nextState);
+}
+
+export function updateProfileInfo(
+  state: GameState,
+  name: string,
+  bio: string
+): GameState {
+  const trimmedName = name.trim();
+  const finalName =
+    trimmedName && trimmedName.length <= 24 ? trimmedName : state.name;
+  const finalBio = bio.slice(0, 160);
+
+  const changed = finalName !== state.name || finalBio !== state.bio;
+  let chronicle = state.chronicle;
+
+  if (changed) {
+    chronicle = addChronicleEvent(chronicle, { type: "profileUpdated" });
+  }
+
+  return {
+    ...state,
+    name: finalName,
+    bio: finalBio,
     chronicle,
   };
 }
