@@ -14,11 +14,15 @@ import {
   HelpCircle,
 } from "lucide-react";
 import { useApp } from "@/lib/context";
-import { formatString } from "@/lib/i18n";
+import { useGame } from "@/lib/game-context";
+import { Figure } from "@/components/Figure";
+import { xpForNextLevel } from "@/lib/game";
+import { FRAMES, TITLES } from "@/lib/items";
 
 export function Sidebar() {
   const pathname = usePathname();
   const { dict } = useApp();
+  const { gameState } = useGame();
 
   const navItems = [
     { href: "/", label: dict.nav.home, icon: Home },
@@ -28,6 +32,18 @@ export function Sidebar() {
     { href: "/community", label: dict.nav.community, icon: Users },
     { href: "/academy", label: dict.nav.academy, icon: GraduationCap },
   ];
+
+  const frameColor = FRAMES[gameState.frame]?.color || "#a38ad1";
+  const titleName =
+    TITLES[gameState.title]?.id === 0
+      ? ""
+      : TITLES[gameState.title]?.nameRu || dict.topbar.noviceTitle;
+
+  const nextLevelXp = xpForNextLevel(gameState.level);
+  const xpPercent = Math.min(
+    100,
+    Math.round((gameState.xp / nextLevelXp) * 100)
+  );
 
   return (
     <aside className="hidden h-full w-[220px] flex-col border-r border-line bg-gradient-to-b from-[#17161e] to-[#121117] p-3 md:flex">
@@ -80,18 +96,25 @@ export function Sidebar() {
           }`}
         >
           {/* Avatar Container */}
-          <div className="relative grid h-10 w-10 flex-none place-items-center overflow-hidden rounded-full border-2 border-vi bg-[#241d3a]">
-            <span className="font-serif text-sm font-bold text-tx">T</span>
+          <div
+            className="relative grid h-10 w-10 flex-none place-items-center overflow-hidden rounded-full border-2 bg-[#241d3a]"
+            style={{ borderColor: frameColor }}
+          >
+            <Figure equipment={gameState.equipment} width={32} height={38} />
           </div>
-          <div className="flex min-w-0 flex-col gap-0.5">
+          <div className="flex min-w-0 flex-col gap-0.5 w-full">
             <span className="truncate text-xs font-semibold text-tx">
-              TraderOne
+              {gameState.name}
             </span>
-            <span className="text-[11px] text-mu">
-              {dict.topbar.level} 1 · {dict.topbar.noviceTitle}
+            <span className="text-[11px] text-mu truncate">
+              {dict.topbar.level} {gameState.level}
+              {titleName ? ` · ${titleName}` : ""}
             </span>
             <div className="xp h-1 w-full bg-white/10">
-              <i className="block h-full bg-vi" style={{ width: "40%" }} />
+              <i
+                className="block h-full bg-vi"
+                style={{ width: `${xpPercent}%` }}
+              />
             </div>
             <span className="text-[10px] text-mu">{dict.topbar.reputation}</span>
           </div>
