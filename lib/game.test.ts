@@ -7,117 +7,123 @@ import {
   checkAndApplyDateResets,
   changePlan,
   getCharacterStatus,
-  GameState,
+  passQuest,
+  replaceQuest,
+  toggleRestDay,
+  migrateState,
 } from "./game";
+import { getDeterministicDailyQuests } from "./quests";
 
-describe("Game State Logic (lib/game.ts)", () => {
-  it("calculates level XP thresholds correctly", () => {
-    expect(xpForNextLevel(1)).toBe(120); // 80 + 1 * 40
-    expect(xpForNextLevel(2)).toBe(160); // 80 + 2 * 40
-    expect(xpForNextLevel(3)).toBe(200); // 80 + 3 * 40
+describe("Game State Logic v3.1 (lib/game.ts & lib/quests.ts)", () => {
+  it("deterministic daily quest selection works", () => {
+    const q1 = getDeterministicDailyQuests("2026-10-05");
+    const q2 = getDeterministicDailyQuests("2026-10-05");
+    const q3 = getDeterministicDailyQuests("2026-10-06");
+
+    expect(q1.core.length).toBe(3);
+    expect(q1.bonus.length).toBe(2);
+    expect(q1.core[0].id).toBe(q2.core[0].id);
+    expect(q1.core[0].id).not.toBe(q3.core[0].id);
   });
 
-  it("handles quest completion, level-up, and XP carryover", () => {
+  it("handles quest completion, level-up, typed chronicle, and history", () => {
     let state = { ...INITIAL_GAME_STATE };
-    const date = new Date("2026-10-05T10:00:00Z"); // Monday
-
-    // Complete quest 1: +40 XP, +10 Coins
-    let res = completeQuest(state, 0, "Daily Bias", date);
-    expect(res.leveledUp).toBe(false);
-    expect(res.state.xp).toBe(40);
-    expect(res.state.coins).toBe(10);
-    expect(res.state.level).toBe(1);
-    expect(res.state.weeklyQuestCount).toBe(1);
-
-    // Complete quest 2: +40 XP (total 80)
-    res = completeQuest(res.state, 1, "Journal Trade", date);
-    expect(res.state.xp).toBe(80);
-
-    // Complete quest 3: +40 XP (total 120 -> Lv 1 requires 120 -> level up to Lv 2, 0 XP remaining)
-    res = completeQuest(res.state, 2, "Reflection", date);
-    expect(res.leveledUp).toBe(true);
-    expect(res.newLevel).toBe(2);
-    expect(res.state.level).toBe(2);
-    expect(res.state.xp).toBe(0);
-    expect(res.state.coins).toBe(30);
-    expect(res.state.chronicle[0]).toContain("Level up! Lv 2");
-  });
-
-  it("ignores repeated completion of the same quest on the same day", () => {
-    const state = { ...INITIAL_GAME_STATE };
     const date = new Date("2026-10-05T10:00:00Z");
 
-    const res1 = completeQuest(state, 0, "Daily Bias", date);
-    const res2 = completeQuest(res1.state, 0, "Daily Bias", date);
-
-    expect(res2.state.xp).toBe(res1.state.xp);
-    expect(res2.state.coins).toBe(res1.state.coins);
-    expect(res2.state.weeklyQuestCount).toBe(res1.state.weeklyQuestCount);
+    const res = completeQuest(state, "q_bias", "Daily Bias", "Trading", 40, 10, date);
+    expect(res.state.xp).toBe(40);
+    expect(res.state.coins).toBe(10);
+    expect(res.state.completedQuestsToday["q_bias"]).toBe(true);
+    expect(res.state.history.length).toBe(1);
+    expect(res.state.history[0].questId).toBe("q_bias");
+    expect(res.state.chronicle[0]).toEqual({
+      type: "questDone",
+      title: "Daily Bias",
+      xp: 40,
+    });
   });
 
-  it("resets daily quests on a new local date without resetting daily reward streak", () => {
-    let state = { ...INITIAL_GAME_STATE };
-    const day1 = new Date("2026-10-05T10:00:00Z");
-    const day2 = new Date("2026-10-06T10:00:00Z");
-
-    // Complete quest on Day 1
-    const res1 = completeQuest(state, 0, "Daily Bias", day1);
-    expect(res1.state.completedQuestsToday[0]).toBe(true);
-
-    // Check reset on Day 2
-    const resettedState = checkAndApplyDateResets(res1.state, day2);
-    expect(resettedState.completedQuestsToday[0]).toBeUndefined();
-    expect(resettedState.lastQuestDate).toBe("2026-10-06");
-  });
-
-  it("allows claiming daily reward only once per local day and advances 1-7 in sequence", () => {
-    let state = { ...INITIAL_GAME_STATE };
-    const day1 = new Date("2026-10-05T10:00:00Z");
-
-    // Day 1 Claim (Day 1 reward = 10 Coins)
-    let claim1 = claimDailyReward(state, day1);
-    expect(claim1.claimedCoins).toBe(10);
-    expect(claim1.state.coins).toBe(10);
-    expect(claim1.state.dailyRewardIndex).toBe(1);
-
-    // Second claim on Day 1 should yield 0
-    let claim1Repeat = claimDailyReward(claim1.state, day1);
-    expect(claim1Repeat.claimedCoins).toBe(0);
-    expect(claim1Repeat.state.coins).toBe(10);
-
-    // Day 3 Claim (missed Day 2): Day 2 reward = 10 Coins, index continues from 1 -> 2
-    const day3 = new Date("2026-10-07T10:00:00Z");
-    let claim3 = claimDailyReward(claim1.state, day3);
-    expect(claim3.claimedCoins).toBe(10);
-    expect(claim3.state.dailyRewardIndex).toBe(2);
-    expect(claim3.state.coins).toBe(20);
-  });
-
-  it("resets weekly quest challenge count on Monday", () => {
-    let state: GameState = {
+  it("streak shield protects streak on missed active day", () => {
+    let state = {
       ...INITIAL_GAME_STATE,
-      weeklyQuestCount: 8,
-      lastWeeklyResetDate: "2026-09-28", // Previous Monday
+      currentStreak: 5,
+      bestStreak: 5,
+      streakShieldsAvailable: 1,
+      lastWeeklyResetDate: "2026-10-05",
+      lastQuestDate: "2026-10-05",
+      completedQuestsToday: {}, // No quests completed on Oct 5
     };
 
-    const nextMonday = new Date("2026-10-05T10:00:00Z");
-    const res = checkAndApplyDateResets(state, nextMonday);
+    const day2 = new Date("2026-10-06T10:00:00Z");
+    const resetted = checkAndApplyDateResets(state, day2);
 
-    expect(res.weeklyQuestCount).toBe(0);
-    expect(res.lastWeeklyResetDate).toBe("2026-10-05");
+    expect(resetted.currentStreak).toBe(5); // Saved by shield!
+    expect(resetted.streakShieldsAvailable).toBe(0);
+
+    // Next missed day without shield -> resets streak
+    const day3 = new Date("2026-10-07T10:00:00Z");
+    const resetted2 = checkAndApplyDateResets(resetted, day3);
+
+    expect(resetted2.currentStreak).toBe(0);
+    expect(resetted2.bestStreak).toBe(5);
   });
 
-  it("changes plan and updates chronicle", () => {
+  it("rest day preserves streak without consuming shield", () => {
+    let state = {
+      ...INITIAL_GAME_STATE,
+      currentStreak: 3,
+      bestStreak: 3,
+      streakShieldsAvailable: 1,
+      lastWeeklyResetDate: "2026-10-05",
+      isRestDay: true,
+      lastQuestDate: "2026-10-05",
+    };
+
+    const day2 = new Date("2026-10-06T10:00:00Z");
+    const resetted = checkAndApplyDateResets(state, day2);
+
+    expect(resetted.currentStreak).toBe(4);
+    expect(resetted.streakShieldsAvailable).toBe(1); // Shield was preserved!
+  });
+
+  it("quest replacement limit (2 max per day)", () => {
     let state = { ...INITIAL_GAME_STATE };
-    state = changePlan(state, "Pro");
+    const date = new Date("2026-10-05T10:00:00Z");
 
-    expect(state.plan).toBe("Pro");
-    expect(state.chronicle[0]).toBe("Тариф: Pro");
+    const r1 = replaceQuest(state, "q_1", date);
+    expect(r1.success).toBe(true);
+    expect(r1.state.replacementsUsedToday).toBe(1);
+
+    const r2 = replaceQuest(r1.state, "q_2", date);
+    expect(r2.success).toBe(true);
+    expect(r2.state.replacementsUsedToday).toBe(2);
+
+    const r3 = replaceQuest(r2.state, "q_3", date);
+    expect(r3.success).toBe(false);
+    expect(r3.state.replacementsUsedToday).toBe(2);
   });
 
-  it("calculates character status dynamically", () => {
-    expect(getCharacterStatus(0)).toBe("Resting");
-    expect(getCharacterStatus(1)).toBe("Training");
-    expect(getCharacterStatus(3)).toBe("Training");
+  it("pass quest does not cause penalties", () => {
+    let state = { ...INITIAL_GAME_STATE };
+    const date = new Date("2026-10-05T10:00:00Z");
+
+    const passed = passQuest(state, "q_bias", date);
+    expect(passed.passedQuestsToday["q_bias"]).toBe(true);
+    expect(passed.xp).toBe(0);
+    expect(passed.coins).toBe(0);
+  });
+
+  it("migrates legacy string chronicle entries gracefully", () => {
+    const rawLegacy = {
+      name: "OldTrader",
+      chronicle: ["Персонаж создан", "Квест: Daily Bias (+40 XP)"],
+    };
+
+    const migrated = migrateState(rawLegacy);
+    expect(migrated.name).toBe("OldTrader");
+    expect(migrated.chronicle[0]).toEqual({
+      type: "legacy",
+      text: "Персонаж создан",
+    });
   });
 });

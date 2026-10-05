@@ -35,9 +35,13 @@ export function Sidebar() {
 
   const frameColor = FRAMES[gameState.frame]?.color || "#a38ad1";
   const titleName =
-    TITLES[gameState.title]?.id === 0
-      ? ""
-      : TITLES[gameState.title]?.nameRu || dict.topbar.noviceTitle;
+    gameState.title === 1
+      ? dict.titles.titleNovice
+      : gameState.title === 2
+      ? dict.titles.titleDisciplined
+      : gameState.title === 3
+      ? dict.titles.titleStrategist
+      : "";
 
   const nextLevelXp = xpForNextLevel(gameState.level);
   const xpPercent = Math.min(
@@ -108,7 +112,7 @@ export function Sidebar() {
             </span>
             <span className="text-[11px] text-mu truncate">
               {dict.topbar.level} {gameState.level}
-              {titleName ? ` · ${titleName}` : ""}
+              {titleName ? ` · ${titleName}` : ` · ${dict.titles.titleNovice}`}
             </span>
             <div className="xp h-1 w-full bg-white/10">
               <i

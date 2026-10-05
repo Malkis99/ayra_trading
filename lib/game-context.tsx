@@ -9,7 +9,11 @@ import {
   claimDailyReward as claimDailyRewardLogic,
   changePlan as changePlanLogic,
   getCharacterStatus,
-  addChronicleEvent,
+  passQuest as passQuestLogic,
+  replaceQuest as replaceQuestLogic,
+  toggleRestDay as toggleRestDayLogic,
+  addCustomGoal as addCustomGoalLogic,
+  removeCustomGoal as removeCustomGoalLogic,
 } from "@/lib/game";
 
 const STORAGE_KEY = "ayra_demo_v1";
@@ -17,7 +21,16 @@ const STORAGE_KEY = "ayra_demo_v1";
 interface GameContextType {
   gameState: GameState;
   isLoaded: boolean;
-  completeQuest: (index: number, title: string) => { leveledUp: boolean; newLevel?: number };
+  completeQuest: (
+    questId: string,
+    title: string,
+    category: string,
+    xp?: number,
+    coins?: number
+  ) => { leveledUp: boolean; newLevel?: number };
+  passQuest: (questId: string) => void;
+  replaceQuest: (questId: string) => boolean;
+  toggleRestDay: () => void;
   claimDailyReward: () => number;
   setPlan: (plan: "Free" | "Pro" | "Elite") => void;
   updateProfile: (name: string, bio: string) => void;
@@ -25,6 +38,8 @@ interface GameContextType {
   setFrame: (frame: number) => void;
   setTitle: (title: number) => void;
   setBackground: (bg: number) => void;
+  addCustomGoal: (title: string, category: string) => void;
+  removeCustomGoal: (goalId: string) => void;
   characterStatus: "Training" | "Resting";
 }
 
@@ -39,17 +54,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        const parsed = JSON.parse(saved) as GameState;
-        // Merge with initial to preserve any missing keys
-        const merged: GameState = { ...INITIAL_GAME_STATE, ...parsed };
-        const resetted = checkAndApplyDateResets(merged, new Date());
+        const parsed = JSON.parse(saved);
+        const resetted = checkAndApplyDateResets(parsed, new Date());
         setGameState(resetted);
       } else {
         const resetted = checkAndApplyDateResets(INITIAL_GAME_STATE, new Date());
         setGameState(resetted);
       }
     } catch {
-      // Fallback to default state on parse error
       setGameState(INITIAL_GAME_STATE);
     } finally {
       setIsLoaded(true);
@@ -67,10 +79,24 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   }, [gameState, isLoaded]);
 
   const completeQuest = useCallback(
-    (index: number, title: string) => {
+    (
+      questId: string,
+      title: string,
+      category: string,
+      xp?: number,
+      coins?: number
+    ) => {
       let result = { leveledUp: false, newLevel: undefined as number | undefined };
       setGameState((prev) => {
-        const res = completeQuestLogic(prev, index, title, new Date());
+        const res = completeQuestLogic(
+          prev,
+          questId,
+          title,
+          category,
+          xp,
+          coins,
+          new Date()
+        );
         result = { leveledUp: res.leveledUp, newLevel: res.newLevel };
         return res.state;
       });
@@ -78,6 +104,24 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     },
     []
   );
+
+  const passQuest = useCallback((questId: string) => {
+    setGameState((prev) => passQuestLogic(prev, questId, new Date()));
+  }, []);
+
+  const replaceQuest = useCallback((questId: string) => {
+    let success = false;
+    setGameState((prev) => {
+      const res = replaceQuestLogic(prev, questId, new Date());
+      success = res.success;
+      return res.state;
+    });
+    return success;
+  }, []);
+
+  const toggleRestDay = useCallback(() => {
+    setGameState((prev) => toggleRestDayLogic(prev, new Date()));
+  }, []);
 
   const claimDailyReward = useCallback(() => {
     let claimedCoins = 0;
@@ -129,8 +173,19 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     }));
   }, []);
 
+  const addCustomGoal = useCallback((title: string, category: string) => {
+    setGameState((prev) => addCustomGoalLogic(prev, title, category));
+  }, []);
+
+  const removeCustomGoal = useCallback((goalId: string) => {
+    setGameState((prev) => removeCustomGoalLogic(prev, goalId));
+  }, []);
+
   const completedTodayCount = Object.keys(gameState.completedQuestsToday).length;
-  const characterStatus = getCharacterStatus(completedTodayCount);
+  const characterStatus = getCharacterStatus(
+    completedTodayCount,
+    gameState.isRestDay
+  );
 
   return (
     <GameContext.Provider
@@ -138,6 +193,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         gameState,
         isLoaded,
         completeQuest,
+        passQuest,
+        replaceQuest,
+        toggleRestDay,
         claimDailyReward,
         setPlan,
         updateProfile,
@@ -145,6 +203,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         setFrame,
         setTitle,
         setBackground,
+        addCustomGoal,
+        removeCustomGoal,
         characterStatus,
       }}
     >

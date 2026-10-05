@@ -6,6 +6,7 @@ import { Search, Plus, Bell } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { Figure } from "@/components/Figure";
+import { CoinsChip } from "@/components/CoinsChip";
 import { FRAMES } from "@/lib/items";
 
 export function Topbar() {
@@ -35,7 +36,7 @@ export function Topbar() {
         <span className="hidden sm:inline truncate">{dict.topbar.search}</span>
       </button>
 
-      {/* Add Button ("＋ Добавить" in RU, "Add" in EN) */}
+      {/* Add Button ("Добавить" / "Add") */}
       <button
         onClick={() => setAddModalOpen(true)}
         className="btn flex items-center gap-1 text-xs py-1.5 px-3"
@@ -66,10 +67,13 @@ export function Topbar() {
 
       <div className="flex-1" />
 
+      {/* Coins Chip */}
+      <CoinsChip value={gameState.coins} />
+
       {/* Plan Chip */}
       <Link
         href="/plans"
-        className="rounded-xl border border-go bg-go/10 px-3 py-1 text-xs font-semibold text-go transition-colors hover:bg-go/20"
+        className="rounded-xl border border-go bg-go/10 px-3 py-1 text-xs font-semibold text-go transition-colors hover:bg-go/20 flex-none"
       >
         ★ {gameState.plan}
       </Link>
