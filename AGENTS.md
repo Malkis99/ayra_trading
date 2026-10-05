@@ -25,6 +25,7 @@ Next.js 14 (App Router) + TypeScript (strict) + Tailwind CSS + lucide-react. Lat
 
 ## Code & UX conventions
 - All user-visible text goes through an i18n dictionary (ru/en). No hardcoded strings in components after T1.
+- В состоянии не хранить переведённые строки; значения по умолчанию отображаются из словаря. Ники только латиницей.
 - Design tokens (Tailwind theme / CSS variables): dark graphite surfaces, violet `#50348f` / `#a38ad1`, gold `#d6a94a` only for achievements/rare items. Serif font for names/levels. Animations only for meaningful state changes; respect `prefers-reduced-motion`.
 - Navigation is fixed: Home, Journal, Market, Quests, Community, Academy; profile card in the left sidebar above Settings/Help; plan chip (Free/Pro/Elite) next to the bell opens `/plans`.
 - Mobile-first responsive; sidebar becomes bottom navigation; no horizontal scroll bars inside tab rows (hide scrollbars).

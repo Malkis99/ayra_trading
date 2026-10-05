@@ -7,6 +7,7 @@ import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { Figure } from "@/components/Figure";
 import { CoinsChip } from "@/components/CoinsChip";
+import { PlanBadge } from "@/components/PlanBadge";
 import { FRAMES } from "@/lib/items";
 
 export function Topbar() {
@@ -26,7 +27,7 @@ export function Topbar() {
 
   return (
     <header className="sticky top-0 z-20 flex h-14 items-center gap-2.5 border-b border-line bg-[#121117cc] px-4 backdrop-blur-md">
-      {/* Compact Search Trigger (~120px on sm+, icon-only on mobile) */}
+      {/* Search Trigger */}
       <button
         onClick={() => setSearchOpen(true)}
         className="flex w-9 sm:w-[120px] items-center justify-center sm:justify-start gap-2 rounded-xl border border-line bg-white/5 p-2 sm:px-3 sm:py-1.5 text-xs text-mu transition-colors hover:border-vi"
@@ -36,7 +37,7 @@ export function Topbar() {
         <span className="hidden sm:inline truncate">{dict.topbar.search}</span>
       </button>
 
-      {/* Add Button ("Добавить" / "Add") */}
+      {/* Add Button */}
       <button
         onClick={() => setAddModalOpen(true)}
         className="btn flex items-center gap-1 text-xs py-1.5 px-3"
@@ -70,13 +71,8 @@ export function Topbar() {
       {/* Coins Chip */}
       <CoinsChip value={gameState.coins} />
 
-      {/* Plan Chip */}
-      <Link
-        href="/plans"
-        className="rounded-xl border border-go bg-go/10 px-3 py-1 text-xs font-semibold text-go transition-colors hover:bg-go/20 flex-none"
-      >
-        ★ {gameState.plan}
-      </Link>
+      {/* Plan Badge */}
+      <PlanBadge plan={gameState.plan} />
 
       {/* Notification Bell */}
       <button

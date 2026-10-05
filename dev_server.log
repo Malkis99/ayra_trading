@@ -6,22 +6,25 @@
   - Local:        http://localhost:3000
 
  ✓ Starting...
- ✓ Ready in 1749ms
+ ✓ Ready in 1775ms
  ○ Compiling / ...
- ✓ Compiled / in 6.5s (588 modules)
- GET / 200 in 7336ms
- ○ Compiling /settings ...
- ✓ Compiled /settings in 3.3s (594 modules)
- GET /settings 200 in 3546ms
- GET / 200 in 47ms
- GET / 200 in 66ms
- GET / 200 in 43ms
- GET /settings 200 in 36ms
- GET / 200 in 33ms
- GET / 200 in 48ms
- ✓ Compiled in 574ms (594 modules)
- GET / 200 in 172ms
- GET / 200 in 35ms
- GET /settings 200 in 64ms
- GET / 200 in 32ms
- GET / 200 in 32ms
+ ✓ Compiled / in 5.6s (622 modules)
+ HEAD / 200 in 6424ms
+ ○ Compiling /profile ...
+ ✓ Compiled /profile in 1627ms (709 modules)
+ GET /profile 200 in 1961ms
+ GET /profile 200 in 58ms
+ GET /profile 200 in 60ms
+ GET /profile 200 in 73ms
+ ✓ Compiled in 819ms (709 modules)
+ ✓ Compiled in 433ms (709 modules)
+ ✓ Compiled in 553ms (709 modules)
+ ✓ Compiled in 471ms (709 modules)
+ ✓ Compiled in 425ms (709 modules)
+ ✓ Compiled in 1079ms (709 modules)
+ ✓ Compiled in 426ms (709 modules)
+ ✓ Compiled in 335ms (361 modules)
+ GET /profile 200 in 394ms
+ GET /profile 200 in 54ms
+ GET /profile 200 in 59ms
+ GET /profile 200 in 60ms

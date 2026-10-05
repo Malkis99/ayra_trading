@@ -2,6 +2,7 @@
 
 import React from "react";
 import { ITEMS, SlotName } from "@/lib/items";
+import { DEFAULT_AVATAR } from "@/lib/avatar";
 
 interface FigureProps {
   equipment?: Record<string, number>;
@@ -33,82 +34,130 @@ export function Figure({
       viewBox={viewBox}
       width={width}
       height={height}
-      className={className}
+      className={`select-none ${className}`}
       xmlns="http://www.w3.org/2000/svg"
     >
+      <defs>
+        <radialGradient id="auraGlow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor={getColor("Аура", "#a38ad1")} stopOpacity="0.35" />
+          <stop offset="100%" stopColor={getColor("Аура", "#a38ad1")} stopOpacity="0" />
+        </radialGradient>
+      </defs>
+
       {/* Aura */}
       {equipment["Аура"] != null && (
         <ellipse
           cx="50"
           cy="120"
-          rx="54"
-          ry="108"
-          fill={getColor("Аура", "#a38ad1")}
-          opacity="0.16"
-          stroke={getColor("Аура", "#a38ad1")}
-          strokeOpacity="0.6"
+          rx="48"
+          ry="96"
+          fill="url(#auraGlow)"
+          className="animate-pulse motion-reduce:animate-none"
         />
       )}
 
       {/* Cloak */}
       {equipment["Плащ"] != null && (
         <path
-          d="M24 66L76 66L94 205L6 205Z"
+          d="M24 62L76 62L92 205L8 205Z"
           fill={getColor("Плащ", "#2a1d5c")}
           opacity="0.9"
         />
       )}
 
-      {/* Legs & Shoes */}
+      {/* Legs Base & Pants */}
       <path
-        d="M32 140L68 140L66 222L53 222L50 165L47 222L34 222Z"
-        fill={getColor("Низ", "#2b2b36")}
-      />
-      <ellipse
-        cx="42"
-        cy="224"
-        rx="10"
-        ry="4"
-        fill={getColor("Обувь", "#555555")}
-      />
-      <ellipse
-        cx="58"
-        cy="224"
-        rx="10"
-        ry="4"
-        fill={getColor("Обувь", "#555555")}
+        d="M32 135L68 135L66 218L53 218L50 160L47 218L34 218Z"
+        fill={getColor("Низ", DEFAULT_AVATAR.basePantsColor)}
       />
 
-      {/* Body / Top */}
+      {/* Feet & Shoes */}
+      <ellipse
+        cx="41"
+        cy="221"
+        rx="9"
+        ry="4"
+        fill={getColor("Обувь", "#444452")}
+      />
+      <ellipse
+        cx="59"
+        cy="221"
+        rx="9"
+        ry="4"
+        fill={getColor("Обувь", "#444452")}
+      />
+
+      {/* Torso Base & Shirt */}
       <path
-        d="M22 68Q50 54 78 68L86 148L72 148L70 100L68 148L32 148L30 100L28 148L14 148Z"
-        fill={getColor("Верх", "#3a3a48")}
+        d="M22 64Q50 50 78 64L85 142L72 142L70 96L68 142L32 142L30 96L28 142L15 142Z"
+        fill={getColor("Верх", DEFAULT_AVATAR.baseShirtColor)}
       />
 
       {/* Outerwear */}
       {equipment["Верхняя"] != null && (
         <path
-          d="M22 68Q50 54 78 68L86 150L62 150L50 92L38 150L14 150Z"
+          d="M22 64Q50 50 78 64L86 145L62 145L50 88L38 145L14 145Z"
           fill={getColor("Верхняя", "#30286e")}
           opacity="0.95"
         />
       )}
 
-      {/* Gloves */}
-      {equipment["Перчатки"] != null && (
+      {/* Neck */}
+      <rect
+        x="45"
+        y="46"
+        width="10"
+        height="12"
+        rx="2"
+        fill={DEFAULT_AVATAR.skinColor}
+      />
+
+      {/* Hands */}
+      {equipment["Перчатки"] != null ? (
         <>
-          <circle cx="15" cy="152" r="6" fill={getColor("Перчатки", "#d6d6e0")} />
-          <circle cx="85" cy="152" r="6" fill={getColor("Перчатки", "#d6d6e0")} />
+          <circle cx="15" cy="146" r="5" fill={getColor("Перчатки", "#d6d6e0")} />
+          <circle cx="85" cy="146" r="5" fill={getColor("Перчатки", "#d6d6e0")} />
+        </>
+      ) : (
+        <>
+          <circle cx="15" cy="146" r="4.5" fill={DEFAULT_AVATAR.skinColor} />
+          <circle cx="85" cy="146" r="4.5" fill={DEFAULT_AVATAR.skinColor} />
         </>
       )}
 
-      {/* Head & Hair */}
+      {/* Head */}
       {back ? (
-        <circle cx="50" cy="36" r="16" fill="#1a1a22" />
+        <>
+          <circle cx="50" cy="34" r="15" fill={DEFAULT_AVATAR.hairColor} />
+          <ellipse cx="50" cy="36" rx="14" ry="15" fill={DEFAULT_AVATAR.hairColor} />
+        </>
       ) : (
         <>
-          <circle cx="50" cy="36" r="16" fill="#caa98e" />
-          <path d="M34 32Q50 14 66 32Q50 25 34 32Z" fill="#1a1a22" />
+          {/* Ears */}
+          <circle cx="34" cy="36" r="3" fill={DEFAULT_AVATAR.skinColor} />
+          <circle cx="66" cy="36" r="3" fill={DEFAULT_AVATAR.skinColor} />
+
+          {/* Head Shape */}
+          <ellipse cx="50" cy="36" rx="14" ry="16" fill={DEFAULT_AVATAR.skinColor} />
+
+          {/* Facial Features */}
+          {/* Eyes */}
+          <ellipse cx="44" cy="35" rx="2" ry="1.5" fill={DEFAULT_AVATAR.eyeColor} />
+          <ellipse cx="56" cy="35" rx="2" ry="1.5" fill={DEFAULT_AVATAR.eyeColor} />
+
+          {/* Eyebrows */}
+          <path d="M41 31Q44 29 47 31" stroke={DEFAULT_AVATAR.hairColor} strokeWidth="1.2" fill="none" />
+          <path d="M53 31Q56 29 59 31" stroke={DEFAULT_AVATAR.hairColor} strokeWidth="1.2" fill="none" />
+
+          {/* Nose & Mouth */}
+          <path d="M50 36L49.5 39L51 39" stroke="#b38769" strokeWidth="1" fill="none" />
+          <path d="M47 43Q50 45 53 43" stroke="#aa7a5b" strokeWidth="1.2" fill="none" />
+
+          {/* Hair */}
+          <path
+            d="M34 32Q50 12 66 32Q50 22 34 32Z"
+            fill={DEFAULT_AVATAR.hairColor}
+          />
         </>
       )}
 
@@ -116,12 +165,12 @@ export function Figure({
       {equipment["Голова"] != null && (
         ITEMS[equipment["Голова"]]?.rarity === 2 ? (
           <path
-            d="M34 28L40 12L46 24L50 10L54 24L60 12L66 28Z"
+            d="M34 26L40 10L46 22L50 8L54 22L60 10L66 26Z"
             fill={getColor("Голова", "#d6a94a")}
           />
         ) : (
           <path
-            d="M33 30Q50 10 67 30L73 33L33 33Z"
+            d="M33 28Q50 8 67 28L73 31L33 31Z"
             fill={getColor("Голова", "#50348f")}
           />
         )
@@ -132,7 +181,7 @@ export function Figure({
         <>
           <rect
             x="38"
-            y="35"
+            y="32"
             width="10"
             height="6"
             rx="2"
@@ -142,7 +191,7 @@ export function Figure({
           />
           <rect
             x="52"
-            y="35"
+            y="32"
             width="10"
             height="6"
             rx="2"
@@ -150,18 +199,29 @@ export function Figure({
             stroke={getColor("Аксессуар", "#a38ad1")}
             strokeWidth="1.5"
           />
+          <line x1="48" y1="35" x2="52" y2="35" stroke={getColor("Аксессуар", "#a38ad1")} strokeWidth="1.5" />
         </>
       )}
 
       {/* Companion */}
       {equipment["Компаньон"] != null && (
-        <circle
-          className="bob"
-          cx="90"
-          cy="48"
-          r="6"
-          fill={getColor("Компаньон", "#a38ad1")}
-        />
+        <g className="animate-bounce motion-reduce:animate-none">
+          <circle
+            cx="88"
+            cy="44"
+            r="6"
+            fill={getColor("Компаньон", "#a38ad1")}
+          />
+          <circle
+            cx="88"
+            cy="44"
+            r="8"
+            fill="none"
+            stroke={getColor("Компаньон", "#a38ad1")}
+            strokeOpacity="0.5"
+            strokeWidth="1"
+          />
+        </g>
       )}
     </svg>
   );

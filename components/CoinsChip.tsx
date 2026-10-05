@@ -3,13 +3,14 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Coins } from "lucide-react";
 import { useApp } from "@/lib/context";
+import { formatNumber } from "@/lib/i18n";
 
 interface CoinsChipProps {
   value: number;
 }
 
 export function CoinsChip({ value }: CoinsChipProps) {
-  const { dict } = useApp();
+  const { dict, lang } = useApp();
   const [displayValue, setDisplayValue] = useState<number>(value);
   const [popup, setPopup] = useState<{ text: string; isPositive: boolean } | null>(null);
   const [isFlashing, setIsFlashing] = useState<boolean>(false);
@@ -38,7 +39,6 @@ export function CoinsChip({ value }: CoinsChipProps) {
     const flashTimeout = setTimeout(() => setIsFlashing(false), 400);
     const popupTimeout = setTimeout(() => setPopup(null), 1200);
 
-    // Check prefers-reduced-motion
     const prefersReducedMotion =
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -77,12 +77,15 @@ export function CoinsChip({ value }: CoinsChipProps) {
     <div className="relative inline-flex items-center">
       <div
         title={dict.topbar.coinsTooltip}
-        className={`flex items-center gap-1.5 rounded-xl border border-line bg-s1 px-2.5 py-1 text-xs font-bold text-go transition-all duration-300 ${
-          isFlashing ? "border-go bg-go/20 shadow-[0_0_12px_#d6a94a66]" : ""
+        className={`group relative overflow-hidden flex items-center gap-1.5 rounded-xl border border-go/30 bg-gradient-to-r from-[#211a0c] to-[#121117] px-2.5 py-1 text-xs font-bold text-go transition-all duration-300 hover:border-go hover:shadow-[0_0_12px_rgba(214,169,74,0.3)] ${
+          isFlashing ? "border-go bg-go/20 shadow-[0_0_14px_rgba(214,169,74,0.5)]" : ""
         }`}
       >
-        <Coins size={14} className="text-go flex-none" />
-        <span className="font-mono tabular-nums">{displayValue}</span>
+        <Coins size={14} className="text-go flex-none drop-shadow-[0_0_4px_rgba(214,169,74,0.6)]" />
+        <span className="font-mono tabular-nums">{formatNumber(lang, displayValue)}</span>
+
+        {/* Hover shine effect */}
+        <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/15 to-transparent transition-transform duration-700 ease-in-out group-hover:translate-x-full motion-reduce:hidden" />
       </div>
 
       {popup && (

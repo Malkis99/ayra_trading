@@ -14,6 +14,11 @@ import {
   toggleRestDay as toggleRestDayLogic,
   addCustomGoal as addCustomGoalLogic,
   removeCustomGoal as removeCustomGoalLogic,
+  equipItem as equipItemLogic,
+  unequipItem as unequipItemLogic,
+  selectTitle as selectTitleLogic,
+  validateNickname,
+  addChronicleEvent,
 } from "@/lib/game";
 
 const STORAGE_KEY = "ayra_demo_v1";
@@ -33,10 +38,15 @@ interface GameContextType {
   toggleRestDay: () => void;
   claimDailyReward: () => number;
   setPlan: (plan: "Free" | "Pro" | "Elite") => void;
-  updateProfile: (name: string, bio: string) => void;
+  updateProfile: (
+    name: string,
+    bio: string | null
+  ) => { isValid: boolean; errorKey?: string };
   setEquipment: (equipment: Record<string, number>) => void;
+  equipItem: (slot: string, itemId: number, itemName: string) => void;
+  unequipItem: (slot: string) => void;
+  selectTitle: (titleId: string) => boolean;
   setFrame: (frame: number) => void;
-  setTitle: (title: number) => void;
   setBackground: (bg: number) => void;
   addCustomGoal: (title: string, category: string) => void;
   removeCustomGoal: (goalId: string) => void;
@@ -137,13 +147,36 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     setGameState((prev) => changePlanLogic(prev, plan));
   }, []);
 
-  const updateProfile = useCallback((name: string, bio: string) => {
-    setGameState((prev) => ({
-      ...prev,
-      name: name.trim() || prev.name,
-      bio,
-    }));
-  }, []);
+  const updateProfile = useCallback(
+    (rawName: string, rawBio: string | null) => {
+      const val = validateNickname(rawName);
+      if (!val.isValid) {
+        return { isValid: false, errorKey: val.errorKey };
+      }
+
+      const cleanBio =
+        rawBio === null || rawBio.trim() === "" ? null : rawBio.trim();
+
+      setGameState((prev) => {
+        let chronicle = prev.chronicle;
+        if (prev.name !== val.trimmedName) {
+          chronicle = addChronicleEvent(chronicle, {
+            type: "nicknameChanged",
+            name: val.trimmedName,
+          });
+        }
+        return {
+          ...prev,
+          name: val.trimmedName,
+          bio: cleanBio,
+          chronicle,
+        };
+      });
+
+      return { isValid: true };
+    },
+    []
+  );
 
   const setEquipment = useCallback((equipment: Record<string, number>) => {
     setGameState((prev) => ({
@@ -152,17 +185,31 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     }));
   }, []);
 
+  const equipItem = useCallback(
+    (slot: string, itemId: number, itemName: string) => {
+      setGameState((prev) => equipItemLogic(prev, slot, itemId, itemName));
+    },
+    []
+  );
+
+  const unequipItem = useCallback((slot: string) => {
+    setGameState((prev) => unequipItemLogic(prev, slot));
+  }, []);
+
+  const selectTitle = useCallback((titleId: string) => {
+    let success = false;
+    setGameState((prev) => {
+      const res = selectTitleLogic(prev, titleId);
+      success = res.success;
+      return res.state;
+    });
+    return success;
+  }, []);
+
   const setFrame = useCallback((frame: number) => {
     setGameState((prev) => ({
       ...prev,
       frame,
-    }));
-  }, []);
-
-  const setTitle = useCallback((title: number) => {
-    setGameState((prev) => ({
-      ...prev,
-      title,
     }));
   }, []);
 
@@ -200,8 +247,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         setPlan,
         updateProfile,
         setEquipment,
+        equipItem,
+        unequipItem,
+        selectTitle,
         setFrame,
-        setTitle,
         setBackground,
         addCustomGoal,
         removeCustomGoal,
