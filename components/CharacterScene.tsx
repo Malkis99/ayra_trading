@@ -43,7 +43,7 @@ export function CharacterScene({
   className = "",
 }: CharacterSceneProps) {
   const { gameState, setBackground } = useGame();
-  const { dict, showToast, lang } = useApp();
+  const { dict, showToast } = useApp();
 
   const [rotationAngle, setRotationAngle] = useState(0);
   const [isAutoRotating, setIsAutoRotating] = useState(false);
@@ -57,7 +57,8 @@ export function CharacterScene({
 
   // Background style
   const bgOption = BACKGROUNDS[gameState.background % BACKGROUNDS.length];
-  const bgName = lang === "en" ? bgOption.nameEn : bgOption.nameRu;
+  const bgKeyShort = bgOption ? bgOption.nameKey.replace("backgrounds.", "") : "";
+  const bgName = bgOption && (dict.backgrounds as any)[bgKeyShort] ? (dict.backgrounds as any)[bgKeyShort] : bgOption?.nameKey || "";
 
   const bgGradients = [
     "bg-radial from-[#241a38] via-[#161422] to-[#121117]",
@@ -146,6 +147,14 @@ export function CharacterScene({
   const leftSlots = SLOTS.slice(0, 5);
   const rightSlots = SLOTS.slice(5, 10);
 
+  const getItemName = (itemIdx: number | undefined) => {
+    if (itemIdx == null) return null;
+    const item = ITEMS[itemIdx];
+    if (!item) return null;
+    const keyShort = item.nameKey.replace("items.", "");
+    return (dict.items as any)[keyShort] || item.nameKey;
+  };
+
   return (
     <div
       className={`relative card flex flex-col items-center justify-between p-4 min-h-[460px] overflow-hidden ${
@@ -177,7 +186,7 @@ export function CharacterScene({
             const itemIdx = activeEquipment[slot];
             const isEquipped = itemIdx != null && ITEMS[itemIdx] != null;
             const item = isEquipped ? ITEMS[itemIdx] : null;
-            const itemName = item ? (lang === "en" ? item.nameEn : item.nameRu) : null;
+            const itemName = getItemName(itemIdx);
 
             return (
               <button
@@ -243,7 +252,7 @@ export function CharacterScene({
             const itemIdx = activeEquipment[slot];
             const isEquipped = itemIdx != null && ITEMS[itemIdx] != null;
             const item = isEquipped ? ITEMS[itemIdx] : null;
-            const itemName = item ? (lang === "en" ? item.nameEn : item.nameRu) : null;
+            const itemName = getItemName(itemIdx);
 
             return (
               <button

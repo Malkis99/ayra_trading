@@ -35,6 +35,14 @@ export const GAME_CONFIG = {
     { level: 4, rankKey: "expert", xpRequired: 500 },
     { level: 5, rankKey: "master", xpRequired: 1000 },
   ] as const,
+
+  // Level unlock thresholds (placeholders for T4)
+  LEVEL_UNLOCKS: {
+    FRAME_BLUE_LEVEL: 3,
+    FRAME_GOLD_LEVEL: 4,
+    TITLE_DISCIPLINED_LEVEL: 3,
+    TITLE_STRATEGIST_LEVEL: 5,
+  },
 };
 
 export type StatKey = (typeof GAME_CONFIG.STAT_KEYS)[number];

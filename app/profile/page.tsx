@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { TabHeader } from "@/components/TabHeader";
 import { CharacterScene } from "@/components/CharacterScene";
 import { ProfileOverview } from "@/components/ProfileOverview";
@@ -17,6 +17,7 @@ export default function ProfilePage() {
   const { dict } = useApp();
   const { gameState } = useGame();
 
+  // Tabs list
   const tabs = [
     dict.profile.tabs.overview,
     dict.profile.tabs.wardrobe,
@@ -25,6 +26,19 @@ export default function ProfilePage() {
     dict.profile.tabs.posts,
     dict.profile.tabs.stats,
   ];
+
+  // Handle URL tab parameter if present (e.g., /profile?tab=wardrobe)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab");
+      if (tabParam === "wardrobe") setActiveTab(1);
+      else if (tabParam === "achievements") setActiveTab(2);
+      else if (tabParam === "chronicle") setActiveTab(3);
+      else if (tabParam === "posts") setActiveTab(4);
+      else if (tabParam === "stats") setActiveTab(5);
+    }
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -104,7 +118,7 @@ export default function ProfilePage() {
                     });
                   } else if (item.type === "itemEquipped") {
                     text = formatString(dict.chronicleEvents.itemEquipped, {
-                      name: item.name,
+                      name: item.name || item.itemId?.toString() || "",
                     });
                   } else if (item.type === "titleUnlocked") {
                     text = formatString(dict.chronicleEvents.titleUnlocked, {

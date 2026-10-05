@@ -13,7 +13,7 @@ interface WardrobeTabProps {
 
 export function WardrobeTab({ onPreviewChange }: WardrobeTabProps) {
   const { gameState, equipItem, unequipItem, setFrame, setBackground } = useGame();
-  const { dict, showToast, lang } = useApp();
+  const { dict, showToast } = useApp();
 
   const [selectedSlot, setSelectedSlot] = useState<SlotName>("Верх");
   const [previewEquipment, setPreviewEquipment] = useState<Record<string, number> | null>(null);
@@ -23,6 +23,21 @@ export function WardrobeTab({ onPreviewChange }: WardrobeTabProps) {
   const itemsInSlot = ITEMS.map((item, idx) => ({ ...item, globalIdx: idx })).filter(
     (item) => item.slot === selectedSlot
   );
+
+  const getItemName = (item: { nameKey: string }) => {
+    const keyShort = item.nameKey.replace("items.", "");
+    return (dict.items as any)[keyShort] || item.nameKey;
+  };
+
+  const getFrameName = (frame: { nameKey: string }) => {
+    const keyShort = frame.nameKey.replace("frames.", "");
+    return (dict.frames as any)[keyShort] || frame.nameKey;
+  };
+
+  const getBgName = (bg: { nameKey: string }) => {
+    const keyShort = bg.nameKey.replace("backgrounds.", "");
+    return (dict.backgrounds as any)[keyShort] || bg.nameKey;
+  };
 
   const handlePreview = (slot: SlotName, globalIdx: number) => {
     const next = {
@@ -39,7 +54,7 @@ export function WardrobeTab({ onPreviewChange }: WardrobeTabProps) {
   };
 
   const handleEquip = (slot: SlotName, globalIdx: number, item: EquipmentItem) => {
-    const name = lang === "en" ? item.nameEn : item.nameRu;
+    const name = getItemName(item);
     equipItem(slot, globalIdx, name);
     setPreviewEquipment(null);
     if (onPreviewChange) onPreviewChange(null);
@@ -47,7 +62,7 @@ export function WardrobeTab({ onPreviewChange }: WardrobeTabProps) {
   };
 
   const handleUnequip = (slot: SlotName, item: EquipmentItem) => {
-    const name = lang === "en" ? item.nameEn : item.nameRu;
+    const name = getItemName(item);
     unequipItem(slot);
     setPreviewEquipment(null);
     if (onPreviewChange) onPreviewChange(null);
@@ -111,7 +126,7 @@ export function WardrobeTab({ onPreviewChange }: WardrobeTabProps) {
             </p>
           ) : (
             itemsInSlot.map((item) => {
-              const itemName = lang === "en" ? item.nameEn : item.nameRu;
+              const itemName = getItemName(item);
               const isEquippedInState = gameState.equipment?.[selectedSlot] === item.globalIdx;
               const isPreviewed = previewEquipment?.[selectedSlot] === item.globalIdx;
               const isLocked = gameState.level < item.reqLevel;
@@ -205,7 +220,7 @@ export function WardrobeTab({ onPreviewChange }: WardrobeTabProps) {
             {FRAMES.map((f) => {
               const isSelected = gameState.frame === f.id;
               const isLocked = gameState.level < f.reqLevel;
-              const fName = lang === "en" ? f.nameEn : f.nameRu;
+              const fName = getFrameName(f);
 
               return (
                 <button
@@ -243,7 +258,7 @@ export function WardrobeTab({ onPreviewChange }: WardrobeTabProps) {
           <div className="grid grid-cols-3 gap-2.5">
             {BACKGROUNDS.map((bg) => {
               const isSelected = gameState.background === bg.id;
-              const bgName = lang === "en" ? bg.nameEn : bg.nameRu;
+              const bgName = getBgName(bg);
 
               return (
                 <button

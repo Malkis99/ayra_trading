@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 import {
   GameState,
   INITIAL_GAME_STATE,
@@ -15,24 +15,34 @@ import {
   addCustomGoal as addCustomGoalLogic,
   removeCustomGoal as removeCustomGoalLogic,
   equipItem as equipItemLogic,
+  unequipSlot as unequipSlotLogic,
   unequipItem as unequipItemLogic,
+  applyLoadout as applyLoadoutLogic,
+  saveLoadout as saveLoadoutLogic,
+  addPost as addPostLogic,
   selectTitle as selectTitleLogic,
   validateNickname,
   addChronicleEvent,
 } from "@/lib/game";
+import { ITEMS, FRAMES, TITLES, BACKGROUNDS } from "@/lib/items";
 
 const STORAGE_KEY = "ayra_demo_v1";
 
 interface GameContextType {
   gameState: GameState;
   isLoaded: boolean;
+  previewItem: number | null;
+  setPreviewItem: (itemId: number | null) => void;
+  wardrobeFilter: string;
+  setWardrobeFilter: (slot: string) => void;
+  effectiveEquipment: Record<string, number>;
   completeQuest: (
     questId: string,
     title: string,
     category: string,
     xp?: number,
     coins?: number
-  ) => { leveledUp: boolean; newLevel?: number };
+  ) => { leveledUp: boolean; newLevel?: number; newlyUnlocked: string[] };
   passQuest: (questId: string) => void;
   replaceQuest: (questId: string) => boolean;
   toggleRestDay: () => void;
@@ -42,12 +52,18 @@ interface GameContextType {
     name: string,
     bio: string | null
   ) => { isValid: boolean; errorKey?: string };
-  setEquipment: (equipment: Record<string, number>) => void;
-  equipItem: (slot: string, itemId: number, itemName: string) => void;
+  equipItem: (arg1: any, arg2?: any, arg3?: any) => string[];
   unequipItem: (slot: string) => void;
+  unequipSlot: (slot: string) => string[];
+  applyLoadout: (loadoutName: string) => string[];
+  saveLoadout: (loadoutName: string) => void;
+  addPost: (content: string) => string[];
   selectTitle: (titleId: string) => boolean;
   setFrame: (frame: number) => void;
   setBackground: (bg: number) => void;
+  cycleFrame: () => void;
+  cycleBackground: () => void;
+  cycleTitle: () => void;
   addCustomGoal: (title: string, category: string) => void;
   removeCustomGoal: (goalId: string) => void;
   characterStatus: "Training" | "Resting";
@@ -58,6 +74,8 @@ const GameContext = createContext<GameContextType | undefined>(undefined);
 export function GameProvider({ children }: { children: React.ReactNode }) {
   const [gameState, setGameState] = useState<GameState>(INITIAL_GAME_STATE);
   const [isLoaded, setIsLoaded] = useState<boolean>(false);
+  const [previewItem, setPreviewItem] = useState<number | null>(null);
+  const [wardrobeFilter, setWardrobeFilter] = useState<string>("Все");
 
   // Load from localStorage on client mount to avoid SSR hydration mismatch
   useEffect(() => {
@@ -96,7 +114,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       xp?: number,
       coins?: number
     ) => {
-      let result = { leveledUp: false, newLevel: undefined as number | undefined };
+      let result = {
+        leveledUp: false,
+        newLevel: undefined as number | undefined,
+        newlyUnlocked: [] as string[],
+      };
       setGameState((prev) => {
         const res = completeQuestLogic(
           prev,
@@ -107,7 +129,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           coins,
           new Date()
         );
-        result = { leveledUp: res.leveledUp, newLevel: res.newLevel };
+        result = {
+          leveledUp: res.leveledUp,
+          newLevel: res.newLevel,
+          newlyUnlocked: res.newlyUnlocked,
+        };
         return res.state;
       });
       return result;
@@ -178,22 +204,55 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  const setEquipment = useCallback((equipment: Record<string, number>) => {
-    setGameState((prev) => ({
-      ...prev,
-      equipment,
-    }));
+  const equipItem = useCallback((arg1: any, arg2?: any, arg3?: any) => {
+    let newlyUnlocked: string[] = [];
+    setGameState((prev) => {
+      const res = equipItemLogic(prev, arg1, arg2, arg3);
+      newlyUnlocked = res.newlyUnlocked;
+      return res.state;
+    });
+    setPreviewItem(null);
+    return newlyUnlocked;
   }, []);
 
-  const equipItem = useCallback(
-    (slot: string, itemId: number, itemName: string) => {
-      setGameState((prev) => equipItemLogic(prev, slot, itemId, itemName));
-    },
-    []
-  );
+  const unequipSlot = useCallback((slot: string) => {
+    let newlyUnlocked: string[] = [];
+    setGameState((prev) => {
+      const res = unequipSlotLogic(prev, slot);
+      newlyUnlocked = res.newlyUnlocked;
+      return res.state;
+    });
+    setPreviewItem(null);
+    return newlyUnlocked;
+  }, []);
 
   const unequipItem = useCallback((slot: string) => {
     setGameState((prev) => unequipItemLogic(prev, slot));
+  }, []);
+
+  const applyLoadout = useCallback((loadoutName: string) => {
+    let newlyUnlocked: string[] = [];
+    setGameState((prev) => {
+      const res = applyLoadoutLogic(prev, loadoutName);
+      newlyUnlocked = res.newlyUnlocked;
+      return res.state;
+    });
+    setPreviewItem(null);
+    return newlyUnlocked;
+  }, []);
+
+  const saveLoadout = useCallback((loadoutName: string) => {
+    setGameState((prev) => saveLoadoutLogic(prev, loadoutName));
+  }, []);
+
+  const addPost = useCallback((content: string) => {
+    let newlyUnlocked: string[] = [];
+    setGameState((prev) => {
+      const res = addPostLogic(prev, content);
+      newlyUnlocked = res.newlyUnlocked;
+      return res.state;
+    });
+    return newlyUnlocked;
   }, []);
 
   const selectTitle = useCallback((titleId: string) => {
@@ -220,6 +279,41 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     }));
   }, []);
 
+  const cycleFrame = useCallback(() => {
+    setGameState((prev) => {
+      let nextFrame = prev.frame;
+      for (let i = 1; i <= FRAMES.length; i++) {
+        const idx = (prev.frame + i) % FRAMES.length;
+        if (prev.level >= FRAMES[idx].reqLevel) {
+          nextFrame = idx;
+          break;
+        }
+      }
+      return { ...prev, frame: nextFrame };
+    });
+  }, []);
+
+  const cycleBackground = useCallback(() => {
+    setGameState((prev) => ({
+      ...prev,
+      background: (prev.background + 1) % BACKGROUNDS.length,
+    }));
+  }, []);
+
+  const cycleTitle = useCallback(() => {
+    setGameState((prev) => {
+      let nextTitle = prev.title;
+      for (let i = 1; i <= TITLES.length; i++) {
+        const idx = (prev.title + i) % TITLES.length;
+        if (prev.level >= TITLES[idx].reqLevel) {
+          nextTitle = idx;
+          break;
+        }
+      }
+      return { ...prev, title: nextTitle };
+    });
+  }, []);
+
   const addCustomGoal = useCallback((title: string, category: string) => {
     setGameState((prev) => addCustomGoalLogic(prev, title, category));
   }, []);
@@ -227,6 +321,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const removeCustomGoal = useCallback((goalId: string) => {
     setGameState((prev) => removeCustomGoalLogic(prev, goalId));
   }, []);
+
+  const effectiveEquipment = useMemo(() => {
+    const eq = { ...gameState.equipment };
+    if (previewItem != null && ITEMS[previewItem]) {
+      eq[ITEMS[previewItem].slot] = previewItem;
+    }
+    return eq;
+  }, [gameState.equipment, previewItem]);
 
   const completedTodayCount = Object.keys(gameState.completedQuestsToday).length;
   const characterStatus = getCharacterStatus(
@@ -239,6 +341,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       value={{
         gameState,
         isLoaded,
+        previewItem,
+        setPreviewItem,
+        wardrobeFilter,
+        setWardrobeFilter,
+        effectiveEquipment,
         completeQuest,
         passQuest,
         replaceQuest,
@@ -246,12 +353,18 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         claimDailyReward,
         setPlan,
         updateProfile,
-        setEquipment,
         equipItem,
         unequipItem,
+        unequipSlot,
+        applyLoadout,
+        saveLoadout,
+        addPost,
         selectTitle,
         setFrame,
         setBackground,
+        cycleFrame,
+        cycleBackground,
+        cycleTitle,
         addCustomGoal,
         removeCustomGoal,
         characterStatus,
