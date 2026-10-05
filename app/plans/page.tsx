@@ -2,101 +2,130 @@
 
 import React from "react";
 import { useApp } from "@/lib/context";
+import { useGame } from "@/lib/game-context";
+import { Check } from "lucide-react";
 import { formatString } from "@/lib/i18n";
 
 export default function PlansPage() {
-  const { userPlan, setUserPlan, showToast, dict } = useApp();
+  const { dict, showToast } = useApp();
+  const { gameState, setPlan } = useGame();
 
-  const plansList = [
+  const plans = [
     {
-      name: "Free" as const,
+      id: "Free" as const,
+      name: dict.plans.free.name,
       price: dict.plans.free.price,
       desc: dict.plans.free.desc,
+      color: "#a09eb2",
       features: [
         dict.plans.free.f1,
         dict.plans.free.f2,
         dict.plans.free.f3,
         dict.plans.free.f4,
       ],
-      color: "text-mu",
-      borderColor: "border-line",
     },
     {
-      name: "Pro" as const,
+      id: "Pro" as const,
+      name: dict.plans.pro.name,
       price: dict.plans.pro.price,
       desc: dict.plans.pro.desc,
+      color: "#a38ad1",
       features: [
         dict.plans.pro.f1,
         dict.plans.pro.f2,
         dict.plans.pro.f3,
         dict.plans.pro.f4,
       ],
-      color: "text-vi",
-      borderColor: "border-vi",
     },
     {
-      name: "Elite" as const,
+      id: "Elite" as const,
+      name: dict.plans.elite.name,
       price: dict.plans.elite.price,
       desc: dict.plans.elite.desc,
+      color: "#d6a94a",
       features: [
         dict.plans.elite.f1,
         dict.plans.elite.f2,
         dict.plans.elite.f3,
         dict.plans.elite.f4,
       ],
-      color: "text-go",
-      borderColor: "border-go",
     },
   ];
 
-  const handleSelectPlan = (planName: "Free" | "Pro" | "Elite") => {
-    setUserPlan(planName);
-    showToast(formatString(dict.plans.selectedToast, { name: planName }));
+  const handleSelectPlan = (planId: "Free" | "Pro" | "Elite") => {
+    if (gameState.plan === planId) return;
+    setPlan(planId);
+    showToast(formatString(dict.plans.selectedToast, { name: planId }));
   };
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
-      <div className="text-center">
-        <h1 className="font-serif text-3xl font-bold text-tx">{dict.plans.title}</h1>
-        <p className="text-xs text-mu mt-2 max-w-md mx-auto">
+    <div className="space-y-6 max-w-5xl mx-auto">
+      {/* Header */}
+      <div className="text-center space-y-2">
+        <h1 className="font-serif text-2xl font-bold text-tx md:text-3xl">
+          {dict.plans.title}
+        </h1>
+        <p className="text-xs text-mu max-w-2xl mx-auto">
           {dict.plans.subtitle}
         </p>
       </div>
 
+      {/* Cards Grid */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        {plansList.map((p) => {
-          const isCurrent = userPlan === p.name;
+        {plans.map((p) => {
+          const isCurrent = gameState.plan === p.id;
           return (
             <div
-              key={p.name}
-              className={`card flex flex-col justify-between border ${p.borderColor}`}
+              key={p.id}
+              className="card flex flex-col justify-between space-y-4"
+              style={{
+                borderColor: isCurrent ? p.color : "#2a2836",
+              }}
             >
-              <div>
-                <div className={`font-serif text-2xl font-bold ${p.color}`}>{p.name}</div>
-                <div className="mt-1 text-xl font-bold text-tx">{p.price}</div>
-                <div className="text-xs text-mu mt-1">{p.desc}</div>
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <b
+                    className="font-serif text-xl font-bold"
+                    style={{ color: p.color }}
+                  >
+                    {p.name}
+                  </b>
+                  {isCurrent && (
+                    <span className="chip text-[10px] font-semibold border-go text-go">
+                      {dict.plans.currentPlan}
+                    </span>
+                  )}
+                </div>
 
-                <hr className="my-4 border-line" />
+                <div className="text-2xl font-bold text-tx">{p.price}</div>
+                <div className="text-xs text-mu">{p.desc}</div>
 
-                <ul className="space-y-2 text-xs text-mu">
-                  {p.features.map((f, i) => (
-                    <li key={i} className="flex items-start gap-2">
-                      <span className="text-vi">•</span>
-                      <span>{f}</span>
+                <ul className="space-y-2 pt-2 border-t border-line text-xs text-mu">
+                  {p.features.map((feat, idx) => (
+                    <li key={idx} className="flex items-start gap-2">
+                      <Check
+                        size={14}
+                        className="text-vi flex-none mt-0.5"
+                        style={{ color: p.color }}
+                      />
+                      <span>{feat}</span>
                     </li>
                   ))}
                 </ul>
               </div>
 
-              <div className="mt-6">
+              <div className="pt-2">
                 {isCurrent ? (
-                  <div className="chip w-full justify-center py-2 text-center font-semibold">
+                  <button
+                    disabled
+                    className="w-full btn-ghost text-xs py-2 opacity-50 cursor-default"
+                  >
                     {dict.plans.currentPlan}
-                  </div>
+                  </button>
                 ) : (
                   <button
-                    onClick={() => handleSelectPlan(p.name)}
-                    className="btn w-full text-xs"
+                    onClick={() => handleSelectPlan(p.id)}
+                    className="w-full btn text-xs py-2"
                   >
                     {formatString(dict.plans.selectPlan, { name: p.name })}
                   </button>
@@ -105,6 +134,11 @@ export default function PlansPage() {
             </div>
           );
         })}
+      </div>
+
+      {/* Note footer */}
+      <div className="text-center text-[11px] text-mu pt-4 border-t border-line">
+        * {dict.plans.subtitle}
       </div>
     </div>
   );

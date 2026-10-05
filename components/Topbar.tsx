@@ -4,6 +4,10 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { Search, Plus, Bell } from "lucide-react";
 import { useApp } from "@/lib/context";
+import { useGame } from "@/lib/game-context";
+import { Figure } from "@/components/Figure";
+import { CoinsChip } from "@/components/CoinsChip";
+import { FRAMES } from "@/lib/items";
 
 export function Topbar() {
   const {
@@ -13,10 +17,12 @@ export function Topbar() {
     setAddModalOpen,
     setSearchOpen,
     showToast,
-    userPlan,
   } = useApp();
 
+  const { gameState } = useGame();
   const [isProfileMenuOpen, setProfileMenuOpen] = useState(false);
+
+  const frameColor = FRAMES[gameState.frame]?.color || "#a38ad1";
 
   return (
     <header className="sticky top-0 z-20 flex h-14 items-center gap-2.5 border-b border-line bg-[#121117cc] px-4 backdrop-blur-md">
@@ -30,7 +36,7 @@ export function Topbar() {
         <span className="hidden sm:inline truncate">{dict.topbar.search}</span>
       </button>
 
-      {/* Add Button ("＋ Добавить" in RU, "Add" in EN) */}
+      {/* Add Button ("Добавить" / "Add") */}
       <button
         onClick={() => setAddModalOpen(true)}
         className="btn flex items-center gap-1 text-xs py-1.5 px-3"
@@ -61,12 +67,15 @@ export function Topbar() {
 
       <div className="flex-1" />
 
+      {/* Coins Chip */}
+      <CoinsChip value={gameState.coins} />
+
       {/* Plan Chip */}
       <Link
         href="/plans"
-        className="rounded-xl border border-go bg-go/10 px-3 py-1 text-xs font-semibold text-go transition-colors hover:bg-go/20"
+        className="rounded-xl border border-go bg-go/10 px-3 py-1 text-xs font-semibold text-go transition-colors hover:bg-go/20 flex-none"
       >
-        ★ {userPlan}
+        ★ {gameState.plan}
       </Link>
 
       {/* Notification Bell */}
@@ -82,12 +91,13 @@ export function Topbar() {
       <div className="relative md:hidden">
         <button
           onClick={() => setProfileMenuOpen((prev) => !prev)}
-          className="relative grid h-9 w-9 place-items-center overflow-hidden rounded-full border-2 border-go bg-[#241d3a] font-serif font-bold text-tx text-xs"
+          className="relative grid h-9 w-9 place-items-center overflow-hidden rounded-full border-2 bg-[#241d3a]"
+          style={{ borderColor: frameColor }}
           aria-label={dict.topbar.profile}
         >
-          T
+          <Figure equipment={gameState.equipment} width={30} height={34} />
           <small className="absolute -bottom-1 -right-1 rounded bg-go px-1 text-[8px] font-bold text-black">
-            1
+            {gameState.level}
           </small>
         </button>
 

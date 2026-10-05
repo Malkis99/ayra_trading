@@ -2,6 +2,7 @@
 
 import React from "react";
 import { AppProvider } from "@/lib/context";
+import { GameProvider } from "@/lib/game-context";
 import { Sidebar } from "@/components/Sidebar";
 import { Topbar } from "@/components/Topbar";
 import { BottomNav } from "@/components/BottomNav";
@@ -20,7 +21,8 @@ export function Shell({
 }) {
   return (
     <AppProvider initialLang={initialLang}>
-      <div className="flex h-screen overflow-hidden bg-ink text-tx">
+      <GameProvider>
+        <div className="flex h-screen overflow-hidden bg-ink text-tx">
         {/* Fixed Desktop Sidebar */}
         <Sidebar />
 
@@ -46,6 +48,7 @@ export function Shell({
         <SearchModal />
         <Toast />
       </div>
+      </GameProvider>
     </AppProvider>
   );
 }
