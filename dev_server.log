@@ -11,3 +11,5 @@
  ✓ Compiled /profile in 6.4s (606 modules)
  GET /profile 200 in 7200ms
  GET /profile 200 in 51ms
+ GET /profile 200 in 520ms
+ GET /profile 200 in 111ms
