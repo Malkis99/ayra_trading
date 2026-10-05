@@ -1,0 +1,17 @@
+
+> ayra-web@0.1.0 dev
+> next dev
+
+  ▲ Next.js 14.2.5
+  - Local:        http://localhost:3000
+
+ ✓ Starting...
+ ✓ Ready in 1692ms
+ ○ Compiling / ...
+ ✓ Compiled / in 5.8s (575 modules)
+ GET / 200 in 6253ms
+ GET / 200 in 134ms
+ GET / 200 in 44ms
+ GET / 200 in 35ms
+ GET / 200 in 31ms
+ GET / 200 in 29ms
