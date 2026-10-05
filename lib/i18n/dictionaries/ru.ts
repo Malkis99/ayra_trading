@@ -278,7 +278,7 @@ export const ru = {
   chronicleEvents: {
     characterCreated: "Персонаж создан",
     questDone: "Квест: {title} (+{xp} XP)",
-    levelUp: "Level up! Lv {level}",
+    levelUp: "Новый уровень! Ур. {level}",
     dailyReward: "Ежедневная награда: +{coins} Coins",
     planChanged: "Тариф: {plan}",
     itemEquipped: "Надето: {name}",
@@ -451,7 +451,7 @@ export const ru = {
   academy: {
     title: "Академия",
     subtitle: "Обучающие материалы, риск-менеджмент и бэктесты",
-    tabHeader: "Tab: {tab}",
+    tabHeader: "Вкладка: {tab}",
     inDev: "Раздел находится в разработке (T13).",
     emptyState: "Курсы и программы обучения {tab}",
     tabs: {
@@ -549,7 +549,7 @@ export const ru = {
       stylistDesc: "Надень хотя бы один предмет",
       streakDay: "Серия дня",
       streakDayDesc: "3 квеста за день",
-      level3: "Level 3",
+      level3: "Уровень 3",
       level3Desc: "Достигни Lv 3",
       author: "Автор",
       authorDesc: "Опубликуй свой первый пост",

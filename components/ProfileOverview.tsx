@@ -7,6 +7,7 @@ import { useApp } from "@/lib/context";
 import { FollowersBlock } from "@/components/FollowersBlock";
 import { ReputationBlock } from "@/components/ReputationBlock";
 import { StatsBlock } from "@/components/StatsBlock";
+import { PlanBadge } from "@/components/PlanBadge";
 import { EditProfileModal } from "@/components/EditProfileModal";
 import { TitlesModal } from "@/components/TitlesModal";
 import { TITLES_CATALOG } from "@/lib/titles";
@@ -62,6 +63,7 @@ export function ProfileOverview({ onGoToStatsTab }: ProfileOverviewProps) {
                 >
                   <Edit2 size={15} />
                 </button>
+                <PlanBadge plan={gameState.plan} />
               </div>
 
               {/* Title dropdown trigger */}
@@ -84,11 +86,11 @@ export function ProfileOverview({ onGoToStatsTab }: ProfileOverviewProps) {
         </div>
       </div>
 
-      {/* 2. Followers Block */}
-      <FollowersBlock />
-
       {/* 3. Reputation Block */}
       <ReputationBlock />
+
+      {/* 4. Followers Block */}
+      <FollowersBlock />
 
       {/* 4. Full-width Level Bar */}
       <div className="card bg-s1 border border-line p-4 space-y-3">
