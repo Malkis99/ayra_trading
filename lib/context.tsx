@@ -12,6 +12,9 @@ interface AppContextType {
   setFocusMode: (f: boolean | ((prev: boolean) => boolean)) => void;
   isAddModalOpen: boolean;
   setAddModalOpen: (o: boolean) => void;
+  addModalTab: string;
+  setAddModalTab: (tab: string) => void;
+  openAddModal: (tab?: string) => void;
   isSearchOpen: boolean;
   setSearchOpen: (o: boolean) => void;
   toastMessage: string | null;
@@ -32,6 +35,7 @@ export function AppProvider({
   const [lang, setLangState] = useState<Language>(initialLang);
   const [focusMode, setFocusMode] = useState<boolean>(false);
   const [isAddModalOpen, setAddModalOpen] = useState<boolean>(false);
+  const [addModalTab, setAddModalTab] = useState<string>("grid");
   const [isSearchOpen, setSearchOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [userPlan, setUserPlan] = useState<"Free" | "Pro" | "Elite">("Free");
@@ -54,11 +58,6 @@ export function AppProvider({
       const savedLang = localStorage.getItem("ayra_lang") as Language | null;
       if (savedLang && (savedLang === "ru" || savedLang === "en")) {
         setLangState(savedLang);
-      } else {
-        const browserLang = navigator.language.toLowerCase().startsWith("ru")
-          ? "ru"
-          : "en";
-        setLangState(browserLang);
       }
     } catch {
       // ignore
@@ -68,6 +67,11 @@ export function AppProvider({
   useEffect(() => {
     document.documentElement.lang = lang;
   }, [lang]);
+
+  const openAddModal = (tab: string = "grid") => {
+    setAddModalTab(tab);
+    setAddModalOpen(true);
+  };
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -106,6 +110,9 @@ export function AppProvider({
         setFocusMode,
         isAddModalOpen,
         setAddModalOpen,
+        addModalTab,
+        setAddModalTab,
+        openAddModal,
         isSearchOpen,
         setSearchOpen,
         toastMessage,

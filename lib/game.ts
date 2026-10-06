@@ -628,6 +628,16 @@ export function equipItem(
   return checkAchievements(nextState);
 }
 
+export function deletePost(state: GameState, postIndex: number): GameState {
+  if (postIndex < 0 || postIndex >= state.posts.length) return state;
+  const nextPosts = [...state.posts];
+  nextPosts.splice(postIndex, 1);
+  return {
+    ...state,
+    posts: nextPosts,
+  };
+}
+
 export function unequipSlot(
   state: GameState,
   slot: string

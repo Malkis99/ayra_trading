@@ -13,6 +13,22 @@ export const SLOTS = [
 
 export type SlotName = typeof SLOTS[number];
 
+export const LEFT_SLOTS: SlotName[] = ["Голова", "Верх", "Верхняя", "Низ", "Обувь"];
+export const RIGHT_SLOTS: SlotName[] = ["Плащ", "Перчатки", "Аксессуар", "Аура", "Компаньон"];
+
+export const SLOT_KEY_MAP: Record<SlotName, string> = {
+  Голова: "head",
+  Верх: "top",
+  Верхняя: "outer",
+  Низ: "bottom",
+  Обувь: "shoes",
+  Плащ: "cloak",
+  Перчатки: "gloves",
+  Аксессуар: "accessory",
+  Аура: "aura",
+  Компаньон: "companion",
+};
+
 export interface EquipmentItem {
   id: number;
   slot: SlotName;

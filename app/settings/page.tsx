@@ -31,7 +31,7 @@ export default function SettingsPage() {
                   : "text-mu hover:text-tx"
               }`}
             >
-              Русский
+              {dict.settings.languageRu}
             </button>
             <button
               type="button"
@@ -42,7 +42,7 @@ export default function SettingsPage() {
                   : "text-mu hover:text-tx"
               }`}
             >
-              English
+              {dict.settings.languageEn}
             </button>
           </div>
         </div>

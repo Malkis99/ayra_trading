@@ -19,6 +19,7 @@ import {
   applyLoadout as applyLoadoutLogic,
   saveLoadout as saveLoadoutLogic,
   addPost as addPostLogic,
+  deletePost as deletePostLogic,
   updateProfileInfo as updateProfileInfoLogic,
 } from "@/lib/game";
 import { ITEMS, FRAMES, TITLES, BACKGROUNDS } from "@/lib/items";
@@ -52,6 +53,7 @@ interface GameContextType {
   applyLoadout: (loadoutName: string) => string[];
   saveLoadout: (loadoutName: string) => void;
   addPost: (content: string) => string[];
+  deletePost: (postIndex: number) => void;
   setFrame: (frame: number) => void;
   setTitle: (title: number) => void;
   setBackground: (bg: number) => void;
@@ -69,7 +71,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [gameState, setGameState] = useState<GameState>(INITIAL_GAME_STATE);
   const [isLoaded, setIsLoaded] = useState<boolean>(false);
   const [previewItem, setPreviewItem] = useState<number | null>(null);
-  const [wardrobeFilter, setWardrobeFilter] = useState<string>("Все");
+  const [wardrobeFilter, setWardrobeFilter] = useState<string>("all");
 
   // Load from localStorage on client mount to avoid SSR hydration mismatch
   useEffect(() => {
@@ -225,6 +227,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     return newlyUnlocked;
   }, []);
 
+  const deletePost = useCallback((postIndex: number) => {
+    setGameState((prev) => deletePostLogic(prev, postIndex));
+  }, []);
+
   const setFrame = useCallback((frame: number) => {
     setGameState((prev) => ({
       ...prev,
@@ -326,6 +332,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         applyLoadout,
         saveLoadout,
         addPost,
+        deletePost,
         setFrame,
         setTitle,
         setBackground,

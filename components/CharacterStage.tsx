@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useGame } from "@/lib/game-context";
 import { useApp } from "@/lib/context";
 import { Figure } from "@/components/Figure";
-import { SlotName, ITEMS, FRAMES } from "@/lib/items";
+import { SlotName, ITEMS, FRAMES, SLOT_KEY_MAP, LEFT_SLOTS, RIGHT_SLOTS } from "@/lib/items";
 import { formatString, formatNumber } from "@/lib/i18n";
 import {
   Crown,
@@ -21,20 +21,17 @@ import {
   Image,
 } from "lucide-react";
 
-const LEFT_SLOTS: SlotName[] = ["Голова", "Верх", "Верхняя", "Низ", "Обувь"];
-const RIGHT_SLOTS: SlotName[] = ["Плащ", "Перчатки", "Аксессуар", "Аура", "Компаньон"];
-
-const SLOT_ICONS: Record<SlotName, React.ComponentType<{ size?: number | string; className?: string }>> = {
-  Голова: Crown,
-  Верх: Shirt,
-  Верхняя: Shield,
-  Низ: Shield,
-  Обувь: Footprints,
-  Плащ: Sparkles,
-  Перчатки: Zap,
-  Аксессуар: Glasses,
-  Аура: Smile,
-  Компаньон: Bot,
+const SLOT_ICONS: Record<string, React.ComponentType<{ size?: number | string; className?: string }>> = {
+  head: Crown,
+  top: Shirt,
+  outer: Shield,
+  bottom: Shield,
+  shoes: Footprints,
+  cloak: Sparkles,
+  gloves: Zap,
+  accessory: Glasses,
+  aura: Smile,
+  companion: Bot,
 };
 
 interface CharacterStageProps {
@@ -118,7 +115,7 @@ export function CharacterStage({ onSlotClick, selectedSlot }: CharacterStageProp
     };
   }, [isAutoSpinning]);
 
-  // Handle page visibility change and unmount
+  // Handle page visibility change
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.hidden) {
@@ -133,9 +130,8 @@ export function CharacterStage({ onSlotClick, selectedSlot }: CharacterStageProp
     };
   }, [stopAutoSpin]);
 
-  // Pointer event handlers
+  // Pointer handlers for dragging
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    // Ignore clicks on control buttons
     if ((e.target as HTMLElement).closest(".stage-ctl")) return;
 
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -173,7 +169,6 @@ export function CharacterStage({ onSlotClick, selectedSlot }: CharacterStageProp
     }
   };
 
-  // Keyboard navigation
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "ArrowLeft") {
       e.preventDefault();
@@ -192,20 +187,7 @@ export function CharacterStage({ onSlotClick, selectedSlot }: CharacterStageProp
     const itemIndex = effectiveEquipment[slotName];
     const item = itemIndex != null ? ITEMS[itemIndex] : null;
 
-    const slotKeyMap: Record<string, string> = {
-      Голова: "head",
-      Верх: "top",
-      Верхняя: "outer",
-      Низ: "bottom",
-      Обувь: "shoes",
-      Плащ: "cloak",
-      Перчатки: "gloves",
-      Аксессуар: "accessory",
-      Аура: "aura",
-      Компаньон: "companion",
-    };
-
-    const slotKey = slotKeyMap[slotName] || "top";
+    const slotKey = SLOT_KEY_MAP[slotName] || "top";
     const slotLabel = (dict.slots as any)[slotKey] || slotName;
 
     let itemLabel = slotLabel;
@@ -214,7 +196,7 @@ export function CharacterStage({ onSlotClick, selectedSlot }: CharacterStageProp
       itemLabel = (dict.items as any)[nameKeyShort] || itemLabel;
     }
 
-    const IconComp = SLOT_ICONS[slotName] || Shield;
+    const IconComp = SLOT_ICONS[slotKey] || Shield;
     const isSelected = selectedSlot === slotName;
 
     let borderStyle = "border-line bg-s1/60 hover:border-vi/60 text-mu";
@@ -233,9 +215,9 @@ export function CharacterStage({ onSlotClick, selectedSlot }: CharacterStageProp
         key={slotName}
         type="button"
         onClick={() => onSlotClick && onSlotClick(slotName)}
-        aria-label={item ? `${slotLabel}: ${itemLabel}` : `${slotLabel}: Пусто`}
+        aria-label={item ? `${slotLabel}: ${itemLabel}` : `${slotLabel}`}
         title={item ? `${slotLabel}: ${itemLabel}` : slotLabel}
-        className={`w-11 h-11 sm:w-12 sm:h-12 rounded-xl border flex flex-col items-center justify-center transition-all cursor-pointer relative group ${borderStyle}`}
+        className={`w-11 h-11 sm:w-12 sm:h-12 rounded-xl border flex flex-col items-center justify-center transition-all cursor-pointer relative group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi ${borderStyle}`}
       >
         {item ? (
           <div
@@ -252,16 +234,19 @@ export function CharacterStage({ onSlotClick, selectedSlot }: CharacterStageProp
   };
 
   return (
-    <div className={`card stage p-3 sm:p-4 flex flex-col justify-between h-full min-h-[480px] lg:min-h-[640px] relative overflow-hidden ${bgClass} shadow-xl border border-line`}>
-      {/* Background Soft Glow without borders */}
+    <div
+      className={`card stage p-3 sm:p-4 flex flex-col justify-between h-full min-h-[480px] lg:min-h-[640px] max-h-[70vh] lg:max-h-none relative overflow-hidden ${bgClass} shadow-xl border rounded-2xl`}
+      style={{ borderColor: frameColor, borderWidth: "1px" }}
+    >
+      {/* Background Soft Glow */}
       <div className="absolute inset-0 bg-gradient-to-b from-pri/5 via-transparent to-black/40 pointer-events-none" />
 
-      {/* Main Interactive Stage Grid */}
+      {/* Main Stage Grid with Slots on edges */}
       <div className="relative z-10 flex-1 grid grid-cols-[48px_1fr_48px] sm:grid-cols-[52px_1fr_52px] gap-2 items-center">
         {/* Left Slots */}
         <div className="flex flex-col gap-3 justify-center">{LEFT_SLOTS.map(renderSlot)}</div>
 
-        {/* Center 3D Rotation Frame */}
+        {/* Center Character Area (No inner double border frame) */}
         <div
           tabIndex={0}
           role="region"
@@ -273,10 +258,9 @@ export function CharacterStage({ onSlotClick, selectedSlot }: CharacterStageProp
           onLostPointerCapture={() => setIsDragging(false)}
           onKeyDown={handleKeyDown}
           onBlur={() => setIsDragging(false)}
-          className="relative h-full min-h-[380px] rounded-2xl border flex flex-col items-center justify-center p-2 focus-visible:ring-2 focus-visible:ring-vi cursor-grab active:cursor-grabbing select-none"
-          style={{ borderColor: frameColor, borderWidth: "1px" }}
+          className="relative h-full min-h-[360px] flex flex-col items-center justify-center p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi cursor-grab active:cursor-grabbing select-none"
         >
-          {/* Oval Shadow under feet - fixed outside rotating figure */}
+          {/* Feet Shadow - Fixed outside 3D rotation container */}
           <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-28 h-5 rounded-[100%] bg-black/60 blur-xs pointer-events-none" />
 
           {/* 3D Turn Container */}
@@ -301,7 +285,7 @@ export function CharacterStage({ onSlotClick, selectedSlot }: CharacterStageProp
           <button
             type="button"
             onClick={handleReset}
-            className="rounded-full p-2 text-xs text-tx hover:bg-pri/40 transition-colors"
+            className="rounded-full p-2 text-xs text-tx hover:bg-pri/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
             aria-label={dict.profile.resetTitle}
             title={dict.profile.resetTitle}
           >
@@ -310,7 +294,7 @@ export function CharacterStage({ onSlotClick, selectedSlot }: CharacterStageProp
           <button
             type="button"
             onClick={handleToggleAutoSpin}
-            className={`rounded-full p-2 text-xs transition-colors ${
+            className={`rounded-full p-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi ${
               isAutoSpinning ? "bg-pri text-white font-semibold" : "text-tx hover:bg-pri/40"
             }`}
             aria-label={dict.profile.rotateToast}
@@ -324,7 +308,7 @@ export function CharacterStage({ onSlotClick, selectedSlot }: CharacterStageProp
               cycleBackground();
               showToast(dict.profile.bgToast);
             }}
-            className="rounded-full p-2 text-xs text-tx hover:bg-pri/40 transition-colors"
+            className="rounded-full p-2 text-xs text-tx hover:bg-pri/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
             aria-label={dict.profile.bgToast}
             title={dict.profile.bgToast}
           >
@@ -338,8 +322,8 @@ export function CharacterStage({ onSlotClick, selectedSlot }: CharacterStageProp
             {previewItem != null ? dict.profile.previewing : dict.profile.dragHint}
           </span>
           <span className="chip bg-s1/80 border-line">
-            {formatString("Серия: {count} дн.", {
-              count: formatNumber(lang, gameState.currentStreak),
+            {formatString(dict.questsPage.todayTab.streakBadge, {
+              streak: formatNumber(lang, gameState.currentStreak),
             })}
           </span>
         </div>
