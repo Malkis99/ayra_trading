@@ -6,24 +6,42 @@ import { useGame } from "@/lib/game-context";
 import { CharacterStage } from "@/components/CharacterStage";
 import { TabHeader } from "@/components/TabHeader";
 import { Figure } from "@/components/Figure";
+import { PlanBadge } from "@/components/PlanBadge";
+import { CoinsChip } from "@/components/CoinsChip";
 import {
   ITEMS,
   SLOTS,
   FRAMES,
-  TITLES,
   BACKGROUNDS,
   SlotName,
-  EquipmentItem,
 } from "@/lib/items";
+import { TITLES_CATALOG } from "@/lib/titles";
+import { getReputation, calculateStats, getCharacterPower, getStatBalance, StatKey } from "@/lib/stats";
 import { xpForNextLevel, ChronicleEntry } from "@/lib/game";
 import { formatString, formatNumber } from "@/lib/i18n";
-import { Check, Lock, X } from "lucide-react";
+import {
+  Pencil,
+  ChevronDown,
+  Shield,
+  HelpCircle,
+  X,
+  Lock,
+  Sparkles,
+  TrendingUp,
+  Brain,
+  Target,
+  Smile,
+  BookOpen,
+  Activity,
+  Zap,
+  Award,
+  ChevronRight,
+} from "lucide-react";
 
 export default function ProfilePage() {
   const { dict, lang, showToast } = useApp();
   const {
     gameState,
-    effectiveEquipment,
     previewItem,
     setPreviewItem,
     wardrobeFilter,
@@ -34,17 +52,24 @@ export default function ProfilePage() {
     saveLoadout,
     addPost,
     updateProfile,
-    completeQuest,
+    selectTitle,
     cycleFrame,
     cycleBackground,
-    cycleTitle,
   } = useGame();
 
   const [activeTab, setActiveTab] = useState<number>(0);
+
+  // Edit Modal state
   const [isEditModalOpen, setEditModalOpen] = useState<boolean>(false);
   const [editName, setEditName] = useState<string>("");
   const [editBio, setEditBio] = useState<string>("");
   const [editError, setEditError] = useState<string>("");
+
+  // Title Selection Modal state
+  const [isTitleModalOpen, setTitleModalOpen] = useState<boolean>(false);
+
+  // Reputation Tooltip state
+  const [showRepTooltip, setShowRepTooltip] = useState<boolean>(false);
 
   const [postText, setPostText] = useState<string>("");
   const [confirmEmptyLoadout, setConfirmEmptyLoadout] = useState<string | null>(null);
@@ -62,7 +87,7 @@ export default function ProfilePage() {
     dict.profile.tabs.stats,
   ];
 
-  // Handle URL tab parameter if present (e.g., /profile?tab=wardrobe)
+  // Handle URL tab parameter
   useEffect(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
@@ -75,32 +100,22 @@ export default function ProfilePage() {
     }
   }, []);
 
-  // Clear preview when changing tabs
   const handleTabChange = (idx: number) => {
     setActiveTab(idx);
     setPreviewItem(null);
     setConfirmEmptyLoadout(null);
   };
 
-  // Handle slot click from CharacterStage
+  // Click slot from CharacterStage opens Wardrobe with slot filter
   const handleSlotClick = (slot: SlotName) => {
     setWardrobeFilter(slot);
-    setActiveTab(1); // switch to Wardrobe
+    setActiveTab(1);
     setPreviewItem(null);
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      window.scrollTo({ top: 400, behavior: "smooth" });
+    }
   };
 
-  // Handle Newly Unlocked Achievements Toast Queue
-  const notifyNewlyUnlocked = (unlockedIds: string[]) => {
-    unlockedIds.forEach((id) => {
-      const achTitle =
-        (dict.profile.achievements as any)[id] || id;
-      showToast(
-        formatString(dict.chronicleEvents.achievementUnlocked, { title: achTitle })
-      );
-    });
-  };
-
-  // Open Edit Modal
   const openEditModal = () => {
     setEditName(gameState.name);
     setEditBio(gameState.bio || "");
@@ -108,37 +123,6 @@ export default function ProfilePage() {
     setEditModalOpen(true);
   };
 
-  // Focus trap for Edit Modal
-  useEffect(() => {
-    if (isEditModalOpen) {
-      setTimeout(() => editInputRef.current?.focus(), 50);
-
-      const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === "Escape") {
-          setEditModalOpen(false);
-        } else if (e.key === "Tab" && modalContainerRef.current) {
-          const focusables = modalContainerRef.current.querySelectorAll<HTMLElement>(
-            'button, input, textarea, [tabindex]:not([tabindex="-1"])'
-          );
-          if (focusables.length === 0) return;
-          const first = focusables[0];
-          const last = focusables[focusables.length - 1];
-          if (e.shiftKey && document.activeElement === first) {
-            e.preventDefault();
-            last.focus();
-          } else if (!e.shiftKey && document.activeElement === last) {
-            e.preventDefault();
-            first.focus();
-          }
-        }
-      };
-
-      document.addEventListener("keydown", handleKeyDown);
-      return () => document.removeEventListener("keydown", handleKeyDown);
-    }
-  }, [isEditModalOpen]);
-
-  // Handle Edit Profile Form Submit
   const handleSaveProfile = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const trimmed = editName.trim();
@@ -146,10 +130,22 @@ export default function ProfilePage() {
       setEditError(dict.profile.editModal.errorEmptyNickname);
       return;
     }
-    if (trimmed.length > 24) {
+
+    // Check Latin nickname requirement
+    if (!/^[A-Za-z0-9_.-]+$/.test(trimmed)) {
+      setEditError(
+        lang === "ru"
+          ? "Только латиница, цифры и _ . -"
+          : "Latin letters, digits and _ . - only"
+      );
+      return;
+    }
+
+    if (trimmed.length < 3 || trimmed.length > 24) {
       setEditError(dict.profile.editModal.errorTooLongNickname);
       return;
     }
+
     if (editBio.length > 160) {
       setEditError(dict.profile.editModal.errorTooLongBio);
       return;
@@ -164,51 +160,37 @@ export default function ProfilePage() {
   const nextLevelXp = xpForNextLevel(gameState.level);
   const xpPercent = Math.min(100, Math.round((gameState.xp / nextLevelXp) * 100));
 
-  // Reputation title
-  const repPercent = Math.min(100, 40 + gameState.level * 3);
-  const repStatusText =
-    repPercent < 50
-      ? dict.profile.reputationStatusGrowing
-      : repPercent < 70
-      ? dict.profile.reputationStatusGood
-      : dict.profile.reputationStatusExcellent;
+  const reputation = getReputation(gameState);
+  const repPercent = Math.min(100, Math.round((reputation.points / 1000) * 100));
+
+  const currentTitleObj = TITLES_CATALOG.find((t) => t.id === gameState.selectedTitle) || TITLES_CATALOG[0];
+  const translatedTitleName =
+    currentTitleObj.id === "novice"
+      ? dict.titles.titleNovice
+      : currentTitleObj.id === "disciplined"
+      ? dict.titles.titleDisciplined
+      : currentTitleObj.id === "strategist"
+      ? dict.titles.titleStrategist
+      : currentTitleObj.id;
 
   const currentFrameObj = FRAMES[gameState.frame] || FRAMES[0];
-  const currentTitleObj = TITLES[gameState.title] || TITLES[0];
-  const currentBgObj = BACKGROUNDS[gameState.background % 3] || BACKGROUNDS[0];
-
   const translatedFrameName =
     (dict.frames as any)[currentFrameObj.nameKey.replace("frames.", "")] || currentFrameObj.nameKey;
-  const translatedTitleName =
-    currentTitleObj.id === 1
-      ? dict.titles.titleNovice
-      : currentTitleObj.id === 2
-      ? dict.titles.titleDisciplined
-      : currentTitleObj.id === 3
-      ? dict.titles.titleStrategist
-      : dict.titles.none;
+
+  const currentBgObj = BACKGROUNDS[gameState.background % 3] || BACKGROUNDS[0];
   const translatedBgName =
     (dict.backgrounds as any)[currentBgObj.nameKey.replace("backgrounds.", "")] || currentBgObj.nameKey;
 
-  // Stats values
-  const dummyStats: Record<string, number> = {
-    Discipline: 10 + gameState.weeklyQuestCount * 2,
-    Trading: 10 + Object.keys(gameState.completedQuestsToday).length * 2,
-    Intelligence: 10 + gameState.level * 3,
-    Focus: 10 + (gameState.currentStreak > 0 ? gameState.currentStreak * 2 : 0),
-    Psychology: 12 + gameState.posts.length * 2,
-    Knowledge: 10 + gameState.level * 2,
-    Endurance: 10 + (gameState.isRestDay ? 5 : 2),
-    Strength: 10 + Object.keys(gameState.equipment).length * 2,
-  };
+  // 8 Stats calculations
+  const statsMap = calculateStats(gameState);
+  const characterPower = getCharacterPower(statsMap);
+  const statBalance = getStatBalance(statsMap);
 
-  // Filtered wardrobe items
   const filteredItems = ITEMS.filter((it) => {
     if (wardrobeFilter === "Все") return true;
     return it.slot === wardrobeFilter;
   });
 
-  // Handle Equip item action
   const handleEquipPreview = () => {
     if (previewItem == null) return;
     const item = ITEMS[previewItem];
@@ -222,8 +204,7 @@ export default function ProfilePage() {
       return;
     }
 
-    const newly = equipItem(previewItem);
-    notifyNewlyUnlocked(newly);
+    equipItem(previewItem);
     showToast(
       formatString(dict.chronicleEvents.itemEquipped, {
         name: (dict.items as any)[item.nameKey.replace("items.", "")] || item.nameKey,
@@ -231,11 +212,8 @@ export default function ProfilePage() {
     );
   };
 
-  // Handle Unequip slot action
   const handleUnequipSlot = (slot: string) => {
-    const newly = unequipSlot(slot);
-    notifyNewlyUnlocked(newly);
-
+    unequipSlot(slot);
     const slotKeyMap: Record<string, string> = {
       Голова: "head",
       Верх: "top",
@@ -257,49 +235,42 @@ export default function ProfilePage() {
     );
   };
 
-  // Handle Save to Loadout action
   const handleSaveToLoadout = () => {
-    const activeLd = gameState.activeLoadout || "Сессия";
+    const activeLd = gameState.activeLoadout || "session";
     saveLoadout(activeLd);
+    const ldDisplayName = activeLd === "session" ? (lang === "ru" ? "Сессия" : "Session") : (lang === "ru" ? "Сообщество" : "Community");
     showToast(
       formatString(dict.profile.wardrobe.loadoutSavedToast, {
-        name: activeLd,
+        name: ldDisplayName,
       })
     );
   };
 
-  // Handle Select Loadout Tab
-  const handleSelectLoadout = (ldName: string) => {
-    const targetEq = gameState.loadouts[ldName] || {};
+  const handleSelectLoadout = (ldKey: string) => {
+    const targetEq = gameState.loadouts[ldKey] || {};
     if (Object.keys(targetEq).length === 0) {
-      // Show inline confirmation row
-      setConfirmEmptyLoadout(ldName);
+      setConfirmEmptyLoadout(ldKey);
     } else {
       setConfirmEmptyLoadout(null);
-      const newly = applyLoadout(ldName);
-      notifyNewlyUnlocked(newly);
+      applyLoadout(ldKey);
     }
   };
 
   const handleConfirmEmptyLoadout = () => {
     if (!confirmEmptyLoadout) return;
-    const ldName = confirmEmptyLoadout;
+    const ldKey = confirmEmptyLoadout;
     setConfirmEmptyLoadout(null);
-    const newly = applyLoadout(ldName);
-    notifyNewlyUnlocked(newly);
+    applyLoadout(ldKey);
   };
 
-  // Handle Publish Post
   const handlePublishPost = () => {
     const trimmed = postText.trim();
     if (!trimmed) return;
-    const newly = addPost(trimmed);
-    notifyNewlyUnlocked(newly);
+    addPost(trimmed);
     setPostText("");
     showToast(dict.chronicleEvents.postPublished);
   };
 
-  // Render Chronicle Entry
   const renderChronicleItem = (entry: ChronicleEntry, idx: number) => {
     let text = "";
     if (typeof entry === "string") {
@@ -351,6 +322,12 @@ export default function ProfilePage() {
           text = formatString(dict.chronicleEvents.itemUnequipped, { name: slotName });
           break;
         }
+        case "titleSelected":
+          text = `Выбрано звание: ${entry.titleId}`;
+          break;
+        case "titleUnlocked":
+          text = `Открыто звание: ${entry.titleId}`;
+          break;
         case "achievementUnlocked": {
           const achKey = entry.achievementId || "";
           const achTitle =
@@ -377,161 +354,323 @@ export default function ProfilePage() {
     }
 
     return (
-      <div key={idx} className="flex items-center gap-2.5 p-2.5 rounded-xl border border-line bg-s2/40 text-xs text-tx">
+      <div key={idx} className="flex items-center gap-2.5 p-2.5 rounded-xl border border-line/60 bg-s2/40 text-xs text-tx">
         <span className="w-2 h-2 rounded-full bg-vi flex-none" />
         <span className="truncate">{text}</span>
       </div>
     );
   };
 
+  const statIcons: Record<StatKey, React.ComponentType<{ size?: number | string; className?: string }>> = {
+    discipline: Shield,
+    trading: TrendingUp,
+    intelligence: Brain,
+    focus: Target,
+    psychology: Smile,
+    knowledge: BookOpen,
+    endurance: Activity,
+    strength: Zap,
+  };
+
+  const statNamesRu: Record<StatKey, string> = {
+    discipline: "Дисциплина",
+    trading: "Трейдинг",
+    intelligence: "Интеллект",
+    focus: "Фокус",
+    psychology: "Психология",
+    knowledge: "Знания",
+    endurance: "Выносливость",
+    strength: "Сила",
+  };
+
+  const statNamesEn: Record<StatKey, string> = {
+    discipline: "Discipline",
+    trading: "Trading",
+    intelligence: "Intelligence",
+    focus: "Focus",
+    psychology: "Psychology",
+    knowledge: "Knowledge",
+    endurance: "Endurance",
+    strength: "Strength",
+  };
+
+  const rankNamesRu: Record<string, string> = {
+    novice: "Новичок",
+    adept: "Адепт",
+    skilled: "Опытный",
+    expert: "Эксперт",
+    master: "Мастер",
+  };
+
+  const rankNamesEn: Record<string, string> = {
+    novice: "Novice",
+    adept: "Adept",
+    skilled: "Skilled",
+    expert: "Expert",
+    master: "Master",
+  };
+
   return (
-    <div className="space-y-6">
-      {/* Page Header */}
-      <div>
+    <div className="space-y-4">
+      {/* Page Header - Single Line */}
+      <div className="flex items-center justify-between">
         <h1 className="font-serif text-2xl font-bold text-tx">{dict.profile.title}</h1>
-        <p className="text-xs text-mu mt-1">{dict.profile.subtitle}</p>
       </div>
 
-      {/* Tabs Header */}
-      <TabHeader tabs={tabs} activeTab={activeTab} onTabChange={handleTabChange} />
-
-      {/* Main Grid Layout */}
+      {/* Main Grid: Left Sticky Scene & Right Single Card Block */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 items-start">
-        {/* Left Column: Interactive 360° Character Stage */}
-        <div className="lg:col-span-5">
-          <CharacterStage onSlotClick={handleSlotClick} />
+        {/* Left Column: Interactive 360° Character Stage (Vertical Sticky) */}
+        <div className="lg:col-span-5 lg:sticky lg:top-20">
+          <CharacterStage onSlotClick={handleSlotClick} selectedSlot={activeTab === 1 ? (wardrobeFilter as SlotName) : null} />
         </div>
 
-        {/* Right Column: Active Tab Content Panel */}
-        <div className="lg:col-span-7 card space-y-4">
+        {/* Right Column: Single Container with Outer Border and Inner Cards */}
+        <div className="lg:col-span-7 rounded-2xl border border-line bg-s1 p-4 sm:p-5 shadow-2xl space-y-5">
+          {/* Top Tabs Bar */}
+          <TabHeader tabs={tabs} activeTab={activeTab} onTabChange={handleTabChange} />
+
           {/* TAB 0: OVERVIEW (Обзор) */}
           {activeTab === 0 && (
-            <div className="space-y-5">
-              {/* Header Info */}
-              <div className="flex items-center gap-3">
-                <div className="lvbadge">{gameState.level}</div>
-                <div className="flex-1 min-w-0">
-                  <b className="font-serif text-2xl font-semibold text-tx block truncate">
-                    {gameState.name}
-                  </b>
-                  <div className="text-xs text-mu truncate">
-                    {formatString(dict.profile.levelStatus, {
-                      level: formatNumber(lang, gameState.level),
-                      title: translatedTitleName,
-                    })}
-                  </div>
-                </div>
-                <div className="border border-go text-go rounded-md px-3 py-1 text-xs font-bold uppercase tracking-wider flex-none">
-                  {gameState.plan}
-                </div>
-              </div>
-
-              {/* Bio */}
-              <p className="text-xs text-mu italic bg-s2/40 p-2.5 rounded-xl border border-line">
-                {gameState.bio || dict.profile.editModal.bioPlaceholder || "Мой путь — дисциплина и процесс."}
-              </p>
-
-              {/* Reputation & Stats Summary */}
-              <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-line">
-                <div className="space-y-1">
-                  <b className="text-xs font-semibold text-tx">
-                    {formatString(dict.profile.reputationTitle, { status: repStatusText })}
-                  </b>
-                  <div className="xp w-40">
-                    <i className="block h-full bg-vi" style={{ width: `${repPercent}%` }} />
-                  </div>
-                  <div className="text-[10px] text-mu">{dict.profile.reputationNote}</div>
-                </div>
-
-                <div className="flex gap-6 text-sm font-bold text-tx">
-                  <div>
-                    {gameState.xp} / {nextLevelXp}
-                    <small className="block text-[10px] font-normal text-mu">XP</small>
-                  </div>
-                  <div>
-                    {gameState.coins}
-                    <small className="block text-[10px] font-normal text-mu">Coins</small>
-                  </div>
-                </div>
-              </div>
-
-              {/* Social Placeholders */}
-              <div className="grid grid-cols-3 gap-2 text-center py-2 border-y border-line">
-                <div>
-                  <b className="text-sm font-bold text-tx">0</b>
-                  <small className="block text-[10px] text-mu">{dict.profile.followers}</small>
-                </div>
-                <div>
-                  <b className="text-sm font-bold text-tx">0</b>
-                  <small className="block text-[10px] text-mu">{dict.profile.following}</small>
-                </div>
-                <div>
-                  <b className="text-sm font-bold text-tx">0</b>
-                  <small className="block text-[10px] text-mu">{dict.profile.markedUseful}</small>
-                </div>
-              </div>
-
-              {/* Level Progress */}
-              <div className="flex items-center gap-3 text-xs">
-                <span className="text-vi font-bold">Lv {gameState.level}</span>
-                <div className="xp flex-1 h-2">
-                  <i className="block h-full bg-gradient-to-r from-pri to-vi" style={{ width: `${xpPercent}%` }} />
-                </div>
-                <span className="text-mu text-[11px]">
-                  {formatString(dict.profile.toLevel, {
-                    level: formatNumber(lang, gameState.level + 1),
-                  })}
-                </span>
-              </div>
-
-              {/* Customization Options (Cycle Frame, Bg, Title) */}
-              <div className="flex flex-wrap gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={cycleFrame}
-                  className="chip hover:border-vi transition-colors cursor-pointer"
-                >
-                  {formatString(dict.profile.frameLabel, { name: translatedFrameName })}
-                </button>
-                <button
-                  type="button"
-                  onClick={cycleBackground}
-                  className="chip hover:border-vi transition-colors cursor-pointer"
-                >
-                  {formatString(dict.profile.bgLabel, { name: translatedBgName })}
-                </button>
-                <button
-                  type="button"
-                  onClick={cycleTitle}
-                  className="chip hover:border-vi transition-colors cursor-pointer"
-                >
-                  {formatString(dict.profile.titleLabel, { name: translatedTitleName })}
-                </button>
-              </div>
-
-              {/* 8 Character Stats */}
-              <div className="space-y-2 pt-2">
-                <h4 className="h4">{dict.profile.statsHeader}</h4>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-                  {Object.entries(dummyStats).map(([key, val]) => (
-                    <div key={key} className="space-y-1">
-                      <div className="flex justify-between text-mu text-[11px]">
-                        <span>{(dict.categories as any)[key] || key}</span>
-                        <span className="font-semibold text-tx">{val}</span>
-                      </div>
-                      <div className="xp">
-                        <i className="block h-full bg-vi" style={{ width: `${Math.min(100, val * 5)}%` }} />
-                      </div>
+            <div className="space-y-4">
+              {/* Compact Header Card */}
+              <div className="p-3.5 rounded-xl border border-line/60 bg-s2/40 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="lvbadge flex-none">{gameState.level}</div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <b className="font-serif text-xl font-semibold text-tx truncate">
+                        {gameState.name}
+                      </b>
+                      <button
+                        type="button"
+                        onClick={openEditModal}
+                        aria-label="Редактировать профиль"
+                        className="p-1 text-mu hover:text-tx transition-colors"
+                      >
+                        <Pencil size={14} />
+                      </button>
                     </div>
+
+                    {/* Selected Title Dropdown Trigger */}
+                    <button
+                      type="button"
+                      onClick={() => setTitleModalOpen(true)}
+                      className="flex items-center gap-1 text-xs font-semibold text-vi hover:underline"
+                    >
+                      <span>{translatedTitleName}</span>
+                      <ChevronDown size={12} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Bio (Truncated to 2 lines) */}
+                <div className="text-xs text-mu italic max-w-xs line-clamp-2" title={gameState.bio || (lang === "ru" ? "Мой путь — дисциплина и процесс." : "My path is discipline and process.")}>
+                  {gameState.bio || (lang === "ru" ? "Мой путь — дисциплина и процесс." : "My path is discipline and process.")}
+                </div>
+              </div>
+
+              {/* Followers / Following / Useful 3-Card Block */}
+              <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                {[
+                  { label: dict.profile.followers, count: 0 },
+                  { label: dict.profile.following, count: 0 },
+                  { label: dict.profile.markedUseful, count: 0 },
+                ].map((card, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => showToast(lang === "ru" ? "Скоро" : "Coming soon")}
+                    className="p-3 rounded-xl border border-line/60 bg-s2/40 hover:bg-s2/80 hover:border-vi/50 transition-all text-center relative overflow-hidden group cursor-pointer"
+                  >
+                    {/* Shimmer Shimmer Effect on Hover */}
+                    <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 bg-gradient-to-r from-transparent via-white/10 to-transparent pointer-events-none" />
+                    <b className="text-lg font-bold text-tx block font-mono">{card.count}</b>
+                    <span className="text-[11px] text-mu truncate block mt-0.5">{card.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Single Dark Reputation Block */}
+              <div className="p-4 rounded-xl border border-line bg-black/60 space-y-3 relative">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-vi/20 border border-vi/40 grid place-items-center text-vi">
+                      <Shield size={18} />
+                    </div>
+                    <div>
+                      <b className="text-xs font-bold text-tx block">
+                        {dict.profile.reputationTitle.split(":")[0]}: {reputation.tierId.toUpperCase()}
+                      </b>
+                      <span className="text-[11px] text-mu">
+                        {dict.profile.reputationNote}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <b className="text-sm font-bold font-mono text-tx">{reputation.points} pt</b>
+                    <button
+                      type="button"
+                      onClick={() => setShowRepTooltip(!showRepTooltip)}
+                      className="text-mu hover:text-tx p-1"
+                      aria-label="Подробнее о репутации"
+                    >
+                      <HelpCircle size={15} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Segmented Bar for 5 Tiers */}
+                <div className="grid grid-cols-5 gap-1.5 h-2">
+                  {[0, 1, 2, 3, 4].map((idx) => (
+                    <div
+                      key={idx}
+                      className={`h-full rounded-full transition-all ${
+                        idx <= reputation.tierIndex
+                          ? "bg-gradient-to-r from-pri to-vi shadow-[0_0_8px_#50348f66]"
+                          : "bg-s2"
+                      }`}
+                    />
                   ))}
                 </div>
+
+                <div className="text-[11px] text-mu">
+                  {lang === "ru" ? `До следующей ступени: ${reputation.pointsToNext} очков` : `To next tier: ${reputation.pointsToNext} points`}
+                </div>
+
+                {/* Tooltip Breakdown Popup */}
+                {showRepTooltip && (
+                  <div className="p-3 rounded-xl border border-line bg-s1 text-xs space-y-1.5 shadow-xl">
+                    <div className="flex justify-between">
+                      <span>Полезность / Usefulness:</span>
+                      <b className="text-tx font-mono">{reputation.usefulness}%</b>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Качество / Quality:</span>
+                      <b className="text-tx font-mono">{reputation.quality}%</b>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Стабильность / Consistency:</span>
+                      <b className="text-tx font-mono">{reputation.consistency}%</b>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {/* Edit & Demo Action Buttons */}
-              <div className="flex gap-2 pt-3">
-                <button type="button" onClick={openEditModal} className="btn text-xs">
-                  {dict.profile.editBtn}
-                </button>
+              {/* Full Width Level Progress */}
+              <div className="p-3.5 rounded-xl border border-line/60 bg-s2/40 space-y-2">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="font-bold text-vi">Ур. {gameState.level}</span>
+                  <span className="text-mu font-mono">{gameState.xp} / {nextLevelXp} XP</span>
+                  <span className="font-bold text-tx">Ур. {gameState.level + 1}</span>
+                </div>
+                <div className="xp w-full h-2.5 rounded-full overflow-hidden bg-s2">
+                  <i
+                    className="block h-full bg-gradient-to-r from-pri via-vi to-go shadow-[0_0_10px_#a38ad188]"
+                    style={{ width: `${xpPercent}%` }}
+                  />
+                </div>
+                <div className="flex justify-between items-center text-[11px] pt-1">
+                  <div className="flex gap-2">
+                    <span className="chip text-[10px]">Задания сегодня: {Object.keys(gameState.completedQuestsToday).length}/3</span>
+                    <span className="chip text-[10px]">Серия: {gameState.currentStreak} дн.</span>
+                  </div>
+                  <span className="text-mu">
+                    ещё {nextLevelXp - gameState.xp} XP до уровня
+                  </span>
+                </div>
+              </div>
+
+              {/* Stage Design Choices (Frames & Backgrounds moved here) */}
+              <div className="p-3.5 rounded-xl border border-line/60 bg-s2/40 space-y-2">
+                <span className="text-xs font-semibold text-mu block">Оформление сцены / Stage Styling</span>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={cycleFrame}
+                    className="chip hover:border-vi transition-colors cursor-pointer"
+                  >
+                    {formatString(dict.profile.frameLabel, { name: translatedFrameName })}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={cycleBackground}
+                    className="chip hover:border-vi transition-colors cursor-pointer"
+                  >
+                    {formatString(dict.profile.bgLabel, { name: translatedBgName })}
+                  </button>
+                </div>
+              </div>
+
+              {/* 8 Horizontal Stat Bars */}
+              <div className="p-3.5 rounded-xl border border-line/60 bg-s2/40 space-y-3">
+                <div className="flex justify-between items-center">
+                  <h4 className="h4 text-sm">{dict.profile.statsHeader}</h4>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab(5)}
+                    className="text-xs text-vi font-semibold hover:underline flex items-center gap-1"
+                  >
+                    <span>Подробнее</span>
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {(Object.keys(statsMap) as StatKey[]).map((key) => {
+                    const s = statsMap[key];
+                    const IconComp = statIcons[key];
+                    const isStrongest = key === statBalance.strongestStat;
+                    const isWeakest = key === statBalance.weakestStat;
+                    const name = lang === "ru" ? statNamesRu[key] : statNamesEn[key];
+                    const rank = lang === "ru" ? rankNamesRu[s.rank] : rankNamesEn[s.rank];
+                    const progressPercent = Math.min(100, Math.round((s.currentLevelXp / s.nextLevelXp) * 100));
+
+                    return (
+                      <div
+                        key={key}
+                        className="p-2.5 rounded-xl border border-line bg-s1 space-y-1.5 relative overflow-hidden group hover:border-vi/50 transition-all"
+                      >
+                        {/* Hover Shimmer */}
+                        <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 bg-gradient-to-r from-transparent via-white/5 to-transparent pointer-events-none" />
+
+                        <div className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-md bg-s2 grid place-items-center text-vi">
+                              <IconComp size={14} />
+                            </div>
+                            <span className="font-semibold text-tx">{name}</span>
+                            {isStrongest && (
+                              <span className="w-2 h-2 rounded-full bg-go shadow-[0_0_6px_#d6a94a]" title="Сильнейшая сторона" />
+                            )}
+                          </div>
+                          <div className="text-[11px] text-mu font-mono">
+                            {rank} · Lv.{s.level}
+                          </div>
+                        </div>
+
+                        {/* Segmented Long Bar */}
+                        <div className="xp h-3 rounded-full overflow-hidden bg-s2">
+                          <i
+                            className="block h-full bg-gradient-to-r from-pri to-vi transition-all duration-500 shadow-[0_0_8px_#50348f]"
+                            style={{ width: `${progressPercent}%` }}
+                          />
+                        </div>
+
+                        <div className="flex justify-between text-[10px] text-mu">
+                          <span>{s.currentLevelXp}/{s.nextLevelXp} XP</span>
+                          <span className="text-go font-semibold">+{s.weeklyGain}</span>
+                        </div>
+
+                        {isWeakest && (
+                          <div className="text-[9px] text-go/80 italic">
+                            Зона роста: упражнения в квестах
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}
@@ -539,46 +678,47 @@ export default function ProfilePage() {
           {/* TAB 1: WARDROBE (Гардероб) */}
           {activeTab === 1 && (
             <div className="space-y-4">
-              {/* Slot Filters Row */}
-              <div className="flex gap-1.5 overflow-x-auto pb-1 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setWardrobeFilter("Все")}
-                  className={`chip cursor-pointer transition-colors ${
-                    wardrobeFilter === "Все" ? "border-vi text-tx font-semibold bg-s2" : ""
-                  }`}
-                >
-                  {dict.slots.all}
-                </button>
-                {SLOTS.map((slot) => {
-                  const slotKeyMap: Record<string, string> = {
-                    Голова: "head",
-                    Верх: "top",
-                    Верхняя: "outer",
-                    Низ: "bottom",
-                    Обувь: "shoes",
-                    Плащ: "cloak",
-                    Перчатки: "gloves",
-                    Аксессуар: "accessory",
-                    Аура: "aura",
-                    Компаньон: "companion",
-                  };
-                  const label = (dict.slots as any)[slotKeyMap[slot] || "top"] || slot;
-                  const isActive = wardrobeFilter === slot;
+              <div className="flex items-center justify-between pb-1">
+                <div className="flex gap-1.5 overflow-x-auto text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setWardrobeFilter("Все")}
+                    className={`chip cursor-pointer transition-colors ${
+                      wardrobeFilter === "Все" ? "border-vi text-tx font-semibold bg-s2" : ""
+                    }`}
+                  >
+                    {dict.slots.all}
+                  </button>
+                  {SLOTS.map((slot) => {
+                    const slotKeyMap: Record<string, string> = {
+                      Голова: "head",
+                      Верх: "top",
+                      Верхняя: "outer",
+                      Низ: "bottom",
+                      Обувь: "shoes",
+                      Плащ: "cloak",
+                      Перчатки: "gloves",
+                      Аксессуар: "accessory",
+                      Аура: "aura",
+                      Компаньон: "companion",
+                    };
+                    const label = (dict.slots as any)[slotKeyMap[slot] || "top"] || slot;
+                    const isActive = wardrobeFilter === slot;
 
-                  return (
-                    <button
-                      key={slot}
-                      type="button"
-                      onClick={() => setWardrobeFilter(slot)}
-                      className={`chip cursor-pointer transition-colors ${
-                        isActive ? "border-vi text-tx font-semibold bg-s2" : ""
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
+                    return (
+                      <button
+                        key={slot}
+                        type="button"
+                        onClick={() => setWardrobeFilter(slot)}
+                        className={`chip cursor-pointer transition-colors ${
+                          isActive ? "border-vi text-tx font-semibold bg-s2" : ""
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Item Grid */}
@@ -606,7 +746,6 @@ export default function ProfilePage() {
                         isPreview ? "ring-2 ring-vi bg-[#50348f33]" : "bg-s2/40 hover:bg-s2/70"
                       } ${isLocked ? "opacity-50" : ""}`}
                     >
-                      {/* Color Preview Tile */}
                       <div
                         className="h-9 rounded-lg mb-1.5 shadow-inner"
                         style={{ backgroundColor: it.color }}
@@ -633,7 +772,7 @@ export default function ProfilePage() {
                 })}
               </div>
 
-              {/* Wardrobe Action Controls Row */}
+              {/* Wardrobe Controls */}
               <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-line">
                 {previewItem != null && (
                   <button
@@ -682,12 +821,12 @@ export default function ProfilePage() {
                   className="btn-ghost text-xs py-2"
                 >
                   {formatString(dict.profile.wardrobe.saveToLoadoutBtn, {
-                    name: gameState.activeLoadout || "Сессия",
+                    name: gameState.activeLoadout === "session" ? (lang === "ru" ? "Сессия" : "Session") : (lang === "ru" ? "Сообщество" : "Community"),
                   })}
                 </button>
               </div>
 
-              {/* Loadouts Inline Confirmation Row if Empty */}
+              {/* Loadouts Confirmation if Empty */}
               {confirmEmptyLoadout && (
                 <div className="rounded-xl border border-go bg-go/10 p-3 text-xs flex flex-wrap items-center justify-between gap-2">
                   <span className="text-go font-semibold">
@@ -718,20 +857,22 @@ export default function ProfilePage() {
                   Лоадауты / Loadouts:
                 </div>
                 <div className="flex gap-2">
-                  {Object.keys(gameState.loadouts).map((ldName) => {
-                    const isActive = gameState.activeLoadout === ldName;
+                  {Object.keys(gameState.loadouts).map((ldKey) => {
+                    const isActive = gameState.activeLoadout === ldKey;
+                    const displayName = ldKey === "session" ? (lang === "ru" ? "Сессия" : "Session") : (lang === "ru" ? "Сообщество" : "Community");
+
                     return (
                       <button
-                        key={ldName}
+                        key={ldKey}
                         type="button"
-                        onClick={() => handleSelectLoadout(ldName)}
+                        onClick={() => handleSelectLoadout(ldKey)}
                         className={`rounded-xl border px-3 py-1.5 text-xs transition-colors ${
                           isActive
                             ? "border-vi bg-pri/30 text-tx font-bold"
                             : "border-line bg-s1 text-mu hover:border-vi hover:text-tx"
                         }`}
                       >
-                        {ldName}
+                        {displayName}
                       </button>
                     );
                   })}
@@ -744,31 +885,11 @@ export default function ProfilePage() {
           {activeTab === 2 && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {[
-                {
-                  id: "firstQuest",
-                  titleKey: "firstQuest",
-                  descKey: "firstQuestDesc",
-                },
-                {
-                  id: "stylist",
-                  titleKey: "stylist",
-                  descKey: "stylistDesc",
-                },
-                {
-                  id: "streakDay",
-                  titleKey: "streakDay",
-                  descKey: "streakDayDesc",
-                },
-                {
-                  id: "level3",
-                  titleKey: "level3",
-                  descKey: "level3Desc",
-                },
-                {
-                  id: "author",
-                  titleKey: "author",
-                  descKey: "authorDesc",
-                },
+                { id: "firstQuest", titleKey: "firstQuest", descKey: "firstQuestDesc" },
+                { id: "stylist", titleKey: "stylist", descKey: "stylistDesc" },
+                { id: "streakDay", titleKey: "streakDay", descKey: "streakDayDesc" },
+                { id: "level3", titleKey: "level3", descKey: "level3Desc" },
+                { id: "author", titleKey: "author", descKey: "authorDesc" },
               ].map((ach) => {
                 const isUnlocked = !!gameState.achievements[ach.id];
                 const title = (dict.profile.achievements as any)[ach.titleKey];
@@ -816,7 +937,6 @@ export default function ProfilePage() {
           {/* TAB 4: POSTS (Посты) */}
           {activeTab === 4 && (
             <div className="space-y-4">
-              {/* Post Input Form */}
               <div className="space-y-2">
                 <textarea
                   value={postText}
@@ -840,7 +960,6 @@ export default function ProfilePage() {
                 </button>
               </div>
 
-              {/* User Posts List */}
               <div className="space-y-3 pt-3 border-t border-line">
                 {gameState.posts.length === 0 ? (
                   <div className="text-xs text-mu text-center py-6">
@@ -863,55 +982,149 @@ export default function ProfilePage() {
           {/* TAB 5: STATS (Статистика) */}
           {activeTab === 5 && (
             <div className="space-y-5">
-              {/* Counter Summaries */}
-              <div className="grid grid-cols-3 gap-3 text-center p-3 rounded-xl border border-line bg-s2/40">
+              {/* Top 4 Summary Metrics */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center p-3 rounded-xl border border-line bg-s2/40">
                 <div>
-                  <b className="text-lg font-bold text-tx">{gameState.history.length}</b>
-                  <small className="block text-[10px] text-mu">
-                    {dict.profile.stats.questsCompleted}
-                  </small>
+                  <b className="text-lg font-bold text-vi font-mono">{characterPower}</b>
+                  <small className="block text-[10px] text-mu">Сила персонажа</small>
                 </div>
                 <div>
-                  <b className="text-lg font-bold text-tx">{gameState.itemsEquippedCount}</b>
-                  <small className="block text-[10px] text-mu">
-                    {dict.profile.stats.itemsEquipped}
-                  </small>
-                </div>
-                <div>
-                  <b className="text-lg font-bold text-tx">
-                    {Object.keys(gameState.achievements).length} / 5
+                  <b className="text-sm font-bold text-go block truncate">
+                    {lang === "ru" ? statNamesRu[statBalance.strongestStat] : statNamesEn[statBalance.strongestStat]}
                   </b>
-                  <small className="block text-[10px] text-mu">
-                    {dict.profile.stats.achievementsUnlocked}
-                  </small>
+                  <small className="block text-[10px] text-mu">Сильнейшая сторона</small>
+                </div>
+                <div>
+                  <b className="text-sm font-bold text-tx block truncate">
+                    {lang === "ru" ? statNamesRu[statBalance.weakestStat] : statNamesEn[statBalance.weakestStat]}
+                  </b>
+                  <small className="block text-[10px] text-mu">Зона роста</small>
+                </div>
+                <div>
+                  <b className="text-sm font-bold text-tx">
+                    {statBalance.isBalanced ? "Сбалансирован" : "С перекосом"}
+                  </b>
+                  <small className="block text-[10px] text-mu">Баланс профиля</small>
                 </div>
               </div>
 
-              {/* 8 Stats Enlarged */}
+              {/* 8 Expandable Cards */}
               <div className="space-y-3">
                 <h4 className="h4">{dict.profile.statsHeader}</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                  {Object.entries(dummyStats).map(([key, val]) => (
-                    <div key={key} className="p-2.5 rounded-xl border border-line bg-s1 space-y-1.5">
-                      <div className="flex justify-between text-mu">
-                        <span className="font-semibold">{key}</span>
-                        <span className="text-tx font-bold">{val}</span>
+                  {(Object.keys(statsMap) as StatKey[]).map((key) => {
+                    const s = statsMap[key];
+                    const IconComp = statIcons[key];
+                    const name = lang === "ru" ? statNamesRu[key] : statNamesEn[key];
+                    const rank = lang === "ru" ? rankNamesRu[s.rank] : rankNamesEn[s.rank];
+                    const progressPercent = Math.min(100, Math.round((s.currentLevelXp / s.nextLevelXp) * 100));
+
+                    return (
+                      <div key={key} className="p-3 rounded-xl border border-line bg-s1 space-y-2">
+                        <div className="flex justify-between items-center">
+                          <div className="flex items-center gap-2">
+                            <IconComp size={16} className="text-vi" />
+                            <b className="text-tx">{name}</b>
+                          </div>
+                          <span className="text-mu text-[11px]">{rank} · Lv.{s.level}</span>
+                        </div>
+
+                        <div className="xp h-2.5 rounded-full overflow-hidden bg-s2">
+                          <i
+                            className="block h-full bg-gradient-to-r from-pri to-vi"
+                            style={{ width: `${progressPercent}%` }}
+                          />
+                        </div>
+
+                        <div className="flex justify-between text-[11px] text-mu">
+                          <span>Прирост за неделю: +{s.weeklyGain}</span>
+                          <a href="/quests" className="text-vi font-semibold hover:underline">
+                            Как прокачать →
+                          </a>
+                        </div>
                       </div>
-                      <div className="xp h-2">
-                        <i className="block h-full bg-vi" style={{ width: `${Math.min(100, val * 5)}%` }} />
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
               <p className="text-[11px] text-mu italic text-center pt-2">
-                {dict.profile.stats.browserStorageNote}
+                Характеристики отражают привычки и обучение в AYRA, а не торговые результаты.
               </p>
             </div>
           )}
         </div>
       </div>
+
+      {/* TITLE SELECTION MODAL */}
+      {isTitleModalOpen && (
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setTitleModalOpen(false);
+          }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+        >
+          <div className="w-full max-w-md rounded-2xl border border-line bg-s1 p-5 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b border-line pb-2.5">
+              <b className="text-base font-bold text-tx">Выбрать звание / Choose Title</b>
+              <button
+                type="button"
+                onClick={() => setTitleModalOpen(false)}
+                className="text-mu hover:text-tx p-1"
+                aria-label={dict.addModal.close}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+              {TITLES_CATALOG.map((t) => {
+                const isUnlocked = gameState.unlockedTitles.includes(t.id);
+                const isSelected = gameState.selectedTitle === t.id;
+
+                let rarityColor = "text-tx border-line";
+                if (t.rarity === "rare") rarityColor = "text-vi border-vi/40 bg-vi/5";
+                if (t.rarity === "epic") rarityColor = "text-go border-go/40 bg-go/5";
+                if (t.rarity === "legendary") rarityColor = "text-[#ffd700] border-[#ffd700]/40 bg-[#ffd700]/5";
+
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      if (isUnlocked) {
+                        selectTitle(t.id);
+                        setTitleModalOpen(false);
+                        showToast(`Звание "${t.id}" выбрано`);
+                      }
+                    }}
+                    disabled={!isUnlocked}
+                    className={`w-full p-3 rounded-xl border text-left flex items-center justify-between transition-all ${rarityColor} ${
+                      isSelected ? "ring-2 ring-vi" : ""
+                    } ${!isUnlocked ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:scale-[1.01]"}`}
+                  >
+                    <div>
+                      <b className="text-xs font-bold block">{t.id}</b>
+                      <span className="text-[10px] text-mu capitalize">
+                        {t.source} · {t.rarity}
+                      </span>
+                    </div>
+
+                    {!isUnlocked && (
+                      <span className="text-[10px] text-go font-semibold flex items-center gap-1">
+                        <Lock size={12} />
+                        {t.isPlaceholder ? "Скоро" : t.reqLevel ? `Ур. ${t.reqLevel}` : "Достижение"}
+                      </span>
+                    )}
+
+                    {isSelected && <span className="text-vi text-xs font-bold">✓ Selected</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* EDIT PROFILE MODAL */}
       {isEditModalOpen && (
@@ -940,7 +1153,6 @@ export default function ProfilePage() {
             </div>
 
             <form onSubmit={handleSaveProfile} className="space-y-4">
-              {/* Nickname Input */}
               <div className="space-y-1">
                 <label className="block text-xs font-semibold text-mu">
                   {dict.profile.editModal.nicknameLabel}
@@ -957,9 +1169,13 @@ export default function ProfilePage() {
                   placeholder={dict.profile.editModal.nicknamePlaceholder}
                   className="w-full rounded-xl border border-line bg-s2 p-2.5 text-xs text-tx focus:outline-none focus:border-vi"
                 />
+                <span className="text-[10px] text-mu block">
+                  {lang === "ru"
+                    ? "Только латиница, цифры и _ . -"
+                    : "Latin letters, digits and _ . - only"}
+                </span>
               </div>
 
-              {/* Bio Textarea */}
               <div className="space-y-1">
                 <div className="flex justify-between text-xs font-semibold text-mu">
                   <label>{dict.profile.editModal.bioLabel}</label>
@@ -978,14 +1194,12 @@ export default function ProfilePage() {
                 />
               </div>
 
-              {/* Error Message */}
               {editError && (
                 <div className="text-xs font-semibold text-red-400 bg-red-500/10 p-2 rounded-lg border border-red-500/20">
                   {editError}
                 </div>
               )}
 
-              {/* Submit Button */}
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"

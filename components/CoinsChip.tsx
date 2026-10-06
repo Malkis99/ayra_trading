@@ -73,21 +73,23 @@ export function CoinsChip({ value }: CoinsChipProps) {
     };
   }, [value]);
 
+  const formattedValue = new Intl.NumberFormat("en-US").format(displayValue);
+
   return (
-    <div className="relative inline-flex items-center">
+    <div className="relative inline-flex items-center group">
       <div
         title={dict.topbar.coinsTooltip}
-        className={`flex items-center gap-1.5 rounded-xl border border-line bg-s1 px-2.5 py-1 text-xs font-bold text-go transition-all duration-300 ${
-          isFlashing ? "border-go bg-go/20 shadow-[0_0_12px_#d6a94a66]" : ""
+        className={`flex items-center gap-1.5 rounded-xl border border-go/40 bg-gradient-to-r from-[#d6a94a15] to-[#d6a94a08] px-2.5 py-1 text-xs font-bold text-go transition-all duration-300 hover:border-go hover:shadow-[0_0_12px_#d6a94a44] ${
+          isFlashing ? "border-go bg-go/30 shadow-[0_0_16px_#d6a94a88]" : ""
         }`}
       >
-        <Coins size={14} className="text-go flex-none" />
-        <span className="font-mono tabular-nums">{displayValue}</span>
+        <Coins size={14} className="text-go flex-none drop-shadow-[0_0_4px_#d6a94a66]" />
+        <span className="font-mono tabular-nums tracking-tight">{formattedValue}</span>
       </div>
 
       {popup && (
         <span
-          className={`absolute -top-3 right-0 -translate-y-full text-[11px] font-extrabold animate-bounce pointer-events-none ${
+          className={`absolute -top-3 right-0 -translate-y-full text-[11px] font-extrabold motion-safe:animate-bounce pointer-events-none ${
             popup.isPositive ? "text-go drop-shadow-[0_0_6px_#d6a94a]" : "text-mu opacity-75"
           }`}
         >

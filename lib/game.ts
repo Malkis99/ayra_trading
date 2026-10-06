@@ -1,5 +1,7 @@
 import { GAME_CONFIG } from "./game-config";
 import { ITEMS } from "./items";
+import { TITLES_CATALOG } from "./titles";
+import { transliterateNickname, isValidLatinNickname } from "./stats";
 
 export const DAILY_REWARDS = GAME_CONFIG.DAILY_REWARD_VALUES;
 export const QUEST_XP = GAME_CONFIG.QUEST_XP;
@@ -13,6 +15,8 @@ export type ChronicleEventType =
   | { type: "planChanged"; plan: "Free" | "Pro" | "Elite" }
   | { type: "itemEquipped"; itemId: number; name?: string }
   | { type: "itemUnequipped"; slot: string; itemId?: number }
+  | { type: "titleSelected"; titleId: string }
+  | { type: "titleUnlocked"; titleId: string }
   | { type: "achievementUnlocked"; achievementId: string; title?: string }
   | { type: "postPublished" }
   | { type: "profileUpdated" }
@@ -27,9 +31,14 @@ export interface CustomGoal {
   createdAt: string;
 }
 
+export interface StatSnapshot {
+  date: string; // YYYY-MM-DD
+  values: Record<string, number>;
+}
+
 export interface GameState {
   name: string;
-  bio: string;
+  bio: string | null;
   path: string;
   level: number;
   xp: number;
@@ -45,7 +54,9 @@ export interface GameState {
   plan: "Free" | "Pro" | "Elite";
   equipment: Record<string, number>;
   frame: number;
-  title: number;
+  title: number; // legacy title id
+  unlockedTitles: string[];
+  selectedTitle: string;
   background: number;
   loadouts: Record<string, Record<string, number>>;
   activeLoadout: string;
@@ -67,11 +78,12 @@ export interface GameState {
     completedAt: string;
   }>;
   customGoals: CustomGoal[];
+  statSnapshots: StatSnapshot[];
 }
 
 export const INITIAL_GAME_STATE: GameState = {
   name: "TraderOne",
-  bio: "Мой путь — дисциплина и процесс.",
+  bio: null,
   path: "Discipline",
   level: 1,
   xp: 0,
@@ -85,15 +97,21 @@ export const INITIAL_GAME_STATE: GameState = {
   dailyRewardIndex: 0,
   lastRewardClaimDate: "",
   plan: "Free",
-  equipment: {},
+  equipment: {
+    Верх: 0, // Starter Shirt
+    Низ: 3,  // Starter Pants
+    Обувь: 5 // Starter Sneakers
+  },
   frame: 1,
   title: 1,
+  unlockedTitles: ["novice"],
+  selectedTitle: "novice",
   background: 0,
   loadouts: {
-    Сессия: {},
-    Сообщество: {},
+    session: {},
+    community: {},
   },
-  activeLoadout: "Сессия",
+  activeLoadout: "session",
   itemsEquippedCount: 0,
   achievements: {},
   posts: [],
@@ -105,6 +123,7 @@ export const INITIAL_GAME_STATE: GameState = {
   isRestDay: false,
   history: [],
   customGoals: [],
+  statSnapshots: [],
 };
 
 export function xpForNextLevel(level: number): number {
@@ -148,6 +167,62 @@ export function addChronicleEvent(
 export function migrateState(rawState: any): GameState {
   if (!rawState || typeof rawState !== "object") return INITIAL_GAME_STATE;
 
+  // 1. Bio migration: if default text, set to null
+  let bio = rawState.bio;
+  if (
+    bio === "Мой путь — дисциплина и процесс." ||
+    bio === "My path is discipline and process" ||
+    bio === "My path is discipline and process."
+  ) {
+    bio = null;
+  }
+
+  // 2. Nickname migration: transliterate if contains Cyrillic or non-allowed chars
+  let name = rawState.name || INITIAL_GAME_STATE.name;
+  if (!isValidLatinNickname(name)) {
+    name = transliterateNickname(name);
+  }
+
+  // 3. Loadouts migration: map legacy keys "Сессия" / "Сообщество" to "session" / "community"
+  let loadouts = rawState.loadouts;
+  if (loadouts && typeof loadouts === "object") {
+    const newLoadouts: Record<string, Record<string, number>> = {};
+    Object.entries(loadouts).forEach(([k, v]) => {
+      const newKey = k === "Сессия" ? "session" : k === "Сообщество" ? "community" : k;
+      newLoadouts[newKey] = v as Record<string, number>;
+    });
+    loadouts = newLoadouts;
+  } else {
+    loadouts = INITIAL_GAME_STATE.loadouts;
+  }
+
+  let activeLoadout = rawState.activeLoadout || "session";
+  if (activeLoadout === "Сессия") activeLoadout = "session";
+  if (activeLoadout === "Сообщество") activeLoadout = "community";
+
+  // 4. Titles silent migration based on requirements without toasts/chronicle
+  const unlockedTitles = new Set<string>(
+    Array.isArray(rawState.unlockedTitles) ? rawState.unlockedTitles : ["novice"]
+  );
+  unlockedTitles.add("novice");
+
+  const currentLevel = rawState.level || 1;
+  const currentAch = rawState.achievements || {};
+
+  TITLES_CATALOG.forEach((t) => {
+    if (t.source === "level" && t.reqLevel && currentLevel >= t.reqLevel) {
+      unlockedTitles.add(t.id);
+    }
+    if (t.source === "achievement" && t.reqAchievement && currentAch[t.reqAchievement]) {
+      unlockedTitles.add(t.id);
+    }
+  });
+
+  const selectedTitle =
+    rawState.selectedTitle && unlockedTitles.has(rawState.selectedTitle)
+      ? rawState.selectedTitle
+      : "novice";
+
   const chronicleMigrated: ChronicleEntry[] = Array.isArray(rawState.chronicle)
     ? rawState.chronicle.map((item: any) => {
         if (typeof item === "string") {
@@ -160,8 +235,12 @@ export function migrateState(rawState: any): GameState {
   return {
     ...INITIAL_GAME_STATE,
     ...rawState,
-    loadouts: rawState.loadouts || INITIAL_GAME_STATE.loadouts,
-    activeLoadout: rawState.activeLoadout || "Сессия",
+    name,
+    bio,
+    loadouts,
+    activeLoadout,
+    unlockedTitles: Array.from(unlockedTitles),
+    selectedTitle,
     itemsEquippedCount: rawState.itemsEquippedCount || 0,
     achievements: rawState.achievements || {},
     posts: rawState.posts || [],
@@ -170,6 +249,7 @@ export function migrateState(rawState: any): GameState {
     passedQuestsToday: rawState.passedQuestsToday || {},
     history: rawState.history || [],
     customGoals: rawState.customGoals || [],
+    statSnapshots: Array.isArray(rawState.statSnapshots) ? rawState.statSnapshots : [],
   };
 }
 
@@ -579,6 +659,66 @@ export function addPost(
   return checkAchievements(nextState);
 }
 
+export function selectTitle(
+  state: GameState,
+  titleId: string
+): GameState {
+  if (!state.unlockedTitles.includes(titleId) || state.selectedTitle === titleId) {
+    return state;
+  }
+  const chronicle = addChronicleEvent(state.chronicle, {
+    type: "titleSelected",
+    titleId,
+  });
+  return {
+    ...state,
+    selectedTitle: titleId,
+    chronicle,
+  };
+}
+
+export function checkAndUnlockTitles(
+  state: GameState
+): { state: GameState; newlyUnlockedTitles: string[] } {
+  const newlyUnlockedTitles: string[] = [];
+  const currentUnlocked = new Set(state.unlockedTitles);
+  let chronicle = state.chronicle;
+
+  TITLES_CATALOG.forEach((t) => {
+    if (currentUnlocked.has(t.id)) return;
+
+    let unlock = false;
+    if (t.source === "level" && t.reqLevel && state.level >= t.reqLevel) {
+      unlock = true;
+    }
+    if (t.source === "achievement" && t.reqAchievement && state.achievements[t.reqAchievement]) {
+      unlock = true;
+    }
+
+    if (unlock) {
+      currentUnlocked.add(t.id);
+      newlyUnlockedTitles.push(t.id);
+      chronicle = addChronicleEvent(chronicle, {
+        type: "titleUnlocked",
+        titleId: t.id,
+      });
+    }
+  });
+
+  if (newlyUnlockedTitles.length === 0) {
+    return { state, newlyUnlockedTitles: [] };
+  }
+
+  return {
+    state: {
+      ...state,
+      unlockedTitles: Array.from(currentUnlocked),
+      chronicle,
+    },
+    newlyUnlockedTitles,
+  };
+}
+
 export function updateProfileInfo(
   state: GameState,
   name: string,
@@ -586,8 +726,8 @@ export function updateProfileInfo(
 ): GameState {
   const trimmedName = name.trim();
   const finalName =
-    trimmedName && trimmedName.length <= 24 ? trimmedName : state.name;
-  const finalBio = bio.slice(0, 160);
+    trimmedName && isValidLatinNickname(trimmedName) ? trimmedName : state.name;
+  const finalBio = bio.trim() ? bio.slice(0, 160) : null;
 
   const changed = finalName !== state.name || finalBio !== state.bio;
   let chronicle = state.chronicle;

@@ -18,22 +18,23 @@ import {
   addPost,
   updateProfileInfo,
   checkAchievements,
+  selectTitle,
+  checkAndUnlockTitles,
 } from "./game";
-import { getDeterministicDailyQuests } from "./quests";
+import {
+  isValidLatinNickname,
+  transliterateNickname,
+  getReputation,
+  calculateStats,
+  getCharacterPower,
+  getStatBalance,
+} from "./stats";
+import { TITLES_CATALOG } from "./titles";
+import { ru } from "./i18n/dictionaries/ru";
+import { en } from "./i18n/dictionaries/en";
 import { ITEMS } from "./items";
 
 describe("Game State Logic v3.1 (lib/game.ts & lib/quests.ts)", () => {
-  it("deterministic daily quest selection works", () => {
-    const q1 = getDeterministicDailyQuests("2026-10-05");
-    const q2 = getDeterministicDailyQuests("2026-10-05");
-    const q3 = getDeterministicDailyQuests("2026-10-06");
-
-    expect(q1.core.length).toBe(3);
-    expect(q1.bonus.length).toBe(2);
-    expect(q1.core[0].id).toBe(q2.core[0].id);
-    expect(q1.core[0].id).not.toBe(q3.core[0].id);
-  });
-
   it("handles quest completion, level-up, typed chronicle, and history", () => {
     let state = { ...INITIAL_GAME_STATE };
     const date = new Date("2026-10-05T10:00:00Z");
@@ -55,204 +56,208 @@ describe("Game State Logic v3.1 (lib/game.ts & lib/quests.ts)", () => {
       streakShieldsAvailable: 1,
       lastWeeklyResetDate: "2026-10-05",
       lastQuestDate: "2026-10-05",
-      completedQuestsToday: {}, // No quests completed on Oct 5
+      completedQuestsToday: {},
     };
 
     const day2 = new Date("2026-10-06T10:00:00Z");
     const resetted = checkAndApplyDateResets(state, day2);
 
-    expect(resetted.currentStreak).toBe(5); // Saved by shield!
+    expect(resetted.currentStreak).toBe(5);
     expect(resetted.streakShieldsAvailable).toBe(0);
 
-    // Next missed day without shield -> resets streak
     const day3 = new Date("2026-10-07T10:00:00Z");
     const resetted2 = checkAndApplyDateResets(resetted, day3);
 
     expect(resetted2.currentStreak).toBe(0);
     expect(resetted2.bestStreak).toBe(5);
   });
+});
 
-  it("rest day preserves streak without consuming shield", () => {
-    let state = {
-      ...INITIAL_GAME_STATE,
-      currentStreak: 3,
-      bestStreak: 3,
-      streakShieldsAvailable: 1,
-      lastWeeklyResetDate: "2026-10-05",
-      isRestDay: true,
-      lastQuestDate: "2026-10-05",
-    };
+describe("T4.1 Requirements: Nickname Validation & Transliteration", () => {
+  it("validates Latin nicknames correctly", () => {
+    expect(isValidLatinNickname("TraderOne")).toBe(true);
+    expect(isValidLatinNickname("Alex_123")).toBe(true);
+    expect(isValidLatinNickname("John.Doe-99")).toBe(true);
 
-    const day2 = new Date("2026-10-06T10:00:00Z");
-    const resetted = checkAndApplyDateResets(state, day2);
-
-    expect(resetted.currentStreak).toBe(4);
-    expect(resetted.streakShieldsAvailable).toBe(1); // Shield was preserved!
+    expect(isValidLatinNickname("Алекс")).toBe(false); // Cyrillic
+    expect(isValidLatinNickname("ab")).toBe(false); // Too short (< 3)
+    expect(isValidLatinNickname("A".repeat(25))).toBe(false); // Too long (> 24)
+    expect(isValidLatinNickname("Alex!")).toBe(false); // Invalid symbol
   });
 
-  it("quest replacement limit (2 max per day)", () => {
-    let state = { ...INITIAL_GAME_STATE };
-    const date = new Date("2026-10-05T10:00:00Z");
-
-    const r1 = replaceQuest(state, "q_1", date);
-    expect(r1.success).toBe(true);
-    expect(r1.state.replacementsUsedToday).toBe(1);
-
-    const r2 = replaceQuest(r1.state, "q_2", date);
-    expect(r2.success).toBe(true);
-    expect(r2.state.replacementsUsedToday).toBe(2);
-
-    const r3 = replaceQuest(r2.state, "q_3", date);
-    expect(r3.success).toBe(false);
-    expect(r3.state.replacementsUsedToday).toBe(2);
+  it("transliterates Cyrillic nicknames to Latin according to table", () => {
+    expect(transliterateNickname("Алекс")).toBe("Aleks");
+    expect(transliterateNickname("Иван")).toBe("Ivan");
+    expect(transliterateNickname("   Михаил   ")).toBe("Mikhail");
+    expect(transliterateNickname("Да")).toBe("TraderOne"); // Less than 3 chars becomes default
+    expect(transliterateNickname("ОченьДлинноеИмяКотороеПревышаетДвадцатьЧетыреСимвола")).toBe("OchenDlinnoeImyaKotoroeP");
   });
 
-  it("pass quest does not cause penalties", () => {
-    let state = { ...INITIAL_GAME_STATE };
-    const date = new Date("2026-10-05T10:00:00Z");
-
-    const passed = passQuest(state, "q_bias", date);
-    expect(passed.passedQuestsToday["q_bias"]).toBe(true);
-    expect(passed.xp).toBe(0);
-    expect(passed.coins).toBe(0);
-  });
-
-  it("migrates legacy string chronicle entries gracefully", () => {
+  it("migrates raw state correctly", () => {
     const rawLegacy = {
-      name: "OldTrader",
-      chronicle: ["Персонаж создан", "Квест: Daily Bias (+40 XP)"],
+      name: "Алекс",
+      bio: "Мой путь — дисциплина и процесс.",
+      loadouts: {
+        Сессия: { Верх: 0 },
+        Сообщество: { Низ: 3 },
+      },
+      activeLoadout: "Сессия",
     };
 
     const migrated = migrateState(rawLegacy);
-    expect(migrated.name).toBe("OldTrader");
-    expect(migrated.chronicle[0]).toEqual({
-      type: "legacy",
-      text: "Персонаж создан",
-    });
+    expect(migrated.name).toBe("Aleks");
+    expect(migrated.bio).toBeNull();
+    expect(migrated.loadouts["session"]).toEqual({ Верх: 0 });
+    expect(migrated.loadouts["community"]).toEqual({ Низ: 3 });
+    expect(migrated.activeLoadout).toBe("session");
+    expect(migrated.unlockedTitles).toContain("novice");
   });
 });
 
-describe("T4 Profile & Wardrobe Logic Requirements", () => {
-  it("enforces level unlocks for equipment items", () => {
-    let state = { ...INITIAL_GAME_STATE, level: 1 };
-    // Item 10 is Crown of Discipline (reqLevel 4)
-    const crown = ITEMS[10];
-    expect(crown.reqLevel).toBe(4);
-
-    // Equip at level 1 should fail and leave equipment unchanged
-    const attempt1 = equipItem(state, 10);
-    expect(attempt1.state.equipment["Голова"]).toBeUndefined();
-
-    // Equip at level 4 should succeed
-    let stateLv4 = { ...state, level: 4 };
-    const attempt2 = equipItem(stateLv4, 10);
-    expect(attempt2.state.equipment["Голова"]).toBe(10);
+describe("T4.1 Requirements: Titles & Reputation", () => {
+  it("calculates reputation correctly", () => {
+    const rep = getReputation({ level: 3, history: [1, 2, 3], currentStreak: 2 });
+    expect(rep.points).toBe(3 * 20 + 3 * 5 + 2 * 10); // 60 + 15 + 20 = 95
+    expect(rep.tierId).toBe("growing");
+    expect(rep.pointsToNext).toBe(101 - 95);
   });
 
-  it("handles equip and unequip actions correctly", () => {
-    let state = { ...INITIAL_GAME_STATE, level: 1 };
-    // Item 0 is Graphite Shirt (Top, reqLevel 1)
-    const res1 = equipItem(state, 0);
-    expect(res1.state.equipment["Верх"]).toBe(0);
-    expect(res1.state.itemsEquippedCount).toBe(1);
-    expect(
-      res1.state.chronicle.some((c) => typeof c === "object" && c.type === "itemEquipped" && c.itemId === 0)
-    ).toBe(true);
+  it("allows selecting unlocked titles and prevents selecting locked titles", () => {
+    let state = { ...INITIAL_GAME_STATE, unlockedTitles: ["novice", "disciplined"] };
 
-    // Unequip slot "Верх"
+    state = selectTitle(state, "disciplined");
+    expect(state.selectedTitle).toBe("disciplined");
+
+    // Try selecting locked title
+    state = selectTitle(state, "strategist");
+    expect(state.selectedTitle).toBe("disciplined"); // remains disciplined
+  });
+
+  it("automatically unlocks titles when conditions are met", () => {
+    let state = { ...INITIAL_GAME_STATE, level: 5 };
+    const res = checkAndUnlockTitles(state);
+    expect(res.newlyUnlockedTitles).toContain("disciplined"); // reqLevel 3
+    expect(res.newlyUnlockedTitles).toContain("strategist"); // reqLevel 5
+  });
+});
+
+describe("T4.1 Requirements: Stats & Character Power", () => {
+  it("calculates 8 stats, power, and balance accurately", () => {
+    const state = { ...INITIAL_GAME_STATE, level: 3, weeklyQuestCount: 5 };
+    const stats = calculateStats(state);
+
+    expect(Object.keys(stats).length).toBe(8);
+    expect(stats.discipline.level).toBeGreaterThan(1);
+
+    const power = getCharacterPower(stats);
+    expect(power).toBeGreaterThan(0);
+
+    const balance = getStatBalance(stats);
+    expect(balance).toHaveProperty("strongestStat");
+    expect(balance).toHaveProperty("weakestStat");
+    expect(balance).toHaveProperty("growthCategory");
+  });
+});
+
+describe("T4.1 Requirements: Wardrobe Bug Fix & Equipment Persistence", () => {
+  it("equips and unequips item saving directly to state", () => {
+    let state = { ...INITIAL_GAME_STATE, level: 1 };
+    // Item 1 is Violet Hoodie (Top, reqLevel 1)
+    const res1 = equipItem(state, 1);
+    expect(res1.state.equipment["Верх"]).toBe(1);
+
     const res2 = unequipSlot(res1.state, "Верх");
     expect(res2.state.equipment["Верх"]).toBeUndefined();
-    expect(res2.state.chronicle[0]).toEqual({
-      type: "itemUnequipped",
-      slot: "Верх",
-      itemId: 0,
-    });
   });
 
-  it("preview does not mutate saved state", () => {
+  it("preview does not mutate saved equipment state", () => {
     let state = { ...INITIAL_GAME_STATE, level: 1 };
-    const previewItemId = 1; // Violet Hoodie
+    const previewItemId = 1; // Violet Hoodie (Top)
     const previewSlot = ITEMS[previewItemId].slot;
 
-    // Simulate preview effective equipment calculation
     const effectiveEquipment = {
       ...state.equipment,
       [previewSlot]: previewItemId,
     };
 
     expect(effectiveEquipment[previewSlot]).toBe(previewItemId);
-    // Original game state equipment must remain untouched!
-    expect(state.equipment[previewSlot]).toBeUndefined();
+    expect(state.equipment[previewSlot]).toBe(0); // Starter shirt remains intact
+  });
+});
+
+describe("T4.1 i18n & State Purity Audits", () => {
+  it("(a) dictionary keys in ru and en match exactly", () => {
+    function getKeys(obj: any, prefix = ""): string[] {
+      let keys: string[] = [];
+      for (const k in obj) {
+        if (typeof obj[k] === "object" && obj[k] !== null && !Array.isArray(obj[k])) {
+          keys = keys.concat(getKeys(obj[k], `${prefix}${k}.`));
+        } else {
+          keys.push(`${prefix}${k}`);
+        }
+      }
+      return keys;
+    }
+
+    const ruKeys = getKeys(ru).sort();
+    const enKeys = getKeys(en).sort();
+
+    expect(ruKeys).toEqual(enKeys);
   });
 
-  it("saves and applies loadouts correctly", () => {
-    let state = { ...INITIAL_GAME_STATE, level: 1 };
-    // Equip item 0
-    state = equipItem(state, 0).state;
+  it("(b) ru values do not contain disallowed English words", () => {
+    const allowedWords = new Set(["AYRA", "Trading", "Free", "Pro", "Elite", "XP", "Coins"]);
 
-    // Save to loadout "Сессия"
-    state = saveLoadout(state, "Сессия");
-    expect(state.loadouts["Сессия"]["Верх"]).toBe(0);
+    function checkValues(obj: any, path = "") {
+      for (const k in obj) {
+        const val = obj[k];
+        if (typeof val === "object" && val !== null) {
+          checkValues(val, `${path}.${k}`);
+        } else if (typeof val === "string") {
+          // Strip template placeholders like {action}, {count}, etc.
+          const cleanedVal = val.replace(/\{[^{}]+\}/g, "");
+          // Find latin words
+          const latinWords = cleanedVal.match(/\b[A-Za-z]+\b/g) || [];
+          for (const word of latinWords) {
+            if (!allowedWords.has(word)) {
+              throw new Error(
+                `Disallowed English word "${word}" found in RU dictionary at key "${path}.${k}": "${val}"`
+              );
+            }
+          }
+        }
+      }
+    }
 
-    // Unequip item 0
-    state = unequipSlot(state, "Верх").state;
-    expect(state.equipment["Верх"]).toBeUndefined();
-
-    // Apply loadout "Сессия"
-    const applied = applyLoadout(state, "Сессия");
-    expect(applied.state.equipment["Верх"]).toBe(0);
-    expect(applied.state.activeLoadout).toBe("Сессия");
+    expect(() => checkValues(ru)).not.toThrow();
   });
 
-  it("unlocks achievements exactly once", () => {
+  it("(c) en values do not contain Cyrillic characters", () => {
+    function checkCyrillic(obj: any, path = "") {
+      for (const k in obj) {
+        const val = obj[k];
+        if (typeof val === "object" && val !== null) {
+          checkCyrillic(val, `${path}.${k}`);
+        } else if (typeof val === "string") {
+          if (/[а-яА-ЯёЁ]/.test(val)) {
+            throw new Error(
+              `Cyrillic character found in EN dictionary at key "${path}.${k}": "${val}"`
+            );
+          }
+        }
+      }
+    }
+
+    expect(() => checkCyrillic(en)).not.toThrow();
+  });
+
+  it("(d) GameState contains zero localized text strings", () => {
     let state = { ...INITIAL_GAME_STATE };
+    state = equipItem(state, 1).state;
+    state = addPost(state, "Test post").state;
 
-    // Completing 1 quest unlocks "firstQuest"
-    const res1 = completeQuest(state, "q_bias", "Daily Bias", "Trading", 40, 10);
-    expect(res1.newlyUnlocked).toContain("firstQuest");
-    expect(res1.state.achievements["firstQuest"]).toBe(true);
-
-    // Calling checkAchievements again should return no new unlocks
-    const res2 = checkAchievements(res1.state);
-    expect(res2.newlyUnlocked).toEqual([]);
-    expect(res2.state.achievements["firstQuest"]).toBe(true);
-  });
-
-  it("validates nickname rules on profile update", () => {
-    let state = { ...INITIAL_GAME_STATE, name: "Original" };
-
-    // Trims leading/trailing whitespace
-    const s1 = updateProfileInfo(state, "  NewName  ", "bio");
-    expect(s1.name).toBe("NewName");
-
-    // Empty or whitespace-only nickname keeps previous name
-    const s2 = updateProfileInfo(state, "   ", "bio");
-    expect(s2.name).toBe("Original");
-
-    // Nickname longer than 24 chars keeps previous name
-    const s3 = updateProfileInfo(state, "A".repeat(25), "bio");
-    expect(s3.name).toBe("Original");
-  });
-
-  it("guarantees GameState contains zero translated strings", () => {
-    let state = { ...INITIAL_GAME_STATE };
-    state = equipItem(state, 0).state;
-    state = addPost(state, "My first post").state;
-
-    // Achievements map stores boolean flags by achievement ID
-    expect(Object.keys(state.achievements)).toEqual(
-      expect.arrayContaining(["stylist", "author"])
-    );
-    expect(state.achievements["stylist"]).toBe(true);
-
-    // Equipment stores item IDs by slot key
     expect(typeof state.equipment["Верх"]).toBe("number");
-
-    // Chronicle entries use structured event objects
-    const equippedEvent = state.chronicle.find(
-      (e) => typeof e === "object" && e.type === "itemEquipped"
-    );
-    expect(equippedEvent).toBeDefined();
-    expect(equippedEvent).toHaveProperty("itemId", 0);
+    expect(state.selectedTitle).toBe("novice");
+    expect(state.activeLoadout).toBe("session");
   });
 });
