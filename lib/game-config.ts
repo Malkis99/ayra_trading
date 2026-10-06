@@ -9,11 +9,23 @@ export const GAME_CONFIG = {
   QUEST_COINS: 10,
   MAX_CUSTOM_GOALS: 5,
 
-  // Level unlock thresholds (placeholders for T4)
+  // Level unlock thresholds
   LEVEL_UNLOCKS: {
     FRAME_BLUE_LEVEL: 3,
     FRAME_GOLD_LEVEL: 4,
     TITLE_DISCIPLINED_LEVEL: 3,
     TITLE_STRATEGIST_LEVEL: 5,
   },
+
+  // Characteristic -> Developed by Task Categories (Spec v1.1)
+  STAT_DEVELOPED_BY_CATEGORIES: {
+    discipline: ["Discipline", "Lifestyle"],
+    trading: ["Trading"],
+    intelligence: ["Mental"],
+    focus: ["Trading", "Social"],
+    psychology: ["Psychology", "Social"],
+    knowledge: ["Mental"],
+    endurance: ["Physical", "Lifestyle"],
+    strength: ["Physical"],
+  } as Record<string, string[]>,
 };

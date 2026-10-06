@@ -1,37 +1,64 @@
-# AYRA Spec v1.4 — Profile, Titles, Reputation & Stats Architecture
+# AYRA Profile & Statistics Specification v1.4
 
-## 1. Overview Block Layout
-The Overview tab (`/profile`) follows a strict top-to-bottom layout rhythm inside a single right container with a clean outer border:
-1. **Compact Header Card**: Level badge, Latin nickname (3–24 chars) with pencil edit button, selected Title dropdown trigger, and 2-line truncated Bio tooltip.
-2. **Followers Block**: 3 interactive cards ("Followers", "Following", "Marked Useful") with count formatters, hover shimmer effect, and toast placeholders ("Coming soon").
-3. **Reputation Card**: Single dark card containing shield icon, Reputation tier title, point total, segmented 5-tier bar, points-to-next label, and tooltip breakdown (Usefulness, Quality, Consistency).
-4. **Full-Width Level Progress**: Level N to N+1 bar with gradient fill, XP counters, and chips ("Quests today: 0/3", "Streak: N days").
-5. **Stage Styling**: Frame and background selection triggers.
-6. **Characteristics Summary**: 8 stat rows with segmented bars, rank labels, weekly gains, gold indicator for strongest stat, and link to Stats tab.
+## Overview
+This specification details the profile layout, character stage, 8-characteristic model, reputation formula, titles catalog, daily activity statistics (`dailyStats`), and JSON data export.
 
-## 2. Latin Nickname & Bio Rules
-- **Nickname validation**: Allowed characters are Latin letters (`A-Z`, `a-z`), digits (`0-9`), underscore (`_`), dot (`.`), and hyphen (`-`). Length must be 3–24 characters.
-- **Cyrillic Transliteration**: Automatic migration converts Cyrillic names (e.g., "Алекс" → "Aleks"). If the transliterated length is under 3 characters, default "TraderOne" is assigned.
-- **Bio State**: Default bio is stored as `null` in `GameState`. Default localized text ("Мой путь — дисциплина и процесс." / "My path is discipline and process") displays from dictionary.
+## 1. Character Stage & Layout
+- **Desktop Grid**: 2 columns (`lg:grid-cols-12`). Left column (5/12) is the interactive Character Stage; Right column (7/12) contains the unified single profile container with inner cards.
+- **Stage Alignment**: Left stage matches height of the right panel (`lg:min-h-[640px]`) and uses `lg:sticky lg:top-20` for smooth scrolling without internal stage scrollbars.
+- **Mobile Responsive**: On mobile viewports, stage is stacked vertically above the overview panel with height limited to `max-h-[70vh]`.
+- **Feet-anchored Shadow**: An oval shadow is drawn fixed outside the 360° rotating figure container so it stays grounded during rotation.
+- **Slot Buttons**: 10 interactive slots (`head`, `top`, `outer`, `bottom`, `shoes`, `cloak`, `gloves`, `accessory`, `aura`, `companion`) with icons, tooltips, and `aria-label`. Clicking a slot switches to the Wardrobe tab filtered by that slot.
 
-## 3. Titles System
-- **Storage**: `unlockedTitles: string[]`, `selectedTitle: string`.
-- **Default Title**: `novice` unlocked and selected by default.
-- **Sources**: Level milestones (3, 5, 10), achievements (`firstQuest`, `stylist`, `level3`), cases, and seasons.
-- **Migration**: Existing accounts silently unlock eligible titles based on current level and achievements without issuing toast popups or chronicle entries.
+## 2. Nicknames & Bio Rules
+- **Nickname**: Strictly Latin (`A-Z`, `a-z`, `0-9`, `_`, `.`, `-`), length 3–24 characters.
+- **Cyrillic Transliteration**: Automatic migration converts Cyrillic nicknames to Latin (e.g., "Алекс" -> "Aleks"). If the resulting nickname is shorter than 3 characters, it falls back to `"TraderOne"`.
+- **Bio**: Stored as `bio: null` by default in state. Default bio text is rendered dynamically from the active i18n dictionary.
 
-## 4. Reputation Formula
-- Calculated dynamically via `getReputation(state)`:
-  `Points = Math.min(2000, level * 20 + completedQuests * 5 + currentStreak * 10)`
-- Tiers:
-  - Growing (0 - 100 pt)
-  - Reliable (101 - 250 pt)
-  - Trusted (251 - 500 pt)
-  - Respected (501 - 1000 pt)
-  - Honored (1001+ pt)
+## 3. 8 Characteristics & Category Mapping
+Daily tasks develop specific character stats based on task categories (Spec v1.1):
 
-## 5. 8 Stats Model & Character Power
-- **Stats**: Discipline, Trading, Intelligence, Focus, Psychology, Knowledge, Endurance, Strength.
-- **Ranks**: Novice (Lv 1-4), Adept (Lv 5-9), Skilled (Lv 10-14), Expert (Lv 15-19), Master (Lv 20+).
-- **Character Power**: Sum of stat levels * 10 + XP.
-- **Stat Balance**: Evaluated by comparing highest and lowest stat levels (diff <= 2 is Balanced).
+| Characteristic | Primary Task Category | Secondary Category |
+|---|---|---|
+| **Discipline** | Discipline | Lifestyle |
+| **Trading** | Trading | — |
+| **Intelligence** | Mental | — |
+| **Focus** | Trading | Social |
+| **Psychology** | Psychology | Social |
+| **Knowledge** | Mental | — |
+| **Endurance** | Physical | Lifestyle |
+| **Strength** | Physical | — |
+
+## 4. Single Reputation Model
+Reputation points are calculated using pure function `getReputation(state)`:
+$$\text{Points} = \min(2000, \text{Level} \times 20 + \text{HistoryCount} \times 5 + \text{Streak} \times 10)$$
+
+Tiers:
+1. **Growing**: 0 – 100 pt
+2. **Reliable**: 101 – 250 pt
+3. **Trusted**: 251 – 500 pt
+4. **Respected**: 501 – 1000 pt
+5. **Honored**: 1001+ pt
+
+## 5. Daily Stats & JournalStats Contract
+Daily activity is tracked in `dailyStats[YYYY-MM-DD]` storing:
+- `questsCompleted`: record of completed task counts per category.
+- `totalQuestsCompleted`, `xpGained`, `coinsGained`, `questsSkipped`, `questsReplaced`, `isRestDay`, `shieldUsed`, `rewardsClaimed`.
+
+### JournalStats Contract (Placeholder for T6)
+```ts
+export interface JournalStats {
+  totalTrades: number;
+  periodTrades: number;
+  planCompliancePercent: number;
+  averageProcessScore: number;
+  periodRResult: number;
+  journalStreakDays: number;
+  notesCount: number;
+  frequentErrors: string[];
+  dominantEmotions: string[];
+}
+```
+
+## 6. JSON Export Format
+Data exports to `ayra-profile-[nickname]-[YYYY-MM-DD].json` containing pure numeric IDs and state keys with zero localized strings.

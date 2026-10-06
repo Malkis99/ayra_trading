@@ -1,7 +1,12 @@
 import { GAME_CONFIG } from "./game-config";
 import { ITEMS } from "./items";
 import { TITLES_CATALOG } from "./titles";
-import { transliterateNickname, isValidLatinNickname } from "./stats";
+import {
+  transliterateNickname,
+  isValidLatinNickname,
+  recordDailyStatEvent,
+  DailyStatRecord,
+} from "./stats";
 
 export const DAILY_REWARDS = GAME_CONFIG.DAILY_REWARD_VALUES;
 export const QUEST_XP = GAME_CONFIG.QUEST_XP;
@@ -43,6 +48,7 @@ export interface GameState {
   level: number;
   xp: number;
   coins: number;
+  createdAt: string; // ISO YYYY-MM-DD
   completedQuestsToday: Record<string, boolean>;
   passedQuestsToday: Record<string, boolean>;
   replacementsUsedToday: number;
@@ -79,6 +85,14 @@ export interface GameState {
   }>;
   customGoals: CustomGoal[];
   statSnapshots: StatSnapshot[];
+  dailyStats: Record<string, DailyStatRecord>;
+}
+
+export function getIsoDateString(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 export const INITIAL_GAME_STATE: GameState = {
@@ -88,6 +102,7 @@ export const INITIAL_GAME_STATE: GameState = {
   level: 1,
   xp: 0,
   coins: 0,
+  createdAt: getIsoDateString(new Date()),
   completedQuestsToday: {},
   passedQuestsToday: {},
   replacementsUsedToday: 0,
@@ -124,6 +139,7 @@ export const INITIAL_GAME_STATE: GameState = {
   history: [],
   customGoals: [],
   statSnapshots: [],
+  dailyStats: {},
 };
 
 export function xpForNextLevel(level: number): number {
@@ -136,13 +152,6 @@ export function getCharacterStatus(
 ): "Training" | "Resting" {
   if (isRestDay) return "Resting";
   return completedQuestsTodayCount >= 1 ? "Training" : "Resting";
-}
-
-export function getIsoDateString(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
 }
 
 export function getMondayIsoDateString(date: Date): string {
@@ -167,7 +176,6 @@ export function addChronicleEvent(
 export function migrateState(rawState: any): GameState {
   if (!rawState || typeof rawState !== "object") return INITIAL_GAME_STATE;
 
-  // 1. Bio migration: if default text, set to null
   let bio = rawState.bio;
   if (
     bio === "Мой путь — дисциплина и процесс." ||
@@ -177,13 +185,11 @@ export function migrateState(rawState: any): GameState {
     bio = null;
   }
 
-  // 2. Nickname migration: transliterate if contains Cyrillic or non-allowed chars
   let name = rawState.name || INITIAL_GAME_STATE.name;
   if (!isValidLatinNickname(name)) {
     name = transliterateNickname(name);
   }
 
-  // 3. Loadouts migration: map legacy keys "Сессия" / "Сообщество" to "session" / "community"
   let loadouts = rawState.loadouts;
   if (loadouts && typeof loadouts === "object") {
     const newLoadouts: Record<string, Record<string, number>> = {};
@@ -200,7 +206,6 @@ export function migrateState(rawState: any): GameState {
   if (activeLoadout === "Сессия") activeLoadout = "session";
   if (activeLoadout === "Сообщество") activeLoadout = "community";
 
-  // 4. Titles silent migration based on requirements without toasts/chronicle
   const unlockedTitles = new Set<string>(
     Array.isArray(rawState.unlockedTitles) ? rawState.unlockedTitles : ["novice"]
   );
@@ -232,11 +237,18 @@ export function migrateState(rawState: any): GameState {
       })
     : INITIAL_GAME_STATE.chronicle;
 
+  const createdAt = rawState.createdAt || getIsoDateString(new Date());
+  const dailyStats =
+    rawState.dailyStats && typeof rawState.dailyStats === "object"
+      ? rawState.dailyStats
+      : {};
+
   return {
     ...INITIAL_GAME_STATE,
     ...rawState,
     name,
     bio,
+    createdAt,
     loadouts,
     activeLoadout,
     unlockedTitles: Array.from(unlockedTitles),
@@ -250,6 +262,7 @@ export function migrateState(rawState: any): GameState {
     history: rawState.history || [],
     customGoals: rawState.customGoals || [],
     statSnapshots: Array.isArray(rawState.statSnapshots) ? rawState.statSnapshots : [],
+    dailyStats,
   };
 }
 
@@ -262,9 +275,7 @@ export function checkAndApplyDateResets(
 
   let updated = migrateState(state);
 
-  // Check if date changed
   if (updated.lastQuestDate && updated.lastQuestDate !== todayStr) {
-    // Check if yesterday was active (>=1 completed quest or rest day)
     const yesterdayDoneCount = Object.keys(updated.completedQuestsToday).length;
     const wasActive = yesterdayDoneCount >= 1 || updated.isRestDay;
 
@@ -274,12 +285,12 @@ export function checkAndApplyDateResets(
     if (wasActive) {
       newStreak += 1;
     } else {
-      // Try using streak shield
       if (newShields > 0) {
         newShields -= 1;
-        // Shield protected the streak!
+        updated.dailyStats = recordDailyStatEvent(updated.dailyStats, updated.lastQuestDate, {
+          type: "shieldUsed",
+        });
       } else {
-        // Streak resets gracefully
         newStreak = 0;
       }
     }
@@ -298,7 +309,6 @@ export function checkAndApplyDateResets(
     updated.lastQuestDate = todayStr;
   }
 
-  // Weekly reset
   if (updated.lastWeeklyResetDate !== mondayStr) {
     updated.weeklyQuestCount = 0;
     updated.lastWeeklyResetDate = mondayStr;
@@ -316,7 +326,6 @@ export function checkAchievements(
   let updatedState = { ...state };
   let chronicle = [...updatedState.chronicle];
 
-  // 1. firstQuest: completed >= 1 quest
   const hasFirstQuest =
     updatedState.history.length >= 1 ||
     Object.keys(updatedState.completedQuestsToday).length >= 1 ||
@@ -331,7 +340,6 @@ export function checkAchievements(
     newlyUnlocked.push("firstQuest");
   }
 
-  // 2. stylist: itemsEquippedCount >= 1 or Object.keys(equipment).length >= 1
   const hasStylist =
     updatedState.itemsEquippedCount >= 1 ||
     Object.keys(updatedState.equipment).length >= 1;
@@ -345,7 +353,6 @@ export function checkAchievements(
     newlyUnlocked.push("stylist");
   }
 
-  // 3. streakDay: 3 quests completed today
   const hasStreakDay = Object.keys(updatedState.completedQuestsToday).length >= 3;
 
   if (hasStreakDay && !updatedState.achievements["streakDay"]) {
@@ -357,7 +364,6 @@ export function checkAchievements(
     newlyUnlocked.push("streakDay");
   }
 
-  // 4. level3: level >= 3
   const hasLevel3 = updatedState.level >= 3;
 
   if (hasLevel3 && !updatedState.achievements["level3"]) {
@@ -369,7 +375,6 @@ export function checkAchievements(
     newlyUnlocked.push("level3");
   }
 
-  // 5. author: posts.length >= 1
   const hasAuthor = updatedState.posts.length >= 1;
 
   if (hasAuthor && !updatedState.achievements["author"]) {
@@ -400,6 +405,7 @@ export function completeQuest(
   newlyUnlocked: string[];
 } {
   let newState = checkAndApplyDateResets(state, currentDate);
+  const todayStr = getIsoDateString(currentDate);
 
   if (newState.completedQuestsToday[questId]) {
     return { state: newState, leveledUp: false, newlyUnlocked: [] };
@@ -438,10 +444,17 @@ export function completeQuest(
       category,
       xp: xpAmount,
       coins: coinsAmount,
-      completedAt: getIsoDateString(currentDate),
+      completedAt: todayStr,
     },
     ...newState.history,
   ];
+
+  const updatedDailyStats = recordDailyStatEvent(newState.dailyStats, todayStr, {
+    type: "questDone",
+    category,
+    xp: xpAmount,
+    coins: coinsAmount,
+  });
 
   newState = {
     ...newState,
@@ -452,6 +465,7 @@ export function completeQuest(
     weeklyQuestCount: newState.weeklyQuestCount + 1,
     chronicle,
     history: newHistory,
+    dailyStats: updatedDailyStats,
   };
 
   const { state: finalState, newlyUnlocked } = checkAchievements(newState);
@@ -470,12 +484,18 @@ export function passQuest(
   currentDate: Date = new Date()
 ): GameState {
   let newState = checkAndApplyDateResets(state, currentDate);
+  const todayStr = getIsoDateString(currentDate);
+  const updatedDailyStats = recordDailyStatEvent(newState.dailyStats, todayStr, {
+    type: "questSkipped",
+  });
+
   return {
     ...newState,
     passedQuestsToday: {
       ...newState.passedQuestsToday,
       [questId]: true,
     },
+    dailyStats: updatedDailyStats,
   };
 }
 
@@ -485,10 +505,15 @@ export function replaceQuest(
   currentDate: Date = new Date()
 ): { state: GameState; success: boolean } {
   let newState = checkAndApplyDateResets(state, currentDate);
+  const todayStr = getIsoDateString(currentDate);
 
   if (newState.replacementsUsedToday >= GAME_CONFIG.QUEST_REPLACEMENTS_PER_DAY) {
     return { state: newState, success: false };
   }
+
+  const updatedDailyStats = recordDailyStatEvent(newState.dailyStats, todayStr, {
+    type: "questReplaced",
+  });
 
   newState = {
     ...newState,
@@ -497,6 +522,7 @@ export function replaceQuest(
       ...newState.passedQuestsToday,
       [questId]: true,
     },
+    dailyStats: updatedDailyStats,
   };
 
   return { state: newState, success: true };
@@ -507,9 +533,20 @@ export function toggleRestDay(
   currentDate: Date = new Date()
 ): GameState {
   let newState = checkAndApplyDateResets(state, currentDate);
+  const todayStr = getIsoDateString(currentDate);
+  const nextRestDayState = !newState.isRestDay;
+
+  let updatedDailyStats = newState.dailyStats;
+  if (nextRestDayState) {
+    updatedDailyStats = recordDailyStatEvent(newState.dailyStats, todayStr, {
+      type: "restDay",
+    });
+  }
+
   return {
     ...newState,
-    isRestDay: !newState.isRestDay,
+    isRestDay: nextRestDayState,
+    dailyStats: updatedDailyStats,
   };
 }
 
@@ -532,12 +569,18 @@ export function claimDailyReward(
     coins: claimedCoins,
   });
 
+  const updatedDailyStats = recordDailyStatEvent(newState.dailyStats, todayStr, {
+    type: "rewardClaimed",
+    coins: claimedCoins,
+  });
+
   newState = {
     ...newState,
     coins: newState.coins + claimedCoins,
     dailyRewardIndex: newState.dailyRewardIndex + 1,
     lastRewardClaimDate: todayStr,
     chronicle,
+    dailyStats: updatedDailyStats,
   };
 
   return { state: newState, claimedCoins };

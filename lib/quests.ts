@@ -230,13 +230,44 @@ export const QUEST_POOL: QuestTemplate[] = [
     fallbackWhyRu: "Наработка статистического преимущества своей стратегии.",
     fallbackWhyEn: "Building statistical edge for your strategy.",
   },
+  {
+    id: "q_logic_puzzle",
+    category: "Mental",
+    durationMinutes: 15,
+    difficulty: "Medium",
+    xpReward: 35,
+    coinsReward: 8,
+    statKey: "Intelligence",
+    verificationType: "SelfReport",
+    titleKey: "quest.logic_puzzle.title",
+    fallbackTitleRu: "Логический анализ торговой модели",
+    fallbackTitleEn: "Logical trading model analysis",
+    whyReasonKey: "quest.logic_puzzle.why",
+    fallbackWhyRu: "Тренировка критического мышления и структуры принятия решений.",
+    fallbackWhyEn: "Training critical thinking and decision structure.",
+  },
+  {
+    id: "q_workout",
+    category: "Physical",
+    durationMinutes: 30,
+    difficulty: "Medium",
+    xpReward: 40,
+    coinsReward: 10,
+    statKey: "Strength",
+    verificationType: "SelfReport",
+    titleKey: "quest.workout.title",
+    fallbackTitleRu: "Силовая тренировка или растяжка",
+    fallbackTitleEn: "Strength workout or stretching",
+    whyReasonKey: "quest.workout.why",
+    fallbackWhyRu: "Физическая выносливость поддерживает высокий энергоресурс.",
+    fallbackWhyEn: "Physical endurance supports high energy levels.",
+  },
 ];
 
 export function getDeterministicDailyQuests(dateStr: string): {
   core: QuestTemplate[];
   bonus: QuestTemplate[];
 } {
-  // Simple deterministic hash based on date string
   let hash = 0;
   for (let i = 0; i < dateStr.length; i++) {
     hash = (hash << 5) - hash + dateStr.charCodeAt(i);
@@ -245,7 +276,6 @@ export function getDeterministicDailyQuests(dateStr: string): {
   const seed = Math.abs(hash);
 
   const pool = [...QUEST_POOL];
-  // Fisher-Yates deterministic shuffle
   for (let i = pool.length - 1; i > 0; i--) {
     const j = (seed + i * 17) % (i + 1);
     const temp = pool[i];

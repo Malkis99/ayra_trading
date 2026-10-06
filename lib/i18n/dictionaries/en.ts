@@ -34,7 +34,7 @@ export const en: Dictionary = {
   },
   titles: {
     none: "—",
-    titleNovice: "Way Novice",
+    titleNovice: "Novice",
     titleDisciplined: "Disciplined",
     titleStrategist: "Strategist",
   },
@@ -382,7 +382,7 @@ export const en: Dictionary = {
     dragHint: "Drag to rotate",
     previewing: "Preview",
     streakCounter: "Streak: {current}/3",
-    noviceTitle: "Way Novice",
+    noviceTitle: "Novice",
     levelStatus: "Lv. {level} · {title}",
     reset: "⟲",
     resetTitle: "Reset",

@@ -89,7 +89,6 @@ export function getReputation(state: { level: number; history?: any[]; currentSt
 
   const pointsToNext = nextTier ? Math.max(0, nextTier.minPoints - points) : 0;
 
-  // 3 components placeholders for tooltip breakdown
   const usefulness = Math.min(100, Math.round((points / 1200) * 100));
   const quality = Math.min(100, Math.round((level / 20) * 100));
   const consistency = Math.min(100, Math.round((streak / 30) * 100));
@@ -253,4 +252,151 @@ export function getStatBalance(stats: Record<StatKey, StatInfo>): {
     weakestStat,
     growthCategory,
   };
+}
+
+export interface DailyStatRecord {
+  questsCompleted: Record<string, number>;
+  totalQuestsCompleted: number;
+  xpGained: number;
+  coinsGained: number;
+  questsSkipped: number;
+  questsReplaced: number;
+  isRestDay: boolean;
+  shieldUsed: boolean;
+  rewardsClaimed: number;
+}
+
+export function recordDailyStatEvent(
+  dailyStats: Record<string, DailyStatRecord>,
+  dateStr: string,
+  event: {
+    type: "questDone" | "questSkipped" | "questReplaced" | "restDay" | "shieldUsed" | "rewardClaimed";
+    category?: string;
+    xp?: number;
+    coins?: number;
+  }
+): Record<string, DailyStatRecord> {
+  const existingRecord: DailyStatRecord = dailyStats[dateStr] || {
+    questsCompleted: {},
+    totalQuestsCompleted: 0,
+    xpGained: 0,
+    coinsGained: 0,
+    questsSkipped: 0,
+    questsReplaced: 0,
+    isRestDay: false,
+    shieldUsed: false,
+    rewardsClaimed: 0,
+  };
+
+  const updatedRecord = { ...existingRecord };
+
+  if (event.type === "questDone") {
+    updatedRecord.totalQuestsCompleted += 1;
+    updatedRecord.xpGained += event.xp || 0;
+    updatedRecord.coinsGained += event.coins || 0;
+    if (event.category) {
+      const catCount = updatedRecord.questsCompleted[event.category] || 0;
+      updatedRecord.questsCompleted = {
+        ...updatedRecord.questsCompleted,
+        [event.category]: catCount + 1,
+      };
+    }
+  } else if (event.type === "questSkipped") {
+    updatedRecord.questsSkipped += 1;
+  } else if (event.type === "questReplaced") {
+    updatedRecord.questsReplaced += 1;
+  } else if (event.type === "restDay") {
+    updatedRecord.isRestDay = true;
+  } else if (event.type === "shieldUsed") {
+    updatedRecord.shieldUsed = true;
+  } else if (event.type === "rewardClaimed") {
+    updatedRecord.rewardsClaimed += 1;
+    updatedRecord.coinsGained += event.coins || 0;
+  }
+
+  const nextStats = { ...dailyStats, [dateStr]: updatedRecord };
+
+  // Keep max 365 days
+  const keys = Object.keys(nextStats).sort();
+  if (keys.length > 365) {
+    const toRemove = keys.slice(0, keys.length - 365);
+    toRemove.forEach((k) => delete nextStats[k]);
+  }
+
+  return nextStats;
+}
+
+export interface ProfileObservations {
+  topCategory: string | null;
+  growthZone: StatKey;
+  streakInsight: string;
+  adviceTextKey: string;
+}
+
+export function getProfileObservations(
+  state: any,
+  statsMap: Record<StatKey, StatInfo>
+): ProfileObservations {
+  const history = state.history || [];
+  const categoryCounts: Record<string, number> = {};
+
+  history.forEach((h: any) => {
+    if (h.category) {
+      categoryCounts[h.category] = (categoryCounts[h.category] || 0) + 1;
+    }
+  });
+
+  let topCategory: string | null = null;
+  let maxCount = 0;
+  Object.entries(categoryCounts).forEach(([cat, count]) => {
+    if (count > maxCount) {
+      maxCount = count;
+      topCategory = cat;
+    }
+  });
+
+  const balance = getStatBalance(statsMap);
+
+  return {
+    topCategory,
+    growthZone: balance.weakestStat,
+    streakInsight: state.currentStreak >= 3 ? "strongStreak" : "buildingStreak",
+    adviceTextKey: balance.isBalanced ? "balancedProfile" : "focusGrowthZone",
+  };
+}
+
+export function exportProfileDataJSON(state: any, exportedAtDate: Date = new Date()): string {
+  const todayStr = exportedAtDate.toISOString().split("T")[0];
+  const filename = `ayra-profile-${state.name || "TraderOne"}-${todayStr}.json`;
+
+  const payload = {
+    app: "ayra",
+    exportVersion: "1.0",
+    exportedAt: exportedAtDate.toISOString(),
+    user: {
+      name: state.name,
+      bio: state.bio,
+      path: state.path,
+      level: state.level,
+      xp: state.xp,
+      coins: state.coins,
+      createdAt: state.createdAt || todayStr,
+      currentStreak: state.currentStreak,
+      bestStreak: state.bestStreak,
+      plan: state.plan,
+      selectedTitle: state.selectedTitle,
+      unlockedTitles: state.unlockedTitles,
+      equipment: state.equipment,
+      loadouts: state.loadouts,
+      activeLoadout: state.activeLoadout,
+      achievements: state.achievements,
+      dailyStats: state.dailyStats || {},
+      history: state.history || [],
+      posts: state.posts || [],
+      customGoals: state.customGoals || [],
+      chronicle: state.chronicle || [],
+    },
+  };
+
+  return JSON.stringify(payload, null, 2);
 }

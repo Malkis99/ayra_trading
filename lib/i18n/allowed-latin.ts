@@ -1,0 +1,18 @@
+export const ALLOWED_LATIN_WORDS = [
+  "AYRA",
+  "Free",
+  "Pro",
+  "Elite",
+  "XP",
+  "Coins",
+  "R",
+  "pt",
+  "JSON",
+  "CPI",
+  "FOMC",
+  "PMI",
+  "DXY",
+  "BTC",
+  "SP500",
+  "NASDAQ",
+] as const;
