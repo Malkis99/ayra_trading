@@ -17,15 +17,15 @@ export const GAME_CONFIG = {
     TITLE_STRATEGIST_LEVEL: 5,
   },
 
-  // Characteristic -> Developed by Task Categories (Spec v1.1)
+  // Characteristic -> Developed by Task Categories (Spec v1.4)
   STAT_DEVELOPED_BY_CATEGORIES: {
-    discipline: ["Discipline", "Lifestyle"],
-    trading: ["Trading"],
-    intelligence: ["Mental"],
-    focus: ["Trading", "Social"],
-    psychology: ["Psychology", "Social"],
-    knowledge: ["Mental"],
-    endurance: ["Physical", "Lifestyle"],
-    strength: ["Physical"],
+    discipline: ["discipline", "lifestyle"],
+    trading: ["trading"],
+    intelligence: ["mental"],
+    focus: ["trading", "social"],
+    psychology: ["psychology", "social"],
+    knowledge: ["mental"],
+    endurance: ["physical", "lifestyle"],
+    strength: ["physical"],
   } as Record<string, string[]>,
 };

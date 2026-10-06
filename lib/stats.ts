@@ -174,14 +174,14 @@ export function calculateStats(state: any): Record<StatKey, StatInfo> {
   };
 
   const categories: Record<StatKey, string> = {
-    discipline: "Discipline",
-    trading: "Trading",
-    intelligence: "Mental",
-    focus: "Discipline",
-    psychology: "Psychology",
-    knowledge: "Mental",
-    endurance: "Physical",
-    strength: "Physical",
+    discipline: "discipline",
+    trading: "trading",
+    intelligence: "mental",
+    focus: "trading",
+    psychology: "psychology",
+    knowledge: "mental",
+    endurance: "physical",
+    strength: "physical",
   };
 
   const weeklyGains: Record<StatKey, number> = {

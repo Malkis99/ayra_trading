@@ -32,6 +32,7 @@ import {
 import { TITLES_CATALOG } from "./titles";
 import { ru } from "./i18n/dictionaries/ru";
 import { en } from "./i18n/dictionaries/en";
+import { ALLOWED_LATIN_WORDS } from "./i18n/allowed-latin";
 import { ITEMS } from "./items";
 
 describe("Game State Logic v3.1 (lib/game.ts & lib/quests.ts)", () => {
@@ -206,7 +207,7 @@ describe("T4.1 i18n & State Purity Audits", () => {
   });
 
   it("(b) ru values do not contain disallowed English words", () => {
-    const allowedWords = new Set(["AYRA", "Trading", "Free", "Pro", "Elite", "XP", "Coins"]);
+    const allowedWords = new Set([...ALLOWED_LATIN_WORDS, "Trading"]);
 
     function checkValues(obj: any, path = "") {
       for (const k in obj) {

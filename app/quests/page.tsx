@@ -75,13 +75,13 @@ export default function QuestsPage() {
 
   const handlePass = (id: string) => {
     passQuest(id);
-    showToast("Задание пропущено без штрафа");
+    showToast(dict.questsPage.todayTab.notTodayToast);
   };
 
   const handleReplace = (id: string) => {
     const success = replaceQuest(id);
     if (success) {
-      showToast("Задание заменено");
+      showToast(dict.questsPage.todayTab.questReplacedToast);
     } else {
       showToast(dict.questsPage.todayTab.replaceLimitReached);
     }
@@ -93,7 +93,7 @@ export default function QuestsPage() {
     addCustomGoal(goalTitle.trim(), goalCategory);
     setGoalTitle("");
     setIsAddingGoal(false);
-    showToast("Цель добавлена");
+    showToast(dict.questsPage.goalsTab.goalAddedToast);
   };
 
   return (
@@ -353,7 +353,7 @@ export default function QuestsPage() {
             <p className="text-xs text-mu">{dict.questsPage.weekTab.challengeDesc}</p>
             <div className="space-y-1.5 pt-2">
               <div className="flex justify-between text-xs font-semibold">
-                <span className="text-mu">Прогресс</span>
+                <span className="text-mu">{dict.questsPage.weekTab.progressLabel}</span>
                 <span className="text-go">
                   {Math.min(10, gameState.weeklyQuestCount)} / 10
                 </span>

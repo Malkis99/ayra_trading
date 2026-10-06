@@ -15,4 +15,8 @@ export const ALLOWED_LATIN_WORDS = [
   "BTC",
   "SP500",
   "NASDAQ",
+  "Process",
+  "Score",
+  "English",
+  "Russian",
 ] as const;
