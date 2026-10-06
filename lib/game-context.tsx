@@ -46,6 +46,7 @@ interface GameContextType {
   claimDailyReward: () => number;
   setPlan: (plan: "Free" | "Pro" | "Elite") => void;
   updateProfile: (name: string, bio: string) => void;
+  selectTitle: (titleId: string) => void;
   equipItem: (itemId: number) => string[];
   unequipSlot: (slot: string) => string[];
   applyLoadout: (loadoutName: string) => string[];
@@ -168,6 +169,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   const updateProfile = useCallback((name: string, bio: string) => {
     setGameState((prev) => updateProfileInfoLogic(prev, name, bio));
+  }, []);
+
+  const selectTitle = useCallback((titleId: string) => {
+    setGameState((prev) => {
+      if (!prev.unlockedTitles.includes(titleId)) return prev;
+      return { ...prev, selectedTitle: titleId };
+    });
   }, []);
 
   const equipItem = useCallback((itemId: number) => {
@@ -312,6 +320,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         claimDailyReward,
         setPlan,
         updateProfile,
+        selectTitle,
         equipItem,
         unequipSlot,
         applyLoadout,
