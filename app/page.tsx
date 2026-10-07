@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
-import { Plus, CheckSquare, BarChart2 } from "lucide-react";
+import { Plus, CheckSquare, BarChart2, X, Sparkles, Compass } from "lucide-react";
 import { formatString, getPlural, formatNumber } from "@/lib/i18n";
 import { Figure } from "@/components/Figure";
 import { Sparkline } from "@/components/Sparkline";
@@ -15,7 +15,13 @@ import { TITLES, FRAMES, ITEMS } from "@/lib/items";
 
 export default function HomePage() {
   const { setAddModalOpen, showToast, dict, lang } = useApp();
-  const { gameState, completeQuest, claimDailyReward, characterStatus } = useGame();
+  const {
+    gameState,
+    completeQuest,
+    claimDailyReward,
+    characterStatus,
+    dismissLegacyBanner,
+  } = useGame();
 
   const [greeting, setGreeting] = useState<string>("");
 
@@ -142,8 +148,68 @@ export default function HomePage() {
     );
   };
 
+  const showLegacyBanner =
+    gameState.onboarding.status === "legacy" &&
+    !gameState.onboarding.legacyDismissed;
+  const showInProgressBanner = gameState.onboarding.status === "inProgress";
+
   return (
     <div className="space-y-6">
+      {/* Onboarding Soft Banners */}
+      {showLegacyBanner && (
+        <div className="card bg-gradient-to-r from-vi/20 via-s1 to-s1 border-vi/40 relative flex flex-col md:flex-row items-start md:items-center justify-between gap-4 p-4">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-xl bg-vi/20 text-vi flex-none mt-0.5">
+              <Sparkles size={18} />
+            </div>
+            <div>
+              <h3 className="font-semibold text-sm text-tx">
+                {dict.awakening.bannerLegacyTitle}
+              </h3>
+              <p className="text-xs text-mu mt-0.5">
+                {dict.awakening.bannerLegacyDesc}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-end md:self-auto">
+            <Link href="/awakening" className="btn text-xs py-1.5 px-3">
+              {dict.awakening.bannerLegacyBtn}
+            </Link>
+            <button
+              onClick={dismissLegacyBanner}
+              className="p-1.5 rounded-lg text-mu hover:text-tx hover:bg-white/5 transition-colors"
+              aria-label="Dismiss banner"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showInProgressBanner && (
+        <div className="card bg-gradient-to-r from-go/15 via-s1 to-s1 border-go/40 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 p-4">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-xl bg-go/20 text-go flex-none mt-0.5">
+              <Compass size={18} />
+            </div>
+            <div>
+              <h3 className="font-semibold text-sm text-tx">
+                {dict.awakening.bannerInProgressTitle}
+              </h3>
+              <p className="text-xs text-mu mt-0.5">
+                {dict.awakening.bannerInProgressDesc}
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/awakening"
+            className="btn text-xs py-1.5 px-3 bg-go text-ink hover:bg-go/90 self-end md:self-auto"
+          >
+            {dict.awakening.bannerInProgressBtn}
+          </Link>
+        </div>
+      )}
+
       {/* Welcome Banner */}
       <div className="card bg-gradient-to-r from-s1 via-[#1c1b28] to-s1">
         <div className="text-xs text-mu">{greeting || dict.home.greetings.afternoon}</div>
@@ -317,7 +383,12 @@ export default function HomePage() {
                 style={{ borderColor: frameColor }}
               >
                 <div className="absolute inset-0 bg-radial-gradient from-vi/20 to-transparent pointer-events-none" />
-                <Figure equipment={gameState.equipment} width={64} height={110} />
+                <Figure
+                  equipment={gameState.equipment}
+                  appearance={gameState.profile.appearance}
+                  width={64}
+                  height={110}
+                />
                 {/* Pedestal Ring */}
                 <div className="absolute bottom-1 w-16 h-3 rounded-full border border-vi/60 bg-vi/20" />
               </div>

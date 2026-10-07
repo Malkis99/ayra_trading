@@ -23,6 +23,8 @@ import {
   updateProfileInfo as updateProfileInfoLogic,
 } from "@/lib/game";
 import { ITEMS, FRAMES, TITLES, BACKGROUNDS } from "@/lib/items";
+import { AvatarAppearance, validateAvatarAppearance } from "@/lib/avatar";
+import { OnboardingState, generateProgram } from "@/lib/awakening";
 
 const STORAGE_KEY = "ayra_demo_v1";
 
@@ -63,6 +65,15 @@ interface GameContextType {
   addCustomGoal: (title: string, category: string) => void;
   removeCustomGoal: (goalId: string) => void;
   characterStatus: "Training" | "Resting";
+
+  // Onboarding & Settings extensions
+  saveOnboardingAnswer: (key: string, value: any) => void;
+  setOnboardingStep: (step: number, subStep: number) => void;
+  completeOnboarding: () => void;
+  dismissLegacyBanner: () => void;
+  setAiConsent: (consent: boolean) => void;
+  updateAvatarAppearance: (appearance: AvatarAppearance) => void;
+  updateMinorMode: (minorMode: boolean) => void;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -73,8 +84,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [previewItem, setPreviewItem] = useState<number | null>(null);
   const [wardrobeFilter, setWardrobeFilter] = useState<string>("all");
 
-  // Load from localStorage on client mount to avoid SSR hydration mismatch
+  // Load from localStorage on client mount to avoid SSR hydration mismatch, with safety timer fallback
   useEffect(() => {
+    let timer: NodeJS.Timeout;
+
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
@@ -90,6 +103,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoaded(true);
     }
+
+    // Safety fallback timer: force hydrated = true after 1.5s to prevent infinite whiteout or splash freeze
+    timer = setTimeout(() => {
+      setIsLoaded(true);
+    }, 1500);
+
+    return () => clearTimeout(timer);
   }, []);
 
   // Save to localStorage whenever state changes after mount
@@ -101,6 +121,128 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       // ignore storage errors
     }
   }, [gameState, isLoaded]);
+
+  const saveOnboardingAnswer = useCallback((key: string, value: any) => {
+    setGameState((prev) => {
+      const newAnswers = { ...prev.onboarding.answers, [key]: value };
+      const currentStatus = prev.onboarding.status;
+      const newStatus =
+        currentStatus === "done" || currentStatus === "legacy"
+          ? currentStatus
+          : "inProgress";
+
+      let newName = prev.name;
+      if (key === "nickname" && typeof value === "string" && value.trim()) {
+        newName = value.trim();
+      }
+
+      let newAppearance = prev.profile.appearance;
+      if (key === "appearance" && typeof value === "object") {
+        newAppearance = validateAvatarAppearance(value);
+      }
+
+      let newMinorMode = prev.profile.minorMode;
+      if (key === "ageRange") {
+        newMinorMode = value === "16-17";
+      }
+
+      const newStartedAt =
+        prev.onboarding.startedAt || new Date().toISOString();
+
+      return {
+        ...prev,
+        name: newName,
+        profile: {
+          ...prev.profile,
+          appearance: newAppearance,
+          minorMode: newMinorMode,
+        },
+        onboarding: {
+          ...prev.onboarding,
+          status: newStatus,
+          answers: newAnswers,
+          startedAt: newStartedAt,
+        },
+      };
+    });
+  }, []);
+
+  const setOnboardingStep = useCallback((step: number, subStep: number) => {
+    setGameState((prev) => ({
+      ...prev,
+      onboarding: {
+        ...prev.onboarding,
+        step,
+        subStep,
+        status:
+          prev.onboarding.status === "done" || prev.onboarding.status === "legacy"
+            ? prev.onboarding.status
+            : "inProgress",
+        startedAt: prev.onboarding.startedAt || new Date().toISOString(),
+      },
+    }));
+  }, []);
+
+  const completeOnboarding = useCallback(() => {
+    setGameState((prev) => {
+      generateProgram(prev.onboarding.answers);
+      return {
+        ...prev,
+        onboarding: {
+          ...prev.onboarding,
+          status: "done",
+          step: 5,
+          subStep: 0,
+          finishedAt: prev.onboarding.finishedAt || new Date().toISOString(),
+        },
+      };
+    });
+  }, []);
+
+  const dismissLegacyBanner = useCallback(() => {
+    setGameState((prev) => ({
+      ...prev,
+      onboarding: {
+        ...prev.onboarding,
+        legacyDismissed: true,
+      },
+    }));
+  }, []);
+
+  const setAiConsent = useCallback((aiConsent: boolean) => {
+    setGameState((prev) => ({
+      ...prev,
+      aiConsent,
+    }));
+  }, []);
+
+  const updateAvatarAppearance = useCallback((appearance: AvatarAppearance) => {
+    const valid = validateAvatarAppearance(appearance);
+    setGameState((prev) => ({
+      ...prev,
+      profile: {
+        ...prev.profile,
+        appearance: valid,
+      },
+      onboarding: {
+        ...prev.onboarding,
+        answers: {
+          ...prev.onboarding.answers,
+          appearance: valid,
+        },
+      },
+    }));
+  }, []);
+
+  const updateMinorMode = useCallback((minorMode: boolean) => {
+    setGameState((prev) => ({
+      ...prev,
+      profile: {
+        ...prev.profile,
+        minorMode,
+      },
+    }));
+  }, []);
 
   const completeQuest = useCallback(
     (
@@ -342,6 +484,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         addCustomGoal,
         removeCustomGoal,
         characterStatus,
+        saveOnboardingAnswer,
+        setOnboardingStep,
+        completeOnboarding,
+        dismissLegacyBanner,
+        setAiConsent,
+        updateAvatarAppearance,
+        updateMinorMode,
       }}
     >
       {children}

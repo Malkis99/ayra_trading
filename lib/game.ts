@@ -7,6 +7,15 @@ import {
   recordDailyStatEvent,
   DailyStatRecord,
 } from "./stats";
+import {
+  AvatarAppearance,
+  DEFAULT_AVATAR_APPEARANCE,
+  validateAvatarAppearance,
+} from "./avatar";
+import {
+  OnboardingState,
+  INITIAL_ONBOARDING_STATE,
+} from "./awakening";
 
 export const DAILY_REWARDS = GAME_CONFIG.DAILY_REWARD_VALUES;
 export const QUEST_XP = GAME_CONFIG.QUEST_XP;
@@ -39,6 +48,12 @@ export interface CustomGoal {
 export interface StatSnapshot {
   date: string; // YYYY-MM-DD
   values: Record<string, number>;
+}
+
+export interface ProfileState {
+  appearance: AvatarAppearance;
+  minorMode: boolean;
+  timezone: string;
 }
 
 export interface GameState {
@@ -86,6 +101,9 @@ export interface GameState {
   customGoals: CustomGoal[];
   statSnapshots: StatSnapshot[];
   dailyStats: Record<string, DailyStatRecord>;
+  onboarding: OnboardingState;
+  profile: ProfileState;
+  aiConsent: boolean;
 }
 
 export function getIsoDateString(date: Date): string {
@@ -140,6 +158,13 @@ export const INITIAL_GAME_STATE: GameState = {
   customGoals: [],
   statSnapshots: [],
   dailyStats: {},
+  onboarding: INITIAL_ONBOARDING_STATE,
+  profile: {
+    appearance: DEFAULT_AVATAR_APPEARANCE,
+    minorMode: false,
+    timezone: typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" : "UTC",
+  },
+  aiConsent: false,
 };
 
 export function xpForNextLevel(level: number): number {
@@ -243,6 +268,43 @@ export function migrateState(rawState: any): GameState {
       ? rawState.dailyStats
       : {};
 
+  let onboarding: OnboardingState;
+  if (!rawState.onboarding) {
+    onboarding = {
+      status: "legacy",
+      step: 1,
+      subStep: 0,
+      answers: {},
+      legacyDismissed: false,
+    };
+  } else {
+    onboarding = {
+      status: rawState.onboarding.status || "none",
+      step: rawState.onboarding.step || 1,
+      subStep: rawState.onboarding.subStep || 0,
+      answers: rawState.onboarding.answers || {},
+      startedAt: rawState.onboarding.startedAt,
+      finishedAt: rawState.onboarding.finishedAt,
+      legacyDismissed: !!rawState.onboarding.legacyDismissed,
+    };
+  }
+
+  const isMinor =
+    !!rawState.profile?.minorMode ||
+    !!rawState.minorMode ||
+    onboarding.answers?.ageRange === "16-17";
+
+  const profile: ProfileState = {
+    appearance: validateAvatarAppearance(rawState.profile?.appearance || rawState.appearance),
+    minorMode: isMinor,
+    timezone:
+      rawState.profile?.timezone ||
+      rawState.timezone ||
+      (typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" : "UTC"),
+  };
+
+  const aiConsent = !!rawState.aiConsent;
+
   return {
     ...INITIAL_GAME_STATE,
     ...rawState,
@@ -263,6 +325,9 @@ export function migrateState(rawState: any): GameState {
     customGoals: rawState.customGoals || [],
     statSnapshots: Array.isArray(rawState.statSnapshots) ? rawState.statSnapshots : [],
     dailyStats,
+    onboarding,
+    profile,
+    aiConsent,
   };
 }
 
