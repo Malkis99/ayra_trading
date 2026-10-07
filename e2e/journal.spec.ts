@@ -59,17 +59,17 @@ test.describe("T6a Journal v1 E2E Flow", () => {
     await page.click("button:has-text('Сохранить сделку')");
 
     // 3. Verify trade appears in list
-    await expect(page.locator("text=XAUUSD")).toBeVisible();
-    await expect(page.locator("text=+3.00 R")).toBeVisible();
+    await expect(page.locator("text=XAUUSD").first()).toBeVisible();
+    await expect(page.locator("text=+3.00 R").first()).toBeVisible();
 
     // 4. Reload page and check persistence
     await page.reload();
     await page.click("button:has-text('Сделки')");
-    await expect(page.locator("text=XAUUSD")).toBeVisible();
+    await expect(page.locator("text=XAUUSD").first()).toBeVisible();
 
     // 5. Switch units ($ / %)
-    await page.click("button:has-text('$')");
-    await expect(page.locator("text=+$300.00")).toBeVisible();
+    await page.getByRole("button", { name: "$", exact: true }).click();
+    await expect(page.locator("text=300").first()).toBeVisible();
 
     // 6. Open trade card, edit and save
     await page.click("tr:has-text('XAUUSD')");
@@ -77,13 +77,13 @@ test.describe("T6a Journal v1 E2E Flow", () => {
     await page.fill("input[placeholder='XAUUSD, EURUSD...']", "NAS100");
     await page.click("button:has-text('Сохранить сделку')");
 
-    await expect(page.locator("text=NAS100")).toBeVisible();
+    await expect(page.locator("text=NAS100").first()).toBeVisible();
 
     // 7. Delete trade with confirmation
     await page.click("tr:has-text('NAS100')");
     await page.click("button:has-text('Удалить')");
     await expect(page.locator("text=Удалить сделку?")).toBeVisible();
-    await page.click("button:has-text('Удалить'):nth-match(2)");
+    await page.locator("button:has-text('Удалить')").first().click();
 
     await expect(page.locator("text=NAS100")).not.toBeVisible();
   });

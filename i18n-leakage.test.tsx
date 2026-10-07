@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render } from "@testing-library/react";
 import { AppProvider } from "./lib/context";
 import { GameProvider } from "./lib/game-context";
+import { JournalProvider } from "./lib/journal/context";
 import ProfilePage from "./app/profile/page";
 import HomePage from "./app/page";
 import QuestsPage from "./app/quests/page";
@@ -22,7 +23,9 @@ function renderWithProviders(ui: React.ReactNode, lang: "ru" | "en" = "ru") {
   return render(
     <AppProvider initialLang={lang}>
       <GameProvider>
-        {ui}
+        <JournalProvider>
+          {ui}
+        </JournalProvider>
       </GameProvider>
     </AppProvider>
   );

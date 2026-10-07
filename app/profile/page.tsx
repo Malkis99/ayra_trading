@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
+import { useJournal } from "@/lib/journal/context";
 import { CharacterStage } from "@/components/CharacterStage";
 import { TabHeader } from "@/components/TabHeader";
 import { Sparkline } from "@/components/Sparkline";
@@ -21,6 +22,7 @@ import {
   getCharacterPower,
   getStatBalance,
   getProfileObservations,
+  calculateJournalStats,
   exportProfileDataJSON,
   StatKey,
 } from "@/lib/stats";
@@ -64,6 +66,7 @@ export default function ProfilePage() {
     setFrame,
     deletePost,
   } = useGame();
+  const { trades: journalTrades } = useJournal();
 
   const [activeTab, setActiveTab] = useState<number>(0);
 
@@ -1270,25 +1273,63 @@ export default function ProfilePage() {
                 </div>
               </div>
 
-              {/* BLOCK 6: JournalStats Contract Placeholder */}
-              <div className="p-4 rounded-xl border border-line/60 bg-s2/40 space-y-3 text-xs">
-                <b className="font-bold text-tx block">{dict.profile.statsTab.journal.title}</b>
-                <div className="p-4 rounded-xl border border-line bg-s1 text-center space-y-3">
-                  <div className="text-mu">{dict.profile.statsTab.journal.willAppear}</div>
-                  <div className="grid grid-cols-3 gap-2 text-[10px] text-mu font-mono">
-                    <div>{formatString(dict.profile.statsTab.journal.totalTrades, { count: 0 })}</div>
-                    <div>{formatString(dict.profile.statsTab.journal.planCompliance, { percent: 0 })}</div>
-                    <div>{formatString(dict.profile.statsTab.journal.processScore, { score: "0.0" })}</div>
+              {/* BLOCK 6: JournalStats Contract */}
+              {(() => {
+                const jStats = calculateJournalStats(journalTrades, 30);
+
+                return (
+                  <div className="p-4 rounded-xl border border-line/60 bg-s2/40 space-y-3 text-xs">
+                    <b className="font-bold text-tx block">{dict.profile.statsTab.journal.title}</b>
+                    {journalTrades.length === 0 ? (
+                      <div className="p-4 rounded-xl border border-line bg-s1 text-center space-y-3">
+                        <div className="text-mu">{dict.profile.statsTab.journal.willAppear}</div>
+                        <button
+                          type="button"
+                          onClick={() => openAddModal("trade")}
+                          className="btn text-xs py-2 px-4 cursor-pointer"
+                        >
+                          {dict.profile.statsTab.journal.recordTradeBtn}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                        <div className="p-2.5 rounded-lg border border-line bg-s1">
+                          <span className="text-[10px] text-mu block">{dict.journal.dashboard.kpi.trades}</span>
+                          <b className="text-sm font-mono text-tx">{jStats.totalTrades}</b>
+                        </div>
+                        <div className="p-2.5 rounded-lg border border-line bg-s1">
+                          <span className="text-[10px] text-mu block">
+                            {dict.journal.dashboard.filters.period30d} (R)
+                          </span>
+                          <b className={`text-sm font-mono ${jStats.periodRResult > 0 ? "text-emerald-400" : jStats.periodRResult < 0 ? "text-rose-400" : "text-tx"}`}>
+                            {jStats.periodRResult > 0 ? `+${jStats.periodRResult}` : jStats.periodRResult} R
+                          </b>
+                        </div>
+                        <div className="p-2.5 rounded-lg border border-line bg-s1">
+                          <span className="text-[10px] text-mu block">
+                            {dict.awakening.skills3m.plan_compliance}
+                          </span>
+                          <b className="text-sm font-mono text-vi">{jStats.planCompliancePercent}%</b>
+                        </div>
+                        <div className="p-2.5 rounded-lg border border-line bg-s1">
+                          <span className="text-[10px] text-mu block">Process Score</span>
+                          <b className="text-sm font-mono text-go">{jStats.averageProcessScore} / 5.0</b>
+                        </div>
+                        <div className="p-2.5 rounded-lg border border-line bg-s1">
+                          <span className="text-[10px] text-mu block">{dict.journal.journalStreak}</span>
+                          <b className="text-sm font-mono text-tx">
+                            {jStats.journalStreakDays} {dict.journal.daysShort}
+                          </b>
+                        </div>
+                        <div className="p-2.5 rounded-lg border border-line bg-s1">
+                          <span className="text-[10px] text-mu block">{dict.journal.tabs.notes}</span>
+                          <b className="text-sm font-mono text-tx">{jStats.notesCount}</b>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => openAddModal("trade")}
-                    className="btn text-xs py-2 px-4 cursor-pointer"
-                  >
-                    {dict.profile.statsTab.journal.recordTradeBtn}
-                  </button>
-                </div>
-              </div>
+                );
+              })()}
 
               {/* BLOCK 7: Collection */}
               <div className="p-4 rounded-xl border border-line bg-s2/40 space-y-2 text-xs">

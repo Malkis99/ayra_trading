@@ -272,14 +272,21 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
     });
 
     const nowIso = new Date().toISOString();
+    const isClosed = Boolean(closedAt || parsedPnl !== null || parsedR !== null || parsedExit !== null);
+    const resolvedClosedAt = closedAt
+      ? new Date(closedAt).toISOString()
+      : isClosed
+      ? new Date(openedAt).toISOString()
+      : undefined;
+
     const tradeToSave: Trade = {
       id: initialTrade?.id || `tr_${Date.now()}`,
       accountId,
       instrument: normInst,
       direction,
-      status: closedAt ? "closed" : "open",
+      status: isClosed ? "closed" : "open",
       openedAt: new Date(openedAt).toISOString(),
-      closedAt: closedAt ? new Date(closedAt).toISOString() : undefined,
+      closedAt: resolvedClosedAt,
       entryPrice: parsedEntry ?? undefined,
       exitPrice: parsedExit ?? undefined,
       stopLoss: parsedSL ?? undefined,

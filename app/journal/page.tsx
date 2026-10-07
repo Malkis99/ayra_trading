@@ -9,6 +9,10 @@ import { Account, Trade, AccountType, AccountCurrency } from "@/lib/journal/type
 import { calculatePnlPercent } from "@/lib/journal/calc";
 import { exportProfileDataJSON, calculateJournalStats } from "@/lib/stats";
 import { AddTradeModal } from "@/components/AddTradeModal";
+import { DashboardTab } from "@/components/journal/DashboardTab";
+import { CalendarTab } from "@/components/journal/CalendarTab";
+import { ReportsTab } from "@/components/journal/ReportsTab";
+import { getDemoTrades, DEMO_ACCOUNT } from "@/lib/journal/demo-trades";
 import { Plus, Download, AlertTriangle, Search, Trash2, Edit2, ShieldAlert } from "lucide-react";
 
 export default function JournalPage() {
@@ -24,7 +28,19 @@ export default function JournalPage() {
     deleteTrade,
   } = useJournal();
 
-  const [activeTab, setActiveTab] = useState<number>(1); // Default to Trades tab (1)
+  const [activeTab, setActiveTab] = useState<number>(0); // Default to Dashboard (0)
+
+  // Demo Mode State
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(false);
+
+  // Active trades and accounts (demo vs real)
+  const activeTrades = useMemo(() => {
+    return isDemoMode ? getDemoTrades() : trades;
+  }, [isDemoMode, trades]);
+
+  const activeAccounts = useMemo(() => {
+    return isDemoMode ? [DEMO_ACCOUNT, ...accounts] : accounts;
+  }, [isDemoMode, accounts]);
 
   // Unit Switcher: 'R' | 'money' | 'percent'
   const [unit, setUnit] = useState<"R" | "money" | "percent">("R");
@@ -45,18 +61,19 @@ export default function JournalPage() {
     }
   };
 
-  // Trade Filters
+  // Trade Filters for Trades Tab (Tab 1)
   const [filterAccount, setFilterAccount] = useState<string>("all");
-  const [filterPeriod, setFilterPeriod] = useState<string>("all"); // '7d' | '30d' | '90d' | 'all'
+  const [filterPeriod, setFilterPeriod] = useState<string>("all");
   const [filterInstrument, setFilterInstrument] = useState<string>("");
-  const [filterResult, setFilterResult] = useState<string>("all"); // 'win' | 'loss' | 'breakeven' | 'all'
-  const [filterDirection, setFilterDirection] = useState<string>("all"); // 'long' | 'short' | 'all'
+  const [filterResult, setFilterResult] = useState<string>("all");
+  const [filterDirection, setFilterDirection] = useState<string>("all");
   const [page, setPage] = useState<number>(1);
 
   // Trade Detail / Edit / Delete state
   const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null);
   const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
   const [deletingTradeId, setDeleteTradeId] = useState<string | null>(null);
+  const [addTradeInitialDate, setAddTradeInitialDate] = useState<string | undefined>(undefined);
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
 
   // Account Form state
@@ -78,7 +95,7 @@ export default function JournalPage() {
     dict.journal.tabs.notes,
   ];
 
-  // Export JSON
+  // Export JSON (guaranteed to export only real journal data, never demo data)
   const handleExportJSON = () => {
     const jsonStr = exportProfileDataJSON(gameState, { accounts, trades });
     const blob = new Blob([jsonStr], { type: "application/json" });
@@ -94,11 +111,11 @@ export default function JournalPage() {
     showToast(dict.profile.statsTab.downloadedToast);
   };
 
-  // Filter Trades
+  // Filter Trades for Trades Tab
   const filteredTrades = useMemo(() => {
     const nowMs = Date.now();
 
-    return trades.filter((t) => {
+    return activeTrades.filter((t) => {
       if (filterAccount !== "all" && t.accountId !== filterAccount) return false;
       if (filterResult !== "all" && t.result !== filterResult) return false;
       if (filterDirection !== "all" && t.direction !== filterDirection) return false;
@@ -118,7 +135,7 @@ export default function JournalPage() {
 
       return true;
     }).sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
-  }, [trades, filterAccount, filterPeriod, filterInstrument, filterResult, filterDirection]);
+  }, [activeTrades, filterAccount, filterPeriod, filterInstrument, filterResult, filterDirection]);
 
   // Paginated Trades (50 per page)
   const pageSize = 50;
@@ -131,14 +148,13 @@ export default function JournalPage() {
 
   // Formatting trade result values
   const formatTradeValue = (trade: Trade) => {
-    const acc = accounts.find((a) => a.id === trade.accountId);
+    const acc = activeAccounts.find((a) => a.id === trade.accountId);
     const curr = acc?.currency || "USD";
 
     if (unit === "R") {
       if (trade.rMultiple != null) {
         const val = trade.rMultiple;
-        const formatted = val > 0 ? `+${val.toFixed(2)} R` : `${val.toFixed(2)} R`;
-        return formatted;
+        return val > 0 ? `+${val.toFixed(2)} R` : `${val.toFixed(2)} R`;
       }
       return "—";
     }
@@ -152,7 +168,6 @@ export default function JournalPage() {
       return "—";
     }
 
-    // Money format
     if (trade.pnlMoney != null) {
       const val = trade.pnlMoney;
       try {
@@ -171,7 +186,6 @@ export default function JournalPage() {
     return "—";
   };
 
-  // Focus trap for delete confirmation
   useEffect(() => {
     if (deletingTradeId && cancelButtonRef.current) {
       cancelButtonRef.current.focus();
@@ -187,7 +201,6 @@ export default function JournalPage() {
     }
   };
 
-  // Account Modal Actions
   const handleOpenAccountModal = (account?: Account) => {
     setEditingAccount(account || null);
     setAccName(account?.name || "");
@@ -229,7 +242,11 @@ export default function JournalPage() {
     }
   };
 
-  const journalStats = useMemo(() => calculateJournalStats(trades, 30), [trades]);
+  const handleAddTradeForDate = (dateStr: string) => {
+    const dateIso = `${dateStr}T12:00`;
+    setAddTradeInitialDate(dateIso);
+    setAddTradeModalOpen(true);
+  };
 
   return (
     <div className="space-y-4">
@@ -240,7 +257,10 @@ export default function JournalPage() {
           <p className="text-xs text-mu mt-0.5">{dict.journal.subtitle}</p>
         </div>
         <button
-          onClick={() => setAddTradeModalOpen(true)}
+          onClick={() => {
+            setAddTradeInitialDate(undefined);
+            setAddTradeModalOpen(true);
+          }}
           className="btn text-xs py-2 px-4 flex items-center gap-1.5 self-start sm:self-auto font-semibold"
         >
           <Plus size={16} />
@@ -275,36 +295,30 @@ export default function JournalPage() {
 
       {/* TAB 0: DASHBOARD */}
       {activeTab === 0 && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="card p-4 space-y-1">
-              <span className="text-xs text-mu">{dict.journal.tradesTab.colResult}</span>
-              <b className="block text-2xl font-bold text-tx">{trades.length}</b>
-              <span className="text-[11px] text-mu">{dict.home.journalBlock.title}</span>
-            </div>
+        <div className="space-y-6">
+          <DashboardTab
+            trades={activeTrades}
+            accounts={activeAccounts}
+            unit={unit}
+            onUnitChange={handleUnitChange}
+            onGoToTrades={() => setActiveTab(1)}
+            isDemoMode={isDemoMode}
+            onEnableDemoMode={() => setIsDemoMode(true)}
+            onExitDemoMode={() => setIsDemoMode(false)}
+            dict={dict}
+            lang={lang}
+          />
 
-            <div className="card p-4 space-y-1">
-              <span className="text-xs text-mu">{dict.journal.accountsTab.title}</span>
-              <b className="block text-2xl font-bold text-tx">{accounts.length}</b>
-              <span className="text-[11px] text-mu">{dict.journal.accountsCreated}</span>
-            </div>
-
-            <div className="card p-4 space-y-1">
-              <span className="text-xs text-mu">Streak</span>
-              <b className="block text-2xl font-bold text-tx">{journalStats.journalStreakDays} {dict.journal.daysShort}</b>
-              <span className="text-[11px] text-mu">{dict.journal.journalStreak}</span>
-            </div>
-          </div>
-
-          <div className="card text-center p-6 space-y-3">
-            <p className="text-xs text-mu">{dict.journal.inDev}</p>
-            <button
-              onClick={() => setAddTradeModalOpen(true)}
-              className="btn text-xs py-2 px-4 inline-flex items-center gap-1.5"
-            >
-              <Plus size={16} />
-              <span>{dict.home.quickActions.addTrade}</span>
-            </button>
+          {/* Embedded Calendar Section */}
+          <div className="pt-2 border-t border-line">
+            <CalendarTab
+              trades={activeTrades}
+              accounts={activeAccounts}
+              unit={unit}
+              onAddTradeForDate={handleAddTradeForDate}
+              dict={dict}
+              lang={lang}
+            />
           </div>
         </div>
       )}
@@ -312,12 +326,12 @@ export default function JournalPage() {
       {/* TAB 1: TRADES */}
       {activeTab === 1 && (
         <div className="space-y-4">
-          {/* Controls Bar: Unit Switcher & Filters */}
           <div className="card p-3 space-y-3">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-              {/* Unit Switcher */}
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-mu">{dict.journal.tradesTab.unitSwitcher}</span>
+                <span className="text-xs font-semibold text-mu">
+                  {dict.journal.tradesTab.unitSwitcher}
+                </span>
                 <div className="flex rounded-lg border border-line bg-s2 p-0.5 text-xs">
                   <button
                     onClick={() => handleUnitChange("R")}
@@ -346,7 +360,6 @@ export default function JournalPage() {
                 </div>
               </div>
 
-              {/* Instrument Search */}
               <div className="relative flex-1 max-w-xs">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-mu" />
                 <input
@@ -362,9 +375,7 @@ export default function JournalPage() {
               </div>
             </div>
 
-            {/* Filter Dropdowns */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-              {/* Account */}
               <select
                 value={filterAccount}
                 onChange={(e) => {
@@ -374,14 +385,13 @@ export default function JournalPage() {
                 className="input text-xs"
               >
                 <option value="all">{dict.journal.tradesTab.filterAccount}</option>
-                {accounts.map((a) => (
+                {activeAccounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name || dict.journal.accountsTab.mainAccountDefaultName}
                   </option>
                 ))}
               </select>
 
-              {/* Period */}
               <select
                 value={filterPeriod}
                 onChange={(e) => {
@@ -396,7 +406,6 @@ export default function JournalPage() {
                 <option value="90d">{dict.journal.tradesTab.period90d}</option>
               </select>
 
-              {/* Result */}
               <select
                 value={filterResult}
                 onChange={(e) => {
@@ -411,7 +420,6 @@ export default function JournalPage() {
                 <option value="breakeven">{dict.journal.tradesTab.resultBreakeven}</option>
               </select>
 
-              {/* Direction */}
               <select
                 value={filterDirection}
                 onChange={(e) => {
@@ -427,7 +435,6 @@ export default function JournalPage() {
             </div>
           </div>
 
-          {/* Empty State */}
           {filteredTrades.length === 0 ? (
             <div className="card text-center p-8 space-y-3 border-dashed">
               <h3 className="h3">{dict.journal.tradesTab.emptyTitle}</h3>
@@ -444,7 +451,6 @@ export default function JournalPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              {/* Wide Screen Table View (hidden on mobile) */}
               <div className="hidden md:block overflow-x-auto card p-0">
                 <table className="w-full text-xs text-left">
                   <thead className="bg-s2/80 text-mu font-semibold border-b border-line">
@@ -459,7 +465,7 @@ export default function JournalPage() {
                   </thead>
                   <tbody className="divide-y divide-line/40">
                     {paginatedTrades.map((t) => {
-                      const acc = accounts.find((a) => a.id === t.accountId);
+                      const acc = activeAccounts.find((a) => a.id === t.accountId);
                       const isWin = t.result === "win";
                       const isLoss = t.result === "loss";
 
@@ -470,12 +476,15 @@ export default function JournalPage() {
                           className="hover:bg-s2/60 cursor-pointer transition-colors"
                         >
                           <td className="p-3 text-mu">
-                            {new Date(t.openedAt).toLocaleDateString(lang === "ru" ? "ru-RU" : "en-US", {
-                              day: "2-digit",
-                              month: "short",
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
+                            {new Date(t.openedAt).toLocaleDateString(
+                              lang === "ru" ? "ru-RU" : "en-US",
+                              {
+                                day: "2-digit",
+                                month: "short",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              }
+                            )}
                           </td>
                           <td className="p-3 font-bold text-tx">{t.instrument}</td>
                           <td className="p-3">
@@ -521,10 +530,10 @@ export default function JournalPage() {
                 </table>
               </div>
 
-              {/* Mobile Card View (hidden on desktop) */}
+              {/* Mobile Cards */}
               <div className="grid grid-cols-1 gap-2.5 md:hidden">
                 {paginatedTrades.map((t) => {
-                  const acc = accounts.find((a) => a.id === t.accountId);
+                  const acc = activeAccounts.find((a) => a.id === t.accountId);
                   const isWin = t.result === "win";
                   const isLoss = t.result === "loss";
 
@@ -562,21 +571,25 @@ export default function JournalPage() {
 
                       <div className="flex justify-between items-center text-[11px] text-mu border-t border-line/40 pt-1.5">
                         <span>
-                          {new Date(t.openedAt).toLocaleDateString(lang === "ru" ? "ru-RU" : "en-US", {
-                            day: "2-digit",
-                            month: "short",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+                          {new Date(t.openedAt).toLocaleDateString(
+                            lang === "ru" ? "ru-RU" : "en-US",
+                            {
+                              day: "2-digit",
+                              month: "short",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            }
+                          )}
                         </span>
-                        <span>{acc?.name || dict.journal.accountsTab.mainAccountDefaultName}</span>
+                        <span>
+                          {acc?.name || dict.journal.accountsTab.mainAccountDefaultName}
+                        </span>
                       </div>
                     </div>
                   );
                 })}
               </div>
 
-              {/* Pagination */}
               {totalPages > 1 && (
                 <div className="flex justify-between items-center text-xs text-mu pt-2">
                   <button
@@ -587,7 +600,9 @@ export default function JournalPage() {
                     {dict.journal.prevBtn}
                   </button>
                   <span>
-                    {dict.journal.pageOf.replace("{page}", String(page)).replace("{total}", String(totalPages))}
+                    {dict.journal.pageOf
+                      .replace("{page}", String(page))
+                      .replace("{total}", String(totalPages))}
                   </span>
                   <button
                     disabled={page === totalPages}
@@ -601,6 +616,17 @@ export default function JournalPage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* TAB 2: REPORTS */}
+      {activeTab === 2 && (
+        <ReportsTab
+          trades={activeTrades}
+          accounts={activeAccounts}
+          unit={unit}
+          dict={dict}
+          lang={lang}
+        />
       )}
 
       {/* TAB 5: ACCOUNTS */}
@@ -651,7 +677,9 @@ export default function JournalPage() {
                     {a.startBalance != null && (
                       <div className="flex justify-between">
                         <span>{dict.journal.accountsTab.startBalance}:</span>
-                        <b className="text-tx">{a.startBalance} {a.currency}</b>
+                        <b className="text-tx">
+                          {a.startBalance} {a.currency}
+                        </b>
                       </div>
                     )}
                     <div className="flex justify-between">
@@ -692,13 +720,11 @@ export default function JournalPage() {
         </div>
       )}
 
-      {/* STUBS FOR TABS 2, 3, 4, 6 */}
-      {[2, 3, 4, 6].includes(activeTab) && (
+      {/* STUBS FOR TABS 3, 4, 6 */}
+      {[3, 4, 6].includes(activeTab) && (
         <div className="card text-center p-8 space-y-3">
           <h4 className="h4">{tabs[activeTab]}</h4>
-          <p className="text-xs text-mu max-w-sm mx-auto">
-            {dict.journal.inDev}
-          </p>
+          <p className="text-xs text-mu max-w-sm mx-auto">{dict.journal.inDev}</p>
           <span className="badge-free inline-block text-xs py-1 px-3">
             {dict.journal.comingSoon}
           </span>
@@ -717,7 +743,9 @@ export default function JournalPage() {
             <div className="flex justify-between items-center border-b border-line pb-3">
               <div>
                 <h3 className="h3">{dict.journal.tradesTab.viewTradeTitle}</h3>
-                <span className="text-xs text-mu">{selectedTrade.instrument} · {selectedTrade.direction.toUpperCase()}</span>
+                <span className="text-xs text-mu">
+                  {selectedTrade.instrument} · {selectedTrade.direction.toUpperCase()}
+                </span>
               </div>
               <button
                 onClick={() => setSelectedTrade(null)}
@@ -727,7 +755,6 @@ export default function JournalPage() {
               </button>
             </div>
 
-            {/* Inline Delete Confirmation */}
             {deletingTradeId === selectedTrade.id ? (
               <div className="p-4 bg-rose-500/15 border border-rose-500/40 rounded-xl space-y-3">
                 <p className="text-xs font-semibold text-rose-200">
@@ -753,11 +780,17 @@ export default function JournalPage() {
               <div className="space-y-3 text-xs">
                 <div className="grid grid-cols-2 gap-2 p-3 bg-s2/60 rounded-xl border border-line">
                   <div>
-                    <span className="text-mu block text-[11px]">{dict.journal.addTradeModal.openedAtLabel}</span>
-                    <b className="text-tx">{new Date(selectedTrade.openedAt).toLocaleString()}</b>
+                    <span className="text-mu block text-[11px]">
+                      {dict.journal.addTradeModal.openedAtLabel}
+                    </span>
+                    <b className="text-tx">
+                      {new Date(selectedTrade.openedAt).toLocaleString()}
+                    </b>
                   </div>
                   <div>
-                    <span className="text-mu block text-[11px]">{dict.journal.tradesTab.colResult}</span>
+                    <span className="text-mu block text-[11px]">
+                      {dict.journal.tradesTab.colResult}
+                    </span>
                     <b
                       className={
                         selectedTrade.result === "win"
@@ -775,19 +808,27 @@ export default function JournalPage() {
                 {selectedTrade.entryPrice != null && (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     <div>
-                      <span className="text-mu block text-[11px]">{dict.journal.addTradeModal.entryPriceLabel}</span>
+                      <span className="text-mu block text-[11px]">
+                        {dict.journal.addTradeModal.entryPriceLabel}
+                      </span>
                       <b className="text-tx">{selectedTrade.entryPrice}</b>
                     </div>
                     <div>
-                      <span className="text-mu block text-[11px]">{dict.journal.addTradeModal.exitPriceLabel}</span>
+                      <span className="text-mu block text-[11px]">
+                        {dict.journal.addTradeModal.exitPriceLabel}
+                      </span>
                       <b className="text-tx">{selectedTrade.exitPrice ?? "—"}</b>
                     </div>
                     <div>
-                      <span className="text-mu block text-[11px]">{dict.journal.addTradeModal.stopLossLabel}</span>
+                      <span className="text-mu block text-[11px]">
+                        {dict.journal.addTradeModal.stopLossLabel}
+                      </span>
                       <b className="text-tx">{selectedTrade.stopLoss ?? "—"}</b>
                     </div>
                     <div>
-                      <span className="text-mu block text-[11px]">{dict.journal.addTradeModal.takeProfitLabel}</span>
+                      <span className="text-mu block text-[11px]">
+                        {dict.journal.addTradeModal.takeProfitLabel}
+                      </span>
                       <b className="text-tx">{selectedTrade.takeProfit ?? "—"}</b>
                     </div>
                   </div>
@@ -795,46 +836,52 @@ export default function JournalPage() {
 
                 {selectedTrade.notes && (
                   <div>
-                    <span className="text-mu block text-[11px] mb-1">{dict.journal.addTradeModal.notesLabel}</span>
+                    <span className="text-mu block text-[11px] mb-1">
+                      {dict.journal.addTradeModal.notesLabel}
+                    </span>
                     <p className="p-2.5 bg-s2/40 border border-line rounded-lg text-tx whitespace-pre-wrap">
                       {selectedTrade.notes}
                     </p>
                   </div>
                 )}
 
-                {/* Actions */}
-                <div className="flex justify-end gap-2 pt-3 border-t border-line">
-                  <button
-                    onClick={() => {
-                      const tradeToEdit = selectedTrade;
-                      setSelectedTrade(null);
-                      setEditingTrade(tradeToEdit);
-                    }}
-                    className="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1"
-                  >
-                    <Edit2 size={13} />
-                    <span>{dict.journal.tradesTab.editTradeBtn}</span>
-                  </button>
-                  <button
-                    onClick={() => setDeleteTradeId(selectedTrade.id)}
-                    className="bg-rose-500/20 text-rose-300 border border-rose-500/30 hover:bg-rose-500/30 py-1.5 px-3 text-xs font-medium rounded-lg flex items-center gap-1 transition-colors"
-                  >
-                    <Trash2 size={13} />
-                    <span>{dict.journal.tradesTab.deleteTradeBtn}</span>
-                  </button>
-                </div>
+                {!isDemoMode && (
+                  <div className="flex justify-end gap-2 pt-3 border-t border-line">
+                    <button
+                      onClick={() => {
+                        const tradeToEdit = selectedTrade;
+                        setSelectedTrade(null);
+                        setEditingTrade(tradeToEdit);
+                      }}
+                      className="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1"
+                    >
+                      <Edit2 size={13} />
+                      <span>{dict.journal.tradesTab.editTradeBtn}</span>
+                    </button>
+                    <button
+                      onClick={() => setDeleteTradeId(selectedTrade.id)}
+                      className="bg-rose-500/20 text-rose-300 border border-rose-500/30 hover:bg-rose-500/30 py-1.5 px-3 text-xs font-medium rounded-lg flex items-center gap-1 transition-colors"
+                    >
+                      <Trash2 size={13} />
+                      <span>{dict.journal.tradesTab.deleteTradeBtn}</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* EDIT TRADE MODAL */}
-      {editingTrade && (
+      {/* EDIT / ADD TRADE MODAL */}
+      {(editingTrade || addTradeInitialDate) && (
         <AddTradeModal
-          isOpen={!!editingTrade}
-          initialTrade={editingTrade}
-          onClose={() => setEditingTrade(null)}
+          isOpen={true}
+          initialTrade={editingTrade || undefined}
+          onClose={() => {
+            setEditingTrade(null);
+            setAddTradeInitialDate(undefined);
+          }}
         />
       )}
 
@@ -852,7 +899,9 @@ export default function JournalPage() {
           >
             <div className="flex justify-between items-center border-b border-line pb-3">
               <h3 className="h3">
-                {editingAccount ? dict.journal.accountsTab.editBtn : dict.journal.accountsTab.addAccountBtn}
+                {editingAccount
+                  ? dict.journal.accountsTab.editBtn
+                  : dict.journal.accountsTab.addAccountBtn}
               </h3>
               <button
                 type="button"
@@ -864,7 +913,9 @@ export default function JournalPage() {
             </div>
 
             <div>
-              <label className="text-xs text-mu block mb-1">{dict.journal.accountNameLabel}</label>
+              <label className="text-xs text-mu block mb-1">
+                {dict.journal.accountNameLabel}
+              </label>
               <input
                 type="text"
                 value={accName}
@@ -876,7 +927,9 @@ export default function JournalPage() {
 
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-xs text-mu block mb-1">{dict.journal.accountTypeLabel}</label>
+                <label className="text-xs text-mu block mb-1">
+                  {dict.journal.accountTypeLabel}
+                </label>
                 <select
                   value={accType}
                   onChange={(e) => setAccType(e.target.value as AccountType)}
@@ -889,7 +942,9 @@ export default function JournalPage() {
               </div>
 
               <div>
-                <label className="text-xs text-mu block mb-1">{dict.journal.currencyLabel}</label>
+                <label className="text-xs text-mu block mb-1">
+                  {dict.journal.currencyLabel}
+                </label>
                 <select
                   value={accCurrency}
                   onChange={(e) => setAccCurrency(e.target.value as AccountCurrency)}
@@ -905,7 +960,9 @@ export default function JournalPage() {
             </div>
 
             <div>
-              <label className="text-xs text-mu block mb-1">{dict.journal.accountsTab.startBalance}</label>
+              <label className="text-xs text-mu block mb-1">
+                {dict.journal.accountsTab.startBalance}
+              </label>
               <input
                 type="text"
                 value={accStartBalance}
