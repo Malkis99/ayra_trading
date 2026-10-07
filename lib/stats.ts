@@ -467,12 +467,30 @@ export function calculateJournalStats(
     }
   }
 
+  // Execution ratings (Process Score)
+  const ratedTrades = trades.filter(
+    (t) => typeof t.executionRating === "number" && t.executionRating > 0
+  );
+
+  let averageProcessScore = 0;
+  let planCompliancePercent = 100;
+
+  if (ratedTrades.length > 0) {
+    const sumScore = ratedTrades.reduce((acc, t) => acc + t.executionRating, 0);
+    averageProcessScore = Number((sumScore / ratedTrades.length).toFixed(1));
+
+    const compliantCount = ratedTrades.filter((t) => t.executionRating >= 4).length;
+    planCompliancePercent = Number(
+      ((compliantCount / ratedTrades.length) * 100).toFixed(0)
+    );
+  }
+
   return {
     totalTrades,
     periodTrades,
-    planCompliancePercent: 100, // Placeholder for T6b
-    averageProcessScore: 0, // Placeholder for T6b
-    periodRResult,
+    planCompliancePercent,
+    averageProcessScore,
+    periodRResult: Number(periodRResult.toFixed(2)),
     journalStreakDays,
     notesCount,
     frequentErrors,

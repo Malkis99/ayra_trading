@@ -12,6 +12,7 @@ export const GAME_CONFIG = {
   // Journal Trade XP & Anti-farm config
   TRADE_BASE_XP: 10,
   MAX_DAILY_TRADE_XP_COUNT: 3,
+  JOURNAL_MIN_SAMPLE_SIZE: 20,
   VERIFICATION_XP_MULTIPLIER: {
     unverified: 1.0,
     imported: 1.2,

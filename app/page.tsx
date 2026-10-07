@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
+import { useJournal } from "@/lib/journal/context";
 import { Plus, CheckSquare, BarChart2, X, Sparkles, Compass } from "lucide-react";
 import { formatString, getPlural, formatNumber } from "@/lib/i18n";
 import { Figure } from "@/components/Figure";
@@ -358,17 +359,66 @@ export default function HomePage() {
           </div>
 
           {/* Journal Block */}
-          <div className="card space-y-2">
-            <h4 className="h4">{dict.home.journalBlock.title}</h4>
-            <p className="text-xs text-mu">{dict.home.journalBlock.desc}</p>
-            <button
-              onClick={() => setAddTradeModalOpen(true)}
-              className="btn-ghost text-xs py-2 px-3 inline-flex items-center gap-1.5 mt-1"
-            >
-              <Plus size={14} />
-              <span>{dict.home.journalBlock.addTradeBtn}</span>
-            </button>
-          </div>
+          {(() => {
+            const { trades } = useJournal();
+            const nowMs = Date.now();
+            const weekMs = 7 * 24 * 60 * 60 * 1000;
+
+            const weekTrades = trades.filter((t) => {
+              if (t.status !== "closed") return false;
+              const tradeMs = new Date(t.closedAt || t.openedAt || t.createdAt).getTime();
+              return !isNaN(tradeMs) && nowMs - tradeMs <= weekMs;
+            });
+
+            const weekRSum = weekTrades.reduce((acc, t) => acc + (typeof t.rMultiple === "number" ? t.rMultiple : 0), 0);
+            const winsCount = weekTrades.filter((t) => t.result === "win").length;
+            const weekWinrate = weekTrades.length > 0 ? (winsCount / weekTrades.length) * 100 : 0;
+
+            return (
+              <div className="card space-y-2.5">
+                <div className="flex justify-between items-center">
+                  <h4 className="h4">{dict.home.journalBlock.title}</h4>
+                  <Link
+                    href="/journal"
+                    className="text-xs font-semibold text-vi hover:underline"
+                  >
+                    {dict.profile.details} →
+                  </Link>
+                </div>
+
+                {weekTrades.length > 0 ? (
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs p-2.5 rounded-xl border border-line bg-s2/40">
+                    <div>
+                      <span className="text-[10px] text-mu block">
+                        {dict.questsPage.weekTab.progressLabel} (R)
+                      </span>
+                      <b className={`font-mono font-bold ${weekRSum > 0 ? "text-emerald-400" : weekRSum < 0 ? "text-rose-400" : "text-tx"}`}>
+                        {weekRSum > 0 ? `+${weekRSum.toFixed(2)}` : weekRSum.toFixed(2)} R
+                      </b>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-mu block">{dict.journal.tradesWord}</span>
+                      <b className="font-mono font-bold text-tx">{weekTrades.length}</b>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-mu block">Winrate</span>
+                      <b className="font-mono font-bold text-tx">{weekWinrate.toFixed(0)}%</b>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-mu">{dict.home.journalBlock.desc}</p>
+                )}
+
+                <button
+                  onClick={() => setAddTradeModalOpen(true)}
+                  className="btn-ghost text-xs py-2 px-3 inline-flex items-center gap-1.5 mt-1"
+                >
+                  <Plus size={14} />
+                  <span>{dict.home.journalBlock.addTradeBtn}</span>
+                </button>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Right Column */}
