@@ -6,44 +6,23 @@
   - Local:        http://localhost:3000
 
  ✓ Starting...
- ✓ Ready in 1785ms
- ○ Compiling /profile ...
- ✓ Compiled /profile in 6.1s (654 modules)
- GET /profile 200 in 6726ms
- GET /profile 200 in 84ms
- GET /profile 200 in 60ms
- GET /profile 200 in 50ms
- GET /profile 200 in 60ms
- GET /profile 200 in 52ms
- GET /profile 200 in 51ms
- GET /profile 200 in 53ms
- GET /profile 200 in 59ms
- ✓ Compiled in 3.4s (654 modules)
- ✓ Compiled in 813ms (654 modules)
- ✓ Compiled in 716ms (654 modules)
- ✓ Compiled in 513ms (654 modules)
- ✓ Compiled in 3.4s (654 modules)
- ✓ Compiled in 581ms (654 modules)
- ✓ Compiled in 407ms (654 modules)
- ✓ Compiled in 710ms (654 modules)
- ✓ Compiled in 526ms (654 modules)
- ✓ Compiled in 392ms (654 modules)
- ✓ Compiled in 653ms (654 modules)
- ✓ Compiled in 417ms (330 modules)
- ✓ Compiled in 559ms (654 modules)
- ✓ Compiled in 394ms (654 modules)
- ✓ Compiled in 273ms (330 modules)
- ✓ Compiled in 224ms (330 modules)
- ✓ Compiled in 1167ms (654 modules)
- ✓ Compiled in 551ms (654 modules)
- ✓ Compiled in 330ms (330 modules)
- ✓ Compiled in 420ms (654 modules)
- ✓ Compiled in 396ms (654 modules)
- GET /profile 200 in 296ms
- GET /profile 200 in 59ms
- GET /profile 200 in 66ms
- GET /profile 200 in 61ms
- GET /profile 200 in 59ms
- GET /profile 200 in 45ms
- GET /profile 200 in 80ms
- GET /profile 200 in 47ms
+ ✓ Ready in 1827ms
+ ○ Compiling /quests ...
+ ✓ Compiled /quests in 7.5s (649 modules)
+ GET /quests 200 in 8040ms
+ ○ Compiling /awakening ...
+ ✓ Compiled /awakening in 4.1s (662 modules)
+ GET /quests 200 in 103ms
+ GET /awakening 200 in 62ms
+ GET /awakening 200 in 34ms
+ ○ Compiling / ...
+ ✓ Compiled / in 617ms (648 modules)
+ GET / 200 in 781ms
+ GET / 200 in 20ms
+ GET /awakening 200 in 77ms
+ GET /awakening 200 in 38ms
+ GET / 200 in 25ms
+ GET /awakening 200 in 36ms
+ GET / 200 in 24ms
+ GET /awakening 200 in 25ms
+ GET / 200 in 25ms

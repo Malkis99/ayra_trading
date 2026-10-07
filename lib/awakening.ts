@@ -1,4 +1,10 @@
 import { DEFAULT_AVATAR_APPEARANCE, AvatarAppearance } from "./avatar";
+import {
+  AWAKENING_RULES_CATALOG,
+  createInitialProgramDraft,
+  ProgramDraft,
+} from "./awakening-rules";
+import { QUEST_POOL } from "./quests";
 
 export type OnboardingStatus = "none" | "inProgress" | "done" | "legacy";
 
@@ -10,6 +16,21 @@ export interface OnboardingState {
   startedAt?: string;
   finishedAt?: string;
   legacyDismissed?: boolean;
+  rewardClaimed?: boolean;
+  program?: AwakeningProgram | null;
+}
+
+export interface AwakeningProgram {
+  startingPath: "structure" | "discipline" | "mind" | "analysis";
+  questWeights: {
+    categoryWeights: Record<string, number>;
+    templateWeights: Record<string, number>;
+  };
+  firstDayQuestIds: string[];
+  focusStats: string[];
+  weeklyGoalIds: string[];
+  academyTopicIds: string[];
+  reasons: Record<string, string[]>;
 }
 
 export const INITIAL_ONBOARDING_STATE: OnboardingState = {
@@ -23,6 +44,8 @@ export const INITIAL_ONBOARDING_STATE: OnboardingState = {
     appearance: { ...DEFAULT_AVATAR_APPEARANCE },
     ageRange: "",
   },
+  rewardClaimed: false,
+  program: null,
 };
 
 export interface QuestionOption {
@@ -411,8 +434,165 @@ export function getFilteredOptions(options: QuestionOption[] = [], minorMode: bo
 }
 
 /**
- * Extension point for T5b: starter program generation stub.
+ * Deterministic onboarding program generator engine (pure function).
  */
-export function generateProgram(_answers: Record<string, any>): null {
-  return null;
+export function generateProgram(
+  answers: Record<string, any> = {},
+  minorMode: boolean = false,
+  dateStr: string = "2025-01-01"
+): AwakeningProgram {
+  const isMinor = minorMode || answers.ageRange === "16-17";
+  const draft: ProgramDraft = createInitialProgramDraft();
+
+  const rules = [...AWAKENING_RULES_CATALOG].sort((a, b) => a.priority - b.priority);
+  for (const rule of rules) {
+    if (rule.condition(answers, isMinor)) {
+      rule.effect(draft, answers, isMinor);
+    }
+  }
+
+  const uniqueFocusStats = Array.from(new Set(draft.focusStats)).slice(0, 2);
+  const uniqueWeeklyGoals = Array.from(new Set(draft.weeklyGoalIds));
+  const uniqueAcademyTopics = Array.from(new Set(draft.academyTopicIds));
+
+  const firstDayQuestIds: string[] = [];
+  const usedCategories = new Set<string>();
+
+  if (draft.forcedFirstQuestId) {
+    firstDayQuestIds.push(draft.forcedFirstQuestId);
+    const forcedTemplate = QUEST_POOL.find((q) => q.id === draft.forcedFirstQuestId);
+    if (forcedTemplate) {
+      usedCategories.add(forcedTemplate.category);
+    }
+  }
+
+  const sortedPool = [...QUEST_POOL].map((tmpl) => {
+    const catWeight = draft.categoryWeights[tmpl.category] ?? 1.0;
+    const tmplWeight = draft.templateWeights[tmpl.id] ?? 1.0;
+    return {
+      template: tmpl,
+      weight: catWeight * tmplWeight,
+    };
+  }).filter((item) => item.weight > 0);
+
+  sortedPool.sort((a, b) => {
+    let hashA = 0;
+    let hashB = 0;
+    const strA = `${dateStr}:firstDay:${a.template.id}`;
+    const strB = `${dateStr}:firstDay:${b.template.id}`;
+    for (let i = 0; i < strA.length; i++) hashA = (hashA << 5) - hashA + strA.charCodeAt(i);
+    for (let i = 0; i < strB.length; i++) hashB = (hashB << 5) - hashB + strB.charCodeAt(i);
+    const scoreA = (Math.abs(hashA) % 1000) * a.weight;
+    const scoreB = (Math.abs(hashB) % 1000) * b.weight;
+    return scoreB - scoreA;
+  });
+
+  for (const candidate of sortedPool) {
+    if (firstDayQuestIds.length >= 3) break;
+    if (firstDayQuestIds.includes(candidate.template.id)) continue;
+
+    if (usedCategories.has(candidate.template.category) && sortedPool.some(c => !usedCategories.has(c.template.category) && !firstDayQuestIds.includes(c.template.id))) {
+      continue;
+    }
+
+    firstDayQuestIds.push(candidate.template.id);
+    usedCategories.add(candidate.template.category);
+  }
+
+  for (const candidate of sortedPool) {
+    if (firstDayQuestIds.length >= 3) break;
+    if (!firstDayQuestIds.includes(candidate.template.id)) {
+      firstDayQuestIds.push(candidate.template.id);
+    }
+  }
+
+  return {
+    startingPath: draft.startingPath,
+    questWeights: {
+      categoryWeights: draft.categoryWeights,
+      templateWeights: draft.templateWeights,
+    },
+    firstDayQuestIds,
+    focusStats: uniqueFocusStats,
+    weeklyGoalIds: uniqueWeeklyGoals,
+    academyTopicIds: uniqueAcademyTopics,
+    reasons: draft.reasons,
+  };
+}
+
+export interface SideQuest {
+  id: string; // e.g. 'side_step2', 'side_step3_opt', 'side_step4', 'side_appearance'
+  titleKey: string;
+  step: number;
+  xpReward: number;
+}
+
+export function getAvailableSideQuests(
+  answers: Record<string, any> = {},
+  completedSideQuests: Record<string, boolean> = {}
+): SideQuest[] {
+  const result: SideQuest[] = [];
+
+  const hasStep2Answer =
+    answers.reading ||
+    (Array.isArray(answers.sports) && answers.sports.length > 0) ||
+    (Array.isArray(answers.languages) && answers.languages.length > 0) ||
+    (Array.isArray(answers.hobbies) && answers.hobbies.length > 0) ||
+    answers.devTime;
+
+  if (!hasStep2Answer && !completedSideQuests["side_step2"]) {
+    result.push({
+      id: "side_step2",
+      titleKey: "awakening.sideQuest.step2",
+      step: 2,
+      xpReward: 25,
+    });
+  }
+
+  const hasStep3OptAnswer =
+    answers.tradingStyle || answers.readyStrategy || answers.keepJournal || answers.analysisTime;
+
+  if (!hasStep3OptAnswer && !completedSideQuests["side_step3_opt"]) {
+    result.push({
+      id: "side_step3_opt",
+      titleKey: "awakening.sideQuest.step3",
+      step: 3,
+      xpReward: 25,
+    });
+  }
+
+  const hasStep4Answer =
+    answers.tradingGoal ||
+    (Array.isArray(answers.joinReason) && answers.joinReason.length > 0) ||
+    (Array.isArray(answers.skills3m) && answers.skills3m.length > 0) ||
+    answers.vision1y ||
+    answers.successVision;
+
+  if (!hasStep4Answer && !completedSideQuests["side_step4"]) {
+    result.push({
+      id: "side_step4",
+      titleKey: "awakening.sideQuest.step4",
+      step: 4,
+      xpReward: 25,
+    });
+  }
+
+  const app = answers.appearance;
+  const isDefaultAppearance =
+    !app ||
+    (app.skinTone === DEFAULT_AVATAR_APPEARANCE.skinTone &&
+      app.hairstyle === DEFAULT_AVATAR_APPEARANCE.hairstyle &&
+      app.hairColor === DEFAULT_AVATAR_APPEARANCE.hairColor &&
+      app.outfit === DEFAULT_AVATAR_APPEARANCE.outfit);
+
+  if (isDefaultAppearance && !completedSideQuests["side_appearance"]) {
+    result.push({
+      id: "side_appearance",
+      titleKey: "awakening.sideQuest.appearance",
+      step: 1,
+      xpReward: 25,
+    });
+  }
+
+  return result;
 }
