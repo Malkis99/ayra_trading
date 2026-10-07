@@ -15,6 +15,8 @@ interface AppContextType {
   addModalTab: string;
   setAddModalTab: (tab: string) => void;
   openAddModal: (tab?: string) => void;
+  isAddTradeModalOpen: boolean;
+  setAddTradeModalOpen: (o: boolean) => void;
   isSearchOpen: boolean;
   setSearchOpen: (o: boolean) => void;
   toastMessage: string | null;
@@ -36,6 +38,7 @@ export function AppProvider({
   const [focusMode, setFocusMode] = useState<boolean>(false);
   const [isAddModalOpen, setAddModalOpen] = useState<boolean>(false);
   const [addModalTab, setAddModalTab] = useState<string>("grid");
+  const [isAddTradeModalOpen, setAddTradeModalOpen] = useState<boolean>(false);
   const [isSearchOpen, setSearchOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [userPlan, setUserPlan] = useState<"Free" | "Pro" | "Elite">("Free");
@@ -113,6 +116,8 @@ export function AppProvider({
         addModalTab,
         setAddModalTab,
         openAddModal,
+        isAddTradeModalOpen,
+        setAddTradeModalOpen,
         isSearchOpen,
         setSearchOpen,
         toastMessage,

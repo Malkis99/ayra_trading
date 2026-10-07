@@ -191,7 +191,9 @@ describe("T5a Character Awakening & Onboarding Logic", () => {
     });
   });
 
-  it("11. Stub generateProgram returns null in T5a", () => {
-    expect(generateProgram({})).toBeNull();
+  it("11. generateProgram generates deterministic AwakeningProgram", () => {
+    const prog = generateProgram({});
+    expect(prog).not.toBeNull();
+    expect(prog.startingPath).toBeDefined();
   });
 });

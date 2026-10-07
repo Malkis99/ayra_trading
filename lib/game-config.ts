@@ -9,6 +9,16 @@ export const GAME_CONFIG = {
   QUEST_COINS: 10,
   MAX_CUSTOM_GOALS: 5,
 
+  // Journal Trade XP & Anti-farm config
+  TRADE_BASE_XP: 10,
+  MAX_DAILY_TRADE_XP_COUNT: 3,
+  VERIFICATION_XP_MULTIPLIER: {
+    unverified: 1.0,
+    imported: 1.2,
+    connected: 1.5,
+    verified: 1.5,
+  } as Record<string, number>,
+
   // Level unlock thresholds
   LEVEL_UNLOCKS: {
     FRAME_BLUE_LEVEL: 3,

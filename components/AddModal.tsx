@@ -7,7 +7,7 @@ import { ArrowLeftRight, Edit3, Smile, Mail, Calendar, X, ArrowLeft } from "luci
 import { formatString } from "@/lib/i18n";
 
 export function AddModal() {
-  const { isAddModalOpen, setAddModalOpen, addModalTab, setAddModalTab, showToast, dict } = useApp();
+  const { isAddModalOpen, setAddModalOpen, addModalTab, setAddModalTab, setAddTradeModalOpen, showToast, dict } = useApp();
   const { addPost } = useGame();
 
   const [postType, setPostType] = useState<string>("analysis");
@@ -91,7 +91,10 @@ export function AddModal() {
                   <button
                     key={act.key}
                     onClick={() => {
-                      if (act.key === "post") {
+                      if (act.key === "trade") {
+                        setAddModalOpen(false);
+                        setAddTradeModalOpen(true);
+                      } else if (act.key === "post") {
                         setAddModalTab("post");
                       } else {
                         setAddModalOpen(false);

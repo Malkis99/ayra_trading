@@ -21,6 +21,7 @@ import {
   addPost as addPostLogic,
   deletePost as deletePostLogic,
   updateProfileInfo as updateProfileInfoLogic,
+  recordLoggedTrade,
 } from "@/lib/game";
 import { ITEMS, FRAMES, TITLES, BACKGROUNDS } from "@/lib/items";
 import { AvatarAppearance, validateAvatarAppearance } from "@/lib/avatar";
@@ -56,6 +57,10 @@ interface GameContextType {
   saveLoadout: (loadoutName: string) => void;
   addPost: (content: string) => string[];
   deletePost: (postIndex: number) => void;
+  recordTrade: (
+    trade: any,
+    allTrades: any[]
+  ) => { xpAwarded: number; questClosed: boolean; leveledUp: boolean; newLevel?: number; newlyUnlocked: string[] };
   setFrame: (frame: number) => void;
   setTitle: (title: number) => void;
   setBackground: (bg: number) => void;
@@ -373,6 +378,28 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     setGameState((prev) => deletePostLogic(prev, postIndex));
   }, []);
 
+  const recordTrade = useCallback((trade: any, allTrades: any[]) => {
+    let result = {
+      xpAwarded: 0,
+      questClosed: false,
+      leveledUp: false,
+      newLevel: undefined as number | undefined,
+      newlyUnlocked: [] as string[],
+    };
+    setGameState((prev) => {
+      const res = recordLoggedTrade(prev, trade, allTrades, new Date());
+      result = {
+        xpAwarded: res.xpAwarded,
+        questClosed: res.questClosed,
+        leveledUp: res.leveledUp,
+        newLevel: res.newLevel,
+        newlyUnlocked: res.newlyUnlocked,
+      };
+      return res.state;
+    });
+    return result;
+  }, []);
+
   const setFrame = useCallback((frame: number) => {
     setGameState((prev) => ({
       ...prev,
@@ -475,6 +502,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         saveLoadout,
         addPost,
         deletePost,
+        recordTrade,
         setFrame,
         setTitle,
         setBackground,
