@@ -1,3 +1,5 @@
+import { AwakeningProgram } from "./awakening";
+
 export type QuestCategory =
   | "Trading"
   | "Discipline"
@@ -294,6 +296,86 @@ export const QUEST_POOL: QuestTemplate[] = [
     fallbackWhyRu: "Снятие зажимов в спине после долгого сидения перед мониторами.",
     fallbackWhyEn: "Relieving back tension after long hours sitting at monitors.",
   },
+  {
+    id: "q_read_pages",
+    category: "Mental",
+    durationMinutes: 10,
+    difficulty: "Easy",
+    xpReward: 30,
+    coinsReward: 5,
+    statKey: "Knowledge",
+    verificationType: "Timer",
+    titleKey: "quest.read_pages.title",
+    fallbackTitleRu: "Прочитать 10 страниц",
+    fallbackTitleEn: "Read 10 pages",
+    whyReasonKey: "quest.read_pages.why",
+    fallbackWhyRu: "Регулярное чтение развивает фокус и дисциплину мышления.",
+    fallbackWhyEn: "Regular reading enhances focus and mental discipline.",
+  },
+  {
+    id: "q_lang_10m",
+    category: "Mental",
+    durationMinutes: 10,
+    difficulty: "Easy",
+    xpReward: 30,
+    coinsReward: 5,
+    statKey: "Intelligence",
+    verificationType: "Timer",
+    titleKey: "quest.lang_10m.title",
+    fallbackTitleRu: "10 минут иностранного языка",
+    fallbackTitleEn: "10 minutes foreign language",
+    whyReasonKey: "quest.lang_10m.why",
+    fallbackWhyRu: "Ежедневная тренировка памяти и нейропластичности.",
+    fallbackWhyEn: "Daily memory and neuroplasticity training.",
+  },
+  {
+    id: "q_running",
+    category: "Physical",
+    durationMinutes: 20,
+    difficulty: "Medium",
+    xpReward: 35,
+    coinsReward: 8,
+    statKey: "Endurance",
+    verificationType: "SelfReport",
+    titleKey: "quest.running.title",
+    fallbackTitleRu: "Пробежка или кардио",
+    fallbackTitleEn: "Jogging or cardio",
+    whyReasonKey: "quest.running.why",
+    fallbackWhyRu: "Аэробная нагрузка улучшает кровообращение и выносливость.",
+    fallbackWhyEn: "Aerobic exercise improves circulation and stamina.",
+  },
+  {
+    id: "q_swimming",
+    category: "Physical",
+    durationMinutes: 30,
+    difficulty: "Medium",
+    xpReward: 40,
+    coinsReward: 10,
+    statKey: "Endurance",
+    verificationType: "SelfReport",
+    titleKey: "quest.swimming.title",
+    fallbackTitleRu: "Сессия плавания",
+    fallbackTitleEn: "Swimming session",
+    whyReasonKey: "quest.swimming.why",
+    fallbackWhyRu: "Комплексная нагрузка на мышечный корсет и дыхание.",
+    fallbackWhyEn: "Comprehensive physical load and breathing technique.",
+  },
+  {
+    id: "q_gym",
+    category: "Physical",
+    durationMinutes: 30,
+    difficulty: "Hard",
+    xpReward: 45,
+    coinsReward: 10,
+    statKey: "Strength",
+    verificationType: "SelfReport",
+    titleKey: "quest.gym.title",
+    fallbackTitleRu: "Тренировка в зале",
+    fallbackTitleEn: "Gym workout",
+    whyReasonKey: "quest.gym.why",
+    fallbackWhyRu: "Силовая подготовка укрепляет осанку и общую выносливость.",
+    fallbackWhyEn: "Strength training improves posture and total endurance.",
+  },
 ];
 
 export function getDeterministicDailyQuests(dateStr: string): {
@@ -319,4 +401,89 @@ export function getDeterministicDailyQuests(dateStr: string): {
     core: pool.slice(0, 3),
     bonus: pool.slice(3, 5),
   };
+}
+
+export function getStableTemplateHash(dateStr: string, userSeed: string, templateId: string): number {
+  const str = `${dateStr}:${userSeed}:${templateId}`;
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return (Math.abs(hash) % 1000000) / 1000000;
+}
+
+export function getWeightedDailyQuests(
+  dateStr: string,
+  userSeed: string = "user_default",
+  program?: AwakeningProgram | null
+): {
+  core: QuestTemplate[];
+  bonus: QuestTemplate[];
+} {
+  if (!program) {
+    return getDeterministicDailyQuests(dateStr);
+  }
+
+  // If dateStr matches user registration / creation date, use program.firstDayQuestIds for core quests
+  if ((dateStr === userSeed || userSeed.startsWith(dateStr)) && program.firstDayQuestIds && program.firstDayQuestIds.length === 3) {
+    const firstDayCore = program.firstDayQuestIds
+      .map((id) => QUEST_POOL.find((q) => q.id === id))
+      .filter((q): q is QuestTemplate => q != null);
+
+    if (firstDayCore.length === 3) {
+      const firstDayIds = new Set(program.firstDayQuestIds);
+      const bonus = QUEST_POOL.filter((q) => !firstDayIds.has(q.id)).slice(0, 2);
+      return { core: firstDayCore, bonus };
+    }
+  }
+
+  const categoryWeights = program.questWeights?.categoryWeights || {};
+  const templateWeights = program.questWeights?.templateWeights || {};
+
+  const scored = QUEST_POOL.map((tmpl) => {
+    const catW = categoryWeights[tmpl.category] ?? 1.0;
+    const tmplW = templateWeights[tmpl.id] ?? 1.0;
+    const totalWeight = catW * tmplW;
+
+    if (totalWeight <= 0) {
+      return { tmpl, score: -1 };
+    }
+
+    const hashVal = getStableTemplateHash(dateStr, userSeed, tmpl.id);
+    const score = (hashVal + 0.00001) * totalWeight;
+    return { tmpl, score };
+  })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  const core: QuestTemplate[] = [];
+  const usedCategories = new Set<string>();
+
+  for (const item of scored) {
+    if (core.length >= 3) break;
+    if (!usedCategories.has(item.tmpl.category)) {
+      core.push(item.tmpl);
+      usedCategories.add(item.tmpl.category);
+    }
+  }
+
+  for (const item of scored) {
+    if (core.length >= 3) break;
+    if (!core.some((c) => c.id === item.tmpl.id)) {
+      core.push(item.tmpl);
+    }
+  }
+
+  const bonus: QuestTemplate[] = [];
+  const coreIds = new Set(core.map((c) => c.id));
+
+  for (const item of scored) {
+    if (bonus.length >= 2) break;
+    if (!coreIds.has(item.tmpl.id)) {
+      bonus.push(item.tmpl);
+    }
+  }
+
+  return { core, bonus };
 }
