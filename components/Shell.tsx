@@ -41,7 +41,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
   if (!isLoaded || isCleanRedirecting) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-ink text-tx">
-        <div className="text-sm text-mu animate-pulse">AYRA...</div>
+        <div className="font-serif text-xl font-bold tracking-wider text-tx animate-pulse">AYRA</div>
       </div>
     );
   }

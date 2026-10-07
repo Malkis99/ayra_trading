@@ -1,8 +1,16 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import { Manrope } from "next/font/google";
 import "./globals.css";
 import { Shell } from "@/components/Shell";
 import { Language } from "@/lib/i18n/types";
+
+const manrope = Manrope({
+  subsets: ["latin", "cyrillic"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-manrope",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "AYRA Trading",
@@ -15,8 +23,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   const initialLang: Language = savedLocale === "en" ? "en" : "ru";
 
   return (
-    <html lang={initialLang}>
-      <body>
+    <html lang={initialLang} className={`${manrope.variable} font-sans`}>
+      <body className="font-sans antialiased tabular-nums">
         <Shell initialLang={initialLang}>{children}</Shell>
       </body>
     </html>

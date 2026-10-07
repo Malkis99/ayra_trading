@@ -21,7 +21,7 @@ import {
   getFilteredOptions,
   QuestionDefinition,
 } from "@/lib/awakening";
-import { ArrowLeft, ArrowRight, SkipForward, Check, Globe, Sparkles, FastForward } from "lucide-react";
+import { ArrowLeft, ArrowRight, SkipForward, Check, Globe, Sparkles, FastForward, Loader2 } from "lucide-react";
 import { formatString, formatNumber } from "@/lib/i18n";
 
 function AwakeningCanvasAnimation({
@@ -30,27 +30,28 @@ function AwakeningCanvasAnimation({
   skipText,
   startText,
   onComplete,
+  isNavigating,
 }: {
   appearance: AvatarAppearance;
   equipment: Record<string, number>;
   skipText: string;
   startText: string;
   onComplete: () => void;
+  isNavigating: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [phase, setPhase] = useState<"dark" | "spiral" | "bloom" | "final">("dark");
 
   useEffect(() => {
-    // Check reduced motion
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (prefersReducedMotion) {
       setPhase("final");
       return;
     }
 
-    const t1 = setTimeout(() => setPhase("spiral"), 400);
-    const t2 = setTimeout(() => setPhase("bloom"), 1800);
-    const t3 = setTimeout(() => setPhase("final"), 3000);
+    const t1 = setTimeout(() => setPhase("spiral"), 300);
+    const t2 = setTimeout(() => setPhase("bloom"), 1500);
+    const t3 = setTimeout(() => setPhase("final"), 2400);
 
     return () => {
       clearTimeout(t1);
@@ -126,9 +127,7 @@ function AwakeningCanvasAnimation({
     <div className="relative w-full max-w-md mx-auto flex flex-col items-center justify-center space-y-6">
       {phase !== "final" && (
         <button
-          onClick={() => {
-            setPhase("final");
-          }}
+          onClick={() => setPhase("final")}
           className="absolute top-0 right-0 z-30 btn-ghost text-xs py-1.5 px-3 flex items-center gap-1 text-mu hover:text-tx"
         >
           <span>{skipText}</span>
@@ -139,14 +138,12 @@ function AwakeningCanvasAnimation({
       <div className="relative w-56 h-72 rounded-2xl grid place-items-center bg-radial-gradient from-s1 via-ink to-ink overflow-hidden border border-vi/30 shadow-2xl shadow-vi/20">
         <canvas ref={canvasRef} className="absolute inset-0 z-10 pointer-events-none" />
 
-        {/* Aura Bloom Effect */}
         <div
           className={`absolute inset-0 bg-radial-gradient from-vi/40 via-pri/20 to-transparent transition-opacity duration-1000 ${
             phase === "bloom" || phase === "final" ? "opacity-100" : "opacity-0"
           }`}
         />
 
-        {/* Character Silhouette vs Full Color */}
         <div className="relative z-20 transition-all duration-1000">
           <Figure
             appearance={appearance}
@@ -161,7 +158,6 @@ function AwakeningCanvasAnimation({
           />
         </div>
 
-        {/* Level 1 Octagonal Gold Badge */}
         {(phase === "bloom" || phase === "final") && (
           <div className="absolute top-3 right-3 z-30 w-8 h-8 rounded-lg bg-go/20 border-2 border-go text-go font-serif text-xs font-bold flex items-center justify-center shadow-lg shadow-go/30 animate-pulse">
             1
@@ -170,15 +166,27 @@ function AwakeningCanvasAnimation({
       </div>
 
       <div
-        className={`transition-all duration-1000 ${
+        className={`w-full transition-all duration-700 ${
           phase === "final" ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
         }`}
       >
         <button
+          type="button"
           onClick={onComplete}
-          className="btn w-full py-3.5 px-8 text-sm font-bold shadow-xl shadow-vi/40 bg-gradient-to-r from-vi via-pri to-vi hover:opacity-90 transition-all"
+          disabled={isNavigating}
+          className="group relative w-full h-[56px] min-w-[220px] rounded-2xl font-semibold text-base text-white overflow-hidden transition-all duration-200 active:scale-[0.98] disabled:opacity-70 disabled:cursor-wait shadow-[0_8px_24px_rgba(80,52,143,0.5)] border-t border-go/60 bg-gradient-to-r from-vi via-pri to-vi hover:brightness-110 flex items-center justify-center gap-2"
         >
-          {startText}
+          {/* Shimmer line */}
+          <span className="absolute inset-0 w-1/2 h-full bg-white/20 skew-x-[-20deg] -translate-x-full group-hover:translate-x-[300%] transition-transform duration-1000 ease-out pointer-events-none motion-reduce:hidden" />
+
+          {isNavigating ? (
+            <Loader2 size={20} className="animate-spin text-white" />
+          ) : (
+            <>
+              <span>{startText}</span>
+              <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+            </>
+          )}
         </button>
       </div>
     </div>
@@ -202,6 +210,7 @@ export default function AwakeningPage() {
 
   const [step, setStep] = useState<number>(gameState.onboarding.step || 1);
   const [subStep, setSubStep] = useState<number>(gameState.onboarding.subStep || 0);
+  const [isNavigating, setIsNavigating] = useState<boolean>(false);
 
   const [answers, setAnswers] = useState<Record<string, any>>({
     nickname: gameState.name || "",
@@ -217,15 +226,12 @@ export default function AwakeningPage() {
   const [customInputText, setCustomInputText] = useState<string>("");
   const titleRef = useRef<HTMLHeadingElement>(null);
 
-  // Initial completion check vs re-edit mode
   const wasAlreadyDone = gameState.onboarding.status === "done";
 
-  // Sync step/subStep state changes to GameContext & localStorage
   useEffect(() => {
     setOnboardingStep(step, subStep);
   }, [step, subStep, setOnboardingStep]);
 
-  // Focus title when transitioning screens
   useEffect(() => {
     titleRef.current?.focus();
   }, [step, subStep]);
@@ -371,47 +377,58 @@ export default function AwakeningPage() {
   };
 
   const handleFinishOnboarding = () => {
+    if (isNavigating) return;
+    setIsNavigating(true);
+
+    // Synchronously write onboarding state to localStorage and GameContext store
+    const nowIso = new Date().toISOString();
     completeOnboarding();
 
-    // Synchronous fallback persistence to localStorage to guarantee status='done' before redirect
     try {
       const saved = localStorage.getItem("ayra_demo_v1");
       const current = saved ? JSON.parse(saved) : {};
       current.onboarding = {
         ...current.onboarding,
         status: "done",
-        finishedAt: new Date().toISOString(),
+        step: 5,
+        subStep: 0,
+        finishedAt: nowIso,
       };
       localStorage.setItem("ayra_demo_v1", JSON.stringify(current));
     } catch {
       // ignore
     }
 
-    if (isEditMode) {
-      router.replace("/settings");
-    } else {
-      router.replace("/");
-    }
+    const targetUrl = isEditMode ? "/settings" : "/";
+    router.replace(targetUrl);
+
+    // Fallback timer: if pathname hasn't updated within 800ms, force hard assignment
+    setTimeout(() => {
+      if (typeof window !== "undefined" && window.location.pathname === "/awakening") {
+        window.location.assign(targetUrl);
+      }
+    }, 800);
   };
 
   const renderQuestionInput = () => {
     if (step === 5) {
       if (!wasAlreadyDone && !isEditMode) {
         return (
-          <div className="space-y-6 max-w-md mx-auto py-4">
+          <div className="space-y-6 max-w-md mx-auto py-2">
             <AwakeningCanvasAnimation
               appearance={validateAvatarAppearance(answers.appearance)}
               equipment={gameState.equipment}
               skipText={dict.awakening.skipQuestion}
               startText={dict.awakening.startBtn}
               onComplete={handleFinishOnboarding}
+              isNavigating={isNavigating}
             />
           </div>
         );
       }
 
       return (
-        <div className="text-center space-y-6 py-6 max-w-md mx-auto">
+        <div className="text-center space-y-6 py-4 max-w-md mx-auto">
           <div className="w-16 h-16 rounded-2xl bg-vi/20 border border-vi/50 text-vi flex items-center justify-center mx-auto shadow-lg shadow-vi/20">
             <Sparkles size={32} />
           </div>
@@ -424,14 +441,26 @@ export default function AwakeningPage() {
             </p>
           </div>
 
-          <div className="pt-4 flex flex-col gap-3">
+          <div className="pt-4 flex flex-col items-center">
             <button
+              type="button"
               onClick={handleFinishOnboarding}
-              className="btn w-full py-3 text-sm font-semibold shadow-lg shadow-vi/30"
+              disabled={isNavigating}
+              className="group relative w-full h-[56px] min-w-[220px] rounded-2xl font-semibold text-base text-white overflow-hidden transition-all duration-200 active:scale-[0.98] disabled:opacity-70 disabled:cursor-wait shadow-[0_8px_24px_rgba(80,52,143,0.5)] border-t border-go/60 bg-gradient-to-r from-vi via-pri to-vi hover:brightness-110 flex items-center justify-center gap-2"
             >
-              {isEditMode
-                ? dict.awakening.returnToSettingsBtn
-                : dict.awakening.startBtn}
+              <span className="absolute inset-0 w-1/2 h-full bg-white/20 skew-x-[-20deg] -translate-x-full group-hover:translate-x-[300%] transition-transform duration-1000 ease-out pointer-events-none motion-reduce:hidden" />
+              {isNavigating ? (
+                <Loader2 size={20} className="animate-spin text-white" />
+              ) : (
+                <>
+                  <span>
+                    {isEditMode
+                      ? dict.awakening.returnToSettingsBtn
+                      : dict.awakening.startBtn}
+                  </span>
+                  <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -446,14 +475,14 @@ export default function AwakeningPage() {
       const isLengthValid = nick.length >= 3 && nick.length <= 24;
 
       return (
-        <div className="space-y-3 max-w-md mx-auto">
+        <div className="space-y-3 max-w-[640px] mx-auto">
           <div>
             <input
               type="text"
               value={nick}
               onChange={(e) => handleNicknameChange(e.target.value)}
               placeholder={dict.awakening.q.nickname.placeholder}
-              className="w-full bg-s2 border border-line rounded-xl p-3 text-sm text-tx focus:outline-none focus:border-vi focus:ring-1 focus:ring-vi"
+              className="w-full bg-s2 border border-line rounded-xl p-3.5 text-base text-tx focus:outline-none focus:border-vi focus:ring-1 focus:ring-vi"
               maxLength={24}
               autoFocus
             />
@@ -486,25 +515,25 @@ export default function AwakeningPage() {
 
     if (currentQuestion.id === "language_timezone") {
       return (
-        <div className="space-y-4 max-w-md mx-auto text-left">
+        <div className="space-y-5 max-w-[640px] mx-auto text-left">
           <div className="space-y-2">
             <label className="text-xs font-semibold text-mu block">
               {dict.awakening.q.language_timezone.languageLabel}
             </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => {
                   setLanguage("ru");
                   handleAnswerChange("language", "ru");
                 }}
-                className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
+                className={`p-3.5 rounded-xl border text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
                   lang === "ru"
-                    ? "border-vi bg-vi/20 text-tx shadow-sm"
+                    ? "border-vi bg-vi/20 text-tx shadow-md shadow-vi/10 ring-1 ring-vi"
                     : "border-line bg-s2/60 text-mu hover:border-line/80"
                 }`}
               >
-                <Globe size={14} />
+                <Globe size={16} />
                 <span>{dict.awakening.russianLabel}</span>
               </button>
               <button
@@ -513,13 +542,13 @@ export default function AwakeningPage() {
                   setLanguage("en");
                   handleAnswerChange("language", "en");
                 }}
-                className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
+                className={`p-3.5 rounded-xl border text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
                   lang === "en"
-                    ? "border-vi bg-vi/20 text-tx shadow-sm"
+                    ? "border-vi bg-vi/20 text-tx shadow-md shadow-vi/10 ring-1 ring-vi"
                     : "border-line bg-s2/60 text-mu hover:border-line/80"
                 }`}
               >
-                <Globe size={14} />
+                <Globe size={16} />
                 <span>{dict.awakening.englishLabel}</span>
               </button>
             </div>
@@ -533,7 +562,7 @@ export default function AwakeningPage() {
               type="text"
               value={answers.timezone || ""}
               onChange={(e) => handleAnswerChange("timezone", e.target.value)}
-              className="w-full bg-s2 border border-line rounded-xl p-3 text-sm text-tx focus:outline-none focus:border-vi"
+              className="w-full bg-s2 border border-line rounded-xl p-3.5 text-sm text-tx focus:outline-none focus:border-vi"
             />
           </div>
         </div>
@@ -546,28 +575,31 @@ export default function AwakeningPage() {
       );
 
       return (
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-center w-full max-w-5xl mx-auto">
-          {/* Figure Preview Column: min 420px on xl, 70% window height */}
-          <div className="xl:col-span-6 flex flex-col items-center justify-center p-6 rounded-3xl bg-s2/90 border border-vi/40 shadow-2xl shadow-vi/20 min-h-[380px] xl:min-h-[480px] xl:w-[420px] mx-auto">
-            <div className="relative w-full h-[320px] xl:h-[400px] rounded-2xl grid place-items-center bg-radial-gradient from-pri/50 via-s1 to-s1 overflow-hidden border border-vi/30">
-              <div className="absolute bottom-4 w-40 h-6 rounded-full border border-vi/60 bg-vi/30 shadow-lg shadow-vi/50" />
-              <Figure
-                appearance={currentApp}
-                rotateSlowly
-                className="h-[85%] w-auto"
-              />
-            </div>
-          </div>
+        <div className="w-full max-w-[1120px] mx-auto py-2">
+          {/* 2-Column CSS Grid with >= 48px gap on lg screens */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+            {/* Left Column: Figure Preview with single clean border */}
+            <div className="lg:col-span-6 flex flex-col items-center justify-center">
+              <div className="relative w-full min-w-[320px] lg:min-w-[380px] h-[calc(100vh-280px)] min-h-[460px] max-h-[680px] rounded-3xl bg-radial-gradient from-pri/40 via-s1 to-s1 overflow-hidden border border-vi/40 shadow-2xl shadow-vi/20 grid place-items-center p-6">
+                {/* Soft ground glow ring */}
+                <div className="absolute bottom-6 w-48 h-7 rounded-full border border-vi/50 bg-vi/30 shadow-2xl shadow-vi/60 blur-[1px]" />
 
-          {/* Compact Right Selector Column */}
-          <div className="xl:col-span-6 space-y-3 text-left">
-            {/* Skin Tone & Hair Color in 1 Row */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-[11px] font-semibold text-mu block">
+                <Figure
+                  appearance={currentApp}
+                  rotateSlowly
+                  className="h-[85%] w-auto relative z-10"
+                />
+              </div>
+            </div>
+
+            {/* Right Column: Customizer Card */}
+            <div className="lg:col-span-6 w-full min-w-[320px] lg:min-w-[400px] lg:max-w-[540px] space-y-5 text-left bg-s1/80 border border-line p-5 md:p-6 rounded-3xl shadow-xl">
+              {/* Skin Tone Section */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-tx block">
                   {dict.avatar.skinToneLabel}
                 </label>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-2">
                   {SKIN_TONES.map((st) => (
                     <button
                       key={st.id}
@@ -578,10 +610,10 @@ export default function AwakeningPage() {
                         updateAvatarAppearance(updated);
                       }}
                       style={{ backgroundColor: st.hex }}
-                      className={`w-6 h-6 rounded-full border-2 transition-transform ${
+                      className={`w-7 h-7 md:w-8 md:h-8 rounded-full border-2 transition-all ${
                         currentApp.skinTone === st.id
-                          ? "border-vi scale-110 ring-2 ring-vi/40"
-                          : "border-transparent opacity-80 hover:opacity-100"
+                          ? "border-vi scale-110 ring-2 ring-vi/60 shadow-lg shadow-vi/30"
+                          : "border-transparent opacity-80 hover:opacity-100 hover:scale-105"
                       }`}
                       aria-label={(dict.avatar as any)[st.id] || st.id}
                     />
@@ -589,11 +621,12 @@ export default function AwakeningPage() {
                 </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="text-[11px] font-semibold text-mu block">
+              {/* Hair Color Section */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-tx block">
                   {dict.avatar.hairColorLabel}
                 </label>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-2">
                   {HAIR_COLORS.map((hc) => (
                     <button
                       key={hc.id}
@@ -604,73 +637,73 @@ export default function AwakeningPage() {
                         updateAvatarAppearance(updated);
                       }}
                       style={{ backgroundColor: hc.hex }}
-                      className={`w-6 h-6 rounded-full border-2 transition-transform ${
+                      className={`w-7 h-7 md:w-8 md:h-8 rounded-full border-2 transition-all ${
                         currentApp.hairColor === hc.id
-                          ? "border-vi scale-110 ring-2 ring-vi/40"
-                          : "border-transparent opacity-80 hover:opacity-100"
+                          ? "border-vi scale-110 ring-2 ring-vi/60 shadow-lg shadow-vi/30"
+                          : "border-transparent opacity-80 hover:opacity-100 hover:scale-105"
                       }`}
                       aria-label={(dict.avatar as any)[hc.id] || hc.id}
                     />
                   ))}
                 </div>
               </div>
-            </div>
 
-            {/* Hairstyles in 4x2 Grid */}
-            <div className="space-y-1">
-              <label className="text-[11px] font-semibold text-mu block">
-                {dict.avatar.hairstyleLabel}
-              </label>
-              <div className="grid grid-cols-4 gap-1.5">
-                {HAIRSTYLES.map((hs) => (
-                  <button
-                    key={hs.id}
-                    type="button"
-                    onClick={() => {
-                      const updated = { ...currentApp, hairstyle: hs.id };
-                      handleAnswerChange("appearance", updated);
-                      updateAvatarAppearance(updated);
-                    }}
-                    className={`p-1.5 rounded-lg border text-[10px] font-medium truncate text-center transition-all ${
-                      currentApp.hairstyle === hs.id
-                        ? "border-vi bg-vi/20 text-tx"
-                        : "border-line bg-s2/40 text-mu hover:border-line/80"
-                    }`}
-                  >
-                    {(dict.avatar as any)[hs.id] || hs.id}
-                  </button>
-                ))}
+              {/* Hairstyles 4x2 Grid */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-tx block">
+                  {dict.avatar.hairstyleLabel}
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {HAIRSTYLES.map((hs) => (
+                    <button
+                      key={hs.id}
+                      type="button"
+                      onClick={() => {
+                        const updated = { ...currentApp, hairstyle: hs.id };
+                        handleAnswerChange("appearance", updated);
+                        updateAvatarAppearance(updated);
+                      }}
+                      className={`p-2 min-h-[44px] rounded-xl border text-[11px] leading-tight font-medium text-center flex items-center justify-center transition-all ${
+                        currentApp.hairstyle === hs.id
+                          ? "border-vi bg-vi/20 text-tx font-bold ring-1 ring-vi shadow-md"
+                          : "border-line bg-s2/60 text-mu hover:border-vi/50 hover:bg-s2"
+                      }`}
+                    >
+                      <span>{(dict.avatar as any)[hs.id] || hs.id}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
 
-            {/* Outfit Style in Compact Grid */}
-            <div className="space-y-1">
-              <label className="text-[11px] font-semibold text-mu block">
-                {dict.avatar.outfitLabel}
-              </label>
-              <div className="grid grid-cols-2 gap-1.5">
-                {OUTFITS.map((o) => (
-                  <button
-                    key={o.id}
-                    type="button"
-                    onClick={() => {
-                      const updated = { ...currentApp, outfit: o.id };
-                      handleAnswerChange("appearance", updated);
-                      updateAvatarAppearance(updated);
-                    }}
-                    className={`p-2 rounded-lg border text-[11px] font-medium flex items-center justify-between transition-all ${
-                      currentApp.outfit === o.id
-                        ? "border-vi bg-vi/20 text-tx"
-                        : "border-line bg-s2/40 text-mu hover:border-line/80"
-                    }`}
-                  >
-                    <span className="truncate">{(dict.avatar as any)[o.id] || o.id}</span>
-                    <div className="flex items-center gap-1 flex-none ml-1">
-                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: o.topColor }} />
-                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: o.bottomColor }} />
-                    </div>
-                  </button>
-                ))}
+              {/* Outfit Styles 2 Columns */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-tx block">
+                  {dict.avatar.outfitLabel}
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {OUTFITS.map((o) => (
+                    <button
+                      key={o.id}
+                      type="button"
+                      onClick={() => {
+                        const updated = { ...currentApp, outfit: o.id };
+                        handleAnswerChange("appearance", updated);
+                        updateAvatarAppearance(updated);
+                      }}
+                      className={`p-2.5 rounded-xl border text-xs font-medium flex items-center justify-between transition-all ${
+                        currentApp.outfit === o.id
+                          ? "border-vi bg-vi/20 text-tx font-bold ring-1 ring-vi shadow-md"
+                          : "border-line bg-s2/60 text-mu hover:border-vi/50 hover:bg-s2"
+                      }`}
+                    >
+                      <span className="truncate mr-1">{(dict.avatar as any)[o.id] || o.id}</span>
+                      <div className="flex items-center gap-1 flex-none">
+                        <span className="w-3 h-3 rounded-full border border-black/20" style={{ backgroundColor: o.topColor }} />
+                        <span className="w-3 h-3 rounded-full border border-black/20" style={{ backgroundColor: o.bottomColor }} />
+                      </div>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -681,7 +714,7 @@ export default function AwakeningPage() {
     if (currentQuestion.type === "single") {
       const selectedValue = answers[currentQuestion.id];
       return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-w-xl mx-auto">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-[640px] mx-auto">
           {currentOptions.map((opt) => {
             const isSelected = selectedValue === opt.id;
             const labelKeyShort = opt.labelKey.replace("awakening.", "");
@@ -698,14 +731,14 @@ export default function AwakeningPage() {
                 key={opt.id}
                 type="button"
                 onClick={() => handleSingleSelect(currentQuestion.id, opt.id)}
-                className={`p-3.5 rounded-xl border text-xs font-semibold flex items-center justify-between text-left transition-all ${
+                className={`min-h-[52px] p-4 rounded-xl border text-sm font-semibold flex items-center justify-between text-left transition-all duration-200 ${
                   isSelected
-                    ? "border-vi bg-vi/20 text-tx shadow-md shadow-vi/10"
-                    : "border-line bg-s2/60 text-mu hover:border-vi/50 hover:bg-s2"
+                    ? "border-vi bg-vi/20 text-tx shadow-lg shadow-vi/15 ring-1 ring-vi"
+                    : "border-line bg-s2/70 text-mu hover:border-vi/50 hover:bg-s2 hover:text-tx"
                 }`}
               >
-                <span>{label}</span>
-                {isSelected && <Check size={16} className="text-vi flex-none" />}
+                <span className="leading-snug">{label}</span>
+                {isSelected && <Check size={18} className="text-vi flex-none ml-2" />}
               </button>
             );
           })}
@@ -719,7 +752,7 @@ export default function AwakeningPage() {
         : [];
 
       return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-w-xl mx-auto">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-[640px] mx-auto">
           {currentOptions.map((opt) => {
             const isSelected = selectedList.includes(opt.id);
             const labelKeyShort = opt.labelKey.replace("awakening.", "");
@@ -736,19 +769,19 @@ export default function AwakeningPage() {
                 key={opt.id}
                 type="button"
                 onClick={() => handleMultiToggle(currentQuestion.id, opt.id)}
-                className={`p-3.5 rounded-xl border text-xs font-semibold flex items-center justify-between text-left transition-all ${
+                className={`min-h-[52px] p-4 rounded-xl border text-sm font-semibold flex items-center justify-between text-left transition-all duration-200 ${
                   isSelected
-                    ? "border-vi bg-vi/20 text-tx shadow-md shadow-vi/10"
-                    : "border-line bg-s2/60 text-mu hover:border-vi/50 hover:bg-s2"
+                    ? "border-vi bg-vi/20 text-tx shadow-lg shadow-vi/15 ring-1 ring-vi"
+                    : "border-line bg-s2/70 text-mu hover:border-vi/50 hover:bg-s2 hover:text-tx"
                 }`}
               >
-                <span>{label}</span>
+                <span className="leading-snug">{label}</span>
                 <div
-                  className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
-                    isSelected ? "border-vi bg-vi text-white" : "border-line"
+                  className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ml-2 flex-none ${
+                    isSelected ? "border-vi bg-vi text-white" : "border-line bg-s1"
                   }`}
                 >
-                  {isSelected && "✓"}
+                  {isSelected && <Check size={14} className="text-white" />}
                 </div>
               </button>
             );
@@ -769,9 +802,9 @@ export default function AwakeningPage() {
         (dict.awakening.q as any)[currentQuestion.id]?.placeholder || dict.awakening.customPlaceholder;
 
       return (
-        <div className="space-y-4 max-w-xl mx-auto">
+        <div className="space-y-4 max-w-[640px] mx-auto">
           {currentOptions.length > 0 && (
-            <div className="flex flex-wrap gap-2 justify-center">
+            <div className="flex flex-wrap gap-2.5 justify-center">
               {currentOptions.map((opt) => {
                 const isSelected = selectedList.includes(opt.id);
                 const labelKeyShort = opt.labelKey.replace("awakening.", "");
@@ -788,22 +821,22 @@ export default function AwakeningPage() {
                     key={opt.id}
                     type="button"
                     onClick={() => handleMultiToggle(currentQuestion.id, opt.id)}
-                    className={`chip cursor-pointer py-2 px-3 text-xs transition-all ${
+                    className={`min-h-[44px] px-4 py-2.5 rounded-xl border text-xs font-semibold transition-all duration-200 flex items-center gap-2 ${
                       isSelected
-                        ? "border-vi bg-vi/20 text-tx font-bold"
-                        : "border-line bg-s2/60 text-mu hover:border-vi/50"
+                        ? "border-vi bg-vi/25 text-tx font-bold ring-1 ring-vi shadow-md shadow-vi/15"
+                        : "border-line bg-s2/70 text-mu hover:border-vi/50 hover:bg-s2 hover:text-tx"
                     }`}
                   >
                     <span>{label}</span>
-                    {isSelected && <span className="ml-1 text-vi">✓</span>}
+                    {isSelected && <Check size={14} className="text-vi flex-none" />}
                   </button>
                 );
               })}
             </div>
           )}
 
-          {/* Custom Add Input */}
-          <div className="flex items-center gap-2">
+          {/* Custom Option Input */}
+          <div className="flex items-center gap-2 pt-2">
             <input
               type="text"
               value={customInputText}
@@ -815,18 +848,18 @@ export default function AwakeningPage() {
                 }
               }}
               placeholder={placeholder}
-              className="flex-1 bg-s2 border border-line rounded-xl p-3 text-xs text-tx focus:outline-none focus:border-vi"
+              className="flex-1 bg-s2 border border-line rounded-xl p-3.5 text-xs text-tx focus:outline-none focus:border-vi"
             />
             <button
               type="button"
               onClick={() => handleAddCustomOption(currentQuestion.id)}
-              className="btn text-xs py-3 px-4"
+              className="btn text-xs py-3.5 px-5 flex-none"
             >
               {dict.awakening.addBtn}
             </button>
           </div>
 
-          {/* Display Custom Added Items */}
+          {/* Added Custom Options Pills */}
           {selectedList.filter((item) => !currentOptions.some((o) => o.id === item)).length > 0 && (
             <div className="flex flex-wrap gap-2 justify-center pt-2">
               {selectedList
@@ -834,13 +867,13 @@ export default function AwakeningPage() {
                 .map((item) => (
                   <span
                     key={item}
-                    className="chip bg-vi/20 border-vi text-tx py-1.5 px-3 text-xs flex items-center gap-1.5"
+                    className="chip bg-vi/20 border-vi text-tx py-2 px-3.5 text-xs flex items-center gap-2 font-medium"
                   >
                     <span>{item}</span>
                     <button
                       type="button"
                       onClick={() => handleRemoveCustomOption(currentQuestion.id, item)}
-                      className="text-mu hover:text-tx text-xs font-bold"
+                      className="text-mu hover:text-tx text-sm font-bold"
                     >
                       ×
                     </button>
@@ -859,7 +892,7 @@ export default function AwakeningPage() {
         (dict.awakening.q as any)[currentQuestion.id]?.placeholder || "";
 
       return (
-        <div className="space-y-2 max-w-md mx-auto text-left">
+        <div className="space-y-2 max-w-[640px] mx-auto text-left">
           <textarea
             value={textVal}
             onChange={(e) =>
@@ -867,10 +900,10 @@ export default function AwakeningPage() {
             }
             placeholder={placeholder}
             rows={4}
-            className="w-full bg-s2 border border-line rounded-xl p-3 text-xs text-tx focus:outline-none focus:border-vi resize-none"
+            className="w-full bg-s2 border border-line rounded-xl p-3.5 text-sm text-tx focus:outline-none focus:border-vi resize-none"
             maxLength={maxLen}
           />
-          <div className="text-right text-[10px] text-mu">
+          <div className="text-right text-xs text-mu">
             {textVal.length} / {maxLen}
           </div>
         </div>
@@ -902,32 +935,31 @@ export default function AwakeningPage() {
         }
       }}
     >
-      {/* Canvas Starfield Background */}
       <Starfield />
 
-      {/* Single Compact Header Row (~56px high) */}
-      <header className="relative z-20 h-[56px] flex items-center justify-between px-4 md:px-8 border-b border-line/40 bg-ink/70 backdrop-blur-md flex-none gap-4">
-        {/* Logo */}
-        <Link href="/" className="font-serif text-lg font-bold tracking-wider text-tx hover:opacity-80 flex-none">
-          AYRA
-        </Link>
+      {/* Header <= 80px high with progress step bar and centered question counter below */}
+      <header className="relative z-20 flex flex-col justify-center px-4 md:px-8 border-b border-line/40 bg-ink/80 backdrop-blur-md flex-none py-2 space-y-1 max-h-[80px]">
+        <div className="flex items-center justify-between gap-4">
+          {/* Logo AYRA */}
+          <Link href="/" className="font-serif text-lg font-bold tracking-wider text-tx hover:opacity-80 flex-none">
+            AYRA
+          </Link>
 
-        {/* Center Progress Bar & Counter */}
-        <div className="flex-1 max-w-lg mx-auto flex items-center gap-3">
-          <div className="flex-1 grid grid-cols-5 gap-1.5 items-center">
+          {/* Centered 5 Step Segments */}
+          <div className="flex-1 max-w-xl mx-auto grid grid-cols-5 gap-2 items-center">
             {[1, 2, 3, 4, 5].map((st) => {
               const isPast = st < step;
               const isCurrent = st === step;
 
               let barClass = "bg-white/10";
               if (isPast) barClass = "bg-vi";
-              if (isCurrent) barClass = "bg-gradient-to-r from-vi to-go";
+              if (isCurrent) barClass = "bg-gradient-to-r from-vi to-go shadow-sm shadow-vi/50";
 
               return (
                 <div key={st} className="flex flex-col items-center">
-                  <div className={`h-1.5 w-full rounded-full transition-all ${barClass}`} />
+                  <div className={`h-2 w-full rounded-full transition-all duration-300 ${barClass}`} />
                   <div
-                    className={`text-[10px] truncate hidden md:block mt-0.5 ${
+                    className={`text-[11px] font-medium truncate hidden md:block mt-1 ${
                       isCurrent ? "text-tx font-bold" : "text-mu"
                     }`}
                   >
@@ -938,104 +970,91 @@ export default function AwakeningPage() {
             })}
           </div>
 
-          {step <= 4 && (
-            <div className="text-[10px] text-mu font-medium flex-none hidden sm:block">
-              {formatString(dict.awakening.questionProgress, {
-                step: formatNumber(lang, step),
-                subStep: formatNumber(lang, subStep + 1),
-                totalSubSteps: formatNumber(lang, questionsForStep.length),
-              })}
+          {/* Language Switcher RU/EN */}
+          <div className="flex items-center gap-2 flex-none">
+            <div className="flex items-center gap-1 bg-s2/80 p-0.5 rounded-lg border border-line">
+              <button
+                type="button"
+                onClick={() => setLanguage("ru")}
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors ${
+                  lang === "ru" ? "bg-vi text-white" : "text-mu hover:text-tx"
+                }`}
+              >
+                RU
+              </button>
+              <button
+                type="button"
+                onClick={() => setLanguage("en")}
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors ${
+                  lang === "en" ? "bg-vi text-white" : "text-mu hover:text-tx"
+                }`}
+              >
+                EN
+              </button>
             </div>
-          )}
-        </div>
 
-        {/* Language Switcher & Edit Mode Exit */}
-        <div className="flex items-center gap-2 flex-none">
-          <div className="flex items-center gap-1 bg-s2/80 p-0.5 rounded-lg border border-line">
-            <button
-              type="button"
-              onClick={() => setLanguage("ru")}
-              className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors ${
-                lang === "ru" ? "bg-vi text-white" : "text-mu hover:text-tx"
-              }`}
-            >
-              RU
-            </button>
-            <button
-              type="button"
-              onClick={() => setLanguage("en")}
-              className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors ${
-                lang === "en" ? "bg-vi text-white" : "text-mu hover:text-tx"
-              }`}
-            >
-              EN
-            </button>
+            {isEditMode && (
+              <Link
+                href="/settings"
+                className="btn-ghost text-xs py-1 px-2.5 flex items-center gap-1"
+              >
+                <span>{dict.awakening.returnToSettingsBtn}</span>
+              </Link>
+            )}
           </div>
-
-          {isEditMode && (
-            <Link
-              href="/settings"
-              className="btn-ghost text-xs py-1 px-2.5 flex items-center gap-1"
-            >
-              <span>{dict.awakening.returnToSettingsBtn}</span>
-            </Link>
-          )}
         </div>
+
+        {/* Centered Question Counter below the progress bar */}
+        {step <= 4 && (
+          <div className="text-center text-[12px] text-mu font-medium leading-none py-0.5">
+            {formatString(dict.awakening.questionProgress, {
+              step: formatNumber(lang, step),
+              subStep: formatNumber(lang, subStep + 1),
+              totalSubSteps: formatNumber(lang, questionsForStep.length),
+            })}
+          </div>
+        )}
       </header>
 
       {/* Main Content Area */}
       <main className="relative z-10 flex-1 overflow-y-auto p-4 md:p-6 flex flex-col justify-center items-center [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-        <div className="w-full max-w-2xl mx-auto text-center space-y-4">
+        <div className="w-full max-w-4xl mx-auto text-center space-y-4">
           {step <= 4 && currentQuestion && (
             <div className="space-y-1">
-              {/* Question Sub-step Counter on mobile */}
-              <div className="text-[11px] text-mu font-medium sm:hidden">
-                {formatString(dict.awakening.questionProgress, {
-                  step: formatNumber(lang, step),
-                  subStep: formatNumber(lang, subStep + 1),
-                  totalSubSteps: formatNumber(lang, questionsForStep.length),
-                })}
-              </div>
-
-              {/* Title <h1> or <h2> */}
               <h1
                 ref={titleRef}
                 tabIndex={-1}
-                className="font-serif text-xl md:text-3xl font-bold text-tx focus:outline-none"
+                className="font-serif text-2xl md:text-[30px] font-bold text-tx leading-tight focus:outline-none"
               >
                 {questionTitle}
               </h1>
             </div>
           )}
 
-          {/* Question Input / Component */}
           <div className="pt-2">{renderQuestionInput()}</div>
         </div>
       </main>
 
-      {/* Bottom Action Footer */}
+      {/* Action Footer */}
       {step <= 4 && (
-        <footer className="relative z-20 p-3 md:px-8 border-t border-line/40 bg-ink/80 backdrop-blur-md flex-none">
+        <footer className="relative z-20 p-3.5 md:px-8 border-t border-line/40 bg-ink/80 backdrop-blur-md flex-none">
           <div className="max-w-2xl mx-auto flex items-center justify-between gap-3">
-            {/* Left: Back Button */}
             <button
               type="button"
               onClick={handlePrevSubStep}
               disabled={step === 1 && subStep === 0}
-              className="btn-ghost text-xs py-2 px-3.5 flex items-center gap-1.5 disabled:opacity-30 disabled:cursor-not-allowed"
+              className="btn-ghost text-xs py-2.5 px-4 flex items-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed"
             >
-              <ArrowLeft size={15} />
+              <ArrowLeft size={16} />
               <span>{dict.awakening.back}</span>
             </button>
 
-            {/* Right: Actions */}
             <div className="flex items-center gap-2">
-              {/* Step 2 or Step 4: Skip step entirely */}
               {(step === 2 || step === 4) && (
                 <button
                   type="button"
                   onClick={handleSkipEntireStep}
-                  className="btn-ghost text-xs py-2 px-3 flex items-center gap-1.5 text-mu hover:text-tx"
+                  className="btn-ghost text-xs py-2.5 px-3 flex items-center gap-1.5 text-mu hover:text-tx"
                 >
                   <SkipForward size={14} />
                   <span className="hidden sm:inline">
@@ -1044,12 +1063,11 @@ export default function AwakeningPage() {
                 </button>
               )}
 
-              {/* Step 3: Skip optional questions (available after 3 mandatory questions) */}
               {step === 3 && subStep >= 3 && (
                 <button
                   type="button"
                   onClick={handleSkipOptionalInStep3}
-                  className="btn-ghost text-xs py-2 px-3 flex items-center gap-1.5 text-mu hover:text-tx"
+                  className="btn-ghost text-xs py-2.5 px-3 flex items-center gap-1.5 text-mu hover:text-tx"
                 >
                   <SkipForward size={14} />
                   <span className="hidden sm:inline">
@@ -1058,26 +1076,24 @@ export default function AwakeningPage() {
                 </button>
               )}
 
-              {/* Optional question skip */}
               {currentQuestion && !currentQuestion.mandatory && !hasAnsweredCurrent && (
                 <button
                   type="button"
                   onClick={handleSkipSubStep}
-                  className="btn-ghost text-xs py-2 px-3.5 text-mu hover:text-tx"
+                  className="btn-ghost text-xs py-2.5 px-4 text-mu hover:text-tx"
                 >
                   {dict.awakening.skipQuestion}
                 </button>
               )}
 
-              {/* Continue / Next Button */}
               <button
                 type="button"
                 onClick={handleNextSubStep}
                 disabled={!canGoNext}
-                className="btn text-xs py-2 px-4 flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                className="btn text-xs py-2.5 px-5 flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-vi/20"
               >
                 <span>{dict.awakening.continue}</span>
-                <ArrowRight size={15} />
+                <ArrowRight size={16} />
               </button>
             </div>
           </div>

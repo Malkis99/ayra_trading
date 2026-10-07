@@ -84,8 +84,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [previewItem, setPreviewItem] = useState<number | null>(null);
   const [wardrobeFilter, setWardrobeFilter] = useState<string>("all");
 
-  // Load from localStorage on client mount to avoid SSR hydration mismatch
+  // Load from localStorage on client mount to avoid SSR hydration mismatch, with safety timer fallback
   useEffect(() => {
+    let timer: NodeJS.Timeout;
+
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
@@ -101,6 +103,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoaded(true);
     }
+
+    // Safety fallback timer: force hydrated = true after 1.5s to prevent infinite whiteout or splash freeze
+    timer = setTimeout(() => {
+      setIsLoaded(true);
+    }, 1500);
+
+    return () => clearTimeout(timer);
   }, []);
 
   // Save to localStorage whenever state changes after mount
