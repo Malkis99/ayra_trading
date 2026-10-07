@@ -365,13 +365,140 @@ export function getProfileObservations(
   };
 }
 
-export function exportProfileDataJSON(state: any, exportedAtDate: Date = new Date()): string {
-  const todayStr = exportedAtDate.toISOString().split("T")[0];
-  const filename = `ayra-profile-${state.name || "TraderOne"}-${todayStr}.json`;
+export interface JournalStats {
+  totalTrades: number;
+  periodTrades: number;
+  planCompliancePercent: number;
+  averageProcessScore: number;
+  periodRResult: number;
+  journalStreakDays: number;
+  notesCount: number;
+  frequentErrors: string[];
+  dominantEmotions: string[];
+}
+
+export function calculateJournalStats(
+  trades: any[] = [],
+  periodDays: number = 30,
+  referenceDate: Date = new Date()
+): JournalStats {
+  const totalTrades = trades.length;
+
+  const nowMs = referenceDate.getTime();
+  const periodMs = periodDays * 24 * 60 * 60 * 1000;
+
+  const periodTradesList = trades.filter((t) => {
+    const tradeTime = new Date(t.openedAt || t.createdAt).getTime();
+    return !isNaN(tradeTime) && nowMs - tradeTime <= periodMs;
+  });
+
+  const periodTrades = periodTradesList.length;
+
+  const periodRResult = periodTradesList.reduce((acc, t) => {
+    return acc + (typeof t.rMultiple === "number" ? t.rMultiple : 0);
+  }, 0);
+
+  const notesCount = trades.filter((t) => t.notes && t.notes.trim().length > 0).length;
+
+  // Mistakes count
+  const mistakeCounts: Record<string, number> = {};
+  trades.forEach((t) => {
+    if (Array.isArray(t.mistakes)) {
+      t.mistakes.forEach((m: string) => {
+        mistakeCounts[m] = (mistakeCounts[m] || 0) + 1;
+      });
+    }
+  });
+
+  const frequentErrors = Object.entries(mistakeCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([m]) => m);
+
+  // Emotions count
+  const emotionCounts: Record<string, number> = {};
+  trades.forEach((t) => {
+    if (Array.isArray(t.emotions)) {
+      t.emotions.forEach((e: string) => {
+        emotionCounts[e] = (emotionCounts[e] || 0) + 1;
+      });
+    }
+  });
+
+  const dominantEmotions = Object.entries(emotionCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([e]) => e);
+
+  // Calculate journal streak days (consecutive days ending today or yesterday with trades)
+  const tradeDates = new Set<string>();
+  trades.forEach((t) => {
+    const dateStr = (t.openedAt || t.createdAt).split("T")[0];
+    if (dateStr) tradeDates.add(dateStr);
+  });
+
+  let journalStreakDays = 0;
+  let checkDate = new Date(referenceDate);
+
+  while (true) {
+    const y = checkDate.getFullYear();
+    const m = String(checkDate.getMonth() + 1).padStart(2, "0");
+    const d = String(checkDate.getDate()).padStart(2, "0");
+    const ds = `${y}-${m}-${d}`;
+
+    if (tradeDates.has(ds)) {
+      journalStreakDays++;
+      checkDate.setDate(checkDate.getDate() - 1);
+    } else {
+      // If today has no trades yet, check yesterday
+      if (journalStreakDays === 0) {
+        checkDate.setDate(checkDate.getDate() - 1);
+        const y2 = checkDate.getFullYear();
+        const m2 = String(checkDate.getMonth() + 1).padStart(2, "0");
+        const d2 = String(checkDate.getDate()).padStart(2, "0");
+        const ds2 = `${y2}-${m2}-${d2}`;
+        if (tradeDates.has(ds2)) {
+          journalStreakDays++;
+          checkDate.setDate(checkDate.getDate() - 1);
+          continue;
+        }
+      }
+      break;
+    }
+  }
+
+  return {
+    totalTrades,
+    periodTrades,
+    planCompliancePercent: 100, // Placeholder for T6b
+    averageProcessScore: 0, // Placeholder for T6b
+    periodRResult,
+    journalStreakDays,
+    notesCount,
+    frequentErrors,
+    dominantEmotions,
+  };
+}
+
+export function exportProfileDataJSON(
+  state: any,
+  journalDataOrDate?: { accounts: any[]; trades: any[] } | Date,
+  exportedAtDate: Date = new Date()
+): string {
+  let journalData: { accounts: any[]; trades: any[] } | undefined;
+  let actualDate = exportedAtDate;
+
+  if (journalDataOrDate instanceof Date) {
+    actualDate = journalDataOrDate;
+  } else if (journalDataOrDate && typeof journalDataOrDate === "object") {
+    journalData = journalDataOrDate;
+  }
+
+  const todayStr = actualDate.toISOString().split("T")[0];
 
   const payload = {
     app: "ayra",
-    exportVersion: "1.0",
+    exportVersion: "1.1",
     exportedAt: exportedAtDate.toISOString(),
     user: {
       name: state.name,
@@ -395,6 +522,10 @@ export function exportProfileDataJSON(state: any, exportedAtDate: Date = new Dat
       posts: state.posts || [],
       customGoals: state.customGoals || [],
       chronicle: state.chronicle || [],
+    },
+    journal: {
+      accounts: journalData?.accounts || [],
+      trades: journalData?.trades || [],
     },
   };
 

@@ -1,13 +1,72 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { TabHeader } from "@/components/TabHeader";
 import { useApp } from "@/lib/context";
-import { formatString } from "@/lib/i18n";
+import { useGame } from "@/lib/game-context";
+import { useJournal } from "@/lib/journal/context";
+import { Account, Trade, AccountType, AccountCurrency } from "@/lib/journal/types";
+import { calculatePnlPercent } from "@/lib/journal/calc";
+import { exportProfileDataJSON, calculateJournalStats } from "@/lib/stats";
+import { AddTradeModal } from "@/components/AddTradeModal";
+import { Plus, Download, AlertTriangle, Search, Trash2, Edit2, ShieldAlert } from "lucide-react";
 
 export default function JournalPage() {
-  const [activeTab, setActiveTab] = useState(0);
-  const { dict } = useApp();
+  const { dict, lang, showToast, setAddTradeModalOpen } = useApp();
+  const { gameState } = useGame();
+  const {
+    accounts,
+    trades,
+    storageUsage,
+    saveAccount,
+    archiveAccount,
+    deleteAccount,
+    deleteTrade,
+  } = useJournal();
+
+  const [activeTab, setActiveTab] = useState<number>(1); // Default to Trades tab (1)
+
+  // Unit Switcher: 'R' | 'money' | 'percent'
+  const [unit, setUnit] = useState<"R" | "money" | "percent">("R");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedUnit = localStorage.getItem("ayra_journal_unit") as "R" | "money" | "percent";
+      if (savedUnit && ["R", "money", "percent"].includes(savedUnit)) {
+        setUnit(savedUnit);
+      }
+    }
+  }, []);
+
+  const handleUnitChange = (newUnit: "R" | "money" | "percent") => {
+    setUnit(newUnit);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("ayra_journal_unit", newUnit);
+    }
+  };
+
+  // Trade Filters
+  const [filterAccount, setFilterAccount] = useState<string>("all");
+  const [filterPeriod, setFilterPeriod] = useState<string>("all"); // '7d' | '30d' | '90d' | 'all'
+  const [filterInstrument, setFilterInstrument] = useState<string>("");
+  const [filterResult, setFilterResult] = useState<string>("all"); // 'win' | 'loss' | 'breakeven' | 'all'
+  const [filterDirection, setFilterDirection] = useState<string>("all"); // 'long' | 'short' | 'all'
+  const [page, setPage] = useState<number>(1);
+
+  // Trade Detail / Edit / Delete state
+  const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null);
+  const [editingTrade, setEditingTrade] = useState<Trade | null>(null);
+  const [deletingTradeId, setDeleteTradeId] = useState<string | null>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Account Form state
+  const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  const [accName, setAccName] = useState("");
+  const [accType, setAccType] = useState<AccountType>("personal");
+  const [accCurrency, setAccCurrency] = useState<AccountCurrency>("USD");
+  const [accStartBalance, setAccStartBalance] = useState("");
+  const [accountErrorMessage, setAccountErrorMessage] = useState<string | null>(null);
 
   const tabs = [
     dict.journal.tabs.dashboard,
@@ -19,24 +78,858 @@ export default function JournalPage() {
     dict.journal.tabs.notes,
   ];
 
+  // Export JSON
+  const handleExportJSON = () => {
+    const jsonStr = exportProfileDataJSON(gameState, { accounts, trades });
+    const blob = new Blob([jsonStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const dateStr = new Date().toISOString().split("T")[0];
+    link.href = url;
+    link.download = `ayra-profile-${gameState.name}-${dateStr}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showToast(dict.profile.statsTab.downloadedToast);
+  };
+
+  // Filter Trades
+  const filteredTrades = useMemo(() => {
+    const nowMs = Date.now();
+
+    return trades.filter((t) => {
+      if (filterAccount !== "all" && t.accountId !== filterAccount) return false;
+      if (filterResult !== "all" && t.result !== filterResult) return false;
+      if (filterDirection !== "all" && t.direction !== filterDirection) return false;
+
+      if (filterInstrument.trim()) {
+        const query = filterInstrument.trim().toUpperCase();
+        if (!t.instrument.toUpperCase().includes(query)) return false;
+      }
+
+      if (filterPeriod !== "all") {
+        const tradeMs = new Date(t.openedAt || t.createdAt).getTime();
+        const diffDays = (nowMs - tradeMs) / (1000 * 60 * 60 * 24);
+        if (filterPeriod === "7d" && diffDays > 7) return false;
+        if (filterPeriod === "30d" && diffDays > 30) return false;
+        if (filterPeriod === "90d" && diffDays > 90) return false;
+      }
+
+      return true;
+    }).sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
+  }, [trades, filterAccount, filterPeriod, filterInstrument, filterResult, filterDirection]);
+
+  // Paginated Trades (50 per page)
+  const pageSize = 50;
+  const paginatedTrades = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredTrades.slice(start, start + pageSize);
+  }, [filteredTrades, page]);
+
+  const totalPages = Math.ceil(filteredTrades.length / pageSize) || 1;
+
+  // Formatting trade result values
+  const formatTradeValue = (trade: Trade) => {
+    const acc = accounts.find((a) => a.id === trade.accountId);
+    const curr = acc?.currency || "USD";
+
+    if (unit === "R") {
+      if (trade.rMultiple != null) {
+        const val = trade.rMultiple;
+        const formatted = val > 0 ? `+${val.toFixed(2)} R` : `${val.toFixed(2)} R`;
+        return formatted;
+      }
+      return "—";
+    }
+
+    if (unit === "percent") {
+      const startBal = acc?.startBalance;
+      const pct = calculatePnlPercent(trade.pnlMoney, startBal);
+      if (pct != null) {
+        return pct > 0 ? `+${pct.toFixed(2)}%` : `${pct.toFixed(2)}%`;
+      }
+      return "—";
+    }
+
+    // Money format
+    if (trade.pnlMoney != null) {
+      const val = trade.pnlMoney;
+      try {
+        const formatted = new Intl.NumberFormat(lang === "ru" ? "ru-RU" : "en-US", {
+          style: "currency",
+          currency: curr,
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 2,
+        }).format(val);
+        return val > 0 ? `+${formatted}` : formatted;
+      } catch {
+        return `${val} ${curr}`;
+      }
+    }
+
+    return "—";
+  };
+
+  // Focus trap for delete confirmation
+  useEffect(() => {
+    if (deletingTradeId && cancelButtonRef.current) {
+      cancelButtonRef.current.focus();
+    }
+  }, [deletingTradeId]);
+
+  const handleDeleteTradeConfirm = () => {
+    if (deletingTradeId) {
+      deleteTrade(deletingTradeId);
+      setDeleteTradeId(null);
+      setSelectedTrade(null);
+      showToast(dict.journal.addTradeModal.tradeDeletedToast);
+    }
+  };
+
+  // Account Modal Actions
+  const handleOpenAccountModal = (account?: Account) => {
+    setEditingAccount(account || null);
+    setAccName(account?.name || "");
+    setAccType(account?.type || "personal");
+    setAccCurrency(account?.currency || "USD");
+    setAccStartBalance(account?.startBalance != null ? String(account.startBalance) : "");
+    setAccountErrorMessage(null);
+    setIsAccountModalOpen(true);
+  };
+
+  const handleSaveAccountSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const newAcc: Account = {
+      id: editingAccount?.id || `acc_${Date.now()}`,
+      name: accName.trim() || null,
+      type: accType,
+      currency: accCurrency,
+      startBalance: accStartBalance ? parseFloat(accStartBalance) || undefined : undefined,
+      platform: "manual",
+      archivedAt: editingAccount?.archivedAt,
+      createdAt: editingAccount?.createdAt || new Date().toISOString(),
+    };
+    saveAccount(newAcc);
+    setIsAccountModalOpen(false);
+    showToast(dict.journal.accountsTab.accountSavedToast);
+  };
+
+  const handleArchiveAccount = (id: string) => {
+    archiveAccount(id);
+    showToast(dict.journal.accountsTab.accountArchivedToast);
+  };
+
+  const handleDeleteAccountAction = (id: string) => {
+    try {
+      deleteAccount(id);
+      showToast(dict.journal.accountsTab.accountDeletedToast);
+    } catch (err: any) {
+      setAccountErrorMessage(dict.journal.accountsTab.cannotDeleteHasTrades);
+    }
+  };
+
+  const journalStats = useMemo(() => calculateJournalStats(trades, 30), [trades]);
+
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="font-serif text-2xl font-bold text-tx">{dict.journal.title}</h1>
-        <p className="text-xs text-mu mt-1">{dict.journal.subtitle}</p>
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="font-serif text-2xl font-bold text-tx">{dict.journal.title}</h1>
+          <p className="text-xs text-mu mt-0.5">{dict.journal.subtitle}</p>
+        </div>
+        <button
+          onClick={() => setAddTradeModalOpen(true)}
+          className="btn text-xs py-2 px-4 flex items-center gap-1.5 self-start sm:self-auto font-semibold"
+        >
+          <Plus size={16} />
+          <span>{dict.home.quickActions.addTrade}</span>
+        </button>
       </div>
 
+      {/* Storage Usage Soft Warning Banner (>80%) */}
+      {storageUsage.isWarning && (
+        <div className="p-3 bg-amber-500/15 border border-amber-500/40 rounded-xl text-xs text-amber-200 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={18} className="text-amber-400 flex-none" />
+            <span>
+              {dict.journal.storageWarning.replace(
+                "{percent}",
+                storageUsage.percentage.toFixed(0)
+              )}
+            </span>
+          </div>
+          <button
+            onClick={handleExportJSON}
+            className="btn-ghost py-1 px-3 text-xs flex items-center gap-1.5 flex-none"
+          >
+            <Download size={14} />
+            <span>{dict.journal.exportBtn}</span>
+          </button>
+        </div>
+      )}
+
+      {/* Single-line Tabs */}
       <TabHeader tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
 
-      <div className="card">
-        <h4 className="h4">
-          {formatString(dict.journal.tabHeader, { tab: tabs[activeTab] })}
-        </h4>
-        <p className="text-xs text-mu">{dict.journal.inDev}</p>
-        <div className="mt-4 h-32 rounded-xl bg-s2/50 border border-line border-dashed flex items-center justify-center text-xs text-mu px-4 text-center">
-          {formatString(dict.journal.emptyState, { tab: tabs[activeTab] })}
+      {/* TAB 0: DASHBOARD */}
+      {activeTab === 0 && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="card p-4 space-y-1">
+              <span className="text-xs text-mu">{dict.journal.tradesTab.colResult}</span>
+              <b className="block text-2xl font-bold text-tx">{trades.length}</b>
+              <span className="text-[11px] text-mu">{dict.home.journalBlock.title}</span>
+            </div>
+
+            <div className="card p-4 space-y-1">
+              <span className="text-xs text-mu">{dict.journal.accountsTab.title}</span>
+              <b className="block text-2xl font-bold text-tx">{accounts.length}</b>
+              <span className="text-[11px] text-mu">{dict.journal.accountsCreated}</span>
+            </div>
+
+            <div className="card p-4 space-y-1">
+              <span className="text-xs text-mu">Streak</span>
+              <b className="block text-2xl font-bold text-tx">{journalStats.journalStreakDays} {dict.journal.daysShort}</b>
+              <span className="text-[11px] text-mu">{dict.journal.journalStreak}</span>
+            </div>
+          </div>
+
+          <div className="card text-center p-6 space-y-3">
+            <p className="text-xs text-mu">{dict.journal.inDev}</p>
+            <button
+              onClick={() => setAddTradeModalOpen(true)}
+              className="btn text-xs py-2 px-4 inline-flex items-center gap-1.5"
+            >
+              <Plus size={16} />
+              <span>{dict.home.quickActions.addTrade}</span>
+            </button>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* TAB 1: TRADES */}
+      {activeTab === 1 && (
+        <div className="space-y-4">
+          {/* Controls Bar: Unit Switcher & Filters */}
+          <div className="card p-3 space-y-3">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              {/* Unit Switcher */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-mu">{dict.journal.tradesTab.unitSwitcher}</span>
+                <div className="flex rounded-lg border border-line bg-s2 p-0.5 text-xs">
+                  <button
+                    onClick={() => handleUnitChange("R")}
+                    className={`px-3 py-1 font-bold rounded-md transition-colors ${
+                      unit === "R" ? "bg-vi text-white" : "text-mu hover:text-tx"
+                    }`}
+                  >
+                    R
+                  </button>
+                  <button
+                    onClick={() => handleUnitChange("money")}
+                    className={`px-3 py-1 font-bold rounded-md transition-colors ${
+                      unit === "money" ? "bg-vi text-white" : "text-mu hover:text-tx"
+                    }`}
+                  >
+                    $
+                  </button>
+                  <button
+                    onClick={() => handleUnitChange("percent")}
+                    className={`px-3 py-1 font-bold rounded-md transition-colors ${
+                      unit === "percent" ? "bg-vi text-white" : "text-mu hover:text-tx"
+                    }`}
+                  >
+                    %
+                  </button>
+                </div>
+              </div>
+
+              {/* Instrument Search */}
+              <div className="relative flex-1 max-w-xs">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-mu" />
+                <input
+                  type="text"
+                  value={filterInstrument}
+                  onChange={(e) => {
+                    setFilterInstrument(e.target.value);
+                    setPage(1);
+                  }}
+                  placeholder={dict.journal.tradesTab.searchPlaceholder}
+                  className="input text-xs pl-8 w-full"
+                />
+              </div>
+            </div>
+
+            {/* Filter Dropdowns */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              {/* Account */}
+              <select
+                value={filterAccount}
+                onChange={(e) => {
+                  setFilterAccount(e.target.value);
+                  setPage(1);
+                }}
+                className="input text-xs"
+              >
+                <option value="all">{dict.journal.tradesTab.filterAccount}</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name || dict.journal.accountsTab.mainAccountDefaultName}
+                  </option>
+                ))}
+              </select>
+
+              {/* Period */}
+              <select
+                value={filterPeriod}
+                onChange={(e) => {
+                  setFilterPeriod(e.target.value);
+                  setPage(1);
+                }}
+                className="input text-xs"
+              >
+                <option value="all">{dict.journal.tradesTab.periodAll}</option>
+                <option value="7d">{dict.journal.tradesTab.period7d}</option>
+                <option value="30d">{dict.journal.tradesTab.period30d}</option>
+                <option value="90d">{dict.journal.tradesTab.period90d}</option>
+              </select>
+
+              {/* Result */}
+              <select
+                value={filterResult}
+                onChange={(e) => {
+                  setFilterResult(e.target.value);
+                  setPage(1);
+                }}
+                className="input text-xs"
+              >
+                <option value="all">{dict.journal.tradesTab.resultAll}</option>
+                <option value="win">{dict.journal.tradesTab.resultWin}</option>
+                <option value="loss">{dict.journal.tradesTab.resultLoss}</option>
+                <option value="breakeven">{dict.journal.tradesTab.resultBreakeven}</option>
+              </select>
+
+              {/* Direction */}
+              <select
+                value={filterDirection}
+                onChange={(e) => {
+                  setFilterDirection(e.target.value);
+                  setPage(1);
+                }}
+                className="input text-xs"
+              >
+                <option value="all">{dict.journal.tradesTab.dirAll}</option>
+                <option value="long">{dict.journal.addTradeModal.directionLong}</option>
+                <option value="short">{dict.journal.addTradeModal.directionShort}</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Empty State */}
+          {filteredTrades.length === 0 ? (
+            <div className="card text-center p-8 space-y-3 border-dashed">
+              <h3 className="h3">{dict.journal.tradesTab.emptyTitle}</h3>
+              <p className="text-xs text-mu max-w-md mx-auto">
+                {dict.journal.tradesTab.emptyDesc}
+              </p>
+              <button
+                onClick={() => setAddTradeModalOpen(true)}
+                className="btn text-xs py-2 px-4 inline-flex items-center gap-1.5"
+              >
+                <Plus size={16} />
+                <span>{dict.home.quickActions.addTrade}</span>
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {/* Wide Screen Table View (hidden on mobile) */}
+              <div className="hidden md:block overflow-x-auto card p-0">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-s2/80 text-mu font-semibold border-b border-line">
+                    <tr>
+                      <th className="p-3">{dict.journal.tradesTab.colDate}</th>
+                      <th className="p-3">{dict.journal.tradesTab.colInstrument}</th>
+                      <th className="p-3">{dict.journal.tradesTab.colDirection}</th>
+                      <th className="p-3 text-right">{dict.journal.tradesTab.colResult}</th>
+                      <th className="p-3">{dict.journal.tradesTab.colVerification}</th>
+                      <th className="p-3">{dict.journal.tradesTab.colAccount}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line/40">
+                    {paginatedTrades.map((t) => {
+                      const acc = accounts.find((a) => a.id === t.accountId);
+                      const isWin = t.result === "win";
+                      const isLoss = t.result === "loss";
+
+                      return (
+                        <tr
+                          key={t.id}
+                          onClick={() => setSelectedTrade(t)}
+                          className="hover:bg-s2/60 cursor-pointer transition-colors"
+                        >
+                          <td className="p-3 text-mu">
+                            {new Date(t.openedAt).toLocaleDateString(lang === "ru" ? "ru-RU" : "en-US", {
+                              day: "2-digit",
+                              month: "short",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </td>
+                          <td className="p-3 font-bold text-tx">{t.instrument}</td>
+                          <td className="p-3">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                t.direction === "long"
+                                  ? "bg-emerald-500/20 text-emerald-400"
+                                  : "bg-rose-500/20 text-rose-400"
+                              }`}
+                            >
+                              {t.direction.toUpperCase()}
+                            </span>
+                          </td>
+                          <td className="p-3 text-right font-bold">
+                            <span
+                              className={
+                                isWin
+                                  ? "text-emerald-400"
+                                  : isLoss
+                                  ? "text-rose-400"
+                                  : "text-tx"
+                              }
+                            >
+                              {formatTradeValue(t)}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <span
+                              title={dict.journal.tradesTab.unverifiedTooltip}
+                              className="px-2 py-0.5 rounded bg-white/5 border border-line text-[10px] text-mu font-medium inline-flex items-center gap-1"
+                            >
+                              <ShieldAlert size={10} />
+                              {dict.journal.tradesTab.unverifiedBadge}
+                            </span>
+                          </td>
+                          <td className="p-3 text-mu truncate max-w-[120px]">
+                            {acc?.name || dict.journal.accountsTab.mainAccountDefaultName}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile Card View (hidden on desktop) */}
+              <div className="grid grid-cols-1 gap-2.5 md:hidden">
+                {paginatedTrades.map((t) => {
+                  const acc = accounts.find((a) => a.id === t.accountId);
+                  const isWin = t.result === "win";
+                  const isLoss = t.result === "loss";
+
+                  return (
+                    <div
+                      key={t.id}
+                      onClick={() => setSelectedTrade(t)}
+                      className="card p-3 space-y-2 cursor-pointer hover:border-vi transition-colors"
+                    >
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-tx">{t.instrument}</span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                              t.direction === "long"
+                                ? "bg-emerald-500/20 text-emerald-400"
+                                : "bg-rose-500/20 text-rose-400"
+                            }`}
+                          >
+                            {t.direction.toUpperCase()}
+                          </span>
+                        </div>
+                        <span
+                          className={`font-bold text-sm ${
+                            isWin
+                              ? "text-emerald-400"
+                              : isLoss
+                              ? "text-rose-400"
+                              : "text-tx"
+                          }`}
+                        >
+                          {formatTradeValue(t)}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between items-center text-[11px] text-mu border-t border-line/40 pt-1.5">
+                        <span>
+                          {new Date(t.openedAt).toLocaleDateString(lang === "ru" ? "ru-RU" : "en-US", {
+                            day: "2-digit",
+                            month: "short",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                        <span>{acc?.name || dict.journal.accountsTab.mainAccountDefaultName}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex justify-between items-center text-xs text-mu pt-2">
+                  <button
+                    disabled={page === 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    className="btn-ghost py-1 px-3 disabled:opacity-40"
+                  >
+                    {dict.journal.prevBtn}
+                  </button>
+                  <span>
+                    {dict.journal.pageOf.replace("{page}", String(page)).replace("{total}", String(totalPages))}
+                  </span>
+                  <button
+                    disabled={page === totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    className="btn-ghost py-1 px-3 disabled:opacity-40"
+                  >
+                    {dict.journal.nextBtn}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 5: ACCOUNTS */}
+      {activeTab === 5 && (
+        <div className="space-y-4">
+          <div className="flex justify-between items-center">
+            <h3 className="h3">{dict.journal.accountsTab.title}</h3>
+            <button
+              onClick={() => handleOpenAccountModal()}
+              className="btn text-xs py-2 px-3 flex items-center gap-1.5 font-semibold"
+            >
+              <Plus size={15} />
+              <span>{dict.journal.accountsTab.addAccountBtn}</span>
+            </button>
+          </div>
+
+          {accountErrorMessage && (
+            <div className="p-3 bg-rose-500/15 border border-rose-500/40 rounded-xl text-xs text-rose-300">
+              {accountErrorMessage}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {accounts.map((a) => {
+              const tradeCount = trades.filter((t) => t.accountId === a.id).length;
+              const isArchived = !!a.archivedAt;
+
+              return (
+                <div key={a.id} className="card p-4 space-y-3 relative">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h4 className="font-bold text-sm text-tx">
+                        {a.name || dict.journal.accountsTab.mainAccountDefaultName}
+                      </h4>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <span className="badge-free text-[10px] uppercase">{a.type}</span>
+                        <span className="chip text-[10px]">{a.currency}</span>
+                        {isArchived && (
+                          <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] px-1.5 py-0.5 rounded font-medium">
+                            {dict.journal.accountsTab.archivedTag}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="text-xs text-mu space-y-1 border-t border-line/40 pt-2">
+                    {a.startBalance != null && (
+                      <div className="flex justify-between">
+                        <span>{dict.journal.accountsTab.startBalance}:</span>
+                        <b className="text-tx">{a.startBalance} {a.currency}</b>
+                      </div>
+                    )}
+                    <div className="flex justify-between">
+                      <span>{dict.journal.tradesWord}:</span>
+                      <b className="text-tx">{tradeCount}</b>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 pt-1 border-t border-line/40">
+                    <button
+                      onClick={() => handleOpenAccountModal(a)}
+                      className="btn-ghost text-xs py-1 px-2.5 flex-1 flex items-center justify-center gap-1"
+                    >
+                      <Edit2 size={12} />
+                      <span>{dict.journal.accountsTab.editBtn}</span>
+                    </button>
+                    {!isArchived && (
+                      <button
+                        onClick={() => handleArchiveAccount(a.id)}
+                        className="btn-ghost text-xs py-1 px-2.5 text-amber-400 hover:text-amber-300 flex items-center gap-1"
+                      >
+                        {dict.journal.accountsTab.archiveBtn}
+                      </button>
+                    )}
+                    {tradeCount === 0 && (
+                      <button
+                        onClick={() => handleDeleteAccountAction(a.id)}
+                        className="btn-ghost text-xs py-1 px-2 text-rose-400 hover:text-rose-300 flex items-center gap-1"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* STUBS FOR TABS 2, 3, 4, 6 */}
+      {[2, 3, 4, 6].includes(activeTab) && (
+        <div className="card text-center p-8 space-y-3">
+          <h4 className="h4">{tabs[activeTab]}</h4>
+          <p className="text-xs text-mu max-w-sm mx-auto">
+            {dict.journal.inDev}
+          </p>
+          <span className="badge-free inline-block text-xs py-1 px-3">
+            {dict.journal.comingSoon}
+          </span>
+        </div>
+      )}
+
+      {/* TRADE DETAIL VIEW & DELETE MODAL */}
+      {selectedTrade && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4 overflow-y-auto"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSelectedTrade(null);
+          }}
+        >
+          <div className="card w-full max-w-lg space-y-4 shadow-xl border border-line p-5">
+            <div className="flex justify-between items-center border-b border-line pb-3">
+              <div>
+                <h3 className="h3">{dict.journal.tradesTab.viewTradeTitle}</h3>
+                <span className="text-xs text-mu">{selectedTrade.instrument} · {selectedTrade.direction.toUpperCase()}</span>
+              </div>
+              <button
+                onClick={() => setSelectedTrade(null)}
+                className="text-mu hover:text-tx text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Inline Delete Confirmation */}
+            {deletingTradeId === selectedTrade.id ? (
+              <div className="p-4 bg-rose-500/15 border border-rose-500/40 rounded-xl space-y-3">
+                <p className="text-xs font-semibold text-rose-200">
+                  {dict.journal.tradesTab.confirmDelete}
+                </p>
+                <div className="flex justify-end gap-2">
+                  <button
+                    ref={cancelButtonRef}
+                    onClick={() => setDeleteTradeId(null)}
+                    className="btn-secondary text-xs py-1.5 px-4"
+                  >
+                    {dict.journal.tradesTab.cancelDelete}
+                  </button>
+                  <button
+                    onClick={handleDeleteTradeConfirm}
+                    className="bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs py-1.5 px-4 rounded-lg transition-colors"
+                  >
+                    {dict.journal.tradesTab.deleteConfirmYes}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3 text-xs">
+                <div className="grid grid-cols-2 gap-2 p-3 bg-s2/60 rounded-xl border border-line">
+                  <div>
+                    <span className="text-mu block text-[11px]">{dict.journal.addTradeModal.openedAtLabel}</span>
+                    <b className="text-tx">{new Date(selectedTrade.openedAt).toLocaleString()}</b>
+                  </div>
+                  <div>
+                    <span className="text-mu block text-[11px]">{dict.journal.tradesTab.colResult}</span>
+                    <b
+                      className={
+                        selectedTrade.result === "win"
+                          ? "text-emerald-400"
+                          : selectedTrade.result === "loss"
+                          ? "text-rose-400"
+                          : "text-tx"
+                      }
+                    >
+                      {formatTradeValue(selectedTrade)}
+                    </b>
+                  </div>
+                </div>
+
+                {selectedTrade.entryPrice != null && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div>
+                      <span className="text-mu block text-[11px]">{dict.journal.addTradeModal.entryPriceLabel}</span>
+                      <b className="text-tx">{selectedTrade.entryPrice}</b>
+                    </div>
+                    <div>
+                      <span className="text-mu block text-[11px]">{dict.journal.addTradeModal.exitPriceLabel}</span>
+                      <b className="text-tx">{selectedTrade.exitPrice ?? "—"}</b>
+                    </div>
+                    <div>
+                      <span className="text-mu block text-[11px]">{dict.journal.addTradeModal.stopLossLabel}</span>
+                      <b className="text-tx">{selectedTrade.stopLoss ?? "—"}</b>
+                    </div>
+                    <div>
+                      <span className="text-mu block text-[11px]">{dict.journal.addTradeModal.takeProfitLabel}</span>
+                      <b className="text-tx">{selectedTrade.takeProfit ?? "—"}</b>
+                    </div>
+                  </div>
+                )}
+
+                {selectedTrade.notes && (
+                  <div>
+                    <span className="text-mu block text-[11px] mb-1">{dict.journal.addTradeModal.notesLabel}</span>
+                    <p className="p-2.5 bg-s2/40 border border-line rounded-lg text-tx whitespace-pre-wrap">
+                      {selectedTrade.notes}
+                    </p>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex justify-end gap-2 pt-3 border-t border-line">
+                  <button
+                    onClick={() => {
+                      const tradeToEdit = selectedTrade;
+                      setSelectedTrade(null);
+                      setEditingTrade(tradeToEdit);
+                    }}
+                    className="btn-secondary py-1.5 px-3 text-xs flex items-center gap-1"
+                  >
+                    <Edit2 size={13} />
+                    <span>{dict.journal.tradesTab.editTradeBtn}</span>
+                  </button>
+                  <button
+                    onClick={() => setDeleteTradeId(selectedTrade.id)}
+                    className="bg-rose-500/20 text-rose-300 border border-rose-500/30 hover:bg-rose-500/30 py-1.5 px-3 text-xs font-medium rounded-lg flex items-center gap-1 transition-colors"
+                  >
+                    <Trash2 size={13} />
+                    <span>{dict.journal.tradesTab.deleteTradeBtn}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* EDIT TRADE MODAL */}
+      {editingTrade && (
+        <AddTradeModal
+          isOpen={!!editingTrade}
+          initialTrade={editingTrade}
+          onClose={() => setEditingTrade(null)}
+        />
+      )}
+
+      {/* ACCOUNT MODAL */}
+      {isAccountModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsAccountModalOpen(false);
+          }}
+        >
+          <form
+            onSubmit={handleSaveAccountSubmit}
+            className="card w-full max-w-md space-y-4 p-5 shadow-xl border border-line"
+          >
+            <div className="flex justify-between items-center border-b border-line pb-3">
+              <h3 className="h3">
+                {editingAccount ? dict.journal.accountsTab.editBtn : dict.journal.accountsTab.addAccountBtn}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsAccountModalOpen(false)}
+                className="text-mu hover:text-tx text-lg font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div>
+              <label className="text-xs text-mu block mb-1">{dict.journal.accountNameLabel}</label>
+              <input
+                type="text"
+                value={accName}
+                onChange={(e) => setAccName(e.target.value)}
+                placeholder={dict.journal.accountsTab.mainAccountDefaultName}
+                className="input text-xs w-full"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs text-mu block mb-1">{dict.journal.accountTypeLabel}</label>
+                <select
+                  value={accType}
+                  onChange={(e) => setAccType(e.target.value as AccountType)}
+                  className="input text-xs w-full"
+                >
+                  <option value="personal">{dict.journal.accountsTab.typePersonal}</option>
+                  <option value="prop">{dict.journal.accountsTab.typeProp}</option>
+                  <option value="demo">{dict.journal.accountsTab.typeDemo}</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs text-mu block mb-1">{dict.journal.currencyLabel}</label>
+                <select
+                  value={accCurrency}
+                  onChange={(e) => setAccCurrency(e.target.value as AccountCurrency)}
+                  className="input text-xs w-full"
+                >
+                  {["USD", "EUR", "GBP", "GEL", "RUB", "UAH", "KZT", "USDT"].map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-mu block mb-1">{dict.journal.accountsTab.startBalance}</label>
+              <input
+                type="text"
+                value={accStartBalance}
+                onChange={(e) => setAccStartBalance(e.target.value)}
+                placeholder="10000"
+                className="input text-xs w-full"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-line">
+              <button
+                type="button"
+                onClick={() => setIsAccountModalOpen(false)}
+                className="btn-ghost py-2 px-4 text-xs"
+              >
+                {dict.journal.cancel}
+              </button>
+              <button type="submit" className="btn-primary py-2 px-5 text-xs font-semibold">
+                {dict.journal.save}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

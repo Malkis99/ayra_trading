@@ -9,14 +9,18 @@ import { Topbar } from "@/components/Topbar";
 import { BottomNav } from "@/components/BottomNav";
 import { Starfield } from "@/components/Starfield";
 import { AddModal } from "@/components/AddModal";
+import { AddTradeModal } from "@/components/AddTradeModal";
 import { SearchModal } from "@/components/SearchModal";
 import { Toast } from "@/components/Toast";
 import { Language } from "@/lib/i18n/types";
+import { JournalProvider } from "@/lib/journal/context";
+import { useApp } from "@/lib/context";
 
 function ShellContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { isLoaded } = useGame();
+  const { isAddTradeModalOpen, setAddTradeModalOpen } = useApp();
   const [isCleanRedirecting, setIsCleanRedirecting] = useState<boolean>(false);
 
   useEffect(() => {
@@ -70,6 +74,10 @@ function ShellContent({ children }: { children: React.ReactNode }) {
 
       {/* Overlay Modals & Toasts */}
       <AddModal />
+      <AddTradeModal
+        isOpen={isAddTradeModalOpen}
+        onClose={() => setAddTradeModalOpen(false)}
+      />
       <SearchModal />
       <Toast />
     </div>
@@ -86,7 +94,9 @@ export function Shell({
   return (
     <AppProvider initialLang={initialLang}>
       <GameProvider>
-        <ShellContent>{children}</ShellContent>
+        <JournalProvider>
+          <ShellContent>{children}</ShellContent>
+        </JournalProvider>
       </GameProvider>
     </AppProvider>
   );

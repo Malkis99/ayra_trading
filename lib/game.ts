@@ -451,6 +451,19 @@ export function checkAchievements(
     newlyUnlocked.push("author");
   }
 
+  const hasFirstTrade =
+    updatedState.history.some((h) => h.questId === "q_tradelog") ||
+    updatedState.achievements["firstTrade"];
+
+  if (hasFirstTrade && !updatedState.achievements["firstTrade"]) {
+    updatedState.achievements = { ...updatedState.achievements, firstTrade: true };
+    chronicle = addChronicleEvent(chronicle, {
+      type: "achievementUnlocked",
+      achievementId: "firstTrade",
+    });
+    newlyUnlocked.push("firstTrade");
+  }
+
   updatedState.chronicle = chronicle;
   return { state: updatedState, newlyUnlocked };
 }
@@ -884,5 +897,149 @@ export function removeCustomGoal(state: GameState, goalId: string): GameState {
   return {
     ...state,
     customGoals: state.customGoals.filter((g) => g.id !== goalId),
+  };
+}
+
+export interface TradeRewardResult {
+  state: GameState;
+  xpAwarded: number;
+  questClosed: boolean;
+  leveledUp: boolean;
+  newLevel?: number;
+  newlyUnlocked: string[];
+}
+
+export function recordLoggedTrade(
+  state: GameState,
+  trade: {
+    id: string;
+    accountId: string;
+    instrument: string;
+    direction: string;
+    openedAt: string;
+    verification: string;
+  },
+  allTrades: any[],
+  currentDate: Date = new Date()
+): TradeRewardResult {
+  let newState = checkAndApplyDateResets(state, currentDate);
+  const todayStr = getIsoDateString(currentDate);
+
+  // 1. Anti-farm validation
+  let isPlausible = true;
+
+  const tradeOpenedMs = new Date(trade.openedAt).getTime();
+  if (isNaN(tradeOpenedMs) || tradeOpenedMs > currentDate.getTime() + 24 * 60 * 60 * 1000) {
+    isPlausible = false;
+  }
+
+  const isDuplicate = allTrades.some(
+    (other) =>
+      other.id !== trade.id &&
+      other.accountId === trade.accountId &&
+      other.instrument === trade.instrument &&
+      other.direction === trade.direction &&
+      Math.abs(new Date(other.openedAt).getTime() - tradeOpenedMs) < 60 * 1000
+  );
+  if (isDuplicate) {
+    isPlausible = false;
+  }
+
+  const todayRecord = newState.dailyStats[todayStr];
+  const tradesTodayXpCount = todayRecord?.questsCompleted?.["trading_trade"] || 0;
+  if (tradesTodayXpCount >= GAME_CONFIG.MAX_DAILY_TRADE_XP_COUNT) {
+    isPlausible = false;
+  }
+
+  let xpAwarded = 0;
+  let leveledUp = false;
+  let newLevel: number | undefined;
+
+  if (isPlausible) {
+    const multiplier =
+      GAME_CONFIG.VERIFICATION_XP_MULTIPLIER[trade.verification] || 1.0;
+    xpAwarded = Math.round(GAME_CONFIG.TRADE_BASE_XP * multiplier);
+
+    let newXp = newState.xp + xpAwarded;
+    let currentLvl = newState.level;
+
+    let chronicle = newState.chronicle;
+
+    while (newXp >= xpForNextLevel(currentLvl)) {
+      newXp -= xpForNextLevel(currentLvl);
+      currentLvl++;
+      leveledUp = true;
+      chronicle = addChronicleEvent(chronicle, {
+        type: "levelUp",
+        level: currentLvl,
+      });
+    }
+
+    const updatedDailyStats = recordDailyStatEvent(newState.dailyStats, todayStr, {
+      type: "questDone",
+      category: "trading_trade",
+      xp: xpAwarded,
+      coins: 0,
+    });
+
+    newState = {
+      ...newState,
+      xp: newXp,
+      level: currentLvl,
+      chronicle,
+      dailyStats: updatedDailyStats,
+    };
+
+    if (leveledUp) {
+      newLevel = currentLvl;
+    }
+  }
+
+  // 2. Auto-close q_tradelog quest idempotently
+  let questClosed = false;
+  let questUnlocked: string[] = [];
+
+  if (!newState.completedQuestsToday["q_tradelog"]) {
+    const questRes = completeQuest(
+      newState,
+      "q_tradelog",
+      "Запись сделки в журнал",
+      "trading",
+      QUEST_XP,
+      QUEST_COINS,
+      currentDate
+    );
+    newState = questRes.state;
+    questClosed = true;
+    if (questRes.leveledUp) {
+      leveledUp = true;
+      newLevel = questRes.newLevel;
+    }
+    questUnlocked = questRes.newlyUnlocked;
+  }
+
+  // 3. First trade achievement
+  if (!newState.achievements["firstTrade"]) {
+    newState.achievements = { ...newState.achievements, firstTrade: true };
+    newState.chronicle = addChronicleEvent(newState.chronicle, {
+      type: "achievementUnlocked",
+      achievementId: "firstTrade",
+    });
+    questUnlocked.push("firstTrade");
+  }
+
+  const { state: finalState, newlyUnlocked: achUnlocked } = checkAchievements(newState);
+
+  const allNewlyUnlocked = Array.from(
+    new Set([...questUnlocked, ...achUnlocked])
+  );
+
+  return {
+    state: finalState,
+    xpAwarded,
+    questClosed,
+    leveledUp,
+    newLevel,
+    newlyUnlocked: allNewlyUnlocked,
   };
 }

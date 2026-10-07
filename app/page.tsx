@@ -14,7 +14,7 @@ import { getDeterministicDailyQuests } from "@/lib/quests";
 import { TITLES, FRAMES, ITEMS } from "@/lib/items";
 
 export default function HomePage() {
-  const { setAddModalOpen, showToast, dict, lang } = useApp();
+  const { setAddTradeModalOpen, showToast, dict, lang } = useApp();
   const {
     gameState,
     completeQuest,
@@ -239,7 +239,7 @@ export default function HomePage() {
 
         <div className="mt-4 flex flex-wrap gap-2.5">
           <button
-            onClick={() => setAddModalOpen(true)}
+            onClick={() => setAddTradeModalOpen(true)}
             className="btn text-xs py-2 px-3.5 flex items-center gap-1.5"
           >
             <Plus size={15} />
@@ -362,7 +362,7 @@ export default function HomePage() {
             <h4 className="h4">{dict.home.journalBlock.title}</h4>
             <p className="text-xs text-mu">{dict.home.journalBlock.desc}</p>
             <button
-              onClick={() => setAddModalOpen(true)}
+              onClick={() => setAddTradeModalOpen(true)}
               className="btn-ghost text-xs py-2 px-3 inline-flex items-center gap-1.5 mt-1"
             >
               <Plus size={14} />
