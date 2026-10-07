@@ -26,8 +26,8 @@ export function Figure({
   equipment = {},
   appearance = DEFAULT_AVATAR_APPEARANCE,
   viewBox = "0 0 100 230",
-  width = 100,
-  height = 230,
+  width = "100%",
+  height = "100%",
   back = false,
   className = "",
   rotateSlowly = false,
@@ -126,6 +126,7 @@ export function Figure({
       viewBox={viewBox}
       width={width}
       height={height}
+      preserveAspectRatio="xMidYMid meet"
       className={`motion-safe:animate-[breath_4s_easeInOut_infinite] ${
         rotateSlowly ? "motion-safe:animate-[slowRotate_12s_linear_infinite]" : ""
       } ${className}`}

@@ -79,8 +79,6 @@ export const en: Dictionary = {
     outfitLabel: "Outfit Style",
   },
   awakening: {
-    visibleOnlyToYou: "Visible only to you",
-    whyThisIsNeeded: "Why this is needed",
     back: "Back",
     continue: "Continue",
     skipQuestion: "Skip",
@@ -101,118 +99,94 @@ export const en: Dictionary = {
     },
     q: {
       nickname: {
-        title: "What is your nickname?",
-        exp: "Nickname is displayed in your profile and community.",
+        title: "Choose your nickname",
+        rules: "Latin letters, digits and _ . - , 3 to 24 characters",
         placeholder: "A-Z a-z 0-9 _ . -",
         errorRequired: "Nickname is required",
         errorLatin: "Use only Latin letters, digits, and _ . -",
         errorLength: "Between 3 and 24 characters",
       },
-      lang_tz: {
-        title: "Interface language & Timezone",
-        exp: "Used to format trading sessions and calendar events.",
+      language_timezone: {
+        title: "Language and time zone",
         languageLabel: "Language",
         timezoneLabel: "Timezone",
       },
       appearance: {
-        title: "Create your avatar",
-        exp: "Choose your starter avatar appearance. You can unlock new outfits later.",
+        title: "Create your character",
       },
-      age: {
-        title: "Age range",
-        exp: "Needed for content safety and tailored recommendations.",
+      ageRange: {
+        title: "Your age range",
       },
       hobbies: {
-        title: "Your hobbies",
-        exp: "Helps maintain a healthy balance between work and rest.",
+        title: "What are your hobbies?",
         placeholder: "Custom hobby…",
       },
       sports: {
-        title: "Sports & Physical activity",
-        exp: "For tailored physical quests in Strength & Endurance.",
+        title: "Which activities do you prefer?",
         placeholder: "Custom sport…",
       },
       reading: {
-        title: "Reading habits",
-        exp: "For tailored learning materials and Intelligence quests.",
+        title: "Do you read books?",
       },
       languages: {
-        title: "Language learning",
-        exp: "For language learning materials and practice quests.",
+        title: "Are you learning languages?",
         placeholder: "Language being learned…",
       },
-      skills: {
-        title: "Skills to develop",
-        exp: "To personalize your learning path in Academy.",
+      skillsToDevelop: {
+        title: "Which skills do you want to develop?",
         placeholder: "Custom skill…",
       },
-      lifestyle_mode: {
-        title: "Lifestyle mode",
-        exp: "So that quests align smoothly with your daily routine.",
+      lifestyleMode: {
+        title: "What does your life look like?",
       },
-      dev_time: {
-        title: "Daily time for development",
-        exp: "Sets the daily quest load and time budget.",
+      devTime: {
+        title: "How much time per day can you spend on growth?",
       },
-      free_time: {
-        title: "Free time",
-        exp: "Determines optimal time for reminders and quests.",
+      freeTime: {
+        title: "When do you usually have free time?",
       },
       experience: {
-        title: "Trading experience",
-        exp: "Determines starting difficulty and terminology.",
+        title: "How long have you been trading?",
       },
       markets: {
-        title: "Markets",
-        exp: "To filter news, calendar, and analytics in Market Center.",
+        title: "Which markets interest you?",
       },
-      main_problem: {
-        title: "Main challenge",
-        exp: "The starter program will focus on solving this challenge.",
+      mainProblem: {
+        title: "What is the main problem you want to solve?",
       },
-      trading_style: {
-        title: "Trading style",
-        exp: "To tailor review checklists and session prep.",
+      tradingStyle: {
+        title: "Which trading style fits you?",
       },
-      ready_strategy: {
-        title: "Ready strategy",
-        exp: "Determines if strategy building quests are needed.",
+      readyStrategy: {
+        title: "Do you have a ready strategy?",
       },
-      keep_journal: {
+      keepJournal: {
         title: "Do you keep a trading journal?",
-        exp: "Helps configure journal prompts.",
       },
-      analysis_time: {
-        title: "Daily time for market analysis",
-        exp: "Used when generating pre-session prep quests.",
+      analysisTime: {
+        title: "How much time do you spend on market analysis?",
       },
-      trading_goal: {
-        title: "Trading goal",
-        exp: "Connects daily quests to your long-term vision.",
+      tradingGoal: {
+        title: "What do you want to achieve with trading?",
         placeholder: "Custom goal…",
       },
-      join_reason: {
-        title: "Reason for joining",
-        exp: "Helps tailor platform features to your expectations.",
+      joinReason: {
+        title: "Why did you decide to join?",
         placeholder: "Custom reason…",
       },
       skills3m: {
-        title: "Target skills for 3 months",
-        exp: "Shapes the focus of your 3-month growth program.",
+        title: "Which skills do you want to build in 3 months?",
       },
       vision1y: {
-        title: "How do you see yourself in 1 year?",
-        exp: "Your personal vision for reflection (up to 200 chars).",
+        title: "Where do you see yourself in a year?",
         placeholder: "Describe your vision…",
       },
       obstacles: {
-        title: "What hinders you right now?",
-        exp: "Helps remove friction points from daily tasks.",
+        title: "What is holding you back now?",
         placeholder: "Custom obstacle…",
       },
-      success_vision: {
-        title: "What will be success for you?",
-        exp: "The main benchmark of your journey (up to 200 chars).",
+      successVision: {
+        title: "What result would be a real success for you?",
         placeholder: "Describe what success looks like…",
       },
     },

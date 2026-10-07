@@ -21,8 +21,169 @@ import {
   getFilteredOptions,
   QuestionDefinition,
 } from "@/lib/awakening";
-import { ArrowLeft, ArrowRight, SkipForward, Check, Globe, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowRight, SkipForward, Check, Globe, Sparkles, FastForward } from "lucide-react";
 import { formatString, formatNumber } from "@/lib/i18n";
+
+function AwakeningCanvasAnimation({
+  appearance,
+  equipment,
+  skipText,
+  startText,
+  onComplete,
+}: {
+  appearance: AvatarAppearance;
+  equipment: Record<string, number>;
+  skipText: string;
+  startText: string;
+  onComplete: () => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [phase, setPhase] = useState<"dark" | "spiral" | "bloom" | "final">("dark");
+
+  useEffect(() => {
+    // Check reduced motion
+    const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (prefersReducedMotion) {
+      setPhase("final");
+      return;
+    }
+
+    const t1 = setTimeout(() => setPhase("spiral"), 400);
+    const t2 = setTimeout(() => setPhase("bloom"), 1800);
+    const t3 = setTimeout(() => setPhase("final"), 3000);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || phase === "final") return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let animId: number;
+    let width = (canvas.width = canvas.parentElement?.clientWidth || 400);
+    let height = (canvas.height = canvas.parentElement?.clientHeight || 400);
+
+    const particles = Array.from({ length: 70 }).map(() => ({
+      angle: Math.random() * Math.PI * 2,
+      radius: 120 + Math.random() * 100,
+      speed: 0.03 + Math.random() * 0.02,
+      size: 1.5 + Math.random() * 2,
+      alpha: Math.random() * 0.8 + 0.2,
+    }));
+
+    const render = () => {
+      ctx.clearRect(0, 0, width, height);
+
+      const centerX = width / 2;
+      const centerY = height / 2;
+
+      particles.forEach((p) => {
+        p.angle += p.speed;
+        p.radius = Math.max(0, p.radius - 1.2);
+
+        const x = centerX + Math.cos(p.angle) * p.radius;
+        const y = centerY + Math.sin(p.angle) * p.radius;
+
+        ctx.beginPath();
+        ctx.arc(x, y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(163, 138, 209, ${p.alpha})`;
+        ctx.fill();
+      });
+
+      if (phase === "bloom") {
+        const gradient = ctx.createRadialGradient(
+          centerX,
+          centerY,
+          10,
+          centerX,
+          centerY,
+          180
+        );
+        gradient.addColorStop(0, "rgba(80, 52, 143, 0.5)");
+        gradient.addColorStop(0.5, "rgba(163, 138, 209, 0.2)");
+        gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, width, height);
+      }
+
+      animId = requestAnimationFrame(render);
+    };
+
+    animId = requestAnimationFrame(render);
+
+    return () => {
+      cancelAnimationFrame(animId);
+    };
+  }, [phase]);
+
+  return (
+    <div className="relative w-full max-w-md mx-auto flex flex-col items-center justify-center space-y-6">
+      {phase !== "final" && (
+        <button
+          onClick={() => {
+            setPhase("final");
+          }}
+          className="absolute top-0 right-0 z-30 btn-ghost text-xs py-1.5 px-3 flex items-center gap-1 text-mu hover:text-tx"
+        >
+          <span>{skipText}</span>
+          <FastForward size={14} />
+        </button>
+      )}
+
+      <div className="relative w-56 h-72 rounded-2xl grid place-items-center bg-radial-gradient from-s1 via-ink to-ink overflow-hidden border border-vi/30 shadow-2xl shadow-vi/20">
+        <canvas ref={canvasRef} className="absolute inset-0 z-10 pointer-events-none" />
+
+        {/* Aura Bloom Effect */}
+        <div
+          className={`absolute inset-0 bg-radial-gradient from-vi/40 via-pri/20 to-transparent transition-opacity duration-1000 ${
+            phase === "bloom" || phase === "final" ? "opacity-100" : "opacity-0"
+          }`}
+        />
+
+        {/* Character Silhouette vs Full Color */}
+        <div className="relative z-20 transition-all duration-1000">
+          <Figure
+            appearance={appearance}
+            equipment={equipment}
+            width={120}
+            height={200}
+            className={
+              phase === "dark" || phase === "spiral"
+                ? "brightness-0 opacity-40 transition-all duration-1000"
+                : "brightness-100 opacity-100 transition-all duration-1000 drop-shadow-[0_0_20px_rgba(163,138,209,0.5)]"
+            }
+          />
+        </div>
+
+        {/* Level 1 Octagonal Gold Badge */}
+        {(phase === "bloom" || phase === "final") && (
+          <div className="absolute top-3 right-3 z-30 w-8 h-8 rounded-lg bg-go/20 border-2 border-go text-go font-serif text-xs font-bold flex items-center justify-center shadow-lg shadow-go/30 animate-pulse">
+            1
+          </div>
+        )}
+      </div>
+
+      <div
+        className={`transition-all duration-1000 ${
+          phase === "final" ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+        }`}
+      >
+        <button
+          onClick={onComplete}
+          className="btn w-full py-3.5 px-8 text-sm font-bold shadow-xl shadow-vi/40 bg-gradient-to-r from-vi via-pri to-vi hover:opacity-90 transition-all"
+        >
+          {startText}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function AwakeningPage() {
   const router = useRouter();
@@ -55,6 +216,9 @@ export default function AwakeningPage() {
 
   const [customInputText, setCustomInputText] = useState<string>("");
   const titleRef = useRef<HTMLHeadingElement>(null);
+
+  // Initial completion check vs re-edit mode
+  const wasAlreadyDone = gameState.onboarding.status === "done";
 
   // Sync step/subStep state changes to GameContext & localStorage
   useEffect(() => {
@@ -202,25 +366,53 @@ export default function AwakeningPage() {
   };
 
   const handleSkipOptionalInStep3 = () => {
-    // Step 3 optional sub-steps are 3, 4, 5, 6. Skip directly to Step 4!
     setStep(4);
     setSubStep(0);
   };
 
   const handleFinishOnboarding = () => {
     completeOnboarding();
+
+    // Synchronous fallback persistence to localStorage to guarantee status='done' before redirect
+    try {
+      const saved = localStorage.getItem("ayra_demo_v1");
+      const current = saved ? JSON.parse(saved) : {};
+      current.onboarding = {
+        ...current.onboarding,
+        status: "done",
+        finishedAt: new Date().toISOString(),
+      };
+      localStorage.setItem("ayra_demo_v1", JSON.stringify(current));
+    } catch {
+      // ignore
+    }
+
     if (isEditMode) {
-      router.push("/settings");
+      router.replace("/settings");
     } else {
-      router.push("/");
+      router.replace("/");
     }
   };
 
   const renderQuestionInput = () => {
     if (step === 5) {
+      if (!wasAlreadyDone && !isEditMode) {
+        return (
+          <div className="space-y-6 max-w-md mx-auto py-4">
+            <AwakeningCanvasAnimation
+              appearance={validateAvatarAppearance(answers.appearance)}
+              equipment={gameState.equipment}
+              skipText={dict.awakening.skipQuestion}
+              startText={dict.awakening.startBtn}
+              onComplete={handleFinishOnboarding}
+            />
+          </div>
+        );
+      }
+
       return (
         <div className="text-center space-y-6 py-6 max-w-md mx-auto">
-          <div className="w-16 h-16 rounded-2xl bg-vi/20 border border-vi/50 text-vi flex items-center justify-center mx-auto shadow-lg shadow-vi/20 animate-bounce">
+          <div className="w-16 h-16 rounded-2xl bg-vi/20 border border-vi/50 text-vi flex items-center justify-center mx-auto shadow-lg shadow-vi/20">
             <Sparkles size={32} />
           </div>
           <div className="space-y-2">
@@ -254,7 +446,7 @@ export default function AwakeningPage() {
       const isLengthValid = nick.length >= 3 && nick.length <= 24;
 
       return (
-        <div className="space-y-4 max-w-md mx-auto">
+        <div className="space-y-3 max-w-md mx-auto">
           <div>
             <input
               type="text"
@@ -265,6 +457,9 @@ export default function AwakeningPage() {
               maxLength={24}
               autoFocus
             />
+            <div className="text-xs text-mu mt-2 text-center">
+              {dict.awakening.q.nickname.rules}
+            </div>
           </div>
 
           {nick && !isLatin && (
@@ -291,10 +486,10 @@ export default function AwakeningPage() {
 
     if (currentQuestion.id === "language_timezone") {
       return (
-        <div className="space-y-5 max-w-md mx-auto text-left">
+        <div className="space-y-4 max-w-md mx-auto text-left">
           <div className="space-y-2">
             <label className="text-xs font-semibold text-mu block">
-              {dict.awakening.q.lang_tz.languageLabel}
+              {dict.awakening.q.language_timezone.languageLabel}
             </label>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -332,7 +527,7 @@ export default function AwakeningPage() {
 
           <div className="space-y-2">
             <label className="text-xs font-semibold text-mu block">
-              {dict.awakening.q.lang_tz.timezoneLabel}
+              {dict.awakening.q.language_timezone.timezoneLabel}
             </label>
             <input
               type="text"
@@ -351,54 +546,82 @@ export default function AwakeningPage() {
       );
 
       return (
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center max-w-2xl mx-auto">
-          {/* Figure Preview Card */}
-          <div className="md:col-span-5 flex flex-col items-center justify-center p-4 rounded-2xl bg-s2/80 border border-line">
-            <div className="relative w-36 h-48 rounded-xl grid place-items-center bg-radial-gradient from-pri/50 via-s1 to-s1 overflow-hidden border border-vi/30">
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-center w-full max-w-5xl mx-auto">
+          {/* Figure Preview Column: min 420px on xl, 70% window height */}
+          <div className="xl:col-span-6 flex flex-col items-center justify-center p-6 rounded-3xl bg-s2/90 border border-vi/40 shadow-2xl shadow-vi/20 min-h-[380px] xl:min-h-[480px] xl:w-[420px] mx-auto">
+            <div className="relative w-full h-[320px] xl:h-[400px] rounded-2xl grid place-items-center bg-radial-gradient from-pri/50 via-s1 to-s1 overflow-hidden border border-vi/30">
+              <div className="absolute bottom-4 w-40 h-6 rounded-full border border-vi/60 bg-vi/30 shadow-lg shadow-vi/50" />
               <Figure
                 appearance={currentApp}
-                width={90}
-                height={150}
                 rotateSlowly
+                className="h-[85%] w-auto"
               />
             </div>
           </div>
 
-          {/* Preset Selectors */}
-          <div className="md:col-span-7 space-y-4 text-left">
-            {/* Skin Tone */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-mu">
-                {dict.avatar.skinToneLabel}
-              </label>
-              <div className="flex flex-wrap gap-2">
-                {SKIN_TONES.map((st) => (
-                  <button
-                    key={st.id}
-                    type="button"
-                    onClick={() => {
-                      const updated = { ...currentApp, skinTone: st.id };
-                      handleAnswerChange("appearance", updated);
-                      updateAvatarAppearance(updated);
-                    }}
-                    style={{ backgroundColor: st.hex }}
-                    className={`w-7 h-7 rounded-full border-2 transition-transform ${
-                      currentApp.skinTone === st.id
-                        ? "border-vi scale-110 ring-2 ring-vi/40"
-                        : "border-transparent opacity-80 hover:opacity-100"
-                    }`}
-                    aria-label={(dict.avatar as any)[st.id] || st.id}
-                  />
-                ))}
+          {/* Compact Right Selector Column */}
+          <div className="xl:col-span-6 space-y-3 text-left">
+            {/* Skin Tone & Hair Color in 1 Row */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold text-mu block">
+                  {dict.avatar.skinToneLabel}
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {SKIN_TONES.map((st) => (
+                    <button
+                      key={st.id}
+                      type="button"
+                      onClick={() => {
+                        const updated = { ...currentApp, skinTone: st.id };
+                        handleAnswerChange("appearance", updated);
+                        updateAvatarAppearance(updated);
+                      }}
+                      style={{ backgroundColor: st.hex }}
+                      className={`w-6 h-6 rounded-full border-2 transition-transform ${
+                        currentApp.skinTone === st.id
+                          ? "border-vi scale-110 ring-2 ring-vi/40"
+                          : "border-transparent opacity-80 hover:opacity-100"
+                      }`}
+                      aria-label={(dict.avatar as any)[st.id] || st.id}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold text-mu block">
+                  {dict.avatar.hairColorLabel}
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {HAIR_COLORS.map((hc) => (
+                    <button
+                      key={hc.id}
+                      type="button"
+                      onClick={() => {
+                        const updated = { ...currentApp, hairColor: hc.id };
+                        handleAnswerChange("appearance", updated);
+                        updateAvatarAppearance(updated);
+                      }}
+                      style={{ backgroundColor: hc.hex }}
+                      className={`w-6 h-6 rounded-full border-2 transition-transform ${
+                        currentApp.hairColor === hc.id
+                          ? "border-vi scale-110 ring-2 ring-vi/40"
+                          : "border-transparent opacity-80 hover:opacity-100"
+                      }`}
+                      aria-label={(dict.avatar as any)[hc.id] || hc.id}
+                    />
+                  ))}
+                </div>
               </div>
             </div>
 
-            {/* Hairstyles */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-mu">
+            {/* Hairstyles in 4x2 Grid */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold text-mu block">
                 {dict.avatar.hairstyleLabel}
               </label>
-              <div className="grid grid-cols-2 gap-1.5">
+              <div className="grid grid-cols-4 gap-1.5">
                 {HAIRSTYLES.map((hs) => (
                   <button
                     key={hs.id}
@@ -408,7 +631,7 @@ export default function AwakeningPage() {
                       handleAnswerChange("appearance", updated);
                       updateAvatarAppearance(updated);
                     }}
-                    className={`p-2 rounded-lg border text-[11px] font-medium transition-all ${
+                    className={`p-1.5 rounded-lg border text-[10px] font-medium truncate text-center transition-all ${
                       currentApp.hairstyle === hs.id
                         ? "border-vi bg-vi/20 text-tx"
                         : "border-line bg-s2/40 text-mu hover:border-line/80"
@@ -420,39 +643,12 @@ export default function AwakeningPage() {
               </div>
             </div>
 
-            {/* Hair Color */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-mu">
-                {dict.avatar.hairColorLabel}
-              </label>
-              <div className="flex flex-wrap gap-2">
-                {HAIR_COLORS.map((hc) => (
-                  <button
-                    key={hc.id}
-                    type="button"
-                    onClick={() => {
-                      const updated = { ...currentApp, hairColor: hc.id };
-                      handleAnswerChange("appearance", updated);
-                      updateAvatarAppearance(updated);
-                    }}
-                    style={{ backgroundColor: hc.hex }}
-                    className={`w-6 h-6 rounded-full border-2 transition-transform ${
-                      currentApp.hairColor === hc.id
-                        ? "border-vi scale-110 ring-2 ring-vi/40"
-                        : "border-transparent opacity-80 hover:opacity-100"
-                    }`}
-                    aria-label={(dict.avatar as any)[hc.id] || hc.id}
-                  />
-                ))}
-              </div>
-            </div>
-
-            {/* Outfit Style */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-mu">
+            {/* Outfit Style in Compact Grid */}
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold text-mu block">
                 {dict.avatar.outfitLabel}
               </label>
-              <div className="grid grid-cols-1 gap-1.5">
+              <div className="grid grid-cols-2 gap-1.5">
                 {OUTFITS.map((o) => (
                   <button
                     key={o.id}
@@ -462,16 +658,16 @@ export default function AwakeningPage() {
                       handleAnswerChange("appearance", updated);
                       updateAvatarAppearance(updated);
                     }}
-                    className={`p-2.5 rounded-lg border text-xs font-medium flex items-center justify-between transition-all ${
+                    className={`p-2 rounded-lg border text-[11px] font-medium flex items-center justify-between transition-all ${
                       currentApp.outfit === o.id
                         ? "border-vi bg-vi/20 text-tx"
                         : "border-line bg-s2/40 text-mu hover:border-line/80"
                     }`}
                   >
-                    <span>{(dict.avatar as any)[o.id] || o.id}</span>
-                    <div className="flex items-center gap-1">
-                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: o.topColor }} />
-                      <span className="w-3 h-3 rounded-full" style={{ backgroundColor: o.bottomColor }} />
+                    <span className="truncate">{(dict.avatar as any)[o.id] || o.id}</span>
+                    <div className="flex items-center gap-1 flex-none ml-1">
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: o.topColor }} />
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: o.bottomColor }} />
                     </div>
                   </button>
                 ))}
@@ -689,11 +885,6 @@ export default function AwakeningPage() {
       ? (dict.awakening.q as any)[currentQuestion.id].title
       : "";
 
-  const questionExplanation =
-    currentQuestion && (dict.awakening.q as any)[currentQuestion.id]?.exp
-      ? (dict.awakening.q as any)[currentQuestion.id].exp
-      : "";
-
   const hasAnsweredCurrent = useMemo(() => {
     if (!currentQuestion) return false;
     const val = answers[currentQuestion.id];
@@ -703,7 +894,7 @@ export default function AwakeningPage() {
 
   return (
     <div
-      className="h-screen w-screen overflow-hidden flex flex-col bg-ink text-tx relative z-0 select-none"
+      className="h-screen w-screen overflow-hidden flex flex-col bg-ink text-tx relative z-0 select-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
       onKeyDown={(e) => {
         if (e.key === "Enter" && canGoNext) {
           e.preventDefault();
@@ -714,49 +905,16 @@ export default function AwakeningPage() {
       {/* Canvas Starfield Background */}
       <Starfield />
 
-      {/* Top Header Bar */}
-      <header className="relative z-20 flex items-center justify-between p-4 md:px-8 border-b border-line/40 bg-ink/60 backdrop-blur-md flex-none">
-        <Link href="/" className="font-serif text-xl font-bold tracking-wider text-tx hover:opacity-80">
+      {/* Single Compact Header Row (~56px high) */}
+      <header className="relative z-20 h-[56px] flex items-center justify-between px-4 md:px-8 border-b border-line/40 bg-ink/70 backdrop-blur-md flex-none gap-4">
+        {/* Logo */}
+        <Link href="/" className="font-serif text-lg font-bold tracking-wider text-tx hover:opacity-80 flex-none">
           AYRA
         </Link>
 
-        <div className="flex items-center gap-3">
-          {/* Language Switcher */}
-          <div className="flex items-center gap-1 bg-s2/80 p-1 rounded-lg border border-line">
-            <button
-              onClick={() => setLanguage("ru")}
-              className={`text-[11px] font-bold px-2 py-0.5 rounded transition-colors ${
-                lang === "ru" ? "bg-vi text-white" : "text-mu hover:text-tx"
-              }`}
-            >
-              RU
-            </button>
-            <button
-              onClick={() => setLanguage("en")}
-              className={`text-[11px] font-bold px-2 py-0.5 rounded transition-colors ${
-                lang === "en" ? "bg-vi text-white" : "text-mu hover:text-tx"
-              }`}
-            >
-              EN
-            </button>
-          </div>
-
-          {/* Edit Mode Return Button */}
-          {isEditMode && (
-            <Link
-              href="/settings"
-              className="btn-ghost text-xs py-1.5 px-3 flex items-center gap-1.5"
-            >
-              <span>{dict.awakening.returnToSettingsBtn}</span>
-            </Link>
-          )}
-        </div>
-      </header>
-
-      {/* Top 5-Step Progress Bar */}
-      <div className="relative z-20 p-4 md:px-8 bg-s1/40 border-b border-line/20 flex-none">
-        <div className="max-w-xl mx-auto space-y-2">
-          <div className="grid grid-cols-5 gap-1.5">
+        {/* Center Progress Bar & Counter */}
+        <div className="flex-1 max-w-lg mx-auto flex items-center gap-3">
+          <div className="flex-1 grid grid-cols-5 gap-1.5 items-center">
             {[1, 2, 3, 4, 5].map((st) => {
               const isPast = st < step;
               const isCurrent = st === step;
@@ -766,10 +924,10 @@ export default function AwakeningPage() {
               if (isCurrent) barClass = "bg-gradient-to-r from-vi to-go";
 
               return (
-                <div key={st} className="space-y-1">
-                  <div className={`h-1.5 rounded-full transition-all ${barClass}`} />
+                <div key={st} className="flex flex-col items-center">
+                  <div className={`h-1.5 w-full rounded-full transition-all ${barClass}`} />
                   <div
-                    className={`text-[10px] truncate text-center hidden md:block ${
+                    className={`text-[10px] truncate hidden md:block mt-0.5 ${
                       isCurrent ? "text-tx font-bold" : "text-mu"
                     }`}
                   >
@@ -781,7 +939,7 @@ export default function AwakeningPage() {
           </div>
 
           {step <= 4 && (
-            <div className="text-[11px] text-mu text-center font-medium">
+            <div className="text-[10px] text-mu font-medium flex-none hidden sm:block">
               {formatString(dict.awakening.questionProgress, {
                 step: formatNumber(lang, step),
                 subStep: formatNumber(lang, subStep + 1),
@@ -790,13 +948,56 @@ export default function AwakeningPage() {
             </div>
           )}
         </div>
-      </div>
 
-      {/* Main Center Area: Question Slide */}
-      <main className="relative z-10 flex-1 overflow-y-auto p-4 md:p-8 flex flex-col justify-center items-center">
-        <div className="w-full max-w-2xl mx-auto text-center space-y-6">
+        {/* Language Switcher & Edit Mode Exit */}
+        <div className="flex items-center gap-2 flex-none">
+          <div className="flex items-center gap-1 bg-s2/80 p-0.5 rounded-lg border border-line">
+            <button
+              type="button"
+              onClick={() => setLanguage("ru")}
+              className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors ${
+                lang === "ru" ? "bg-vi text-white" : "text-mu hover:text-tx"
+              }`}
+            >
+              RU
+            </button>
+            <button
+              type="button"
+              onClick={() => setLanguage("en")}
+              className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors ${
+                lang === "en" ? "bg-vi text-white" : "text-mu hover:text-tx"
+              }`}
+            >
+              EN
+            </button>
+          </div>
+
+          {isEditMode && (
+            <Link
+              href="/settings"
+              className="btn-ghost text-xs py-1 px-2.5 flex items-center gap-1"
+            >
+              <span>{dict.awakening.returnToSettingsBtn}</span>
+            </Link>
+          )}
+        </div>
+      </header>
+
+      {/* Main Content Area */}
+      <main className="relative z-10 flex-1 overflow-y-auto p-4 md:p-6 flex flex-col justify-center items-center [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <div className="w-full max-w-2xl mx-auto text-center space-y-4">
           {step <= 4 && currentQuestion && (
-            <div className="space-y-2">
+            <div className="space-y-1">
+              {/* Question Sub-step Counter on mobile */}
+              <div className="text-[11px] text-mu font-medium sm:hidden">
+                {formatString(dict.awakening.questionProgress, {
+                  step: formatNumber(lang, step),
+                  subStep: formatNumber(lang, subStep + 1),
+                  totalSubSteps: formatNumber(lang, questionsForStep.length),
+                })}
+              </div>
+
+              {/* Title <h1> or <h2> */}
               <h1
                 ref={titleRef}
                 tabIndex={-1}
@@ -804,32 +1005,18 @@ export default function AwakeningPage() {
               >
                 {questionTitle}
               </h1>
-
-              {questionExplanation && (
-                <div className="text-xs text-mu space-y-1">
-                  <div>
-                    <span className="font-semibold text-tx/80">
-                      {dict.awakening.whyThisIsNeeded}:{" "}
-                    </span>
-                    <span>{questionExplanation}</span>
-                  </div>
-                  <div className="inline-block mt-1 px-2.5 py-0.5 rounded-full bg-white/5 border border-line text-[10px] font-semibold text-mu">
-                    🔒 {dict.awakening.visibleOnlyToYou}
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
-          {/* Question Component */}
+          {/* Question Input / Component */}
           <div className="pt-2">{renderQuestionInput()}</div>
         </div>
       </main>
 
-      {/* Bottom Actions Bar */}
+      {/* Bottom Action Footer */}
       {step <= 4 && (
-        <footer className="relative z-20 p-4 md:px-8 border-t border-line/40 bg-ink/80 backdrop-blur-md flex-none">
-          <div className="max-w-xl mx-auto flex items-center justify-between gap-3">
+        <footer className="relative z-20 p-3 md:px-8 border-t border-line/40 bg-ink/80 backdrop-blur-md flex-none">
+          <div className="max-w-2xl mx-auto flex items-center justify-between gap-3">
             {/* Left: Back Button */}
             <button
               type="button"
