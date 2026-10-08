@@ -13,6 +13,7 @@ import {
   JournalRepository,
 } from "./types";
 import { defaultJournalRepository } from "./repository";
+import { defaultAttachmentRepository } from "./attachments/indexeddb-repository";
 
 interface JournalContextType {
   accounts: Account[];
@@ -94,8 +95,13 @@ export function JournalProvider({
     if (typeof window !== "undefined") {
       setLastSelectedAccountIdState(localStorage.getItem(LAST_ACCOUNT_KEY));
       setLastSelectedInstrumentState(localStorage.getItem(LAST_INSTRUMENT_KEY));
+
+      // Quiet background cleanup of orphan attachments
+      const currentTrades = repository.getTrades();
+      const validTradeIds = new Set(currentTrades.map((t) => t.id));
+      defaultAttachmentRepository.cleanupOrphans(validTradeIds).catch(() => {});
     }
-  }, [refresh]);
+  }, [refresh, repository]);
 
   const setLastSelectedAccountId = useCallback((id: string) => {
     setLastSelectedAccountIdState(id);

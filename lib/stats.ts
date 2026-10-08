@@ -512,12 +512,24 @@ export function calculateJournalStats(
 export function exportProfileDataJSON(
   state: any,
   journalDataOrDate?:
-    | { accounts: any[]; trades: any[]; strategies?: any[]; noTrades?: any[] }
+    | {
+        accounts: any[];
+        trades: any[];
+        strategies?: any[];
+        noTrades?: any[];
+        attachments?: any[];
+      }
     | Date,
   exportedAtDate: Date = new Date()
 ): string {
   let journalData:
-    | { accounts: any[]; trades: any[]; strategies?: any[]; noTrades?: any[] }
+    | {
+        accounts: any[];
+        trades: any[];
+        strategies?: any[];
+        noTrades?: any[];
+        attachments?: any[];
+      }
     | undefined;
   let actualDate = exportedAtDate;
 
@@ -531,7 +543,7 @@ export function exportProfileDataJSON(
 
   const payload = {
     app: "ayra",
-    exportVersion: "1.2",
+    exportVersion: "1.3",
     exportedAt: exportedAtDate.toISOString(),
     user: {
       name: state.name,
@@ -561,6 +573,8 @@ export function exportProfileDataJSON(
       trades: journalData?.trades || [],
       strategies: journalData?.strategies || [],
       noTrades: journalData?.noTrades || [],
+      attachments: journalData?.attachments || [],
+      imagesIncluded: false,
     },
   };
 

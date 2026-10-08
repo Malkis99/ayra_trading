@@ -9,6 +9,7 @@ import {
   StorageUsage,
   JournalRepository,
 } from "./types";
+import { defaultAttachmentRepository } from "./attachments/indexeddb-repository";
 
 const JOURNAL_STORAGE_KEY = "ayra_journal_v1";
 const CURRENT_JOURNAL_SCHEMA_VERSION = 3;
@@ -88,6 +89,7 @@ export class LocalStorageJournalRepository implements JournalRepository {
       ruleChecks: t.ruleChecks ?? {},
       processScore: typeof t.processScore === "number" ? t.processScore : null,
       processScoreSnapshot: t.processScoreSnapshot ?? null,
+      attachmentIds: Array.isArray(t.attachmentIds) ? t.attachmentIds : [],
       schemaVersion: CURRENT_JOURNAL_SCHEMA_VERSION,
     }));
 
@@ -292,6 +294,14 @@ export class LocalStorageJournalRepository implements JournalRepository {
 
     data.trades = filtered;
     this.saveData(data);
+
+    // Asynchronously delete attachments for this trade in background
+    if (typeof window !== "undefined") {
+      defaultAttachmentRepository.deleteAttachmentsByTradeId(id).catch((err) => {
+        console.error(`Failed to delete attachments for deleted trade ${id}:`, err);
+      });
+    }
+
     return true;
   }
 

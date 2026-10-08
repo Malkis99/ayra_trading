@@ -940,10 +940,13 @@ export default function ProfilePage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {[
                 { id: "firstQuest", titleKey: "firstQuest", descKey: "firstQuestDesc" },
+                { id: "firstTrade", titleKey: "firstTrade", descKey: "firstTradeDesc" },
                 { id: "stylist", titleKey: "stylist", descKey: "stylistDesc" },
                 { id: "streakDay", titleKey: "streakDay", descKey: "streakDayDesc" },
                 { id: "level3", titleKey: "level3", descKey: "level3Desc" },
                 { id: "author", titleKey: "author", descKey: "authorDesc" },
+                { id: "consciousRefusal", titleKey: "consciousRefusal", descKey: "consciousRefusalDesc" },
+                { id: "firstScreenshot", titleKey: "firstScreenshot", descKey: "firstScreenshotDesc" },
               ].map((ach) => {
                 const isUnlocked = !!gameState.achievements[ach.id];
                 const title = (dict.profile.achievements as any)[ach.titleKey];

@@ -60,6 +60,7 @@ export interface Trade {
   ruleChecks?: Record<string, RuleCheckValue>;
   processScore?: number | null;
   processScoreSnapshot?: ProcessScoreSnapshot | null;
+  attachmentIds?: string[];
   createdAt: string; // ISO String
   updatedAt: string; // ISO String
   schemaVersion: number;

@@ -4,11 +4,18 @@ import React from "react";
 import Link from "next/link";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
-import { Sparkles, Shield, Compass } from "lucide-react";
+import { Sparkles, Shield, Compass, HardDrive, AlertTriangle } from "lucide-react";
+import { defaultAttachmentRepository } from "@/lib/journal/attachments/indexeddb-repository";
+import { AttachmentStorageEstimate } from "@/lib/journal/attachments/types";
 
 export default function SettingsPage() {
   const { dict, lang, setLanguage } = useApp();
   const { gameState, setAiConsent } = useGame();
+  const [storageEstimate, setStorageEstimate] = React.useState<AttachmentStorageEstimate | null>(null);
+
+  React.useEffect(() => {
+    defaultAttachmentRepository.getStorageUsage().then(setStorageEstimate).catch(() => {});
+  }, []);
 
   return (
     <div className="space-y-4 max-w-2xl">
@@ -116,6 +123,56 @@ export default function SettingsPage() {
           <p>{dict.settings.themeInfo}</p>
           <p>{dict.settings.notificationsInfo}</p>
         </div>
+      </div>
+
+      {/* Storage & Attachments Usage Card */}
+      <div className="card space-y-4">
+        <h4 className="h4 flex items-center gap-2">
+          <HardDrive size={18} className="text-acc" />
+          <span>{dict.journal.attachments.title}</span>
+        </h4>
+
+        {storageEstimate && (
+          <div className="space-y-3">
+            <div className="flex flex-col gap-2 rounded-xl border border-line bg-s2/40 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-xs font-semibold text-tx">
+                  {dict.journal.attachments.storageUsage.replace(
+                    "{size}",
+                    (storageEstimate.bytesUsed / (1024 * 1024)).toFixed(1)
+                  )}
+                </div>
+                <div className="text-[11px] text-mu mt-0.5">
+                  {(storageEstimate.bytesQuota / (1024 * 1024)).toFixed(0)} MB total quota
+                </div>
+              </div>
+
+              <div className="w-full sm:w-36 bg-s1 h-2 rounded-full border border-line overflow-hidden">
+                <div
+                  className={`h-full transition-all ${
+                    storageEstimate.isWarning ? "bg-amber-400" : "bg-acc"
+                  }`}
+                  style={{ width: `${Math.min(100, storageEstimate.percentage)}%` }}
+                />
+              </div>
+            </div>
+
+            {storageEstimate.isWarning && (
+              <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3.5 space-y-1 text-xs text-amber-300">
+                <div className="font-semibold flex items-center gap-1.5">
+                  <AlertTriangle size={14} />
+                  <span>Warning</span>
+                </div>
+                <p className="text-[11px]">
+                  {dict.journal.attachments.storageWarning.replace(
+                    "{percent}",
+                    storageEstimate.percentage.toFixed(0)
+                  )}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

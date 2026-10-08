@@ -55,4 +55,11 @@ export const ALLOWED_LATIN_WORDS = [
   "Sweep",
   "OTE",
   "POI",
+  "PNG",
+  "JPEG",
+  "WebP",
+  "SVG",
+  "GIF",
+  "MB",
+  "Esc",
 ] as const;

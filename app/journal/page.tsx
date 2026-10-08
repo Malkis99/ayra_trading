@@ -18,7 +18,8 @@ import { TradingPlanTab } from "@/components/journal/TradingPlanTab";
 import { NotesTab } from "@/components/journal/NotesTab";
 import { calculateProcessScore, getProcessScoreCategory } from "@/lib/journal/process-score";
 import { getDemoTrades, DEMO_ACCOUNT } from "@/lib/journal/demo-trades";
-import { Plus, Download, AlertTriangle, Search, Trash2, Edit2, ShieldAlert, RefreshCw, FileText } from "lucide-react";
+import { AttachmentManager } from "@/components/journal/AttachmentManager";
+import { Plus, Download, AlertTriangle, Search, Trash2, Edit2, ShieldAlert, RefreshCw, FileText, Camera } from "lucide-react";
 
 export default function JournalPage() {
   const { dict, lang, showToast, setAddTradeModalOpen, openNoteModal } = useApp();
@@ -84,6 +85,7 @@ export default function JournalPage() {
   const [filterInstrument, setFilterInstrument] = useState<string>("");
   const [filterResult, setFilterResult] = useState<string>("all");
   const [filterDirection, setFilterDirection] = useState<string>("all");
+  const [filterScreenshot, setFilterScreenshot] = useState<string>("all");
   const [page, setPage] = useState<number>(1);
 
   // Trade Detail / Edit / Delete state
@@ -137,6 +139,10 @@ export default function JournalPage() {
       if (filterResult !== "all" && t.result !== filterResult) return false;
       if (filterDirection !== "all" && t.direction !== filterDirection) return false;
 
+      const hasScreenshots = Boolean(t.attachmentIds && t.attachmentIds.length > 0);
+      if (filterScreenshot === "with" && !hasScreenshots) return false;
+      if (filterScreenshot === "without" && hasScreenshots) return false;
+
       if (filterInstrument.trim()) {
         const query = filterInstrument.trim().toUpperCase();
         if (!t.instrument.toUpperCase().includes(query)) return false;
@@ -152,7 +158,7 @@ export default function JournalPage() {
 
       return true;
     }).sort((a, b) => new Date(b.openedAt).getTime() - new Date(a.openedAt).getTime());
-  }, [activeTrades, filterAccount, filterPeriod, filterInstrument, filterResult, filterDirection]);
+  }, [activeTrades, filterAccount, filterPeriod, filterInstrument, filterResult, filterDirection, filterScreenshot]);
 
   // Paginated Trades (50 per page)
   const pageSize = 50;
@@ -457,7 +463,7 @@ export default function JournalPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
               <select
                 value={filterAccount}
                 onChange={(e) => {
@@ -514,6 +520,19 @@ export default function JournalPage() {
                 <option value="long">{dict.journal.addTradeModal.directionLong}</option>
                 <option value="short">{dict.journal.addTradeModal.directionShort}</option>
               </select>
+
+              <select
+                value={filterScreenshot}
+                onChange={(e) => {
+                  setFilterScreenshot(e.target.value);
+                  setPage(1);
+                }}
+                className="input text-xs"
+              >
+                <option value="all">{dict.journal.attachments.filterAll}</option>
+                <option value="with">{dict.journal.attachments.filterWithScreenshots}</option>
+                <option value="without">{dict.journal.attachments.filterWithoutScreenshots}</option>
+              </select>
             </div>
           </div>
 
@@ -568,7 +587,17 @@ export default function JournalPage() {
                               }
                             )}
                           </td>
-                          <td className="p-3 font-bold text-tx">{t.instrument}</td>
+                          <td className="p-3 font-bold text-tx">
+                            <div className="flex items-center gap-1.5">
+                              <span>{t.instrument}</span>
+                              {t.attachmentIds && t.attachmentIds.length > 0 && (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] rounded bg-acc/20 border border-acc/40 text-acc font-mono">
+                                  <Camera size={10} />
+                                  <span>{t.attachmentIds.length}</span>
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td className="p-3">
                             <span
                               className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -851,6 +880,9 @@ export default function JournalPage() {
               <div className="p-4 bg-rose-500/15 border border-rose-500/40 rounded-xl space-y-3">
                 <p className="text-xs font-semibold text-rose-200">
                   {dict.journal.tradesTab.confirmDelete}
+                  <span className="block text-[11px] text-rose-300/80 font-normal mt-0.5">
+                    ({dict.journal.attachments.deleteTradeConfirmWithScreenshots})
+                  </span>
                 </p>
                 <div className="flex justify-end gap-2">
                   <button
@@ -1026,6 +1058,17 @@ export default function JournalPage() {
                     </p>
                   </div>
                 )}
+
+                {/* Screenshots Manager in Trade View */}
+                <div className="space-y-2 pt-2 border-t border-line">
+                  <span className="text-xs text-mu block font-medium">
+                    {dict.journal.attachments.title}
+                  </span>
+                  <AttachmentManager
+                    tradeId={selectedTrade.id}
+                    tradeOpenedAt={selectedTrade.openedAt}
+                  />
+                </div>
 
                 {/* Linked Notes for this trade */}
                 {(() => {

@@ -34,6 +34,7 @@ const STORAGE_KEY = "ayra_demo_v1";
 
 interface GameContextType {
   gameState: GameState;
+  setGameState: React.Dispatch<React.SetStateAction<GameState>>;
   isLoaded: boolean;
   previewItem: number | null;
   setPreviewItem: (itemId: number | null) => void;
@@ -567,6 +568,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     <GameContext.Provider
       value={{
         gameState,
+        setGameState,
         isLoaded,
         previewItem,
         setPreviewItem,
