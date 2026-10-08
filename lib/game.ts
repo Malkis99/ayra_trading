@@ -385,7 +385,9 @@ export function checkAndApplyDateResets(
 }
 
 export function checkAchievements(
-  state: GameState
+  state: GameState,
+  allPlans: any[] = [],
+  allNotes: any[] = []
 ): { state: GameState; newlyUnlocked: string[] } {
   const newlyUnlocked: string[] = [];
   let updatedState = { ...state };
@@ -468,8 +470,239 @@ export function checkAchievements(
     newlyUnlocked.push("consciousRefusal");
   }
 
+  // T6c-2a achievements
+  const hasFirstPlan = allPlans.length >= 1 || updatedState.achievements["firstPlan"];
+  if (hasFirstPlan && !updatedState.achievements["firstPlan"]) {
+    updatedState.achievements = { ...updatedState.achievements, firstPlan: true };
+    chronicle = addChronicleEvent(chronicle, {
+      type: "achievementUnlocked",
+      achievementId: "firstPlan",
+    });
+    newlyUnlocked.push("firstPlan");
+  }
+
+  const hasFirstReview =
+    allPlans.some((p) => p.review?.completedAt != null) ||
+    updatedState.achievements["firstReview"];
+  if (hasFirstReview && !updatedState.achievements["firstReview"]) {
+    updatedState.achievements = { ...updatedState.achievements, firstReview: true };
+    chronicle = addChronicleEvent(chronicle, {
+      type: "achievementUnlocked",
+      achievementId: "firstReview",
+    });
+    newlyUnlocked.push("firstReview");
+  }
+
+  const hasFirstNote = allNotes.length >= 1 || updatedState.achievements["firstNote"];
+  if (hasFirstNote && !updatedState.achievements["firstNote"]) {
+    updatedState.achievements = { ...updatedState.achievements, firstNote: true };
+    chronicle = addChronicleEvent(chronicle, {
+      type: "achievementUnlocked",
+      achievementId: "firstNote",
+    });
+    newlyUnlocked.push("firstNote");
+  }
+
+  const hasPlans7 = allPlans.length >= 7 || updatedState.achievements["plans7"];
+  if (hasPlans7 && !updatedState.achievements["plans7"]) {
+    updatedState.achievements = { ...updatedState.achievements, plans7: true };
+    chronicle = addChronicleEvent(chronicle, {
+      type: "achievementUnlocked",
+      achievementId: "plans7",
+    });
+    newlyUnlocked.push("plans7");
+  }
+
   updatedState.chronicle = chronicle;
   return { state: updatedState, newlyUnlocked };
+}
+
+export function evaluatePlanQuestClosure(
+  state: GameState,
+  plan: any,
+  todayTrades: any[],
+  allPlans: any[] = [],
+  allNotes: any[] = [],
+  currentDate: Date = new Date()
+): {
+  state: GameState;
+  closedQuests: string[];
+  xpAwarded: number;
+  newlyUnlocked: string[];
+} {
+  let newState = checkAndApplyDateResets(state, currentDate);
+  const todayStr = getIsoDateString(currentDate);
+
+  // Only close quests if plan date is today
+  if (plan.date !== todayStr) {
+    return { state: newState, closedQuests: [], xpAwarded: 0, newlyUnlocked: [] };
+  }
+
+  const closedQuests: string[] = [];
+  let xpAwarded = 0;
+
+  // 1. q_daily_bias (or q_bias)
+  const hasBiasWithInst =
+    Array.isArray(plan.bias) &&
+    plan.bias.some((b: any) => b.instrument && b.instrument.trim().length > 0);
+
+  if (hasBiasWithInst && !newState.completedQuestsToday["q_bias"]) {
+    const res = completeQuest(
+      newState,
+      "q_bias",
+      "Daily Bias перед сессией",
+      "trading",
+      QUEST_XP,
+      QUEST_COINS,
+      currentDate
+    );
+    newState = res.state;
+    closedQuests.push("q_bias");
+  }
+
+  // 2. q_risk_limits_check (or q_riskcheck)
+  const hasLimitFilled =
+    plan.limits?.maxRiskPerTrade?.value != null ||
+    plan.limits?.maxDailyLoss?.value != null ||
+    plan.limits?.maxTrades != null;
+
+  const isRiskLimitChecked =
+    Array.isArray(plan.checklist) &&
+    plan.checklist.some(
+      (c: any) =>
+        (c.key === "risk_limits_checked" || c.text?.toLowerCase().includes("риск")) &&
+        c.done
+    );
+
+  if (hasLimitFilled && isRiskLimitChecked && !newState.completedQuestsToday["q_riskcheck"]) {
+    const res = completeQuest(
+      newState,
+      "q_riskcheck",
+      "Проверка дневного лимита риска",
+      "trading",
+      QUEST_XP,
+      QUEST_COINS,
+      currentDate
+    );
+    newState = res.state;
+    closedQuests.push("q_riskcheck");
+  }
+
+  // 3. q_reflect (reflection)
+  const reviewTextLen =
+    (plan.review?.whatWorked || "").length +
+    (plan.review?.whatToImprove || "").length +
+    (plan.review?.lesson || "").length;
+
+  const isReviewDone = plan.review?.completedAt != null && reviewTextLen >= 40;
+
+  const isSessionNoteDone = allNotes.some((n: any) => {
+    const isTodayNote = n.createdAt.startsWith(todayStr);
+    const isSessionTemplate = n.templateKey === "session_review";
+    return isTodayNote && isSessionTemplate && (n.body || "").length >= 80;
+  });
+
+  if ((isReviewDone || isSessionNoteDone) && !newState.completedQuestsToday["q_reflect"]) {
+    const res = completeQuest(
+      newState,
+      "q_reflect",
+      "10 минут рефлексии",
+      "psychology",
+      QUEST_XP,
+      QUEST_COINS,
+      currentDate
+    );
+    newState = res.state;
+    closedQuests.push("q_reflect");
+  }
+
+  // Discipline XP for Plan created before first trade with bias & limits
+  const firstTradeOpenedMs =
+    todayTrades.length > 0
+      ? Math.min(...todayTrades.map((t: any) => new Date(t.openedAt).getTime()))
+      : null;
+
+  const planCreatedMs = new Date(plan.createdAt).getTime();
+  const isCreatedBeforeFirstTrade =
+    firstTradeOpenedMs == null || planCreatedMs <= firstTradeOpenedMs;
+
+  const todayRecord = newState.dailyStats[todayStr];
+  const planXpCountToday = todayRecord?.questsCompleted?.["discipline_plan"] || 0;
+
+  if (
+    hasBiasWithInst &&
+    hasLimitFilled &&
+    isCreatedBeforeFirstTrade &&
+    planXpCountToday < 1
+  ) {
+    const planXp = GAME_CONFIG.PLAN_DISCIPLINE_XP;
+    xpAwarded += planXp;
+    let newXp = newState.xp + planXp;
+    let newLevel = newState.level;
+    let chronicle = newState.chronicle;
+
+    while (newXp >= xpForNextLevel(newLevel)) {
+      newXp -= xpForNextLevel(newLevel);
+      newLevel++;
+      chronicle = addChronicleEvent(chronicle, { type: "levelUp", level: newLevel });
+    }
+
+    const updatedDailyStats = recordDailyStatEvent(newState.dailyStats, todayStr, {
+      type: "questDone",
+      category: "discipline_plan",
+      xp: planXp,
+      coins: 0,
+    });
+
+    newState = {
+      ...newState,
+      xp: newXp,
+      level: newLevel,
+      chronicle,
+      dailyStats: updatedDailyStats,
+    };
+  }
+
+  // Psychology XP for completed review
+  const reviewXpCountToday = todayRecord?.questsCompleted?.["psychology_review"] || 0;
+
+  if (plan.review?.completedAt != null && reviewXpCountToday < 1) {
+    const reviewXp = GAME_CONFIG.REVIEW_PSYCHOLOGY_XP;
+    xpAwarded += reviewXp;
+    let newXp = newState.xp + reviewXp;
+    let newLevel = newState.level;
+    let chronicle = newState.chronicle;
+
+    while (newXp >= xpForNextLevel(newLevel)) {
+      newXp -= xpForNextLevel(newLevel);
+      newLevel++;
+      chronicle = addChronicleEvent(chronicle, { type: "levelUp", level: newLevel });
+    }
+
+    const updatedDailyStats = recordDailyStatEvent(newState.dailyStats, todayStr, {
+      type: "questDone",
+      category: "psychology_review",
+      xp: reviewXp,
+      coins: 0,
+    });
+
+    newState = {
+      ...newState,
+      xp: newXp,
+      level: newLevel,
+      chronicle,
+      dailyStats: updatedDailyStats,
+    };
+  }
+
+  const { state: finalState, newlyUnlocked } = checkAchievements(newState, allPlans, allNotes);
+
+  return {
+    state: finalState,
+    closedQuests,
+    xpAwarded,
+    newlyUnlocked,
+  };
 }
 
 export interface NoTradeRewardResult {
@@ -1017,6 +1250,127 @@ export function removeCustomGoal(state: GameState, goalId: string): GameState {
   return {
     ...state,
     customGoals: state.customGoals.filter((g) => g.id !== goalId),
+  };
+}
+
+export interface NoteRewardResult {
+  state: GameState;
+  xpAwarded: number;
+  leveledUp: boolean;
+  newLevel?: number;
+  newlyUnlocked: string[];
+}
+
+export function recordNoteSaved(
+  state: GameState,
+  note: any,
+  allNotes: any[],
+  currentDate: Date = new Date()
+): NoteRewardResult {
+  let newState = checkAndApplyDateResets(state, currentDate);
+  const todayStr = getIsoDateString(currentDate);
+
+  let isPlausible = true;
+  const bodyText = (note.body || "").trim();
+
+  if (bodyText.length < 80) {
+    isPlausible = false;
+  }
+
+  // Duplicate body check
+  const isDuplicate = allNotes.some(
+    (other) => other.id !== note.id && (other.body || "").trim() === bodyText
+  );
+  if (isDuplicate) {
+    isPlausible = false;
+  }
+
+  // Daily cap check (max 1 per day for Knowledge XP)
+  const todayRecord = newState.dailyStats[todayStr];
+  const notesTodayXpCount = todayRecord?.questsCompleted?.["knowledge_note"] || 0;
+  if (notesTodayXpCount >= 1) {
+    isPlausible = false;
+  }
+
+  let xpAwarded = 0;
+  let leveledUp = false;
+  let newLevel: number | undefined;
+
+  if (isPlausible) {
+    xpAwarded = GAME_CONFIG.NOTE_KNOWLEDGE_XP;
+    let newXp = newState.xp + xpAwarded;
+    let currentLvl = newState.level;
+    let chronicle = newState.chronicle;
+
+    while (newXp >= xpForNextLevel(currentLvl)) {
+      newXp -= xpForNextLevel(currentLvl);
+      currentLvl++;
+      leveledUp = true;
+      chronicle = addChronicleEvent(chronicle, {
+        type: "levelUp",
+        level: currentLvl,
+      });
+    }
+
+    const updatedDailyStats = recordDailyStatEvent(newState.dailyStats, todayStr, {
+      type: "questDone",
+      category: "knowledge_note",
+      xp: xpAwarded,
+      coins: 0,
+    });
+
+    newState = {
+      ...newState,
+      xp: newXp,
+      level: currentLvl,
+      chronicle,
+      dailyStats: updatedDailyStats,
+    };
+
+    if (leveledUp) {
+      newLevel = currentLvl;
+    }
+  }
+
+  // Session Review template note body >= 80 chars auto-closes q_reflect
+  if (
+    note.templateKey === "session_review" &&
+    bodyText.length >= 80 &&
+    !newState.completedQuestsToday["q_reflect"]
+  ) {
+    const res = completeQuest(
+      newState,
+      "q_reflect",
+      "10 минут рефлексии",
+      "psychology",
+      QUEST_XP,
+      QUEST_COINS,
+      currentDate
+    );
+    newState = res.state;
+  }
+
+  // First note achievement
+  if (!newState.achievements["firstNote"]) {
+    newState.achievements = { ...newState.achievements, firstNote: true };
+    newState.chronicle = addChronicleEvent(newState.chronicle, {
+      type: "achievementUnlocked",
+      achievementId: "firstNote",
+    });
+  }
+
+  const { state: finalState, newlyUnlocked } = checkAchievements(
+    newState,
+    [],
+    [...allNotes, note]
+  );
+
+  return {
+    state: finalState,
+    xpAwarded,
+    leveledUp,
+    newLevel,
+    newlyUnlocked,
   };
 }
 

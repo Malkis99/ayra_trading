@@ -1,7 +1,17 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { Account, Trade, Strategy, NoTradeEntry, StorageUsage, JournalRepository } from "./types";
+import {
+  Account,
+  Trade,
+  Strategy,
+  NoTradeEntry,
+  TradingPlan,
+  WeekPlan,
+  Note,
+  StorageUsage,
+  JournalRepository,
+} from "./types";
 import { defaultJournalRepository } from "./repository";
 
 interface JournalContextType {
@@ -9,6 +19,9 @@ interface JournalContextType {
   trades: Trade[];
   strategies: Strategy[];
   noTrades: NoTradeEntry[];
+  plans: TradingPlan[];
+  weekPlans: WeekPlan[];
+  notes: Note[];
   storageUsage: StorageUsage;
   lastSelectedAccountId: string | null;
   lastSelectedInstrument: string | null;
@@ -22,6 +35,16 @@ interface JournalContextType {
   deleteStrategy: (id: string) => boolean;
   saveNoTrade: (entry: NoTradeEntry) => NoTradeEntry;
   deleteNoTrade: (id: string) => boolean;
+  getTradingPlan: (date: string) => TradingPlan | null;
+  saveTradingPlan: (plan: TradingPlan) => TradingPlan;
+  deleteTradingPlan: (date: string) => boolean;
+  getWeekPlan: (weekStartDate: string) => WeekPlan | null;
+  saveWeekPlan: (plan: WeekPlan) => WeekPlan;
+  deleteWeekPlan: (weekStartDate: string) => boolean;
+  getNote: (id: string) => Note | null;
+  saveNote: (note: Note) => Note;
+  archiveNote: (id: string) => Note;
+  deleteNote: (id: string) => boolean;
   refresh: () => void;
   setLastSelectedAccountId: (id: string) => void;
   setLastSelectedInstrument: (inst: string) => void;
@@ -43,6 +66,9 @@ export function JournalProvider({
   const [trades, setTrades] = useState<Trade[]>([]);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [noTrades, setNoTrades] = useState<NoTradeEntry[]>([]);
+  const [plans, setPlans] = useState<TradingPlan[]>([]);
+  const [weekPlans, setWeekPlans] = useState<WeekPlan[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
   const [storageUsage, setStorageUsage] = useState<StorageUsage>({
     bytesUsed: 0,
     bytesLimit: 5 * 1024 * 1024,
@@ -57,6 +83,9 @@ export function JournalProvider({
     setTrades(repository.getTrades());
     setStrategies(repository.getStrategies());
     setNoTrades(repository.getNoTrades());
+    setPlans(repository.getTradingPlans());
+    setWeekPlans(repository.getWeekPlans());
+    setNotes(repository.getNotes());
     setStorageUsage(repository.getStorageUsage());
   }, [repository]);
 
@@ -174,6 +203,90 @@ export function JournalProvider({
     [repository, refresh]
   );
 
+  const getTradingPlan = useCallback(
+    (date: string) => {
+      return repository.getTradingPlan(date);
+    },
+    [repository]
+  );
+
+  const saveTradingPlan = useCallback(
+    (plan: TradingPlan) => {
+      const saved = repository.saveTradingPlan(plan);
+      refresh();
+      return saved;
+    },
+    [repository, refresh]
+  );
+
+  const deleteTradingPlan = useCallback(
+    (date: string) => {
+      const result = repository.deleteTradingPlan(date);
+      refresh();
+      return result;
+    },
+    [repository, refresh]
+  );
+
+  const getWeekPlan = useCallback(
+    (weekStartDate: string) => {
+      return repository.getWeekPlan(weekStartDate);
+    },
+    [repository]
+  );
+
+  const saveWeekPlan = useCallback(
+    (plan: WeekPlan) => {
+      const saved = repository.saveWeekPlan(plan);
+      refresh();
+      return saved;
+    },
+    [repository, refresh]
+  );
+
+  const deleteWeekPlan = useCallback(
+    (weekStartDate: string) => {
+      const result = repository.deleteWeekPlan(weekStartDate);
+      refresh();
+      return result;
+    },
+    [repository, refresh]
+  );
+
+  const getNote = useCallback(
+    (id: string) => {
+      return repository.getNote(id);
+    },
+    [repository]
+  );
+
+  const saveNote = useCallback(
+    (note: Note) => {
+      const saved = repository.saveNote(note);
+      refresh();
+      return saved;
+    },
+    [repository, refresh]
+  );
+
+  const archiveNote = useCallback(
+    (id: string) => {
+      const archived = repository.archiveNote(id);
+      refresh();
+      return archived;
+    },
+    [repository, refresh]
+  );
+
+  const deleteNote = useCallback(
+    (id: string) => {
+      const result = repository.deleteNote(id);
+      refresh();
+      return result;
+    },
+    [repository, refresh]
+  );
+
   return (
     <JournalContext.Provider
       value={{
@@ -181,6 +294,9 @@ export function JournalProvider({
         trades,
         strategies,
         noTrades,
+        plans,
+        weekPlans,
+        notes,
         storageUsage,
         lastSelectedAccountId,
         lastSelectedInstrument,
@@ -194,6 +310,16 @@ export function JournalProvider({
         deleteStrategy,
         saveNoTrade,
         deleteNoTrade,
+        getTradingPlan,
+        saveTradingPlan,
+        deleteTradingPlan,
+        getWeekPlan,
+        saveWeekPlan,
+        deleteWeekPlan,
+        getNote,
+        saveNote,
+        archiveNote,
+        deleteNote,
         refresh,
         setLastSelectedAccountId,
         setLastSelectedInstrument,

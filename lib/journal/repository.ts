@@ -1,7 +1,17 @@
-import { Account, Trade, Strategy, NoTradeEntry, StorageUsage, JournalRepository } from "./types";
+import {
+  Account,
+  Trade,
+  Strategy,
+  NoTradeEntry,
+  TradingPlan,
+  WeekPlan,
+  Note,
+  StorageUsage,
+  JournalRepository,
+} from "./types";
 
 const JOURNAL_STORAGE_KEY = "ayra_journal_v1";
-const CURRENT_JOURNAL_SCHEMA_VERSION = 2;
+const CURRENT_JOURNAL_SCHEMA_VERSION = 3;
 const STORAGE_WARN_THRESHOLD = 0.8; // 80%
 
 export interface JournalStorageData {
@@ -10,6 +20,9 @@ export interface JournalStorageData {
   trades: Trade[];
   strategies: Strategy[];
   noTrades: NoTradeEntry[];
+  plans: TradingPlan[];
+  weekPlans: WeekPlan[];
+  notes: Note[];
 }
 
 export const INITIAL_JOURNAL_DATA: JournalStorageData = {
@@ -18,6 +31,9 @@ export const INITIAL_JOURNAL_DATA: JournalStorageData = {
   trades: [],
   strategies: [],
   noTrades: [],
+  plans: [],
+  weekPlans: [],
+  notes: [],
 };
 
 export class LocalStorageJournalRepository implements JournalRepository {
@@ -61,6 +77,9 @@ export class LocalStorageJournalRepository implements JournalRepository {
     const rawTrades: any[] = Array.isArray(raw.trades) ? raw.trades : [];
     const rawStrategies: Strategy[] = Array.isArray(raw.strategies) ? raw.strategies : [];
     const rawNoTrades: NoTradeEntry[] = Array.isArray(raw.noTrades) ? raw.noTrades : [];
+    const rawPlans: TradingPlan[] = Array.isArray(raw.plans) ? raw.plans : [];
+    const rawWeekPlans: WeekPlan[] = Array.isArray(raw.weekPlans) ? raw.weekPlans : [];
+    const rawNotes: Note[] = Array.isArray(raw.notes) ? raw.notes : [];
 
     const trades: Trade[] = rawTrades.map((t) => ({
       ...t,
@@ -78,6 +97,9 @@ export class LocalStorageJournalRepository implements JournalRepository {
       trades,
       strategies: rawStrategies,
       noTrades: rawNoTrades,
+      plans: rawPlans,
+      weekPlans: rawWeekPlans,
+      notes: rawNotes,
     };
   }
 
@@ -126,6 +148,116 @@ export class LocalStorageJournalRepository implements JournalRepository {
     if (filtered.length === data.accounts.length) return false;
 
     data.accounts = filtered;
+    this.saveData(data);
+    return true;
+  }
+
+  getTradingPlans(): TradingPlan[] {
+    return this.loadData().plans || [];
+  }
+
+  getTradingPlan(date: string): TradingPlan | null {
+    const plans = this.getTradingPlans();
+    return plans.find((p) => p.date === date) || null;
+  }
+
+  saveTradingPlan(plan: TradingPlan): TradingPlan {
+    const data = this.loadData();
+    const index = data.plans.findIndex((p) => p.date === plan.date);
+
+    if (index >= 0) {
+      data.plans[index] = plan;
+    } else {
+      data.plans.push(plan);
+    }
+
+    this.saveData(data);
+    return plan;
+  }
+
+  deleteTradingPlan(date: string): boolean {
+    const data = this.loadData();
+    const filtered = data.plans.filter((p) => p.date !== date);
+    if (filtered.length === data.plans.length) return false;
+
+    data.plans = filtered;
+    this.saveData(data);
+    return true;
+  }
+
+  getWeekPlans(): WeekPlan[] {
+    return this.loadData().weekPlans || [];
+  }
+
+  getWeekPlan(weekStartDate: string): WeekPlan | null {
+    const weekPlans = this.getWeekPlans();
+    return weekPlans.find((p) => p.weekStartDate === weekStartDate) || null;
+  }
+
+  saveWeekPlan(plan: WeekPlan): WeekPlan {
+    const data = this.loadData();
+    const index = data.weekPlans.findIndex((p) => p.weekStartDate === plan.weekStartDate);
+
+    if (index >= 0) {
+      data.weekPlans[index] = plan;
+    } else {
+      data.weekPlans.push(plan);
+    }
+
+    this.saveData(data);
+    return plan;
+  }
+
+  deleteWeekPlan(weekStartDate: string): boolean {
+    const data = this.loadData();
+    const filtered = data.weekPlans.filter((p) => p.weekStartDate !== weekStartDate);
+    if (filtered.length === data.weekPlans.length) return false;
+
+    data.weekPlans = filtered;
+    this.saveData(data);
+    return true;
+  }
+
+  getNotes(): Note[] {
+    return this.loadData().notes || [];
+  }
+
+  getNote(id: string): Note | null {
+    const notes = this.getNotes();
+    return notes.find((n) => n.id === id) || null;
+  }
+
+  saveNote(note: Note): Note {
+    const data = this.loadData();
+    const index = data.notes.findIndex((n) => n.id === note.id);
+
+    if (index >= 0) {
+      data.notes[index] = note;
+    } else {
+      data.notes.push(note);
+    }
+
+    this.saveData(data);
+    return note;
+  }
+
+  archiveNote(id: string): Note {
+    const data = this.loadData();
+    const note = data.notes.find((n) => n.id === id);
+    if (!note) throw new Error(`Note not found: ${id}`);
+
+    note.archivedAt = new Date().toISOString();
+    note.updatedAt = new Date().toISOString();
+    this.saveData(data);
+    return note;
+  }
+
+  deleteNote(id: string): boolean {
+    const data = this.loadData();
+    const filtered = data.notes.filter((n) => n.id !== id);
+    if (filtered.length === data.notes.length) return false;
+
+    data.notes = filtered;
     this.saveData(data);
     return true;
   }

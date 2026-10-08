@@ -7,7 +7,16 @@ import { ArrowLeftRight, ShieldAlert, Edit3, Smile, Mail, Calendar, X, ArrowLeft
 import { formatString } from "@/lib/i18n";
 
 export function AddModal() {
-  const { isAddModalOpen, setAddModalOpen, addModalTab, setAddModalTab, setAddTradeModalOpen, showToast, dict } = useApp();
+  const {
+    isAddModalOpen,
+    setAddModalOpen,
+    addModalTab,
+    setAddModalTab,
+    setAddTradeModalOpen,
+    openNoteModal,
+    showToast,
+    dict,
+  } = useApp();
   const { addPost } = useGame();
 
   const [postType, setPostType] = useState<string>("analysis");
@@ -95,6 +104,9 @@ export function AddModal() {
                       if (act.key === "trade") {
                         setAddModalOpen(false);
                         setAddTradeModalOpen(true);
+                      } else if (act.key === "note") {
+                        setAddModalOpen(false);
+                        openNoteModal();
                       } else if (act.key === "post") {
                         setAddModalTab("post");
                       } else {

@@ -42,6 +42,13 @@ export const GAME_CONFIG = {
   NO_TRADE_XP: 10,
   NO_TRADE_DAILY_CAP: 1,
 
+  // Plan & Note XP & Sample thresholds
+  PLAN_DISCIPLINE_XP: 15,
+  REVIEW_PSYCHOLOGY_XP: 15,
+  NOTE_KNOWLEDGE_XP: 10,
+  PLAN_COMPLIANCE_MIN_SAMPLE_SIZE: 5,
+  NOTES_LIMIT: 500,
+
   // Level unlock thresholds
   LEVEL_UNLOCKS: {
     FRAME_BLUE_LEVEL: 3,

@@ -17,6 +17,10 @@ interface AppContextType {
   openAddModal: (tab?: string) => void;
   isAddTradeModalOpen: boolean;
   setAddTradeModalOpen: (o: boolean) => void;
+  isNoteModalOpen: boolean;
+  setNoteModalOpen: (o: boolean) => void;
+  noteModalLinks: any;
+  openNoteModal: (links?: any, templateKey?: any) => void;
   isSearchOpen: boolean;
   setSearchOpen: (o: boolean) => void;
   toastMessage: string | null;
@@ -39,6 +43,9 @@ export function AppProvider({
   const [isAddModalOpen, setAddModalOpen] = useState<boolean>(false);
   const [addModalTab, setAddModalTab] = useState<string>("grid");
   const [isAddTradeModalOpen, setAddTradeModalOpen] = useState<boolean>(false);
+  const [isNoteModalOpen, setNoteModalOpen] = useState<boolean>(false);
+  const [noteModalLinks, setNoteModalLinks] = useState<any>(undefined);
+  const [noteModalTemplateKey, setNoteModalTemplateKey] = useState<any>(undefined);
   const [isSearchOpen, setSearchOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [userPlan, setUserPlan] = useState<"Free" | "Pro" | "Elite">("Free");
@@ -74,6 +81,12 @@ export function AppProvider({
   const openAddModal = (tab: string = "grid") => {
     setAddModalTab(tab);
     setAddModalOpen(true);
+  };
+
+  const openNoteModal = (links?: any, templateKey?: any) => {
+    setNoteModalLinks(links);
+    setNoteModalTemplateKey(templateKey);
+    setNoteModalOpen(true);
   };
 
   const showToast = (msg: string) => {
@@ -118,6 +131,10 @@ export function AppProvider({
         openAddModal,
         isAddTradeModalOpen,
         setAddTradeModalOpen,
+        isNoteModalOpen,
+        setNoteModalOpen,
+        noteModalLinks,
+        openNoteModal,
         isSearchOpen,
         setSearchOpen,
         toastMessage,

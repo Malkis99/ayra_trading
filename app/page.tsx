@@ -320,6 +320,95 @@ export default function HomePage() {
             </div>
           </div>
 
+          {/* Today's Plan Block (T6c-2a Integration) */}
+          {(() => {
+            const { getTradingPlan, trades } = useJournal();
+            const todayPlan = getTradingPlan(todayIso);
+
+            const checklistDoneCount = todayPlan?.checklist
+              ? todayPlan.checklist.filter((c) => c.done).length
+              : 0;
+            const checklistTotalCount = todayPlan?.checklist ? todayPlan.checklist.length : 5;
+
+            const todayTradesCount = trades.filter((t) => t.openedAt.startsWith(todayIso)).length;
+            const maxTradesLimit = todayPlan?.limits?.maxTrades;
+
+            const isPlanFilled =
+              (todayPlan?.bias && todayPlan.bias.length > 0) ||
+              checklistDoneCount > 0 ||
+              todayPlan?.limits != null;
+
+            return (
+              <div className="card space-y-3 bg-s2/80 border border-line">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={16} className="text-vi" />
+                    <h4 className="h4">{dict.home.todayPlanBlock.title}</h4>
+                  </div>
+                  <Link
+                    href="/journal?tab=plan"
+                    className="text-xs font-semibold text-vi hover:underline"
+                  >
+                    {isPlanFilled ? dict.journal.tradingPlan.openPlanBtn : dict.journal.tradingPlan.fillPlanBtn} →
+                  </Link>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                  {/* Bias Chips */}
+                  <div className="p-2.5 bg-s1 rounded-xl border border-line space-y-1">
+                    <span className="text-[10px] text-mu block font-medium">
+                      {dict.journal.tradingPlan.biasTitle}
+                    </span>
+                    {todayPlan?.bias && todayPlan.bias.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {todayPlan.bias.slice(0, 3).map((b, i) => (
+                          <span
+                            key={i}
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                              b.direction === "bullish"
+                                ? "bg-emerald-500/20 text-emerald-400"
+                                : b.direction === "bearish"
+                                ? "bg-rose-500/20 text-rose-400"
+                                : "bg-amber-500/20 text-amber-300"
+                            }`}
+                          >
+                            {b.instrument || "ALL"} {b.direction.toUpperCase()}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-mu text-[11px] italic">
+                        {dict.journal.tradingPlan.noBiasHint}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Checklist Progress */}
+                  <div className="p-2.5 bg-s1 rounded-xl border border-line space-y-1">
+                    <span className="text-[10px] text-mu block font-medium">
+                      {dict.journal.tradingPlan.checklistTitle}
+                    </span>
+                    <b className="text-tx text-xs font-bold block">
+                      {checklistDoneCount} / {checklistTotalCount}
+                    </b>
+                  </div>
+
+                  {/* Limits & Trades Count */}
+                  <div className="p-2.5 bg-s1 rounded-xl border border-line space-y-1">
+                    <span className="text-[10px] text-mu block font-medium">
+                      {dict.journal.tradingPlan.tradesCountLabel}
+                    </span>
+                    <b className="text-tx text-xs font-bold block">
+                      {maxTradesLimit != null
+                        ? `${todayTradesCount} / ${maxTradesLimit}`
+                        : `${todayTradesCount}`}
+                    </b>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* 7-Day Daily Reward */}
           <div className="card space-y-3">
             <h4 className="h4">{dict.home.dailyReward.title}</h4>
