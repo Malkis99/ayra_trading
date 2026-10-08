@@ -10,6 +10,7 @@ import { BottomNav } from "@/components/BottomNav";
 import { Starfield } from "@/components/Starfield";
 import { AddModal } from "@/components/AddModal";
 import { AddTradeModal } from "@/components/AddTradeModal";
+import { NoteModal } from "@/components/journal/NoteModal";
 import { SearchModal } from "@/components/SearchModal";
 import { Toast } from "@/components/Toast";
 import { Language } from "@/lib/i18n/types";
@@ -20,7 +21,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { isLoaded } = useGame();
-  const { isAddTradeModalOpen, setAddTradeModalOpen } = useApp();
+  const { isAddTradeModalOpen, setAddTradeModalOpen, isNoteModalOpen, setNoteModalOpen, noteModalLinks } = useApp();
   const [isCleanRedirecting, setIsCleanRedirecting] = useState<boolean>(false);
 
   useEffect(() => {
@@ -77,6 +78,11 @@ function ShellContent({ children }: { children: React.ReactNode }) {
       <AddTradeModal
         isOpen={isAddTradeModalOpen}
         onClose={() => setAddTradeModalOpen(false)}
+      />
+      <NoteModal
+        isOpen={isNoteModalOpen}
+        onClose={() => setNoteModalOpen(false)}
+        initialLinks={noteModalLinks}
       />
       <SearchModal />
       <Toast />

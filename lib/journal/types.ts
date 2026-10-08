@@ -201,6 +201,93 @@ export interface StorageUsage {
   isWarning: boolean;
 }
 
+export interface PlanBiasItem {
+  instrument: string; // UPPERCASE
+  direction: "bullish" | "bearish" | "neutral";
+  note?: string; // Max 200 chars
+}
+
+export interface PlanLevelItem {
+  instrument?: string; // UPPERCASE
+  price?: number;
+  label?: string; // Max 80 chars
+}
+
+export interface PlanEventItem {
+  time?: string; // e.g. "14:30" or ISO
+  text?: string; // Max 120 chars
+}
+
+export interface PlanLimits {
+  maxRiskPerTrade?: RiskLimit;
+  maxDailyLoss?: RiskLimit;
+  maxTrades?: number;
+}
+
+export interface PlanChecklistItem {
+  key?: string; // Dictionary key for standard items (e.g., "bias_defined")
+  text?: string; // Custom item text
+  done: boolean;
+}
+
+export interface DayReview {
+  rating: number; // 1-5
+  followedPlan: "yes" | "partly" | "no";
+  emotions: string[]; // catalog emotion IDs
+  whatWorked?: string; // Max 300 chars
+  whatToImprove?: string; // Max 300 chars
+  lesson?: string; // Max 300 chars
+  completedAt?: string; // ISO String
+}
+
+export interface TradingPlan {
+  date: string; // YYYY-MM-DD
+  bias: PlanBiasItem[]; // Max 8
+  levels: PlanLevelItem[]; // Max 12
+  events: PlanEventItem[]; // Max 8
+  limits?: PlanLimits;
+  checklist: PlanChecklistItem[];
+  note?: string; // Max 500 chars
+  review?: DayReview;
+  createdAt: string; // ISO String
+  updatedAt: string; // ISO String
+}
+
+export interface WeekPlan {
+  weekStartDate: string; // YYYY-MM-DD (Monday)
+  goals: string[]; // Max 3, each max 120 chars
+  focus?: string; // Strategy ID or custom text
+  summary?: string; // Max 500 chars
+  createdAt: string; // ISO String
+  updatedAt: string; // ISO String
+}
+
+export type NoteTemplateKey =
+  | "session_review"
+  | "weekly_mistake"
+  | "idea"
+  | "lesson";
+
+export interface NoteLinks {
+  tradeId?: string;
+  date?: string; // YYYY-MM-DD
+  instrument?: string; // UPPERCASE
+  strategyId?: string;
+}
+
+export interface Note {
+  id: string;
+  title?: string; // Max 80 chars
+  body: string; // Max 5000 chars
+  tags: string[]; // Max 8 tags, each max 24 chars
+  pinned: boolean;
+  links?: NoteLinks;
+  templateKey?: NoteTemplateKey;
+  createdAt: string; // ISO String
+  updatedAt: string; // ISO String
+  archivedAt?: string | null;
+}
+
 export interface JournalRepository {
   getAccounts(): Account[];
   getAccount(id: string): Account | null;
@@ -223,6 +310,22 @@ export interface JournalRepository {
   getNoTrade(id: string): NoTradeEntry | null;
   saveNoTrade(entry: NoTradeEntry): NoTradeEntry;
   deleteNoTrade(id: string): boolean;
+
+  getTradingPlan(date: string): TradingPlan | null;
+  getTradingPlans(): TradingPlan[];
+  saveTradingPlan(plan: TradingPlan): TradingPlan;
+  deleteTradingPlan(date: string): boolean;
+
+  getWeekPlan(weekStartDate: string): WeekPlan | null;
+  getWeekPlans(): WeekPlan[];
+  saveWeekPlan(plan: WeekPlan): WeekPlan;
+  deleteWeekPlan(weekStartDate: string): boolean;
+
+  getNotes(): Note[];
+  getNote(id: string): Note | null;
+  saveNote(note: Note): Note;
+  archiveNote(id: string): Note;
+  deleteNote(id: string): boolean;
 
   getStorageUsage(): StorageUsage;
 }

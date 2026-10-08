@@ -17,6 +17,7 @@ import {
   MISTAKES_CATALOG,
   SESSIONS_CATALOG,
 } from "@/lib/journal/types";
+import { getLocalDateString } from "@/lib/date-utils";
 import { calculateProcessScore } from "@/lib/journal/process-score";
 import {
   parseNumberInput,
@@ -45,7 +46,16 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
     lastSelectedInstrument,
     saveTrade,
     saveAccount,
+    getTradingPlan,
   } = useJournal();
+  const { gameState } = useGame();
+
+  const todayStr = getLocalDateString(new Date(), gameState.profile?.timezone);
+  const todayPlan = getTradingPlan(todayStr);
+  const todayTradesCount = trades.filter((t) =>
+    t.openedAt.startsWith(todayStr)
+  ).length;
+  const planMaxTrades = todayPlan?.limits?.maxTrades;
 
   const activeStrategies = strategies.filter((s) => !s.archivedAt);
 
@@ -401,6 +411,22 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
             ✕
           </button>
         </div>
+
+        {/* Plan Limit Info Line */}
+        {planMaxTrades != null && (
+          <div className="p-2.5 bg-s2/80 border border-line rounded-lg text-xs text-tx/80 flex items-center justify-between">
+            <span className="font-medium text-mu">
+              {dict.journal.planLimitInfo
+                .replace("{max}", String(planMaxTrades))
+                .replace("{current}", String(todayTradesCount))}
+            </span>
+            {todayTradesCount >= planMaxTrades && (
+              <span className="badge-free text-[10px] text-amber-300 border-amber-500/30 bg-amber-500/10">
+                {dict.journal.planLimitReached}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Duplicate Warning */}
         {isDuplicateWarning && (

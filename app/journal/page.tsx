@@ -14,18 +14,21 @@ import { CalendarTab } from "@/components/journal/CalendarTab";
 import { ReportsTab } from "@/components/journal/ReportsTab";
 import { StrategiesTab } from "@/components/journal/StrategiesTab";
 import { NoTradeTab } from "@/components/journal/NoTradeTab";
+import { TradingPlanTab } from "@/components/journal/TradingPlanTab";
+import { NotesTab } from "@/components/journal/NotesTab";
 import { calculateProcessScore, getProcessScoreCategory } from "@/lib/journal/process-score";
 import { getDemoTrades, DEMO_ACCOUNT } from "@/lib/journal/demo-trades";
-import { Plus, Download, AlertTriangle, Search, Trash2, Edit2, ShieldAlert, RefreshCw } from "lucide-react";
+import { Plus, Download, AlertTriangle, Search, Trash2, Edit2, ShieldAlert, RefreshCw, FileText } from "lucide-react";
 
 export default function JournalPage() {
-  const { dict, lang, showToast, setAddTradeModalOpen } = useApp();
+  const { dict, lang, showToast, setAddTradeModalOpen, openNoteModal } = useApp();
   const { gameState, recordNoTrade } = useGame();
   const {
     accounts,
     trades,
     strategies,
     noTrades,
+    notes,
     storageUsage,
     saveAccount,
     archiveAccount,
@@ -710,6 +713,9 @@ export default function JournalPage() {
         />
       )}
 
+      {/* TAB 3: TRADING PLAN */}
+      {activeTab === 3 && <TradingPlanTab />}
+
       {/* TAB 4: STRATEGIES */}
       {activeTab === 4 && (
         <StrategiesTab
@@ -814,16 +820,8 @@ export default function JournalPage() {
         </div>
       )}
 
-      {/* STUBS FOR TABS 3, 6 */}
-      {[3, 6].includes(activeTab) && (
-        <div className="card text-center p-8 space-y-3">
-          <h4 className="h4">{tabs[activeTab]}</h4>
-          <p className="text-xs text-mu max-w-sm mx-auto">{dict.journal.inDev}</p>
-          <span className="badge-free inline-block text-xs py-1 px-3">
-            {dict.journal.comingSoon}
-          </span>
-        </div>
-      )}
+      {/* TAB 6: NOTES */}
+      {activeTab === 6 && <NotesTab />}
 
       {/* TRADE DETAIL VIEW & DELETE MODAL */}
       {selectedTrade && (
@@ -1028,6 +1026,55 @@ export default function JournalPage() {
                     </p>
                   </div>
                 )}
+
+                {/* Linked Notes for this trade */}
+                {(() => {
+                  const linked = notes.filter((n) => !n.archivedAt && n.links?.tradeId === selectedTrade.id);
+                  return (
+                    <div className="space-y-2 pt-2 border-t border-line/40">
+                      <div className="flex justify-between items-center">
+                        <span className="text-mu text-[11px] font-semibold">
+                          {dict.journal.notes.linkedNotesTitle} ({linked.length})
+                        </span>
+                        {!isDemoMode && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openNoteModal({
+                                tradeId: selectedTrade.id,
+                                instrument: selectedTrade.instrument,
+                                strategyId: selectedTrade.strategyId || undefined,
+                              })
+                            }
+                            className="btn-ghost text-[10px] py-0.5 px-2 flex items-center gap-1 text-acc font-semibold hover:text-tx"
+                          >
+                            <Plus size={12} />
+                            <span>{dict.journal.notes.addLinkedNoteBtn}</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {linked.length > 0 && (
+                        <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                          {linked.map((n) => (
+                            <div
+                              key={n.id}
+                              onClick={() => openNoteModal(n.links)}
+                              className="p-2 bg-s2/60 border border-line rounded-lg text-xs space-y-1 cursor-pointer hover:border-vi"
+                            >
+                              <div className="font-bold text-tx text-[11px]">
+                                {n.title || n.body.split("\n")[0]}
+                              </div>
+                              <p className="text-[10px] text-mu line-clamp-2 font-sans">
+                                {n.body}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {!isDemoMode && (
                   <div className="flex justify-end gap-2 pt-3 border-t border-line">

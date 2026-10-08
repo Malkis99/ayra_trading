@@ -23,6 +23,8 @@ import {
   updateProfileInfo as updateProfileInfoLogic,
   recordLoggedTrade,
   recordNoTradeEntry,
+  evaluatePlanQuestClosure,
+  recordNoteSaved as recordNoteSavedLogic,
 } from "@/lib/game";
 import { ITEMS, FRAMES, TITLES, BACKGROUNDS } from "@/lib/items";
 import { AvatarAppearance, validateAvatarAppearance } from "@/lib/avatar";
@@ -66,6 +68,16 @@ interface GameContextType {
     entry: any,
     allNoTrades: any[]
   ) => { xpAwarded: number; leveledUp: boolean; newLevel?: number; newlyUnlocked: string[] };
+  recordNoteSaved: (
+    note: any,
+    allNotes: any[]
+  ) => { xpAwarded: number; leveledUp: boolean; newLevel?: number; newlyUnlocked: string[] };
+  checkAndClosePlanQuests: (
+    plan: any,
+    todayTrades: any[],
+    allPlans?: any[],
+    allNotes?: any[]
+  ) => { closedQuests: string[]; xpAwarded: number; newlyUnlocked: string[] };
   setFrame: (frame: number) => void;
   setTitle: (title: number) => void;
   setBackground: (bg: number) => void;
@@ -405,6 +417,54 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     return result;
   }, []);
 
+  const recordNoteSaved = useCallback((note: any, allNotes: any[]) => {
+    let result = {
+      xpAwarded: 0,
+      leveledUp: false,
+      newLevel: undefined as number | undefined,
+      newlyUnlocked: [] as string[],
+    };
+    setGameState((prev) => {
+      const res = recordNoteSavedLogic(prev, note, allNotes, new Date());
+      result = {
+        xpAwarded: res.xpAwarded,
+        leveledUp: res.leveledUp,
+        newLevel: res.newLevel,
+        newlyUnlocked: res.newlyUnlocked,
+      };
+      return res.state;
+    });
+    return result;
+  }, []);
+
+  const checkAndClosePlanQuests = useCallback(
+    (plan: any, todayTrades: any[], allPlans: any[] = [], allNotes: any[] = []) => {
+      let result = {
+        closedQuests: [] as string[],
+        xpAwarded: 0,
+        newlyUnlocked: [] as string[],
+      };
+      setGameState((prev) => {
+        const res = evaluatePlanQuestClosure(
+          prev,
+          plan,
+          todayTrades,
+          allPlans,
+          allNotes,
+          new Date()
+        );
+        result = {
+          closedQuests: res.closedQuests,
+          xpAwarded: res.xpAwarded,
+          newlyUnlocked: res.newlyUnlocked,
+        };
+        return res.state;
+      });
+      return result;
+    },
+    []
+  );
+
   const recordNoTrade = useCallback((entry: any, allNoTrades: any[]) => {
     let result = {
       xpAwarded: 0,
@@ -529,6 +589,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         deletePost,
         recordTrade,
         recordNoTrade,
+        recordNoteSaved,
+        checkAndClosePlanQuests,
         setFrame,
         setTitle,
         setBackground,
