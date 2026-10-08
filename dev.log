@@ -6,23 +6,23 @@
   - Local:        http://localhost:3000
 
  ✓ Starting...
- ✓ Ready in 1827ms
- ○ Compiling /quests ...
- ✓ Compiled /quests in 7.5s (649 modules)
- GET /quests 200 in 8040ms
- ○ Compiling /awakening ...
- ✓ Compiled /awakening in 4.1s (662 modules)
- GET /quests 200 in 103ms
- GET /awakening 200 in 62ms
- GET /awakening 200 in 34ms
+ ✓ Ready in 1762ms
  ○ Compiling / ...
- ✓ Compiled / in 617ms (648 modules)
- GET / 200 in 781ms
- GET / 200 in 20ms
- GET /awakening 200 in 77ms
- GET /awakening 200 in 38ms
- GET / 200 in 25ms
- GET /awakening 200 in 36ms
- GET / 200 in 24ms
- GET /awakening 200 in 25ms
- GET / 200 in 25ms
+ ✓ Compiled / in 6s (653 modules)
+ HEAD / 200 in 6466ms
+ HEAD / 200 in 51ms
+ ○ Compiling /journal ...
+ ✓ Compiled /journal in 2.2s (734 modules)
+ GET /journal 200 in 2613ms
+ ✓ Compiled /awakening in 488ms (740 modules)
+ GET /journal 200 in 100ms
+ GET /journal 200 in 37ms
+ GET /journal 200 in 33ms
+ GET / 200 in 71ms
+ GET /journal 200 in 37ms
+ GET / 200 in 28ms
+ GET /journal 200 in 42ms
+ GET / 200 in 28ms
+ GET /journal 200 in 34ms
+ GET / 200 in 50ms
+ GET /journal 200 in 62ms

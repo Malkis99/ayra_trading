@@ -1312,8 +1312,10 @@ export default function ProfilePage() {
                           <b className="text-sm font-mono text-vi">{jStats.planCompliancePercent}%</b>
                         </div>
                         <div className="p-2.5 rounded-lg border border-line bg-s1">
-                          <span className="text-[10px] text-mu block">Process Score</span>
-                          <b className="text-sm font-mono text-go">{jStats.averageProcessScore} / 5.0</b>
+                          <span className="text-[10px] text-mu block">{dict.journal.processScoreLabel}</span>
+                          <b className="text-sm font-mono text-go">
+                            {jStats.averageProcessScore > 0 ? `${jStats.averageProcessScore}/100` : "—"}
+                          </b>
                         </div>
                         <div className="p-2.5 rounded-lg border border-line bg-s1">
                           <span className="text-[10px] text-mu block">{dict.journal.journalStreak}</span>

@@ -1,12 +1,14 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { Account, Trade, StorageUsage, JournalRepository } from "./types";
+import { Account, Trade, Strategy, NoTradeEntry, StorageUsage, JournalRepository } from "./types";
 import { defaultJournalRepository } from "./repository";
 
 interface JournalContextType {
   accounts: Account[];
   trades: Trade[];
+  strategies: Strategy[];
+  noTrades: NoTradeEntry[];
   storageUsage: StorageUsage;
   lastSelectedAccountId: string | null;
   lastSelectedInstrument: string | null;
@@ -15,6 +17,11 @@ interface JournalContextType {
   deleteAccount: (id: string) => boolean;
   saveTrade: (trade: Trade) => Trade;
   deleteTrade: (id: string) => boolean;
+  saveStrategy: (strategy: Strategy) => Strategy;
+  archiveStrategy: (id: string) => Strategy;
+  deleteStrategy: (id: string) => boolean;
+  saveNoTrade: (entry: NoTradeEntry) => NoTradeEntry;
+  deleteNoTrade: (id: string) => boolean;
   refresh: () => void;
   setLastSelectedAccountId: (id: string) => void;
   setLastSelectedInstrument: (inst: string) => void;
@@ -34,6 +41,8 @@ export function JournalProvider({
 }) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [trades, setTrades] = useState<Trade[]>([]);
+  const [strategies, setStrategies] = useState<Strategy[]>([]);
+  const [noTrades, setNoTrades] = useState<NoTradeEntry[]>([]);
   const [storageUsage, setStorageUsage] = useState<StorageUsage>({
     bytesUsed: 0,
     bytesLimit: 5 * 1024 * 1024,
@@ -46,6 +55,8 @@ export function JournalProvider({
   const refresh = useCallback(() => {
     setAccounts(repository.getAccounts());
     setTrades(repository.getTrades());
+    setStrategies(repository.getStrategies());
+    setNoTrades(repository.getNoTrades());
     setStorageUsage(repository.getStorageUsage());
   }, [repository]);
 
@@ -118,11 +129,58 @@ export function JournalProvider({
     [repository, refresh]
   );
 
+  const saveStrategy = useCallback(
+    (strategy: Strategy) => {
+      const saved = repository.saveStrategy(strategy);
+      refresh();
+      return saved;
+    },
+    [repository, refresh]
+  );
+
+  const archiveStrategy = useCallback(
+    (id: string) => {
+      const archived = repository.archiveStrategy(id);
+      refresh();
+      return archived;
+    },
+    [repository, refresh]
+  );
+
+  const deleteStrategy = useCallback(
+    (id: string) => {
+      const result = repository.deleteStrategy(id);
+      refresh();
+      return result;
+    },
+    [repository, refresh]
+  );
+
+  const saveNoTrade = useCallback(
+    (entry: NoTradeEntry) => {
+      const saved = repository.saveNoTrade(entry);
+      refresh();
+      return saved;
+    },
+    [repository, refresh]
+  );
+
+  const deleteNoTrade = useCallback(
+    (id: string) => {
+      const result = repository.deleteNoTrade(id);
+      refresh();
+      return result;
+    },
+    [repository, refresh]
+  );
+
   return (
     <JournalContext.Provider
       value={{
         accounts,
         trades,
+        strategies,
+        noTrades,
         storageUsage,
         lastSelectedAccountId,
         lastSelectedInstrument,
@@ -131,6 +189,11 @@ export function JournalProvider({
         deleteAccount,
         saveTrade,
         deleteTrade,
+        saveStrategy,
+        archiveStrategy,
+        deleteStrategy,
+        saveNoTrade,
+        deleteNoTrade,
         refresh,
         setLastSelectedAccountId,
         setLastSelectedInstrument,

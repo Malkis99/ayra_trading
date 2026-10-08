@@ -90,6 +90,30 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     return calculateJournalAnalytics(filteredTrades, accounts);
   }, [filteredTrades, accounts]);
 
+  // Process Score & Rules Metrics
+  const processMetrics = useMemo(() => {
+    const rated = filteredTrades.filter(
+      (t) =>
+        (typeof t.processScore === "number" && t.processScore >= 0) ||
+        (typeof t.executionRating === "number" && t.executionRating > 0)
+    );
+
+    if (rated.length === 0) {
+      return { avgScore: null, compliancePercent: null };
+    }
+
+    const scores = rated.map((t) => {
+      if (typeof t.processScore === "number") return t.processScore;
+      return (t.executionRating || 3) * 20;
+    });
+
+    const avg = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+    const goodCount = scores.filter((s) => s >= 80).length;
+    const pct = Math.round((goodCount / scores.length) * 100);
+
+    return { avgScore: avg, compliancePercent: pct };
+  }, [filteredTrades]);
+
   // Equity Curve Points
   const equityPoints = useMemo(() => {
     return calculateEquityCurve(filteredTrades, accounts);
@@ -500,6 +524,39 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                 : `-${analytics.maxDrawdownR.toFixed(2)} R`}
             </b>
             <span className="text-[10px] text-mu block">Peak to trough</span>
+          </div>
+
+          {/* CARD 8: Process Score */}
+          <div className="card p-3.5 space-y-2 relative">
+            <div className="flex justify-between items-center text-xs text-mu">
+              <span>{dict.journal.processScoreLabel}</span>
+            </div>
+            <b className="block text-xl font-mono font-bold text-vi">
+              {processMetrics.avgScore !== null ? `${processMetrics.avgScore}/100` : "—"}
+            </b>
+            {analytics.hasLowData && (
+              <span className="inline-block text-[10px] text-mu bg-white/5 border border-line px-1.5 py-0.5 rounded">
+                {dict.journal.dashboard.kpi.lowDataTag.replace(
+                  "{count}",
+                  String(analytics.totalTrades)
+                )}
+              </span>
+            )}
+          </div>
+
+          {/* CARD 9: Rules Followed % */}
+          <div className="card p-3.5 space-y-2 relative">
+            <div className="flex justify-between items-center text-xs text-mu">
+              <span>{dict.journal.ruleChecklistTitle}, %</span>
+            </div>
+            <b className="block text-xl font-mono font-bold text-emerald-400">
+              {processMetrics.compliancePercent !== null
+                ? `${processMetrics.compliancePercent}%`
+                : "—"}
+            </b>
+            <span className="text-[10px] text-mu block">
+              Process Score ≥ 80
+            </span>
           </div>
         </div>
       )}

@@ -464,8 +464,128 @@ export function checkAchievements(
     newlyUnlocked.push("firstTrade");
   }
 
+  if (updatedState.achievements["consciousRefusal"]) {
+    newlyUnlocked.push("consciousRefusal");
+  }
+
   updatedState.chronicle = chronicle;
   return { state: updatedState, newlyUnlocked };
+}
+
+export interface NoTradeRewardResult {
+  state: GameState;
+  xpAwarded: number;
+  leveledUp: boolean;
+  newLevel?: number;
+  newlyUnlocked: string[];
+}
+
+export function recordNoTradeEntry(
+  state: GameState,
+  entry: {
+    id: string;
+    date: string;
+    reason: string;
+    instrument?: string | null;
+  },
+  allNoTrades: any[],
+  currentDate: Date = new Date()
+): NoTradeRewardResult {
+  let newState = checkAndApplyDateResets(state, currentDate);
+  const todayStr = getIsoDateString(currentDate);
+
+  let isPlausible = true;
+
+  if (!entry.reason || !entry.reason.trim()) {
+    isPlausible = false;
+  }
+
+  const entryDateMs = new Date(entry.date).getTime();
+  const nowMs = currentDate.getTime();
+
+  if (isNaN(entryDateMs) || entryDateMs > nowMs + 24 * 60 * 60 * 1000) {
+    isPlausible = false;
+  }
+
+  if (nowMs - entryDateMs > 7 * 24 * 60 * 60 * 1000) {
+    isPlausible = false;
+  }
+
+  const entryDateStr = entry.date.split("T")[0];
+  const isDuplicate = allNoTrades.some((other) => {
+    if (other.id === entry.id) return false;
+    const otherDateStr = (other.date || "").split("T")[0];
+    const sameInstrument = (other.instrument || "").toUpperCase() === (entry.instrument || "").toUpperCase();
+    return otherDateStr === entryDateStr && other.reason === entry.reason && sameInstrument;
+  });
+
+  if (isDuplicate) {
+    isPlausible = false;
+  }
+
+  const todayRecord = newState.dailyStats[todayStr];
+  const noTradesTodayXpCount = todayRecord?.questsCompleted?.["discipline_no_trade"] || 0;
+  if (noTradesTodayXpCount >= GAME_CONFIG.NO_TRADE_DAILY_CAP) {
+    isPlausible = false;
+  }
+
+  let xpAwarded = 0;
+  let leveledUp = false;
+  let newLevel: number | undefined;
+
+  if (isPlausible) {
+    xpAwarded = GAME_CONFIG.NO_TRADE_XP;
+    let newXp = newState.xp + xpAwarded;
+    let currentLvl = newState.level;
+    let chronicle = newState.chronicle;
+
+    while (newXp >= xpForNextLevel(currentLvl)) {
+      newXp -= xpForNextLevel(currentLvl);
+      currentLvl++;
+      leveledUp = true;
+      chronicle = addChronicleEvent(chronicle, {
+        type: "levelUp",
+        level: currentLvl,
+      });
+    }
+
+    const updatedDailyStats = recordDailyStatEvent(newState.dailyStats, todayStr, {
+      type: "questDone",
+      category: "discipline_no_trade",
+      xp: xpAwarded,
+      coins: 0,
+    });
+
+    newState = {
+      ...newState,
+      xp: newXp,
+      level: currentLvl,
+      chronicle,
+      dailyStats: updatedDailyStats,
+    };
+
+    if (leveledUp) {
+      newLevel = currentLvl;
+    }
+  }
+
+  if (!newState.achievements["consciousRefusal"]) {
+    newState.achievements = { ...newState.achievements, consciousRefusal: true };
+    newState.chronicle = addChronicleEvent(newState.chronicle, {
+      type: "achievementUnlocked",
+      achievementId: "consciousRefusal",
+    });
+  }
+
+  const { state: finalState, newlyUnlocked } = checkAchievements(newState);
+
+  return {
+    state: finalState,
+    xpAwarded,
+    leveledUp,
+    newLevel,
+    newlyUnlocked,
+  };
 }
 
 export function completeQuest(

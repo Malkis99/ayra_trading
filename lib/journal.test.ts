@@ -7,7 +7,7 @@ import {
   normalizeInstrument,
   validateTradeInputs,
 } from "./journal/calc";
-import { recordLoggedTrade, INITIAL_GAME_STATE } from "./game";
+import { recordLoggedTrade, recordNoTradeEntry, INITIAL_GAME_STATE } from "./game";
 import { calculateJournalStats } from "./stats";
 
 describe("T6a Journal Formulas & Anti-farm", () => {
@@ -159,6 +159,84 @@ describe("T6a Journal Formulas & Anti-farm", () => {
           expect(res.xpAwarded).toBe(0); // Cap reached
         }
       }
+    });
+  });
+
+  describe("No-Trade Journal & Anti-farm Discipline XP", () => {
+    it("Grants +10 XP for valid no-trade entry and unlocks consciousRefusal achievement", () => {
+      const now = new Date();
+      const entry = {
+        id: "nt_1",
+        date: now.toISOString(),
+        reason: "setup_incomplete",
+        instrument: "EURUSD",
+      };
+
+      const res = recordNoTradeEntry(INITIAL_GAME_STATE, entry, [], now);
+
+      expect(res.xpAwarded).toBe(10);
+      expect(res.state.achievements["consciousRefusal"]).toBe(true);
+      expect(res.newlyUnlocked).toContain("consciousRefusal");
+    });
+
+    it("Rejects XP for duplicate no-trade entry on same day with same reason and instrument", () => {
+      const now = new Date();
+      const entry1 = {
+        id: "nt_1",
+        date: now.toISOString(),
+        reason: "outside_session",
+        instrument: "BTCUSD",
+      };
+
+      const entry2 = {
+        id: "nt_2",
+        date: now.toISOString(),
+        reason: "outside_session",
+        instrument: "BTCUSD",
+      };
+
+      const res1 = recordNoTradeEntry(INITIAL_GAME_STATE, entry1, [], now);
+      const res2 = recordNoTradeEntry(res1.state, entry2, [entry1], now);
+
+      expect(res1.xpAwarded).toBe(10);
+      expect(res2.xpAwarded).toBe(0); // Duplicate -> 0 XP
+    });
+
+    it("Enforces daily cap of 1 XP-granting no-trade entry per day", () => {
+      const now = new Date();
+      const entry1 = {
+        id: "nt_1",
+        date: now.toISOString(),
+        reason: "outside_session",
+        instrument: "EURUSD",
+      };
+
+      const entry2 = {
+        id: "nt_2",
+        date: now.toISOString(),
+        reason: "risk_limit",
+        instrument: "XAUUSD",
+      };
+
+      const res1 = recordNoTradeEntry(INITIAL_GAME_STATE, entry1, [], now);
+      const res2 = recordNoTradeEntry(res1.state, entry2, [entry1], now);
+
+      expect(res1.xpAwarded).toBe(10);
+      expect(res2.xpAwarded).toBe(0); // Daily cap reached
+    });
+
+    it("Rejects XP for no-trade entries with dates > 7 days in the past or > 24h in future", () => {
+      const now = new Date();
+      const oldDate = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000).toISOString(); // 10 days ago
+      const oldEntry = {
+        id: "nt_old",
+        date: oldDate,
+        reason: "news",
+        instrument: "EURUSD",
+      };
+
+      const resOld = recordNoTradeEntry(INITIAL_GAME_STATE, oldEntry, [], now);
+      expect(resOld.xpAwarded).toBe(0);
     });
   });
 

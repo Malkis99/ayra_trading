@@ -11,11 +11,13 @@ import {
   TradeSession,
   AccountCurrency,
   AccountType,
+  RuleCheckValue,
   INSTRUMENT_AUTOCOMPLETE,
   EMOTIONS_CATALOG,
   MISTAKES_CATALOG,
   SESSIONS_CATALOG,
 } from "@/lib/journal/types";
+import { calculateProcessScore } from "@/lib/journal/process-score";
 import {
   parseNumberInput,
   normalizeInstrument,
@@ -38,11 +40,14 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
   const {
     accounts,
     trades,
+    strategies,
     lastSelectedAccountId,
     lastSelectedInstrument,
     saveTrade,
     saveAccount,
   } = useJournal();
+
+  const activeStrategies = strategies.filter((s) => !s.archivedAt);
 
   const activeAccounts = accounts.filter((a) => !a.archivedAt);
 
@@ -80,6 +85,10 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
   const [mistakes, setMistakes] = useState<string[]>([]);
   const [executionRating, setExecutionRating] = useState<number | 0>(0);
   const [notes, setNotes] = useState<string>("");
+
+  // Strategy & Checklist fields
+  const [strategyId, setStrategyId] = useState<string>("");
+  const [ruleChecks, setRuleChecks] = useState<Record<string, RuleCheckValue>>({});
 
   // Validation & Duplicate Warning
   const [errors, setErrors] = useState<TradeValidationErrors>({});
@@ -125,6 +134,8 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
       setMistakes(initialTrade.mistakes || []);
       setExecutionRating(initialTrade.executionRating || 0);
       setNotes(initialTrade.notes || "");
+      setStrategyId(initialTrade.strategyId || "");
+      setRuleChecks(initialTrade.ruleChecks || {});
       setIsDetailed(true);
     } else {
       // Default initialization
@@ -153,6 +164,8 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
       setMistakes([]);
       setExecutionRating(0);
       setNotes("");
+      setStrategyId("");
+      setRuleChecks({});
       setIsDetailed(false);
     }
 
@@ -279,7 +292,11 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
       ? new Date(openedAt).toISOString()
       : undefined;
 
-    const tradeToSave: Trade = {
+    const selectedStrategy = strategies.find((s) => s.id === strategyId) || null;
+    const selectedAccount = accounts.find((a) => a.id === accountId) || null;
+
+    // Temporary object to compute process score
+    const tempTrade: Trade = {
       id: initialTrade?.id || `tr_${Date.now()}`,
       accountId,
       instrument: normInst,
@@ -297,6 +314,9 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
       pnlMoney: parsedPnl ?? undefined,
       rMultiple: parsedR ?? undefined,
       result: calculatedResult,
+      strategyId: selectedStrategy ? selectedStrategy.id : null,
+      strategyVersion: selectedStrategy ? selectedStrategy.version : null,
+      ruleChecks,
       session: session || undefined,
       emotions,
       entryReason: entryReason.slice(0, 500) || undefined,
@@ -307,7 +327,15 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
       source: "manual",
       createdAt: initialTrade?.createdAt || nowIso,
       updatedAt: nowIso,
-      schemaVersion: 1,
+      schemaVersion: 2,
+    };
+
+    const psRes = calculateProcessScore(tempTrade, selectedStrategy, selectedAccount, nowIso);
+
+    const tradeToSave: Trade = {
+      ...tempTrade,
+      processScore: psRes.score,
+      processScoreSnapshot: psRes.snapshot,
     };
 
     saveTrade(tradeToSave);
@@ -786,6 +814,124 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
                       placeholder={dict.journal.notesPlaceholder}
                       className="input text-xs w-full"
                     />
+                  </div>
+
+                  {/* Strategy Selection & Checklist */}
+                  <div className="space-y-2 pt-2 border-t border-line">
+                    <label className="text-xs text-mu block font-medium">
+                      {dict.journal.addTradeModal.strategyLabel}
+                    </label>
+                    {activeStrategies.length === 0 ? (
+                      <div className="p-3 bg-s2/40 border border-line rounded-xl text-xs text-mu flex justify-between items-center">
+                        <span>{dict.journal.addTradeModal.noActiveStrategiesHint}</span>
+                      </div>
+                    ) : (
+                      <select
+                        value={strategyId}
+                        onChange={(e) => {
+                          setStrategyId(e.target.value);
+                          setRuleChecks({});
+                        }}
+                        className="input text-xs w-full"
+                      >
+                        <option value="">— {dict.journal.addTradeModal.noStrategySelected} —</option>
+                        {activeStrategies.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name || dict.journal.strategiesTab.defaultName} ({s.rules.length} {dict.journal.strategiesTab.rulesCountLabel})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
+                    {/* Rule Checklist */}
+                    {strategyId && (() => {
+                      const selStrat = activeStrategies.find((s) => s.id === strategyId);
+                      if (!selStrat || selStrat.rules.length === 0) return null;
+
+                      return (
+                        <div className="p-3 bg-s2/60 border border-line rounded-xl space-y-2 text-xs">
+                          <span className="font-bold text-tx block mb-1">
+                            {dict.journal.addTradeModal.ruleChecklistTitle} ({selStrat.name || dict.journal.strategiesTab.defaultName})
+                          </span>
+
+                          <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                            {selStrat.rules.map((rule) => {
+                              const val = ruleChecks[rule.id];
+
+                              return (
+                                <div
+                                  key={rule.id}
+                                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 bg-s1 border border-line/60 rounded-lg"
+                                >
+                                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-s2 border border-line uppercase text-mu flex-none">
+                                      {rule.group}
+                                    </span>
+                                    <span className="text-tx font-medium line-clamp-2">{rule.text}</span>
+                                    {rule.weight === "required" && (
+                                      <span className="text-[9px] text-amber-400 font-bold uppercase flex-none">
+                                        *
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="flex gap-1 flex-none self-end sm:self-auto">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setRuleChecks((prev) => ({
+                                          ...prev,
+                                          [rule.id]: "passed",
+                                        }))
+                                      }
+                                      className={`px-2 py-0.5 text-[10px] font-bold rounded border transition-colors ${
+                                        val === "passed"
+                                          ? "bg-emerald-500/20 text-emerald-400 border-emerald-500"
+                                          : "bg-s2 text-mu border-line hover:text-tx"
+                                      }`}
+                                    >
+                                      {dict.journal.addTradeModal.rulePassed}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setRuleChecks((prev) => ({
+                                          ...prev,
+                                          [rule.id]: "failed",
+                                        }))
+                                      }
+                                      className={`px-2 py-0.5 text-[10px] font-bold rounded border transition-colors ${
+                                        val === "failed"
+                                          ? "bg-rose-500/20 text-rose-400 border-rose-500"
+                                          : "bg-s2 text-mu border-line hover:text-tx"
+                                      }`}
+                                    >
+                                      {dict.journal.addTradeModal.ruleFailed}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setRuleChecks((prev) => ({
+                                          ...prev,
+                                          [rule.id]: "na",
+                                        }))
+                                      }
+                                      className={`px-2 py-0.5 text-[10px] font-bold rounded border transition-colors ${
+                                        val === "na"
+                                          ? "bg-amber-500/20 text-amber-300 border-amber-500"
+                                          : "bg-s2 text-mu border-line hover:text-tx"
+                                      }`}
+                                    >
+                                      {dict.journal.addTradeModal.ruleNA}
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Screenshots Stub */}

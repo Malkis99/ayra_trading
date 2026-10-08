@@ -1,3 +1,5 @@
+import { GAME_CONFIG } from "./game-config";
+
 // Cyrillic to Latin transliteration map for migration
 const CYRILLIC_TO_LATIN: Record<string, string> = {
   а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "yo", ж: "zh",
@@ -467,21 +469,30 @@ export function calculateJournalStats(
     }
   }
 
-  // Execution ratings (Process Score)
+  // Execution ratings & Process Score
   const ratedTrades = trades.filter(
-    (t) => typeof t.executionRating === "number" && t.executionRating > 0
+    (t) =>
+      (typeof t.processScore === "number" && t.processScore >= 0) ||
+      (typeof t.executionRating === "number" && t.executionRating > 0)
   );
 
   let averageProcessScore = 0;
   let planCompliancePercent = 100;
 
   if (ratedTrades.length > 0) {
-    const sumScore = ratedTrades.reduce((acc, t) => acc + t.executionRating, 0);
-    averageProcessScore = Number((sumScore / ratedTrades.length).toFixed(1));
+    const scores = ratedTrades.map((t) => {
+      if (typeof t.processScore === "number") return t.processScore;
+      return (t.executionRating || 3) * 20;
+    });
 
-    const compliantCount = ratedTrades.filter((t) => t.executionRating >= 4).length;
+    const sumScore = scores.reduce((acc, s) => acc + s, 0);
+    averageProcessScore = Number((sumScore / scores.length).toFixed(1));
+
+    const compliantCount = scores.filter(
+      (s) => s >= GAME_CONFIG.PROCESS_SCORE.THRESHOLDS.GOOD
+    ).length;
     planCompliancePercent = Number(
-      ((compliantCount / ratedTrades.length) * 100).toFixed(0)
+      ((compliantCount / scores.length) * 100).toFixed(0)
     );
   }
 
@@ -500,10 +511,14 @@ export function calculateJournalStats(
 
 export function exportProfileDataJSON(
   state: any,
-  journalDataOrDate?: { accounts: any[]; trades: any[] } | Date,
+  journalDataOrDate?:
+    | { accounts: any[]; trades: any[]; strategies?: any[]; noTrades?: any[] }
+    | Date,
   exportedAtDate: Date = new Date()
 ): string {
-  let journalData: { accounts: any[]; trades: any[] } | undefined;
+  let journalData:
+    | { accounts: any[]; trades: any[]; strategies?: any[]; noTrades?: any[] }
+    | undefined;
   let actualDate = exportedAtDate;
 
   if (journalDataOrDate instanceof Date) {
@@ -516,7 +531,7 @@ export function exportProfileDataJSON(
 
   const payload = {
     app: "ayra",
-    exportVersion: "1.1",
+    exportVersion: "1.2",
     exportedAt: exportedAtDate.toISOString(),
     user: {
       name: state.name,
@@ -544,6 +559,8 @@ export function exportProfileDataJSON(
     journal: {
       accounts: journalData?.accounts || [],
       trades: journalData?.trades || [],
+      strategies: journalData?.strategies || [],
+      noTrades: journalData?.noTrades || [],
     },
   };
 

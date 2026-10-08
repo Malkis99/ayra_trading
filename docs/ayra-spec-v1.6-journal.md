@@ -1,7 +1,7 @@
-# AYRA Trading — Spec v1.6: Журнал сделок (v1, T6a–T6b)
+# AYRA Trading — Spec v1.6: Журнал сделок (v1, T6a–T6c-1)
 
 ## Overview
-Этот спецификационный документ описывает архитектуру данных, контракты, чистые формулы расчёта, аналитический движок Dashboard, Календаря и Отчётов, справочники, правила анти-фарма, пользовательские счета и интерфейс Журнала сделок v1 (этапы T6a и T6b).
+Этот спецификационный документ описывает архитектуру данных, контракты, чистые формулы расчёта, аналитический движок Dashboard, Календаря и Отчётов, справочники, правила анти-фарма, пользовательские счета, стратегии (Playbook), Process Score, журнал «не вошёл» и интерфейс Журнала сделок v1 (этапы T6a, T6b и T6c-1).
 
 ---
 
@@ -68,7 +68,11 @@ export interface Trade {
   pnlMoney?: number;
   rMultiple?: number;
   result: TradeResult;
-  strategyId?: string; // Зарезервировано для T6c
+  strategyId?: string | null;
+  strategyVersion?: number | null;
+  ruleChecks?: Record<string, "passed" | "failed" | "na">;
+  processScore?: number | null;
+  processScoreSnapshot?: ProcessScoreSnapshot | null;
   session?: TradeSession;
   emotions: string[];
   entryReason?: string; // до 500 символов
@@ -79,7 +83,58 @@ export interface Trade {
   source: "manual";
   createdAt: string;
   updatedAt: string;
-  schemaVersion: number;
+  schemaVersion: number; // version 2
+}
+```
+
+### 3.1 Стратегия (`Strategy`)
+
+```ts
+export type RuleGroup = "entry" | "exit" | "risk" | "management";
+export type RuleWeight = "required" | "optional";
+
+export interface StrategyRule {
+  id: string;
+  group: RuleGroup;
+  text: string; // до 120 символов
+  weight: RuleWeight;
+}
+
+export interface Strategy {
+  id: string;
+  name: string | null; // null -> из словаря ("Моя стратегия")
+  description?: string | null;
+  color: string;
+  rules: StrategyRule[];
+  tags: string[]; // до 12 тегов
+  riskLimit?: { type: "r" | "percent"; value: number } | null;
+  allowedSessions?: TradeSession[] | null;
+  version: number;
+  archivedAt?: string | null;
+  createdAt: string;
+}
+```
+
+### 3.2 Журнал «не вошёл» (`NoTradeEntry`)
+
+```ts
+export type NoTradeReason =
+  | "setup_incomplete"
+  | "outside_session"
+  | "risk_limit"
+  | "news"
+  | "emotional_state"
+  | "plan_not_matching"
+  | "other";
+
+export interface NoTradeEntry {
+  id: string;
+  date: string; // YYYY-MM-DD или ISO
+  accountId?: string | null;
+  instrument?: string | null;
+  reason: NoTradeReason;
+  note?: string | null; // до 500 символов
+  createdAt: string;
 }
 ```
 
@@ -92,6 +147,26 @@ export interface Trade {
 ### 4.1 Пороги и константы (`lib/game-config.ts`)
 - `BREAKEVEN_R_THRESHOLD = 0.05` — порог безубытка в R.
 - `JOURNAL_MIN_SAMPLE_SIZE = 20` — порог малой выборки. Если число сделок $< 20$, рядом с процентами и Profit Factor выводится нейтральная пометка «Мало данных: N сделок» без красных предупреждений.
+- `MAX_ACTIVE_STRATEGIES = 10` — лимит активных стратегий.
+- `MAX_RULES_PER_STRATEGY = 25` — лимит правил на стратегию.
+- `PROCESS_SCORE`:
+  - `WEIGHTS`: `{ rules: 50, risk: 25, session: 25 }`
+  - `REQUIRED_RULE_MULTIPLIER = 2.0`
+  - `MISTAKE_PENALTY_PER_ITEM = 15`
+  - `MAX_MISTAKE_PENALTY = 30`
+  - `THRESHOLDS`: `{ GOOD: 80, BAD: 50 }`
+- `NO_TRADE_XP = 10` — XP характеристике «Дисциплина» за отказ от сделки.
+- `NO_TRADE_DAILY_CAP = 1` — лимит засчитываемых отказов в день.
+
+### 4.2 Формула Process Score (`lib/journal/process-score.ts`)
+
+Оценка качества исполнения сделки $0..100$ рассчитывается чистыми функциями независимо от P&L:
+1. **Правила (`rules`)**: соотношение выполненных правил к применимым. Обязательные правила (`required`) имеют вес 2.0, необязательные (`optional`) — 1.0. Неприменимые (`na`) исключаются.
+2. **Риск (`risk`)**: 100%, если риск в R или % в пределах лимита стратегии.
+3. **Сессия (`session`)**: 100%, если сессия сделки совпадает с разрешёнными сессиями стратегии.
+4. **Штраф за ошибки (`mistakesPenalty`)**: $\min(15 \times \text{число ошибок (без other)}, 30)$.
+5. **Нормировка:** При отсутствии базовых компонентов веса оставшихся нормируются до 100%. Если недоступен ни один базовый компонент, оценка `null` (`"—"`).
+6. **Пороги Шкалы:** $\ge 80$ — Сильное исполнение, $50..79$ — Среднее, $<50$ — Есть над чем поработать.
 
 ### 4.2 Основные метрики
 1. **Winrate:**
@@ -154,18 +229,20 @@ export interface Trade {
 
 ---
 
-## 7. Экспорт JSON (версия `"1.1"`)
+## 7. Экспорт JSON (версия `"1.2"`)
 
 Экспорт включает блок `journal`:
 ```json
 {
   "app": "ayra",
-  "exportVersion": "1.1",
+  "exportVersion": "1.2",
   "exportedAt": "2026-10-05T12:00:00.000Z",
   "user": { ... },
   "journal": {
     "accounts": [ ... ],
-    "trades": [ ... ]
+    "trades": [ ... ],
+    "strategies": [ ... ],
+    "noTrades": [ ... ]
   }
 }
 ```
@@ -173,7 +250,7 @@ export interface Trade {
 
 ---
 
-## 8. План на следующие этапы (T6c – T6d)
+## 8. План на следующие этапы (T6c-2 – T6d)
 
-- **T6c:** Стратегии (Playbook), теги сетапов, прикрепление и разметка скриншотов графиков.
-- **T6d:** Prop Rules Tracker (трекинг правил проп-челленджей) и расширенные отчеты.
+- **T6c-2:** Разметка и прикрепление скриншотов графиков к сделкам, теги сетапов.
+- **T6d:** Prop Rules Tracker (трекинг правил проп-челленджей) и кастомные расширенные отчеты.

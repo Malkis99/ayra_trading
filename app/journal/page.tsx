@@ -12,21 +12,35 @@ import { AddTradeModal } from "@/components/AddTradeModal";
 import { DashboardTab } from "@/components/journal/DashboardTab";
 import { CalendarTab } from "@/components/journal/CalendarTab";
 import { ReportsTab } from "@/components/journal/ReportsTab";
+import { StrategiesTab } from "@/components/journal/StrategiesTab";
+import { NoTradeTab } from "@/components/journal/NoTradeTab";
+import { calculateProcessScore, getProcessScoreCategory } from "@/lib/journal/process-score";
 import { getDemoTrades, DEMO_ACCOUNT } from "@/lib/journal/demo-trades";
-import { Plus, Download, AlertTriangle, Search, Trash2, Edit2, ShieldAlert } from "lucide-react";
+import { Plus, Download, AlertTriangle, Search, Trash2, Edit2, ShieldAlert, RefreshCw } from "lucide-react";
 
 export default function JournalPage() {
   const { dict, lang, showToast, setAddTradeModalOpen } = useApp();
-  const { gameState } = useGame();
+  const { gameState, recordNoTrade } = useGame();
   const {
     accounts,
     trades,
+    strategies,
+    noTrades,
     storageUsage,
     saveAccount,
     archiveAccount,
     deleteAccount,
+    saveTrade,
     deleteTrade,
+    saveStrategy,
+    archiveStrategy,
+    deleteStrategy,
+    saveNoTrade,
+    deleteNoTrade,
   } = useJournal();
+
+  // Subtab in Trades tab: 'trades' | 'noTrade'
+  const [tradesSubtab, setTradesSubtab] = useState<"trades" | "noTrade">("trades");
 
   const [activeTab, setActiveTab] = useState<number>(0); // Default to Dashboard (0)
 
@@ -248,6 +262,36 @@ export default function JournalPage() {
     setAddTradeModalOpen(true);
   };
 
+  const handleSaveNoTradeAction = (entry: any) => {
+    const saved = saveNoTrade(entry);
+    const rewardRes = recordNoTrade(saved, noTrades);
+
+    if (rewardRes.xpAwarded > 0) {
+      showToast(dict.journal.noTrade.savedToast);
+    } else {
+      showToast(dict.journal.noTrade.duplicateToast);
+    }
+  };
+
+  const handleRecalculateProcessScore = (trade: Trade) => {
+    const currentStrategy = strategies.find((s) => s.id === trade.strategyId) || null;
+    const currentAccount = accounts.find((a) => a.id === trade.accountId) || null;
+    const nowIso = new Date().toISOString();
+
+    const psRes = calculateProcessScore(trade, currentStrategy, currentAccount, nowIso);
+    const updatedTrade: Trade = {
+      ...trade,
+      strategyVersion: currentStrategy ? currentStrategy.version : trade.strategyVersion,
+      processScore: psRes.score,
+      processScoreSnapshot: psRes.snapshot,
+      updatedAt: nowIso,
+    };
+
+    saveTrade(updatedTrade);
+    setSelectedTrade(updatedTrade);
+    showToast(dict.journal.recalculatedToast);
+  };
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -325,6 +369,41 @@ export default function JournalPage() {
 
       {/* TAB 1: TRADES */}
       {activeTab === 1 && (
+        <div className="space-y-4">
+          {/* Subtab Switcher: Trades / No-Trade */}
+          <div className="flex rounded-xl bg-s2 border border-line p-1 max-w-xs text-xs font-semibold">
+            <button
+              onClick={() => setTradesSubtab("trades")}
+              className={`flex-1 py-1.5 px-3 rounded-lg transition-colors ${
+                tradesSubtab === "trades"
+                  ? "bg-vi text-white shadow"
+                  : "text-mu hover:text-tx"
+              }`}
+            >
+              {dict.journal.tradesSubtab}
+            </button>
+            <button
+              onClick={() => setTradesSubtab("noTrade")}
+              className={`flex-1 py-1.5 px-3 rounded-lg transition-colors ${
+                tradesSubtab === "noTrade"
+                  ? "bg-vi text-white shadow"
+                  : "text-mu hover:text-tx"
+              }`}
+            >
+              {dict.journal.noTradeSubtab} ({noTrades.length})
+            </button>
+          </div>
+
+          {tradesSubtab === "noTrade" ? (
+            <NoTradeTab
+              noTrades={noTrades}
+              accounts={accounts}
+              onSaveNoTrade={handleSaveNoTradeAction}
+              onDeleteNoTrade={deleteNoTrade}
+              dict={dict}
+              lang={lang}
+            />
+          ) : (
         <div className="space-y-4">
           <div className="card p-3 space-y-3">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
@@ -616,6 +695,8 @@ export default function JournalPage() {
             </div>
           )}
         </div>
+          )}
+        </div>
       )}
 
       {/* TAB 2: REPORTS */}
@@ -624,6 +705,19 @@ export default function JournalPage() {
           trades={activeTrades}
           accounts={activeAccounts}
           unit={unit}
+          dict={dict}
+          lang={lang}
+        />
+      )}
+
+      {/* TAB 4: STRATEGIES */}
+      {activeTab === 4 && (
+        <StrategiesTab
+          strategies={strategies}
+          trades={activeTrades}
+          onSaveStrategy={saveStrategy}
+          onArchiveStrategy={archiveStrategy}
+          onDeleteStrategy={deleteStrategy}
           dict={dict}
           lang={lang}
         />
@@ -720,8 +814,8 @@ export default function JournalPage() {
         </div>
       )}
 
-      {/* STUBS FOR TABS 3, 4, 6 */}
-      {[3, 4, 6].includes(activeTab) && (
+      {/* STUBS FOR TABS 3, 6 */}
+      {[3, 6].includes(activeTab) && (
         <div className="card text-center p-8 space-y-3">
           <h4 className="h4">{tabs[activeTab]}</h4>
           <p className="text-xs text-mu max-w-sm mx-auto">{dict.journal.inDev}</p>
@@ -833,6 +927,96 @@ export default function JournalPage() {
                     </div>
                   </div>
                 )}
+
+                {/* Strategy & Process Score Section */}
+                {(() => {
+                  const strat = strategies.find((s) => s.id === selectedTrade.strategyId);
+                  const psScore = selectedTrade.processScore ?? null;
+                  const psCategory = getProcessScoreCategory(psScore);
+
+                  if (!strat && psScore == null) return null;
+
+                  return (
+                    <div className="p-3 bg-s2/60 border border-line rounded-xl space-y-2">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="text-[10px] text-mu block font-medium">
+                            {dict.journal.strategyLabel}
+                          </span>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            {strat && (
+                              <span
+                                className="w-2.5 h-2.5 rounded-full flex-none"
+                                style={{ backgroundColor: strat.color }}
+                              />
+                            )}
+                            <b className="text-tx font-bold">
+                              {strat?.name || dict.journal.strategiesTab.defaultName}
+                            </b>
+                            <span className="text-[10px] text-mu font-semibold px-1 py-0.2 bg-s2 rounded border border-line">
+                              v{selectedTrade.strategyVersion || strat?.version || 1}
+                            </span>
+                          </div>
+                        </div>
+
+                        {psScore != null && (
+                          <div className="text-right">
+                            <span className="text-[10px] text-mu block font-medium">
+                              {dict.journal.processScoreLabel}
+                            </span>
+                            <span
+                              className={`font-bold text-sm ${
+                                psCategory === "good"
+                                  ? "text-emerald-400"
+                                  : psCategory === "bad"
+                                  ? "text-rose-400"
+                                  : "text-amber-300"
+                              }`}
+                            >
+                              {psScore}/100
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Score Components Breakdown */}
+                      {selectedTrade.processScoreSnapshot && (
+                        <div className="pt-2 border-t border-line/40 space-y-1">
+                          <div className="grid grid-cols-3 gap-1 text-[10px] text-mu">
+                            {selectedTrade.processScoreSnapshot.components.map((comp) => (
+                              <div key={comp.key} className="p-1 bg-s1 rounded border border-line/40">
+                                <span className="block font-medium capitalize">{comp.key}:</span>
+                                <b className="text-tx">{comp.score}%</b> ({comp.weight}%)
+                              </div>
+                            ))}
+                          </div>
+
+                          {selectedTrade.processScoreSnapshot.mistakesPenalty > 0 && (
+                            <p className="text-[10px] text-rose-400 font-medium">
+                              {dict.journal.mistakesPenaltyLabel}: -
+                              {selectedTrade.processScoreSnapshot.mistakesPenalty}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="flex justify-between items-center pt-1">
+                        <span className="text-[10px] text-mu italic">
+                          {dict.journal.processScoreDisclaimer}
+                        </span>
+                        {!isDemoMode && (
+                          <button
+                            onClick={() => handleRecalculateProcessScore(selectedTrade)}
+                            className="btn-ghost text-[10px] py-0.5 px-2 flex items-center gap-1 text-vi hover:text-vi/80"
+                          >
+                            <RefreshCw size={10} />
+                            <span>{dict.journal.recalculateProcessBtn}</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {selectedTrade.notes && (
                   <div>

@@ -49,4 +49,10 @@ export const ALLOWED_LATIN_WORDS = [
   "Profit",
   "Payoff",
   "Ratio",
+  "SMC",
+  "FVG",
+  "MSS",
+  "Sweep",
+  "OTE",
+  "POI",
 ] as const;

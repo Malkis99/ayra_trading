@@ -47,7 +47,7 @@ export interface Trade {
   pnlMoney?: number; // Net result in money
   rMultiple?: number; // Entered or calculated R
   result: TradeResult; // Derived/calculated
-  strategyId?: string; // Placeholder for T6c
+  strategyId?: string | null;
   session?: TradeSession;
   emotions: string[]; // Emotion IDs catalog
   entryReason?: string; // Max 500 chars
@@ -56,10 +56,89 @@ export interface Trade {
   notes?: string; // Max 1000 chars
   verification: TradeVerification; // 'unverified' for manual
   source: TradeSource; // 'manual'
+  strategyVersion?: number | null;
+  ruleChecks?: Record<string, RuleCheckValue>;
+  processScore?: number | null;
+  processScoreSnapshot?: ProcessScoreSnapshot | null;
   createdAt: string; // ISO String
   updatedAt: string; // ISO String
   schemaVersion: number;
 }
+
+export type RuleGroup = "entry" | "exit" | "risk" | "management";
+export type RuleWeight = "required" | "optional";
+
+export interface StrategyRule {
+  id: string;
+  group: RuleGroup;
+  text: string; // Max 120 chars
+  weight: RuleWeight;
+}
+
+export interface RiskLimit {
+  type: "r" | "percent";
+  value: number;
+}
+
+export interface Strategy {
+  id: string;
+  name: string | null; // null for default strategy ("Моя стратегия" / "My strategy")
+  description?: string | null; // Max 500 chars
+  color: string; // Palette color code
+  rules: StrategyRule[];
+  tags: string[]; // Max 12 tags
+  riskLimit?: RiskLimit | null;
+  allowedSessions?: TradeSession[] | null;
+  version: number;
+  archivedAt?: string | null;
+  createdAt: string; // ISO String
+}
+
+export type RuleCheckValue = "passed" | "failed" | "na";
+
+export interface ProcessScoreComponent {
+  key: "rules" | "risk" | "session";
+  score: number; // 0-100
+  weight: number; // 0-100 percentage
+  rawContribution: number;
+}
+
+export interface ProcessScoreSnapshot {
+  score: number | null;
+  formulaVersion: string; // e.g. "1.0"
+  components: ProcessScoreComponent[];
+  mistakesPenalty: number;
+  calculatedAt: string; // ISO String
+}
+
+export type NoTradeReason =
+  | "setup_incomplete"
+  | "outside_session"
+  | "risk_limit"
+  | "news"
+  | "emotional_state"
+  | "plan_not_matching"
+  | "other";
+
+export interface NoTradeEntry {
+  id: string;
+  date: string; // ISO String or YYYY-MM-DD
+  accountId?: string | null;
+  instrument?: string | null; // UPPERCASE
+  reason: NoTradeReason;
+  note?: string | null; // Max 500 chars
+  createdAt: string; // ISO String
+}
+
+export const NO_TRADE_REASONS = [
+  "setup_incomplete",
+  "outside_session",
+  "risk_limit",
+  "news",
+  "emotional_state",
+  "plan_not_matching",
+  "other",
+] as const;
 
 export const INSTRUMENT_AUTOCOMPLETE = [
   "XAUUSD",
@@ -133,6 +212,17 @@ export interface JournalRepository {
   getTrade(id: string): Trade | null;
   saveTrade(trade: Trade): Trade;
   deleteTrade(id: string): boolean;
+
+  getStrategies(): Strategy[];
+  getStrategy(id: string): Strategy | null;
+  saveStrategy(strategy: Strategy): Strategy;
+  archiveStrategy(id: string): Strategy;
+  deleteStrategy(id: string): boolean;
+
+  getNoTrades(): NoTradeEntry[];
+  getNoTrade(id: string): NoTradeEntry | null;
+  saveNoTrade(entry: NoTradeEntry): NoTradeEntry;
+  deleteNoTrade(id: string): boolean;
 
   getStorageUsage(): StorageUsage;
 }

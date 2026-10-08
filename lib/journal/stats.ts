@@ -116,7 +116,9 @@ export interface ProcessOutcomeMatrix {
   badWinAvgR: number | null;
   badLossCount: number;
   badLossAvgR: number | null;
+  mediumExecutionCount: number;
   unratedCount: number;
+  usedProcessScoreFallback: boolean;
 }
 
 /**
@@ -602,6 +604,7 @@ export function calculateCalendarMonth(
 }
 
 export type ReportSliceType =
+  | "strategy"
   | "instrument"
   | "session"
   | "dayOfWeek"
@@ -673,8 +676,23 @@ export function calculateReportSlice(
       case "mistake":
         keys = trade.mistakes && trade.mistakes.length > 0 ? trade.mistakes : ["none"];
         break;
+      case "strategy":
+        keys = [trade.strategyId || "no_strategy"];
+        break;
       case "executionRating":
-        keys = trade.executionRating ? [`${trade.executionRating}★`] : ["unrated"];
+        if (trade.executionRating) {
+          keys = [`${trade.executionRating}★`];
+        } else if (typeof trade.processScore === "number") {
+          if (trade.processScore >= GAME_CONFIG.PROCESS_SCORE.THRESHOLDS.GOOD) {
+            keys = ["good_ps"];
+          } else if (trade.processScore < GAME_CONFIG.PROCESS_SCORE.THRESHOLDS.BAD) {
+            keys = ["bad_ps"];
+          } else {
+            keys = ["medium_ps"];
+          }
+        } else {
+          keys = ["unrated"];
+        }
         break;
       case "account": {
         const acc = accountMap.get(trade.accountId);
@@ -765,21 +783,41 @@ export function calculateProcessOutcomeMatrix(trades: Trade[]): ProcessOutcomeMa
   let badLossCount = 0;
   let badLossRSum = 0;
 
+  let mediumExecutionCount = 0;
   let unratedCount = 0;
+  let usedProcessScoreFallback = false;
 
   closedTrades.forEach((t) => {
-    if (!t.executionRating) {
+    let isGood = false;
+    let isBad = false;
+    let isMedium = false;
+
+    if (t.executionRating) {
+      isGood = t.executionRating >= 4;
+      isBad = t.executionRating <= 2;
+      isMedium = t.executionRating === 3;
+    } else if (typeof t.processScore === "number") {
+      usedProcessScoreFallback = true;
+      isGood = t.processScore >= GAME_CONFIG.PROCESS_SCORE.THRESHOLDS.GOOD;
+      isBad = t.processScore < GAME_CONFIG.PROCESS_SCORE.THRESHOLDS.BAD;
+      isMedium =
+        t.processScore >= GAME_CONFIG.PROCESS_SCORE.THRESHOLDS.BAD &&
+        t.processScore < GAME_CONFIG.PROCESS_SCORE.THRESHOLDS.GOOD;
+    } else {
       unratedCount++;
       return;
     }
 
-    const isGoodProcess = t.executionRating >= 4;
-    const isBadProcess = t.executionRating <= 2;
+    if (isMedium) {
+      mediumExecutionCount++;
+      return;
+    }
+
     const isWin = t.result === "win";
     const isLoss = t.result === "loss";
     const r = typeof t.rMultiple === "number" ? t.rMultiple : 0;
 
-    if (isGoodProcess) {
+    if (isGood) {
       if (isWin) {
         goodWinCount++;
         goodWinRSum += r;
@@ -787,7 +825,7 @@ export function calculateProcessOutcomeMatrix(trades: Trade[]): ProcessOutcomeMa
         goodLossCount++;
         goodLossRSum += r;
       }
-    } else if (isBadProcess) {
+    } else if (isBad) {
       if (isWin) {
         badWinCount++;
         badWinRSum += r;
@@ -795,9 +833,6 @@ export function calculateProcessOutcomeMatrix(trades: Trade[]): ProcessOutcomeMa
         badLossCount++;
         badLossRSum += r;
       }
-    } else {
-      // Rating 3 is unrated for binary matrix or neutral
-      unratedCount++;
     }
   });
 
@@ -814,7 +849,9 @@ export function calculateProcessOutcomeMatrix(trades: Trade[]): ProcessOutcomeMa
     badLossCount,
     badLossAvgR: badLossCount > 0 ? Number((badLossRSum / badLossCount).toFixed(2)) : null,
 
+    mediumExecutionCount,
     unratedCount,
+    usedProcessScoreFallback,
   };
 }
 
