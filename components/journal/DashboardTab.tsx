@@ -360,6 +360,40 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             )}
           </div>
 
+          {/* CARD 9: Screenshots ratio */}
+          {(() => {
+            const tradesWithScreenshots = filteredTrades.filter(
+              (t) => t.attachmentIds && t.attachmentIds.length > 0
+            ).length;
+            const screenshotRatio =
+              filteredTrades.length > 0
+                ? Math.round((tradesWithScreenshots / filteredTrades.length) * 100)
+                : 0;
+
+            return (
+              <div className="card p-3.5 space-y-2 relative">
+                <div className="flex justify-between items-center text-xs text-mu">
+                  <span>{dict.journal.attachments.statsCard}</span>
+                </div>
+                <b className="block text-xl font-mono font-bold text-tx">
+                  {filteredTrades.length < 20 ? (
+                    <span className="text-xs text-mu font-sans font-normal">
+                      {dict.journal.dashboard.kpi.lowDataTag.replace(
+                        "{count}",
+                        String(filteredTrades.length)
+                      )}
+                    </span>
+                  ) : (
+                    `${screenshotRatio}%`
+                  )}
+                </b>
+                <span className="text-[10px] text-mu block">
+                  {tradesWithScreenshots} / {filteredTrades.length}
+                </span>
+              </div>
+            );
+          })()}
+
           {/* CARD 2: Winrate */}
           <div className="card p-3.5 space-y-2 relative">
             <div className="flex justify-between items-center text-xs text-mu">

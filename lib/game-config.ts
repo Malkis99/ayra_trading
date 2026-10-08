@@ -49,6 +49,12 @@ export const GAME_CONFIG = {
   PLAN_COMPLIANCE_MIN_SAMPLE_SIZE: 5,
   NOTES_LIMIT: 500,
 
+  // Screenshot & Attachments Config (T6c-2b)
+  MAX_ATTACHMENTS_PER_TRADE: 5,
+  SCREENSHOT_DAILY_XP_CAP: 1,
+  SCREENSHOT_MIN_DIMENSION: 300,
+  SCREENSHOT_XP: 10,
+
   // Level unlock thresholds
   LEVEL_UNLOCKS: {
     FRAME_BLUE_LEVEL: 3,

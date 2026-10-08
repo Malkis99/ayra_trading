@@ -83,6 +83,7 @@ export interface GameState {
   activeLoadout: string;
   itemsEquippedCount: number;
   achievements: Record<string, boolean>;
+  rewardedScreenshotHashes?: string[];
   posts: string[];
   chronicle: ChronicleEntry[];
   currentStreak: number;
@@ -147,6 +148,7 @@ export const INITIAL_GAME_STATE: GameState = {
   activeLoadout: "session",
   itemsEquippedCount: 0,
   achievements: {},
+  rewardedScreenshotHashes: [],
   posts: [],
   chronicle: [{ type: "characterCreated" }],
   currentStreak: 0,
@@ -513,8 +515,129 @@ export function checkAchievements(
     newlyUnlocked.push("plans7");
   }
 
+  const hasFirstScreenshot =
+    (updatedState.rewardedScreenshotHashes &&
+      updatedState.rewardedScreenshotHashes.length > 0) ||
+    updatedState.achievements["firstScreenshot"];
+  if (hasFirstScreenshot && !updatedState.achievements["firstScreenshot"]) {
+    updatedState.achievements = { ...updatedState.achievements, firstScreenshot: true };
+    chronicle = addChronicleEvent(chronicle, {
+      type: "achievementUnlocked",
+      achievementId: "firstScreenshot",
+    });
+    newlyUnlocked.push("firstScreenshot");
+  }
+
   updatedState.chronicle = chronicle;
   return { state: updatedState, newlyUnlocked };
+}
+
+export interface ScreenshotRewardResult {
+  state: GameState;
+  xpAwarded: number;
+  leveledUp: boolean;
+  newLevel?: number;
+  newlyUnlocked: string[];
+}
+
+export function recordScreenshotAdded(
+  state: GameState,
+  screenshot: {
+    hash: string;
+    width: number;
+    height: number;
+    tradeOpenedAt?: string;
+  },
+  currentDate: Date = new Date()
+): ScreenshotRewardResult {
+  let newState = checkAndApplyDateResets(state, currentDate);
+  const todayStr = getIsoDateString(currentDate);
+
+  let isPlausible = true;
+
+  // 1. Min dimension check
+  const minDim = Math.min(screenshot.width, screenshot.height);
+  if (minDim < GAME_CONFIG.SCREENSHOT_MIN_DIMENSION) {
+    isPlausible = false;
+  }
+
+  // 2. Future date check
+  if (screenshot.tradeOpenedAt) {
+    const tradeOpenedMs = new Date(screenshot.tradeOpenedAt).getTime();
+    if (isNaN(tradeOpenedMs) || tradeOpenedMs > currentDate.getTime() + 24 * 60 * 60 * 1000) {
+      isPlausible = false;
+    }
+  }
+
+  // 3. Duplicate hash check
+  const rewardedHashes = newState.rewardedScreenshotHashes || [];
+  if (rewardedHashes.includes(screenshot.hash)) {
+    isPlausible = false;
+  }
+
+  // 4. Daily cap check
+  const todayRecord = newState.dailyStats[todayStr];
+  const screenshotsTodayCount = todayRecord?.questsCompleted?.["trading_screenshot"] || 0;
+  if (screenshotsTodayCount >= GAME_CONFIG.SCREENSHOT_DAILY_XP_CAP) {
+    isPlausible = false;
+  }
+
+  let xpAwarded = 0;
+  let leveledUp = false;
+  let newLevel: number | undefined;
+  const newlyUnlocked: string[] = [];
+
+  if (isPlausible) {
+    xpAwarded = GAME_CONFIG.SCREENSHOT_XP;
+
+    let newXp = newState.xp + xpAwarded;
+    let currentLvl = newState.level;
+    let chronicle = newState.chronicle;
+
+    while (newXp >= xpForNextLevel(currentLvl)) {
+      newXp -= xpForNextLevel(currentLvl);
+      currentLvl++;
+      leveledUp = true;
+      chronicle = addChronicleEvent(chronicle, {
+        type: "levelUp",
+        level: currentLvl,
+      });
+    }
+
+    const updatedDailyStats = recordDailyStatEvent(newState.dailyStats, todayStr, {
+      type: "questDone",
+      category: "trading_screenshot",
+      xp: xpAwarded,
+      coins: 0,
+    });
+
+    const newRewardedHashes = [...rewardedHashes, screenshot.hash];
+
+    newState = {
+      ...newState,
+      xp: newXp,
+      level: currentLvl,
+      chronicle,
+      dailyStats: updatedDailyStats,
+      rewardedScreenshotHashes: newRewardedHashes,
+    };
+
+    if (leveledUp) {
+      newLevel = currentLvl;
+    }
+  }
+
+  const evalResult = checkAchievements(newState);
+  newState = evalResult.state;
+  newlyUnlocked.push(...evalResult.newlyUnlocked);
+
+  return {
+    state: newState,
+    xpAwarded,
+    leveledUp,
+    newLevel,
+    newlyUnlocked,
+  };
 }
 
 export function evaluatePlanQuestClosure(

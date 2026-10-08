@@ -28,6 +28,7 @@ import {
   TradeValidationErrors,
 } from "@/lib/journal/calc";
 import { recordLoggedTrade } from "@/lib/game";
+import { AttachmentManager } from "@/components/journal/AttachmentManager";
 
 interface AddTradeModalProps {
   isOpen: boolean;
@@ -99,6 +100,8 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
   // Strategy & Checklist fields
   const [strategyId, setStrategyId] = useState<string>("");
   const [ruleChecks, setRuleChecks] = useState<Record<string, RuleCheckValue>>({});
+  const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
+  const [activeTradeId, setActiveTradeId] = useState<string>("");
 
   // Validation & Duplicate Warning
   const [errors, setErrors] = useState<TradeValidationErrors>({});
@@ -146,8 +149,12 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
       setNotes(initialTrade.notes || "");
       setStrategyId(initialTrade.strategyId || "");
       setRuleChecks(initialTrade.ruleChecks || {});
+      setAttachmentIds(initialTrade.attachmentIds || []);
+      setActiveTradeId(initialTrade.id);
       setIsDetailed(true);
     } else {
+      const generatedId = `tr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      setActiveTradeId(generatedId);
       // Default initialization
       const defaultAcc =
         lastSelectedAccountId && activeAccounts.some((a) => a.id === lastSelectedAccountId)
@@ -176,6 +183,7 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
       setNotes("");
       setStrategyId("");
       setRuleChecks({});
+      setAttachmentIds([]);
       setIsDetailed(false);
     }
 
@@ -307,7 +315,7 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
 
     // Temporary object to compute process score
     const tempTrade: Trade = {
-      id: initialTrade?.id || `tr_${Date.now()}`,
+      id: activeTradeId || initialTrade?.id || `tr_${Date.now()}`,
       accountId,
       instrument: normInst,
       direction,
@@ -335,9 +343,10 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
       notes: notes.slice(0, 1000) || undefined,
       verification: "unverified",
       source: "manual",
+      attachmentIds,
       createdAt: initialTrade?.createdAt || nowIso,
       updatedAt: nowIso,
-      schemaVersion: 2,
+      schemaVersion: 3,
     };
 
     const psRes = calculateProcessScore(tempTrade, selectedStrategy, selectedAccount, nowIso);
@@ -960,10 +969,16 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
                     })()}
                   </div>
 
-                  {/* Screenshots Stub */}
-                  <div className="p-2.5 bg-s2/40 border border-line border-dashed rounded-lg text-xs text-mu flex justify-between items-center">
-                    <span>{dict.journal.addTradeModal.screenshotsSoon}</span>
-                    <span className="badge-free text-[10px]">T6c</span>
+                  {/* Screenshots Block */}
+                  <div className="space-y-2 pt-2 border-t border-line">
+                    <label className="text-xs text-mu block font-medium">
+                      {dict.journal.attachments.title}
+                    </label>
+                    <AttachmentManager
+                      tradeId={activeTradeId}
+                      tradeOpenedAt={openedAt}
+                      onAttachmentsChanged={(ids) => setAttachmentIds(ids)}
+                    />
                   </div>
                 </div>
               )}
