@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
-import { ArrowLeftRight, Edit3, Smile, Mail, Calendar, X, ArrowLeft } from "lucide-react";
+import { ArrowLeftRight, ShieldAlert, Edit3, Smile, Mail, Calendar, X, ArrowLeft } from "lucide-react";
 import { formatString } from "@/lib/i18n";
 
 export function AddModal() {
@@ -17,6 +17,7 @@ export function AddModal() {
 
   const actions = [
     { key: "trade", label: dict.addModal.actions.trade, icon: ArrowLeftRight },
+    { key: "noTrade", label: dict.journal.noTrade.addBtn, icon: ShieldAlert },
     { key: "note", label: dict.addModal.actions.note, icon: Edit3 },
     { key: "emotion", label: dict.addModal.actions.emotion, icon: Smile },
     { key: "post", label: dict.addModal.actions.post, icon: Mail },

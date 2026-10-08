@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from "react";
 import { Trade, Account } from "@/lib/journal/types";
+import { useJournal } from "@/lib/journal/context";
 import {
   calculateReportSlice,
   ReportSliceType,
@@ -26,6 +27,7 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
   dict,
   lang,
 }) => {
+  const { strategies } = useJournal();
   const [sliceType, setSliceType] = useState<ReportSliceType>("instrument");
 
   // Filters State
@@ -147,6 +149,7 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
   };
 
   const sliceList: { id: ReportSliceType; label: string }[] = [
+    { id: "strategy", label: dict.journal.reports.slices.strategy },
     { id: "instrument", label: dict.journal.reports.slices.instrument },
     { id: "session", label: dict.journal.reports.slices.session },
     { id: "dayOfWeek", label: dict.journal.reports.slices.dayOfWeek },
@@ -160,6 +163,11 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
 
   // Helper to display localized group labels
   const formatGroupLabel = (key: string) => {
+    if (sliceType === "strategy") {
+      if (key === "no_strategy") return dict.journal.noStrategySelected;
+      const strat = strategies.find((s) => s.id === key);
+      return strat?.name || dict.journal.strategiesTab.defaultName;
+    }
     if (sliceType === "session") {
       return (dict.journal.sessions as any)[key] || key;
     }
@@ -168,6 +176,11 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
     }
     if (sliceType === "mistake") {
       return (dict.journal.mistakes as any)[key] || key;
+    }
+    if (sliceType === "executionRating") {
+      if (key === "good_ps") return `${dict.journal.processCategoryGood} (≥80)`;
+      if (key === "bad_ps") return `${dict.journal.processCategoryBad} (<50)`;
+      if (key === "medium_ps") return `${dict.journal.processCategoryMedium} (50–79)`;
     }
     if (sliceType === "dayOfWeek") {
       const idx = parseInt(key, 10);

@@ -20,6 +20,28 @@ export const GAME_CONFIG = {
     verified: 1.5,
   } as Record<string, number>,
 
+  // Strategy & Process Score Config
+  MAX_ACTIVE_STRATEGIES: 10,
+  MAX_RULES_PER_STRATEGY: 25,
+  PROCESS_SCORE: {
+    WEIGHTS: {
+      rules: 50,
+      risk: 25,
+      session: 25,
+    },
+    REQUIRED_RULE_MULTIPLIER: 2.0,
+    MISTAKE_PENALTY_PER_ITEM: 15, // min(3 * count * 5, 30) = 15 per item
+    MAX_MISTAKE_PENALTY: 30,
+    THRESHOLDS: {
+      GOOD: 80,
+      BAD: 50,
+    },
+  },
+
+  // No-Trade Journal Config
+  NO_TRADE_XP: 10,
+  NO_TRADE_DAILY_CAP: 1,
+
   // Level unlock thresholds
   LEVEL_UNLOCKS: {
     FRAME_BLUE_LEVEL: 3,

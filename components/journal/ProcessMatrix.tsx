@@ -100,15 +100,32 @@ export const ProcessMatrix: React.FC<ProcessMatrixProps> = ({ trades, dict }) =>
         </div>
       </div>
 
-      {/* Unrated trades counter */}
-      {matrix.unratedCount > 0 && (
-        <div className="text-[11px] text-mu pt-1">
-          {dict.journal.reports.matrix.unratedCount.replace(
-            "{count}",
-            String(matrix.unratedCount)
+      {/* Additional Stats & Source Label */}
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-mu pt-1 border-t border-line/40">
+        <div>
+          {matrix.mediumExecutionCount > 0 && (
+            <span className="mr-3">
+              {dict.journal.reports.matrix.mediumExecutionLabel}{" "}
+              <b className="text-tx">{matrix.mediumExecutionCount}</b>
+            </span>
+          )}
+          {matrix.unratedCount > 0 && (
+            <span>
+              {dict.journal.reports.matrix.unratedCount.replace(
+                "{count}",
+                String(matrix.unratedCount)
+              )}
+            </span>
           )}
         </div>
-      )}
+
+        <span className="italic">
+          {dict.journal.reports.matrix.sourceLabel}{" "}
+          {matrix.usedProcessScoreFallback
+            ? dict.journal.reports.matrix.sourceProcessScore
+            : dict.journal.reports.matrix.sourceManual}
+        </span>
+      </div>
     </div>
   );
 };

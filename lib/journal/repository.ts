@@ -1,18 +1,23 @@
-import { Account, Trade, StorageUsage, JournalRepository } from "./types";
+import { Account, Trade, Strategy, NoTradeEntry, StorageUsage, JournalRepository } from "./types";
 
 const JOURNAL_STORAGE_KEY = "ayra_journal_v1";
+const CURRENT_JOURNAL_SCHEMA_VERSION = 2;
 const STORAGE_WARN_THRESHOLD = 0.8; // 80%
 
 export interface JournalStorageData {
   schemaVersion: number;
   accounts: Account[];
   trades: Trade[];
+  strategies: Strategy[];
+  noTrades: NoTradeEntry[];
 }
 
 export const INITIAL_JOURNAL_DATA: JournalStorageData = {
-  schemaVersion: 1,
+  schemaVersion: CURRENT_JOURNAL_SCHEMA_VERSION,
   accounts: [],
   trades: [],
+  strategies: [],
+  noTrades: [],
 };
 
 export class LocalStorageJournalRepository implements JournalRepository {
@@ -52,15 +57,27 @@ export class LocalStorageJournalRepository implements JournalRepository {
   }
 
   private migrate(raw: any): JournalStorageData {
-    const version = raw.schemaVersion || 1;
-    const accounts: Account[] = Array.isArray(raw.accounts) ? raw.accounts : [];
-    const trades: Trade[] = Array.isArray(raw.trades) ? raw.trades : [];
+    const rawAccounts: Account[] = Array.isArray(raw.accounts) ? raw.accounts : [];
+    const rawTrades: any[] = Array.isArray(raw.trades) ? raw.trades : [];
+    const rawStrategies: Strategy[] = Array.isArray(raw.strategies) ? raw.strategies : [];
+    const rawNoTrades: NoTradeEntry[] = Array.isArray(raw.noTrades) ? raw.noTrades : [];
 
-    // Migration logic for future schema versions can go here
+    const trades: Trade[] = rawTrades.map((t) => ({
+      ...t,
+      strategyId: t.strategyId ?? null,
+      strategyVersion: t.strategyVersion ?? null,
+      ruleChecks: t.ruleChecks ?? {},
+      processScore: typeof t.processScore === "number" ? t.processScore : null,
+      processScoreSnapshot: t.processScoreSnapshot ?? null,
+      schemaVersion: CURRENT_JOURNAL_SCHEMA_VERSION,
+    }));
+
     return {
-      schemaVersion: version,
-      accounts,
+      schemaVersion: CURRENT_JOURNAL_SCHEMA_VERSION,
+      accounts: rawAccounts,
       trades,
+      strategies: rawStrategies,
+      noTrades: rawNoTrades,
     };
   }
 
@@ -142,6 +159,87 @@ export class LocalStorageJournalRepository implements JournalRepository {
     if (filtered.length === data.trades.length) return false;
 
     data.trades = filtered;
+    this.saveData(data);
+    return true;
+  }
+
+  getStrategies(): Strategy[] {
+    return this.loadData().strategies || [];
+  }
+
+  getStrategy(id: string): Strategy | null {
+    const strategies = this.getStrategies();
+    return strategies.find((s) => s.id === id) || null;
+  }
+
+  saveStrategy(strategy: Strategy): Strategy {
+    const data = this.loadData();
+    const index = data.strategies.findIndex((s) => s.id === strategy.id);
+
+    if (index >= 0) {
+      data.strategies[index] = strategy;
+    } else {
+      data.strategies.push(strategy);
+    }
+
+    this.saveData(data);
+    return strategy;
+  }
+
+  archiveStrategy(id: string): Strategy {
+    const data = this.loadData();
+    const strategy = data.strategies.find((s) => s.id === id);
+    if (!strategy) throw new Error(`Strategy not found: ${id}`);
+
+    strategy.archivedAt = new Date().toISOString();
+    this.saveData(data);
+    return strategy;
+  }
+
+  deleteStrategy(id: string): boolean {
+    const data = this.loadData();
+    const hasTrades = data.trades.some((t) => t.strategyId === id);
+    if (hasTrades) {
+      throw new Error("Cannot delete strategy with trades. Archive it instead.");
+    }
+
+    const filtered = data.strategies.filter((s) => s.id !== id);
+    if (filtered.length === data.strategies.length) return false;
+
+    data.strategies = filtered;
+    this.saveData(data);
+    return true;
+  }
+
+  getNoTrades(): NoTradeEntry[] {
+    return this.loadData().noTrades || [];
+  }
+
+  getNoTrade(id: string): NoTradeEntry | null {
+    const entries = this.getNoTrades();
+    return entries.find((e) => e.id === id) || null;
+  }
+
+  saveNoTrade(entry: NoTradeEntry): NoTradeEntry {
+    const data = this.loadData();
+    const index = data.noTrades.findIndex((e) => e.id === entry.id);
+
+    if (index >= 0) {
+      data.noTrades[index] = entry;
+    } else {
+      data.noTrades.push(entry);
+    }
+
+    this.saveData(data);
+    return entry;
+  }
+
+  deleteNoTrade(id: string): boolean {
+    const data = this.loadData();
+    const filtered = data.noTrades.filter((e) => e.id !== id);
+    if (filtered.length === data.noTrades.length) return false;
+
+    data.noTrades = filtered;
     this.saveData(data);
     return true;
   }

@@ -62,6 +62,13 @@ export const TITLES_CATALOG: TitleCatalogItem[] = [
     reqAchievement: "level3",
   },
   {
+    id: "guardian_discipline",
+    nameKey: "titles.guardianDiscipline",
+    rarity: "rare",
+    source: "achievement",
+    reqAchievement: "consciousRefusal",
+  },
+  {
     id: "case_master",
     nameKey: "titles.caseMaster",
     rarity: "epic",
