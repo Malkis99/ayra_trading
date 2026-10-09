@@ -6,6 +6,7 @@ import { useGame } from "@/lib/game-context";
 import { formatString, formatNumber } from "@/lib/i18n";
 import { getDeterministicDailyQuests, QUEST_CATEGORY_META, QuestCategory } from "@/lib/quests";
 import { GAME_CONFIG } from "@/lib/game-config";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   CheckSquare,
   Shield,
@@ -26,6 +27,7 @@ import {
 
 export default function QuestsPage() {
   const { dict, lang, showToast } = useApp();
+  const [deletingGoal, setDeletingGoal] = useState<{ id: string; title: string } | null>(null);
   const {
     gameState,
     completeQuest,
@@ -483,7 +485,7 @@ export default function QuestsPage() {
                     </div>
                   </div>
                   <button
-                    onClick={() => removeCustomGoal(g.id)}
+                    onClick={() => setDeletingGoal({ id: g.id, title: g.title })}
                     className="text-mu hover:text-red-400 p-1"
                     title={dict.questsPage.goalsTab.deleteBtn}
                   >

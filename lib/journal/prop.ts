@@ -604,3 +604,33 @@ export function calculatePropMetrics(
     daysHistory,
   };
 }
+
+/**
+ * Resolves the primary prop account based on primaryPropAccountId storage value
+ * - null -> explicitly no primary account
+ * - string -> explicit account ID (if active)
+ * - undefined / invalid -> auto mode (first active prop account with rules)
+ */
+export function resolvePrimaryPropAccount(
+  accounts: Account[],
+  primaryPropAccountId?: string | null
+): Account | null {
+  if (primaryPropAccountId === null) {
+    return null;
+  }
+
+  if (typeof primaryPropAccountId === "string") {
+    const matched = accounts.find(
+      (a) => a.id === primaryPropAccountId && a.type === "prop" && !a.archivedAt
+    );
+    if (matched) return matched;
+  }
+
+  const firstWithRules = accounts.find(
+    (a) => a.type === "prop" && !a.archivedAt && a.propRules && a.propRules.startedAt
+  );
+  if (firstWithRules) return firstWithRules;
+
+  const firstProp = accounts.find((a) => a.type === "prop" && !a.archivedAt);
+  return firstProp || null;
+}

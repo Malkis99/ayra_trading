@@ -338,7 +338,12 @@ export const PropRulesModal: React.FC<PropRulesModalProps> = ({
           <form onSubmit={handleExecuteChangePhase} className="space-y-4 text-xs">
             <div className="p-3 bg-vi/10 border border-vi/30 rounded-xl space-y-1">
               <h4 className="font-bold text-tx">{dict.journal.propRules.changePhase.modalTitle}</h4>
-              <p className="text-mu text-[11px]">{dict.journal.propRules.changePhase.modalDesc}</p>
+              <p className="text-mu text-[11px]">
+                {dict.confirmDialog?.propRules?.changePhaseDesc.replace(
+                  "{phase}",
+                  currentRules.phaseLabel || "Phase 1"
+                ) || dict.journal.propRules.changePhase.modalDesc}
+              </p>
             </div>
 
             <div>

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { TabHeader } from "@/components/TabHeader";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
@@ -22,8 +23,9 @@ import { AttachmentManager } from "@/components/journal/AttachmentManager";
 import { Plus, Download, AlertTriangle, Search, Trash2, Edit2, ShieldAlert, RefreshCw, FileText, Camera } from "lucide-react";
 import { PropRulesModal } from "@/components/journal/PropRulesModal";
 import { PropRulesCard } from "@/components/journal/PropRulesCard";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { recordPropRulesSaved } from "@/lib/game";
-import { calculatePropMetrics } from "@/lib/journal/prop";
+import { calculatePropMetrics, resolvePrimaryPropAccount } from "@/lib/journal/prop";
 import { evaluatePropToastAlert } from "@/lib/journal/prop-toast";
 
 export default function JournalPage() {
@@ -37,8 +39,11 @@ export default function JournalPage() {
     notes,
     storageUsage,
     saveAccount,
+    primaryPropAccountId,
+    setPrimaryPropAccountId,
     archiveAccount,
     deleteAccount,
+    softDeleteAccount,
     saveTrade,
     deleteTrade,
     saveStrategy,
@@ -51,7 +56,30 @@ export default function JournalPage() {
   // Subtab in Trades tab: 'trades' | 'noTrade'
   const [tradesSubtab, setTradesSubtab] = useState<"trades" | "noTrade">("trades");
 
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<number>(0); // Default to Dashboard (0)
+
+  useEffect(() => {
+    const getTabFromUrl = () => {
+      if (typeof window !== "undefined" && window.location.search) {
+        return new URLSearchParams(window.location.search).get("tab");
+      }
+      return searchParams.get("tab");
+    };
+
+    const tabParam = getTabFromUrl();
+    if (tabParam === "accounts") {
+      setActiveTab(1);
+    } else if (tabParam === "dashboard") {
+      setActiveTab(0);
+    } else if (tabParam === "reports") {
+      setActiveTab(2);
+    } else if (tabParam === "plan") {
+      setActiveTab(3);
+    } else if (tabParam === "strategies") {
+      setActiveTab(4);
+    }
+  }, [searchParams]);
 
   // Demo Mode State
   const [isDemoMode, setIsDemoMode] = useState<boolean>(false);
@@ -110,20 +138,33 @@ export default function JournalPage() {
   const [accountErrorMessage, setAccountErrorMessage] = useState<string | null>(null);
 
   const [propRulesModalAccount, setPropRulesModalAccount] = useState<Account | null>(null);
+  const [confirmConfig, setConfirmConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: React.ReactNode;
+    warningNote?: string;
+    confirmLabel: string;
+    cancelLabel: string;
+    matchText?: string;
+    isDanger?: boolean;
+    onConfirm: () => void;
+  } | null>(null);
+
+  const resolvedPrimaryPropAccount = useMemo(() => {
+    return resolvePrimaryPropAccount(accounts, primaryPropAccountId);
+  }, [accounts, primaryPropAccountId]);
 
   // Toggle Primary Prop Account
   const handleTogglePrimaryProp = (accountIdToSet: string) => {
-    accounts.forEach((a) => {
-      if (a.type === "prop") {
-        const isPrimary = a.id === accountIdToSet;
-        if (Boolean(a.isPrimaryProp) !== isPrimary) {
-          saveAccount({
-            ...a,
-            isPrimaryProp: isPrimary,
-          });
-        }
-      }
-    });
+    const isCurrentlyPrimary =
+      primaryPropAccountId === accountIdToSet ||
+      (resolvedPrimaryPropAccount?.id === accountIdToSet && primaryPropAccountId !== null);
+
+    if (isCurrentlyPrimary) {
+      setPrimaryPropAccountId(null);
+    } else {
+      setPrimaryPropAccountId(accountIdToSet);
+    }
     showToast(dict.journal.accountsTab.accountSavedToast);
   };
 
@@ -310,17 +351,73 @@ export default function JournalPage() {
   };
 
   const handleArchiveAccount = (id: string) => {
-    archiveAccount(id);
-    showToast(dict.journal.accountsTab.accountArchivedToast);
+    const acc = accounts.find((a) => a.id === id);
+    const accName = acc?.name || dict.journal.accountsTab.mainAccountDefaultName;
+
+    setConfirmConfig({
+      isOpen: true,
+      title: dict.confirmDialog.account.archiveTitle,
+      description: dict.confirmDialog.account.archiveDesc.replace("{name}", accName),
+      confirmLabel: dict.confirmDialog.archive,
+      cancelLabel: dict.confirmDialog.cancel,
+      isDanger: false,
+      onConfirm: () => {
+        archiveAccount(id);
+        showToast(dict.journal.accountsTab.accountArchivedToast);
+        setConfirmConfig(null);
+      },
+    });
   };
 
-  const handleDeleteAccountAction = (id: string) => {
-    try {
-      deleteAccount(id);
-      showToast(dict.journal.accountsTab.accountDeletedToast);
-    } catch (err: any) {
-      setAccountErrorMessage(dict.journal.accountsTab.cannotDeleteHasTrades);
+  const handleDeleteAccountAction = (account: Account) => {
+    const accountTradesCount = trades.filter((t) => t.accountId === account.id).length;
+
+    if (accountTradesCount > 0) {
+      setConfirmConfig({
+        isOpen: true,
+        title: dict.confirmDialog.account.hasTradesTitle,
+        description: dict.confirmDialog.account.hasTradesDesc
+          .replace("{name}", account.name || dict.journal.accountsTab.mainAccountDefaultName)
+          .replace("{count}", String(accountTradesCount)),
+        confirmLabel: dict.confirmDialog.archive,
+        cancelLabel: dict.confirmDialog.cancel,
+        isDanger: false,
+        onConfirm: () => {
+          archiveAccount(account.id);
+          showToast(dict.journal.accountsTab.accountArchivedToast);
+          setConfirmConfig(null);
+        },
+      });
+      return;
     }
+
+    const isPropWithRules = account.type === "prop" && Boolean(account.propRules);
+    const accName = account.name || dict.journal.accountsTab.mainAccountDefaultName;
+
+    setConfirmConfig({
+      isOpen: true,
+      title: dict.confirmDialog.account.deleteTitle,
+      description: dict.confirmDialog.account.deleteDesc.replace("{name}", accName),
+      warningNote: isPropWithRules ? dict.confirmDialog.account.deletePropRulesWarning : undefined,
+      matchText: isPropWithRules ? accName : undefined,
+      confirmLabel: dict.confirmDialog.delete,
+      cancelLabel: dict.confirmDialog.cancel,
+      isDanger: true,
+      onConfirm: () => {
+        setConfirmConfig(null);
+        const res = softDeleteAccount(account.id);
+        if (res) {
+          showToast(
+            dict.confirmDialog.undoToast.replace("{name}", accName),
+            dict.confirmDialog.undo,
+            () => {
+              res.undo();
+              showToast(dict.confirmDialog.undoRestoredToast);
+            }
+          );
+        }
+      },
+    });
   };
 
   const handleAddTradeForDate = (dateStr: string) => {
@@ -839,9 +936,20 @@ export default function JournalPage() {
           {/* Prop Accounts Cards Section */}
           {accounts.some((a) => a.type === "prop" && !a.archivedAt) && (
             <div className="space-y-4">
-              <h4 className="h4 text-sm font-bold text-vi uppercase tracking-wider">
-                {dict.journal.propRules.title}
-              </h4>
+              <div className="flex items-center justify-between">
+                <h4 className="h4 text-sm font-bold text-vi uppercase tracking-wider">
+                  {dict.journal.propRules.title}
+                </h4>
+                {primaryPropAccountId !== undefined && (
+                  <button
+                    type="button"
+                    onClick={() => setPrimaryPropAccountId(undefined)}
+                    className="text-xs text-vi hover:underline font-semibold flex items-center gap-1"
+                  >
+                    {dict.journal.propRules.autoSelectPrimary}
+                  </button>
+                )}
+              </div>
               <div className="grid grid-cols-1 gap-4">
                 {accounts
                   .filter((a) => a.type === "prop" && !a.archivedAt)
@@ -851,6 +959,7 @@ export default function JournalPage() {
                       account={propAcc}
                       accounts={accounts}
                       trades={trades}
+                      isPrimary={resolvedPrimaryPropAccount?.id === propAcc.id}
                       onOpenRulesModal={(acc) => setPropRulesModalAccount(acc)}
                       onTogglePrimaryProp={handleTogglePrimaryProp}
                       dict={dict}
@@ -934,10 +1043,11 @@ export default function JournalPage() {
                           {dict.journal.accountsTab.archiveBtn}
                         </button>
                       )}
-                      {tradeCount === 0 && (
+                      {!isArchived && (
                         <button
-                          onClick={() => handleDeleteAccountAction(a.id)}
+                          onClick={() => handleDeleteAccountAction(a)}
                           className="btn-ghost text-xs py-1 px-2 text-rose-400 hover:text-rose-300 flex items-center gap-1"
+                          title={dict.confirmDialog.delete}
                         >
                           <Trash2 size={12} />
                         </button>
@@ -949,6 +1059,22 @@ export default function JournalPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* CONFIRM DIALOG */}
+      {confirmConfig && confirmConfig.isOpen && (
+        <ConfirmDialog
+          isOpen={confirmConfig.isOpen}
+          title={confirmConfig.title}
+          description={confirmConfig.description}
+          warningNote={confirmConfig.warningNote}
+          confirmLabel={confirmConfig.confirmLabel}
+          cancelLabel={confirmConfig.cancelLabel}
+          matchText={confirmConfig.matchText}
+          isDanger={confirmConfig.isDanger}
+          onConfirm={confirmConfig.onConfirm}
+          onCancel={() => setConfirmConfig(null)}
+        />
       )}
 
       {/* PROP RULES WIZARD MODAL */}

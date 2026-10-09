@@ -376,6 +376,8 @@ export interface Note {
 }
 
 export interface JournalRepository {
+  getPrimaryPropAccountId(): string | null | undefined;
+  setPrimaryPropAccountId(id: string | null | undefined): void;
   getAccounts(): Account[];
   getAccount(id: string): Account | null;
   saveAccount(account: Account): Account;

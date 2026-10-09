@@ -6,7 +6,7 @@ import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useJournal } from "@/lib/journal/context";
 import { Plus, CheckSquare, BarChart2, X, Sparkles, Compass, Shield } from "lucide-react";
-import { calculatePropMetrics } from "@/lib/journal/prop";
+import { calculatePropMetrics, resolvePrimaryPropAccount } from "@/lib/journal/prop";
 import { formatString, getPlural, formatNumber } from "@/lib/i18n";
 import { Figure } from "@/components/Figure";
 import { Sparkline } from "@/components/Sparkline";
@@ -17,6 +17,7 @@ import { TITLES, FRAMES, ITEMS } from "@/lib/items";
 
 export default function HomePage() {
   const { setAddTradeModalOpen, showToast, dict, lang } = useApp();
+  const { accounts, trades, primaryPropAccountId, getTradingPlan } = useJournal();
   const {
     gameState,
     completeQuest,
@@ -323,14 +324,28 @@ export default function HomePage() {
 
           {/* Prop Account Home Block (T6d Integration) */}
           {(() => {
-            const { accounts, trades } = useJournal();
-            const primaryProp = accounts.find(
-              (a) => a.type === "prop" && !a.archivedAt && a.isPrimaryProp && a.propRules && a.propRules.startedAt
-            ) || accounts.find(
-              (a) => a.type === "prop" && !a.archivedAt && a.propRules && a.propRules.startedAt
-            );
+            if (primaryPropAccountId === null) {
+              const hasPropAccounts = accounts.some((a) => a.type === "prop" && !a.archivedAt);
+              if (!hasPropAccounts) return null;
+              return (
+                <div className="card p-3.5 bg-s2/80 border border-line flex items-center justify-between text-xs text-mu">
+                  <div className="flex items-center gap-2">
+                    <Shield size={16} className="text-mu" />
+                    <span>{dict.journal.propRules.noPrimarySelectedBanner}</span>
+                  </div>
+                  <Link
+                    href="/journal?tab=accounts"
+                    className="text-vi hover:underline font-semibold text-xs flex-none"
+                  >
+                    {dict.journal.propRules.selectInAccounts}
+                  </Link>
+                </div>
+              );
+            }
 
-            if (!primaryProp || !primaryProp.propRules) return null;
+            const primaryProp = resolvePrimaryPropAccount(accounts, primaryPropAccountId);
+
+            if (!primaryProp || !primaryProp.propRules || !primaryProp.propRules.startedAt) return null;
             const metrics = calculatePropMetrics(primaryProp, trades);
             if (!metrics) return null;
 
@@ -372,7 +387,7 @@ export default function HomePage() {
                     <Shield size={16} className="text-vi" />
                     <h4 className="h4">{dict.journal.propRules.homeBlock.title}</h4>
                     <span className="chip text-[10px]">
-                      {primaryProp.propRules.phaseLabel || "Prop"}
+                      {primaryProp.name ? `${primaryProp.name} • ` : ""}{primaryProp.propRules.phaseLabel || "Prop"}
                     </span>
                   </div>
                   <Link
@@ -401,7 +416,6 @@ export default function HomePage() {
 
           {/* Today's Plan Block (T6c-2a Integration) */}
           {(() => {
-            const { getTradingPlan, trades } = useJournal();
             const todayPlan = getTradingPlan(todayIso);
 
             const checklistDoneCount = todayPlan?.checklist
@@ -528,7 +542,6 @@ export default function HomePage() {
 
           {/* Journal Block */}
           {(() => {
-            const { trades } = useJournal();
             const nowMs = Date.now();
             const weekMs = 7 * 24 * 60 * 60 * 1000;
 

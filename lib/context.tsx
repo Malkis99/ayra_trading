@@ -24,7 +24,9 @@ interface AppContextType {
   isSearchOpen: boolean;
   setSearchOpen: (o: boolean) => void;
   toastMessage: string | null;
-  showToast: (msg: string) => void;
+  toastActionLabel: string | null;
+  onToastAction: (() => void) | null;
+  showToast: (msg: string, actionLabel?: string, onAction?: () => void) => void;
   userPlan: "Free" | "Pro" | "Elite";
   setUserPlan: (plan: "Free" | "Pro" | "Elite") => void;
 }
@@ -48,6 +50,8 @@ export function AppProvider({
   const [noteModalTemplateKey, setNoteModalTemplateKey] = useState<any>(undefined);
   const [isSearchOpen, setSearchOpen] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastActionLabel, setToastActionLabel] = useState<string | null>(null);
+  const [onToastAction, setOnToastAction] = useState<(() => void) | null>(null);
   const [userPlan, setUserPlan] = useState<"Free" | "Pro" | "Elite">("Free");
 
   const dict = getDictionary(lang);
@@ -89,18 +93,23 @@ export function AppProvider({
     setNoteModalOpen(true);
   };
 
-  const showToast = (msg: string) => {
+  const showToast = (msg: string, actionLabel?: string, onAction?: () => void) => {
     setToastMessage(msg);
+    setToastActionLabel(actionLabel || null);
+    setOnToastAction(onAction ? () => onAction : null);
   };
 
   useEffect(() => {
     if (toastMessage) {
+      const duration = toastActionLabel ? 8000 : 2200;
       const timer = setTimeout(() => {
         setToastMessage(null);
-      }, 2200);
+        setToastActionLabel(null);
+        setOnToastAction(null);
+      }, duration);
       return () => clearTimeout(timer);
     }
-  }, [toastMessage]);
+  }, [toastMessage, toastActionLabel]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -138,6 +147,8 @@ export function AppProvider({
         isSearchOpen,
         setSearchOpen,
         toastMessage,
+        toastActionLabel,
+        onToastAction,
         showToast,
         userPlan,
         setUserPlan,

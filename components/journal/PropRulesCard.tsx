@@ -21,6 +21,7 @@ interface PropRulesCardProps {
   account: Account;
   accounts: Account[];
   trades: Trade[];
+  isPrimary?: boolean;
   onOpenRulesModal: (account: Account) => void;
   onTogglePrimaryProp: (accountId: string) => void;
   dict: any;
@@ -31,6 +32,7 @@ export const PropRulesCard: React.FC<PropRulesCardProps> = ({
   account,
   accounts,
   trades,
+  isPrimary = false,
   onOpenRulesModal,
   onTogglePrimaryProp,
   dict,
@@ -44,8 +46,6 @@ export const PropRulesCard: React.FC<PropRulesCardProps> = ({
   const metrics: PropMetricsSummary | undefined = hasRules
     ? calculatePropMetrics(account, trades)
     : undefined;
-
-  const isPrimary = Boolean(account.isPrimaryProp);
 
   const getStatusBadge = (status?: PropLimitStatus) => {
     if (!status) return null;
@@ -115,14 +115,20 @@ export const PropRulesCard: React.FC<PropRulesCardProps> = ({
               <button
                 type="button"
                 onClick={() => onTogglePrimaryProp(account.id)}
-                aria-label={dict.journal.propRules.makePrimary}
-                title={dict.journal.propRules.makePrimary}
+                aria-pressed={isPrimary}
+                aria-label={isPrimary ? dict.journal.propRules.unsetPrimary : dict.journal.propRules.makePrimary}
+                title={isPrimary ? dict.journal.propRules.unsetPrimary : dict.journal.propRules.makePrimary}
                 className={`p-1 rounded-md transition-colors ${
                   isPrimary ? "text-amber-400 hover:text-amber-300" : "text-mu hover:text-tx"
                 }`}
               >
                 <Star size={16} fill={isPrimary ? "currentColor" : "none"} />
               </button>
+              {isPrimary && (
+                <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded font-medium">
+                  {dict.journal.propRules.primaryBadge}
+                </span>
+              )}
             </div>
             <p className="text-xs text-mu">{dict.journal.propRules.noRulesDesc}</p>
           </div>
@@ -153,8 +159,9 @@ export const PropRulesCard: React.FC<PropRulesCardProps> = ({
             <button
               type="button"
               onClick={() => onTogglePrimaryProp(account.id)}
-              aria-label={dict.journal.propRules.makePrimary}
-              title={dict.journal.propRules.makePrimary}
+              aria-pressed={isPrimary}
+              aria-label={isPrimary ? dict.journal.propRules.unsetPrimary : dict.journal.propRules.makePrimary}
+              title={isPrimary ? dict.journal.propRules.unsetPrimary : dict.journal.propRules.makePrimary}
               className={`p-1 rounded-md transition-colors ${
                 isPrimary ? "text-amber-400 hover:text-amber-300" : "text-mu hover:text-tx"
               }`}

@@ -12,11 +12,12 @@ import {
 import { defaultAttachmentRepository } from "./attachments/indexeddb-repository";
 
 const JOURNAL_STORAGE_KEY = "ayra_journal_v1";
-const CURRENT_JOURNAL_SCHEMA_VERSION = 4;
+const CURRENT_JOURNAL_SCHEMA_VERSION = 5;
 const STORAGE_WARN_THRESHOLD = 0.8; // 80%
 
 export interface JournalStorageData {
   schemaVersion: number;
+  primaryPropAccountId?: string | null;
   accounts: Account[];
   trades: Trade[];
   strategies: Strategy[];
@@ -28,6 +29,7 @@ export interface JournalStorageData {
 
 export const INITIAL_JOURNAL_DATA: JournalStorageData = {
   schemaVersion: CURRENT_JOURNAL_SCHEMA_VERSION,
+  primaryPropAccountId: undefined,
   accounts: [],
   trades: [],
   strategies: [],
@@ -82,32 +84,24 @@ export class LocalStorageJournalRepository implements JournalRepository {
     const rawWeekPlans: WeekPlan[] = Array.isArray(raw.weekPlans) ? raw.weekPlans : [];
     const rawNotes: Note[] = Array.isArray(raw.notes) ? raw.notes : [];
 
-    // Migrate Accounts for T6d: Primary Prop account validation
-    let hasPrimaryProp = false;
+    // Migration v5: Migrate primaryPropAccountId
+    let primaryPropAccountId: string | null | undefined = raw.primaryPropAccountId;
+
     rawAccounts = rawAccounts.map((acc) => {
       const isProp = acc.type === "prop";
-      let isPrimary = Boolean(acc.isPrimaryProp) && isProp && !acc.archivedAt;
-      if (isPrimary) {
-        if (hasPrimaryProp) {
-          isPrimary = false; // Only one primary prop account allowed
-        } else {
-          hasPrimaryProp = true;
-        }
-      }
       return {
         ...acc,
-        isPrimaryProp: isPrimary,
         propRules: isProp && acc.propRules ? acc.propRules : (acc.type === "prop" ? acc.propRules || null : null),
       };
     });
 
-    // If no primary prop is explicitly set, default to first active prop account with rules
-    if (!hasPrimaryProp) {
-      const firstPropWithRules = rawAccounts.find(
-        (a) => a.type === "prop" && !a.archivedAt && a.propRules && a.propRules.startedAt
+    // If primaryPropAccountId was not stored explicitly (undefined), check legacy isPrimaryProp flag
+    if (primaryPropAccountId === undefined) {
+      const legacyPrimary = rawAccounts.find(
+        (a) => a.isPrimaryProp && a.type === "prop" && !a.archivedAt
       );
-      if (firstPropWithRules) {
-        firstPropWithRules.isPrimaryProp = true;
+      if (legacyPrimary) {
+        primaryPropAccountId = legacyPrimary.id;
       }
     }
 
@@ -124,6 +118,7 @@ export class LocalStorageJournalRepository implements JournalRepository {
 
     return {
       schemaVersion: CURRENT_JOURNAL_SCHEMA_VERSION,
+      primaryPropAccountId,
       accounts: rawAccounts,
       trades,
       strategies: rawStrategies,
@@ -132,6 +127,16 @@ export class LocalStorageJournalRepository implements JournalRepository {
       weekPlans: rawWeekPlans,
       notes: rawNotes,
     };
+  }
+
+  getPrimaryPropAccountId(): string | null | undefined {
+    return this.loadData().primaryPropAccountId;
+  }
+
+  setPrimaryPropAccountId(id: string | null | undefined): void {
+    const data = this.loadData();
+    data.primaryPropAccountId = id;
+    this.saveData(data);
   }
 
   getAccounts(): Account[] {
