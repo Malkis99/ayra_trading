@@ -4,6 +4,7 @@ import { render } from "@testing-library/react";
 import { AppProvider } from "./lib/context";
 import { GameProvider } from "./lib/game-context";
 import { JournalProvider } from "./lib/journal/context";
+import { AuthProvider } from "./lib/auth/auth-context";
 import ProfilePage from "./app/profile/page";
 import HomePage from "./app/page";
 import QuestsPage from "./app/quests/page";
@@ -22,11 +23,13 @@ function renderWithProviders(ui: React.ReactNode, lang: "ru" | "en" = "ru") {
   localStorage.setItem("ayra_lang", lang);
   return render(
     <AppProvider initialLang={lang}>
-      <GameProvider>
-        <JournalProvider>
-          {ui}
-        </JournalProvider>
-      </GameProvider>
+      <AuthProvider>
+        <GameProvider>
+          <JournalProvider>
+            {ui}
+          </JournalProvider>
+        </GameProvider>
+      </AuthProvider>
     </AppProvider>
   );
 }

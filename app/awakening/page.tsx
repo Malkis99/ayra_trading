@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
+import { useAuth } from "@/lib/auth/auth-context";
 import { Starfield } from "@/components/Starfield";
 import { Figure } from "@/components/Figure";
 import { isValidLatinNickname, transliterateNickname } from "@/lib/stats";
@@ -21,7 +22,7 @@ import {
   getFilteredOptions,
   QuestionDefinition,
 } from "@/lib/awakening";
-import { ArrowLeft, ArrowRight, SkipForward, Check, Globe, Sparkles, FastForward, Loader2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, SkipForward, Check, Globe, Sparkles, FastForward, Loader2, AlertCircle } from "lucide-react";
 import { formatString, formatNumber } from "@/lib/i18n";
 
 function AwakeningCanvasAnimation({
@@ -208,12 +209,14 @@ export default function AwakeningPage() {
     updateMinorMode,
   } = useGame();
 
+  const { user, profile, checkNicknameAvailable, saveNickname } = useAuth();
+
   const [step, setStep] = useState<number>(gameState.onboarding.step || 1);
   const [subStep, setSubStep] = useState<number>(gameState.onboarding.subStep || 0);
   const [isNavigating, setIsNavigating] = useState<boolean>(false);
 
   const [answers, setAnswers] = useState<Record<string, any>>({
-    nickname: gameState.name || "",
+    nickname: profile?.nickname || gameState.name || "",
     language: lang || "ru",
     timezone:
       gameState.profile.timezone ||
@@ -224,6 +227,8 @@ export default function AwakeningPage() {
   });
 
   const [customInputText, setCustomInputText] = useState<string>("");
+  const [nicknameError, setNicknameError] = useState<string | null>(null);
+  const [checkingNickname, setCheckingNickname] = useState<boolean>(false);
   const titleRef = useRef<HTMLHeadingElement>(null);
 
   const wasAlreadyDone = gameState.onboarding.status === "done";
@@ -257,12 +262,14 @@ export default function AwakeningPage() {
   };
 
   const handleNicknameChange = (val: string) => {
+    setNicknameError(null);
     handleAnswerChange("nickname", val);
   };
 
   const handleTransliterateNickname = () => {
     if (answers.nickname) {
       const transliterated = transliterateNickname(answers.nickname);
+      setNicknameError(null);
       handleAnswerChange("nickname", transliterated);
     }
   };
@@ -310,7 +317,7 @@ export default function AwakeningPage() {
 
     if (currentQuestion.id === "nickname") {
       const nick = answers.nickname?.trim() || "";
-      return nick.length >= 3 && nick.length <= 24 && isValidLatinNickname(nick);
+      return nick.length >= 3 && nick.length <= 24 && isValidLatinNickname(nick) && !nicknameError;
     }
 
     if (currentQuestion.id === "language_timezone") {
@@ -328,10 +335,32 @@ export default function AwakeningPage() {
     }
 
     return true;
-  }, [step, currentQuestion, answers]);
+  }, [step, currentQuestion, answers, nicknameError]);
 
-  const handleNextSubStep = () => {
-    if (!canGoNext) return;
+  const validateNicknameUniqueness = async (nick: string): Promise<boolean> => {
+    setCheckingNickname(true);
+    const available = await checkNicknameAvailable(nick);
+    setCheckingNickname(false);
+
+    if (!available) {
+      setNicknameError(dict.awakening.q.nickname.errorNicknameTaken);
+      return false;
+    }
+    return true;
+  };
+
+  const handleNextSubStep = async () => {
+    if (!canGoNext || checkingNickname) return;
+
+    if (currentQuestion?.id === "nickname") {
+      const nick = answers.nickname?.trim() || "";
+      const ok = await validateNicknameUniqueness(nick);
+      if (!ok) return;
+
+      if (user) {
+        await saveNickname(nick);
+      }
+    }
 
     if (subStep < questionsForStep.length - 1) {
       setSubStep(subStep + 1);
@@ -376,9 +405,14 @@ export default function AwakeningPage() {
     setSubStep(0);
   };
 
-  const handleFinishOnboarding = () => {
+  const handleFinishOnboarding = async () => {
     if (isNavigating) return;
     setIsNavigating(true);
+
+    const nick = answers.nickname?.trim() || gameState.name || "";
+    if (user && nick) {
+      await saveNickname(nick);
+    }
 
     // Synchronously write onboarding state to localStorage and GameContext store
     const nowIso = new Date().toISOString();
@@ -394,6 +428,9 @@ export default function AwakeningPage() {
         subStep: 0,
         finishedAt: nowIso,
       };
+      if (nick) {
+        current.name = nick;
+      }
       localStorage.setItem("ayra_demo_v1", JSON.stringify(current));
     } catch {
       // ignore
@@ -490,6 +527,13 @@ export default function AwakeningPage() {
               {dict.awakening.q.nickname.rules}
             </div>
           </div>
+
+          {nicknameError && (
+            <div className="flex items-center gap-2 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded-xl p-3">
+              <AlertCircle size={16} className="text-red-400 shrink-0" />
+              <span>{nicknameError}</span>
+            </div>
+          )}
 
           {nick && !isLatin && (
             <div className="flex items-center justify-between text-xs text-go bg-go/10 border border-go/30 rounded-xl p-3">
@@ -929,7 +973,7 @@ export default function AwakeningPage() {
     <div
       className="h-screen w-screen overflow-hidden flex flex-col bg-ink text-tx relative z-0 select-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
       onKeyDown={(e) => {
-        if (e.key === "Enter" && canGoNext) {
+        if (e.key === "Enter" && canGoNext && !checkingNickname) {
           e.preventDefault();
           handleNextSubStep();
         }
@@ -1089,11 +1133,17 @@ export default function AwakeningPage() {
               <button
                 type="button"
                 onClick={handleNextSubStep}
-                disabled={!canGoNext}
+                disabled={!canGoNext || checkingNickname}
                 className="btn text-xs py-2.5 px-5 flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-vi/20"
               >
-                <span>{dict.awakening.continue}</span>
-                <ArrowRight size={16} />
+                {checkingNickname ? (
+                  <Loader2 size={16} className="animate-spin text-white" />
+                ) : (
+                  <>
+                    <span>{dict.awakening.continue}</span>
+                    <ArrowRight size={16} />
+                  </>
+                )}
               </button>
             </div>
           </div>

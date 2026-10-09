@@ -62,4 +62,8 @@ export const ALLOWED_LATIN_WORDS = [
   "GIF",
   "MB",
   "Esc",
+  "example",
+  "com",
+  "alex",
+  "cookies",
 ] as const;
