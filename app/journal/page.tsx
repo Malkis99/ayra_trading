@@ -20,6 +20,11 @@ import { calculateProcessScore, getProcessScoreCategory } from "@/lib/journal/pr
 import { getDemoTrades, DEMO_ACCOUNT } from "@/lib/journal/demo-trades";
 import { AttachmentManager } from "@/components/journal/AttachmentManager";
 import { Plus, Download, AlertTriangle, Search, Trash2, Edit2, ShieldAlert, RefreshCw, FileText, Camera } from "lucide-react";
+import { PropRulesModal } from "@/components/journal/PropRulesModal";
+import { PropRulesCard } from "@/components/journal/PropRulesCard";
+import { recordPropRulesSaved } from "@/lib/game";
+import { calculatePropMetrics } from "@/lib/journal/prop";
+import { evaluatePropToastAlert } from "@/lib/journal/prop-toast";
 
 export default function JournalPage() {
   const { dict, lang, showToast, setAddTradeModalOpen, openNoteModal } = useApp();
@@ -95,7 +100,7 @@ export default function JournalPage() {
   const [addTradeInitialDate, setAddTradeInitialDate] = useState<string | undefined>(undefined);
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Account Form state
+  // Account Form & Prop Rules Modal state
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [accName, setAccName] = useState("");
@@ -103,6 +108,35 @@ export default function JournalPage() {
   const [accCurrency, setAccCurrency] = useState<AccountCurrency>("USD");
   const [accStartBalance, setAccStartBalance] = useState("");
   const [accountErrorMessage, setAccountErrorMessage] = useState<string | null>(null);
+
+  const [propRulesModalAccount, setPropRulesModalAccount] = useState<Account | null>(null);
+
+  // Toggle Primary Prop Account
+  const handleTogglePrimaryProp = (accountIdToSet: string) => {
+    accounts.forEach((a) => {
+      if (a.type === "prop") {
+        const isPrimary = a.id === accountIdToSet;
+        if (Boolean(a.isPrimaryProp) !== isPrimary) {
+          saveAccount({
+            ...a,
+            isPrimaryProp: isPrimary,
+          });
+        }
+      }
+    });
+    showToast(dict.journal.accountsTab.accountSavedToast);
+  };
+
+  // Save Prop Rules from modal
+  const handleSavePropRules = (updatedAccount: Account) => {
+    saveAccount(updatedAccount);
+    const { newlyUnlocked } = recordPropRulesSaved(gameState);
+    if (newlyUnlocked.includes("firstPropRules")) {
+      showToast(dict.profile.achievements.firstPropRules);
+    } else {
+      showToast(dict.journal.accountsTab.accountSavedToast);
+    }
+  };
 
   const tabs = [
     dict.journal.tabs.dashboard,
@@ -217,10 +251,34 @@ export default function JournalPage() {
 
   const handleDeleteTradeConfirm = () => {
     if (deletingTradeId) {
+      const tradeToDelete = trades.find((t) => t.id === deletingTradeId);
+      const affectedAccount = tradeToDelete ? accounts.find((a) => a.id === tradeToDelete.accountId) : null;
+      const prevMetrics = affectedAccount?.propRules ? calculatePropMetrics(affectedAccount, trades) : undefined;
+
       deleteTrade(deletingTradeId);
       setDeleteTradeId(null);
       setSelectedTrade(null);
       showToast(dict.journal.addTradeModal.tradeDeletedToast);
+
+      if (affectedAccount && affectedAccount.propRules) {
+        const remainingTrades = trades.filter((t) => t.id !== deletingTradeId);
+        const currMetrics = calculatePropMetrics(affectedAccount, remainingTrades);
+        const { alert } = evaluatePropToastAlert(affectedAccount, prevMetrics, currMetrics);
+        if (alert) {
+          let text = "";
+          const roundedPct = Math.round(alert.usedPct);
+          if (alert.limitType === "dailyLoss") {
+            if (alert.level === "caution") text = dict.journal.propRules.toasts.dailyLossCaution.replace("{pct}", String(roundedPct));
+            else if (alert.level === "close") text = dict.journal.propRules.toasts.dailyLossClose.replace("{pct}", String(roundedPct));
+            else if (alert.level === "reached") text = dict.journal.propRules.toasts.dailyLossReached;
+          } else if (alert.limitType === "totalDrawdown") {
+            if (alert.level === "caution") text = dict.journal.propRules.toasts.totalDrawdownCaution.replace("{pct}", String(roundedPct));
+            else if (alert.level === "close") text = dict.journal.propRules.toasts.totalDrawdownClose.replace("{pct}", String(roundedPct));
+            else if (alert.level === "reached") text = dict.journal.propRules.toasts.totalDrawdownReached;
+          }
+          if (text) showToast(text);
+        }
+      }
     }
   };
 
@@ -760,7 +818,7 @@ export default function JournalPage() {
 
       {/* TAB 5: ACCOUNTS */}
       {activeTab === 5 && (
-        <div className="space-y-4">
+        <div className="space-y-6">
           <div className="flex justify-between items-center">
             <h3 className="h3">{dict.journal.accountsTab.title}</h3>
             <button
@@ -778,75 +836,132 @@ export default function JournalPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {accounts.map((a) => {
-              const tradeCount = trades.filter((t) => t.accountId === a.id).length;
-              const isArchived = !!a.archivedAt;
+          {/* Prop Accounts Cards Section */}
+          {accounts.some((a) => a.type === "prop" && !a.archivedAt) && (
+            <div className="space-y-4">
+              <h4 className="h4 text-sm font-bold text-vi uppercase tracking-wider">
+                {dict.journal.propRules.title}
+              </h4>
+              <div className="grid grid-cols-1 gap-4">
+                {accounts
+                  .filter((a) => a.type === "prop" && !a.archivedAt)
+                  .map((propAcc) => (
+                    <PropRulesCard
+                      key={propAcc.id}
+                      account={propAcc}
+                      accounts={accounts}
+                      trades={trades}
+                      onOpenRulesModal={(acc) => setPropRulesModalAccount(acc)}
+                      onTogglePrimaryProp={handleTogglePrimaryProp}
+                      dict={dict}
+                      lang={lang}
+                    />
+                  ))}
+              </div>
+            </div>
+          )}
 
-              return (
-                <div key={a.id} className="card p-4 space-y-3 relative">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h4 className="font-bold text-sm text-tx">
-                        {a.name || dict.journal.accountsTab.mainAccountDefaultName}
-                      </h4>
-                      <div className="flex items-center gap-1.5 mt-1">
-                        <span className="badge-free text-[10px] uppercase">{a.type}</span>
-                        <span className="chip text-[10px]">{a.currency}</span>
-                        {isArchived && (
-                          <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] px-1.5 py-0.5 rounded font-medium">
-                            {dict.journal.accountsTab.archivedTag}
-                          </span>
-                        )}
+          {/* All Accounts Grid */}
+          <div className="space-y-3">
+            <h4 className="h4 text-sm font-bold text-tx">{dict.journal.accountsTab.title}</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {accounts.map((a) => {
+                const tradeCount = trades.filter((t) => t.accountId === a.id).length;
+                const isArchived = !!a.archivedAt;
+
+                return (
+                  <div key={a.id} className="card p-4 space-y-3 relative">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h4 className="font-bold text-sm text-tx">
+                          {a.name || dict.journal.accountsTab.mainAccountDefaultName}
+                        </h4>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <span className="badge-free text-[10px] uppercase">{a.type}</span>
+                          <span className="chip text-[10px]">{a.currency}</span>
+                          {a.isPrimaryProp && (
+                            <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded font-medium">
+                              {dict.journal.propRules.primaryBadge}
+                            </span>
+                          )}
+                          {isArchived && (
+                            <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] px-1.5 py-0.5 rounded font-medium">
+                              {dict.journal.accountsTab.archivedTag}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="text-xs text-mu space-y-1 border-t border-line/40 pt-2">
-                    {a.startBalance != null && (
+                    <div className="text-xs text-mu space-y-1 border-t border-line/40 pt-2">
+                      {a.startBalance != null && (
+                        <div className="flex justify-between">
+                          <span>{dict.journal.accountsTab.startBalance}:</span>
+                          <b className="text-tx">
+                            {a.startBalance} {a.currency}
+                          </b>
+                        </div>
+                      )}
                       <div className="flex justify-between">
-                        <span>{dict.journal.accountsTab.startBalance}:</span>
-                        <b className="text-tx">
-                          {a.startBalance} {a.currency}
-                        </b>
+                        <span>{dict.journal.tradesWord}:</span>
+                        <b className="text-tx">{tradeCount}</b>
                       </div>
-                    )}
-                    <div className="flex justify-between">
-                      <span>{dict.journal.tradesWord}:</span>
-                      <b className="text-tx">{tradeCount}</b>
+                    </div>
+
+                    <div className="flex gap-2 pt-1 border-t border-line/40">
+                      <button
+                        onClick={() => handleOpenAccountModal(a)}
+                        className="btn-ghost text-xs py-1 px-2.5 flex-1 flex items-center justify-center gap-1"
+                      >
+                        <Edit2 size={12} />
+                        <span>{dict.journal.accountsTab.editBtn}</span>
+                      </button>
+
+                      {a.type === "prop" && !isArchived && (
+                        <button
+                          onClick={() => setPropRulesModalAccount(a)}
+                          className="btn-ghost text-xs py-1 px-2.5 text-vi hover:text-tx flex items-center gap-1 font-semibold"
+                        >
+                          <span>{dict.journal.propRules.editBtn}</span>
+                        </button>
+                      )}
+
+                      {!isArchived && (
+                        <button
+                          onClick={() => handleArchiveAccount(a.id)}
+                          className="btn-ghost text-xs py-1 px-2.5 text-amber-400 hover:text-amber-300 flex items-center gap-1"
+                        >
+                          {dict.journal.accountsTab.archiveBtn}
+                        </button>
+                      )}
+                      {tradeCount === 0 && (
+                        <button
+                          onClick={() => handleDeleteAccountAction(a.id)}
+                          className="btn-ghost text-xs py-1 px-2 text-rose-400 hover:text-rose-300 flex items-center gap-1"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
                     </div>
                   </div>
-
-                  <div className="flex gap-2 pt-1 border-t border-line/40">
-                    <button
-                      onClick={() => handleOpenAccountModal(a)}
-                      className="btn-ghost text-xs py-1 px-2.5 flex-1 flex items-center justify-center gap-1"
-                    >
-                      <Edit2 size={12} />
-                      <span>{dict.journal.accountsTab.editBtn}</span>
-                    </button>
-                    {!isArchived && (
-                      <button
-                        onClick={() => handleArchiveAccount(a.id)}
-                        className="btn-ghost text-xs py-1 px-2.5 text-amber-400 hover:text-amber-300 flex items-center gap-1"
-                      >
-                        {dict.journal.accountsTab.archiveBtn}
-                      </button>
-                    )}
-                    {tradeCount === 0 && (
-                      <button
-                        onClick={() => handleDeleteAccountAction(a.id)}
-                        className="btn-ghost text-xs py-1 px-2 text-rose-400 hover:text-rose-300 flex items-center gap-1"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </div>
+      )}
+
+      {/* PROP RULES WIZARD MODAL */}
+      {propRulesModalAccount && (
+        <PropRulesModal
+          isOpen={true}
+          account={propRulesModalAccount}
+          accounts={accounts}
+          trades={trades}
+          onClose={() => setPropRulesModalAccount(null)}
+          onSave={handleSavePropRules}
+          dict={dict}
+        />
       )}
 
       {/* TAB 6: NOTES */}

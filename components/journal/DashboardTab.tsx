@@ -7,7 +7,8 @@ import {
   calculateEquityCurve,
 } from "@/lib/journal/stats";
 import { EquityCurve } from "./EquityCurve";
-import { HelpCircle, Sparkles, X, ChevronRight, AlertCircle, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { HelpCircle, Sparkles, X, ChevronRight, AlertCircle, ArrowUpRight, ArrowDownRight, Shield, Star } from "lucide-react";
+import { calculatePropMetrics } from "@/lib/journal/prop";
 
 interface DashboardTabProps {
   trades: Trade[];
@@ -89,6 +90,11 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   const analytics = useMemo(() => {
     return calculateJournalAnalytics(filteredTrades, accounts);
   }, [filteredTrades, accounts]);
+
+  // Prop Accounts with rules
+  const propAccountsWithRules = useMemo(() => {
+    return accounts.filter((a) => a.type === "prop" && !a.archivedAt && a.propRules && a.propRules.startedAt);
+  }, [accounts]);
 
   // Process Score & Rules Metrics
   const processMetrics = useMemo(() => {
@@ -184,6 +190,90 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           </button>
         </div>
       )}
+
+      {/* Prop Account Dashboard Block */}
+      {(() => {
+        if (filterAccount !== "all") {
+          const acc = accounts.find((a) => a.id === filterAccount);
+          if (acc && acc.type === "prop" && acc.propRules && acc.propRules.startedAt) {
+            const metrics = calculatePropMetrics(acc, trades);
+            if (!metrics) return null;
+
+            return (
+              <div className="card p-4 bg-s2/60 border border-line space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Shield size={16} className="text-vi" />
+                    <b className="text-xs font-bold text-tx">{acc.name || dict.journal.accountsTab.mainAccountDefaultName}</b>
+                    <span className="chip text-[10px] uppercase">{acc.propRules.phaseLabel || "Prop"}</span>
+                  </div>
+                  <button onClick={onGoToTrades} className="text-xs text-vi hover:underline flex items-center gap-1 font-medium">
+                    <span>{dict.journal.propRules.homeBlock.viewDetails}</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                  {metrics.dailyLoss && (
+                    <div className="p-2 bg-s1 rounded-lg border border-line">
+                      <span className="text-mu block text-[10px]">{dict.journal.propRules.metrics.dailyLoss}</span>
+                      <b className="text-tx font-mono">{metrics.dailyLoss.usedPct.toFixed(1)}%</b>
+                    </div>
+                  )}
+                  {metrics.totalDrawdown && (
+                    <div className="p-2 bg-s1 rounded-lg border border-line">
+                      <span className="text-mu block text-[10px]">{dict.journal.propRules.metrics.totalDrawdown}</span>
+                      <b className="text-tx font-mono">{metrics.totalDrawdown.usedPct.toFixed(1)}%</b>
+                    </div>
+                  )}
+                  {metrics.profitTarget && (
+                    <div className="p-2 bg-s1 rounded-lg border border-line">
+                      <span className="text-mu block text-[10px]">{dict.journal.propRules.metrics.profitTarget}</span>
+                      <b className="text-tx font-mono">{metrics.profitTarget.progressPct.toFixed(1)}%</b>
+                    </div>
+                  )}
+                  {metrics.tradingDays && (
+                    <div className="p-2 bg-s1 rounded-lg border border-line">
+                      <span className="text-mu block text-[10px]">{dict.journal.propRules.metrics.tradingDays}</span>
+                      <b className="text-tx font-mono">{metrics.tradingDays.count} / {metrics.tradingDays.minTradingDays || "—"}</b>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          }
+        } else if (propAccountsWithRules.length > 0) {
+          return (
+            <div className="card p-3.5 bg-s2/40 border border-line space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-mu flex items-center gap-1.5">
+                  <Shield size={14} className="text-vi" />
+                  <span>{dict.journal.propRules.title} ({propAccountsWithRules.length})</span>
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {propAccountsWithRules.map((pAcc) => {
+                  const pMetrics = calculatePropMetrics(pAcc, trades);
+                  return (
+                    <div key={pAcc.id} className="p-2.5 bg-s1 border border-line rounded-lg space-y-1">
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-tx text-[11px] truncate max-w-[120px]">
+                          {pAcc.name || dict.journal.accountsTab.mainAccountDefaultName}
+                        </span>
+                        <span className="chip text-[9px]">{pAcc.propRules?.phaseLabel || "Prop"}</span>
+                      </div>
+                      <div className="flex justify-between text-[10px] text-mu font-mono">
+                        <span>DL: {pMetrics?.dailyLoss ? `${pMetrics.dailyLoss.usedPct.toFixed(0)}%` : "—"}</span>
+                        <span>DD: {pMetrics?.totalDrawdown ? `${pMetrics.totalDrawdown.usedPct.toFixed(0)}%` : "—"}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        }
+        return null;
+      })()}
 
       {/* Top Filters & Unit Switcher */}
       <div className="card p-3.5 space-y-3">

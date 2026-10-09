@@ -27,6 +27,8 @@ import {
   validateTradeInputs,
   TradeValidationErrors,
 } from "@/lib/journal/calc";
+import { predictPreTradeUsage, getPhaseTrades, calculatePropMetrics } from "@/lib/journal/prop";
+import { evaluatePropToastAlert } from "@/lib/journal/prop-toast";
 import { recordLoggedTrade } from "@/lib/game";
 import { AttachmentManager } from "@/components/journal/AttachmentManager";
 
@@ -357,12 +359,36 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
       processScoreSnapshot: psRes.snapshot,
     };
 
+    const prevMetrics = selectedAccount?.propRules ? calculatePropMetrics(selectedAccount, trades) : undefined;
+
     saveTrade(tradeToSave);
+
+    // Evaluate prop toast alert
+    let propToastText = "";
+    if (selectedAccount && selectedAccount.propRules) {
+      const updatedTradesList = [...trades.filter((t) => t.id !== tradeToSave.id), tradeToSave];
+      const currMetrics = calculatePropMetrics(selectedAccount, updatedTradesList);
+      const { alert } = evaluatePropToastAlert(selectedAccount, prevMetrics, currMetrics);
+      if (alert) {
+        const roundedPct = Math.round(alert.usedPct);
+        if (alert.limitType === "dailyLoss") {
+          if (alert.level === "caution") propToastText = dict.journal.propRules.toasts.dailyLossCaution.replace("{pct}", String(roundedPct));
+          else if (alert.level === "close") propToastText = dict.journal.propRules.toasts.dailyLossClose.replace("{pct}", String(roundedPct));
+          else if (alert.level === "reached") propToastText = dict.journal.propRules.toasts.dailyLossReached;
+        } else if (alert.limitType === "totalDrawdown") {
+          if (alert.level === "caution") propToastText = dict.journal.propRules.toasts.totalDrawdownCaution.replace("{pct}", String(roundedPct));
+          else if (alert.level === "close") propToastText = dict.journal.propRules.toasts.totalDrawdownClose.replace("{pct}", String(roundedPct));
+          else if (alert.level === "reached") propToastText = dict.journal.propRules.toasts.totalDrawdownReached;
+        }
+      }
+    }
 
     // Award XP and complete q_tradelog
     const rewardRes = recordTrade(tradeToSave, trades);
 
-    if (rewardRes.xpAwarded > 0) {
+    if (propToastText) {
+      showToast(propToastText);
+    } else if (rewardRes.xpAwarded > 0) {
       showToast(`+${rewardRes.xpAwarded} XP (${dict.stats.trading})`);
     } else if (rewardRes.leveledUp) {
       showToast(`Level up! Lv ${rewardRes.newLevel}`);
@@ -512,6 +538,7 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
                     </button>
                   </div>
                   <select
+                    data-testid="account-select"
                     value={accountId}
                     onChange={(e) => setAccountId(e.target.value)}
                     className="input text-xs w-full"
@@ -676,6 +703,60 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
                       />
                     </div>
                   </div>
+
+                  {/* Pre-trade Prop Rules Risk Prediction Banner */}
+                  {(() => {
+                    const selAcc = accounts.find((a) => a.id === accountId);
+                    if (!selAcc || !selAcc.propRules || !selAcc.propRules.startedAt) return null;
+
+                    const riskVal = parseNumberInput(riskAmount);
+                    if (!riskVal || riskVal <= 0) return null;
+
+                    const phaseTrades = getPhaseTrades(trades, selAcc.propRules, selAcc.id);
+                    const pred = predictPreTradeUsage(
+                      selAcc,
+                      phaseTrades,
+                      riskVal,
+                      initialTrade?.id,
+                      openedAt ? new Date(openedAt) : new Date()
+                    );
+
+                    if (!pred) return null;
+
+                    const isWarning = pred.worstStatus !== "ok";
+
+                    return (
+                      <div className={`p-2.5 rounded-lg border text-xs font-medium space-y-1 ${
+                        isWarning
+                          ? "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                          : "bg-s2/60 border-line text-mu"
+                      }`}>
+                        <div className="flex items-center justify-between">
+                          <span>
+                            {dict.journal.propRules.preTrade.warning
+                              .replace(
+                                "{metric}",
+                                pred.dailyLossPct >= pred.totalDrawdownPct
+                                  ? dict.journal.propRules.metrics.dailyLoss
+                                  : dict.journal.propRules.metrics.totalDrawdown
+                              )
+                              .replace("{percent}", pred.maxUsedPct.toFixed(0))}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold ${
+                            pred.worstStatus === "reached"
+                              ? "bg-purple-500/20 text-purple-300"
+                              : pred.worstStatus === "close"
+                              ? "bg-rose-500/20 text-rose-300"
+                              : pred.worstStatus === "caution"
+                              ? "bg-amber-500/20 text-amber-300"
+                              : "bg-emerald-500/20 text-emerald-300"
+                          }`}>
+                            {dict.journal.propRules.status[pred.worstStatus]}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Prices */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">

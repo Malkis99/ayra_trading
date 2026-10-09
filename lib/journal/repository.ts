@@ -12,7 +12,7 @@ import {
 import { defaultAttachmentRepository } from "./attachments/indexeddb-repository";
 
 const JOURNAL_STORAGE_KEY = "ayra_journal_v1";
-const CURRENT_JOURNAL_SCHEMA_VERSION = 3;
+const CURRENT_JOURNAL_SCHEMA_VERSION = 4;
 const STORAGE_WARN_THRESHOLD = 0.8; // 80%
 
 export interface JournalStorageData {
@@ -74,13 +74,42 @@ export class LocalStorageJournalRepository implements JournalRepository {
   }
 
   private migrate(raw: any): JournalStorageData {
-    const rawAccounts: Account[] = Array.isArray(raw.accounts) ? raw.accounts : [];
+    let rawAccounts: Account[] = Array.isArray(raw.accounts) ? raw.accounts : [];
     const rawTrades: any[] = Array.isArray(raw.trades) ? raw.trades : [];
     const rawStrategies: Strategy[] = Array.isArray(raw.strategies) ? raw.strategies : [];
     const rawNoTrades: NoTradeEntry[] = Array.isArray(raw.noTrades) ? raw.noTrades : [];
     const rawPlans: TradingPlan[] = Array.isArray(raw.plans) ? raw.plans : [];
     const rawWeekPlans: WeekPlan[] = Array.isArray(raw.weekPlans) ? raw.weekPlans : [];
     const rawNotes: Note[] = Array.isArray(raw.notes) ? raw.notes : [];
+
+    // Migrate Accounts for T6d: Primary Prop account validation
+    let hasPrimaryProp = false;
+    rawAccounts = rawAccounts.map((acc) => {
+      const isProp = acc.type === "prop";
+      let isPrimary = Boolean(acc.isPrimaryProp) && isProp && !acc.archivedAt;
+      if (isPrimary) {
+        if (hasPrimaryProp) {
+          isPrimary = false; // Only one primary prop account allowed
+        } else {
+          hasPrimaryProp = true;
+        }
+      }
+      return {
+        ...acc,
+        isPrimaryProp: isPrimary,
+        propRules: isProp && acc.propRules ? acc.propRules : (acc.type === "prop" ? acc.propRules || null : null),
+      };
+    });
+
+    // If no primary prop is explicitly set, default to first active prop account with rules
+    if (!hasPrimaryProp) {
+      const firstPropWithRules = rawAccounts.find(
+        (a) => a.type === "prop" && !a.archivedAt && a.propRules && a.propRules.startedAt
+      );
+      if (firstPropWithRules) {
+        firstPropWithRules.isPrimaryProp = true;
+      }
+    }
 
     const trades: Trade[] = rawTrades.map((t) => ({
       ...t,

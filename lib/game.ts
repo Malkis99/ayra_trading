@@ -386,6 +386,135 @@ export function checkAndApplyDateResets(
   return updated;
 }
 
+export function recordPropRulesSaved(state: GameState): {
+  state: GameState;
+  newlyUnlocked: string[];
+} {
+  let newState = migrateState(state);
+  const newlyUnlocked: string[] = [];
+
+  if (!newState.achievements["firstPropRules"]) {
+    newState.achievements = { ...newState.achievements, firstPropRules: true };
+    newState.chronicle = addChronicleEvent(newState.chronicle, {
+      type: "achievementUnlocked",
+      achievementId: "firstPropRules",
+    });
+    newlyUnlocked.push("firstPropRules");
+  }
+
+  const { state: finalState, newlyUnlocked: achUnlocked } = checkAchievements(newState);
+  return {
+    state: finalState,
+    newlyUnlocked: Array.from(new Set([...newlyUnlocked, ...achUnlocked])),
+  };
+}
+
+export interface PropDisciplineRewardResult {
+  state: GameState;
+  xpAwarded: number;
+  leveledUp: boolean;
+  newLevel?: number;
+  newlyUnlocked: string[];
+}
+
+export function recordPropDisciplineDay(
+  state: GameState,
+  accountId: string,
+  dayKey: string,
+  hasTradeToday: boolean,
+  hasPlanWithLimitsToday: boolean,
+  isWithinLimits: boolean,
+  currentDate: Date = new Date()
+): PropDisciplineRewardResult {
+  let newState = checkAndApplyDateResets(state, currentDate);
+  const todayStr = getIsoDateString(currentDate);
+
+  const todayRecord = newState.dailyStats[todayStr];
+  const planDisciplineXp = todayRecord?.questsCompleted?.["discipline_plan"] || 0;
+  const noTradeDisciplineXp = todayRecord?.questsCompleted?.["discipline_no_trade"] || 0;
+  const propDayDisciplineXp = todayRecord?.questsCompleted?.["discipline_prop_day"] || 0;
+
+  const currentTotalDisciplineXp = planDisciplineXp + noTradeDisciplineXp + propDayDisciplineXp;
+  const maxAllowance = Math.max(
+    0,
+    GAME_CONFIG.JOURNAL_DISCIPLINE_DAILY_XP_CAP - currentTotalDisciplineXp
+  );
+
+  let isEligible =
+    isWithinLimits &&
+    hasTradeToday &&
+    hasPlanWithLimitsToday &&
+    propDayDisciplineXp === 0 &&
+    maxAllowance > 0;
+
+  let xpAwarded = 0;
+  let leveledUp = false;
+  let newLevel: number | undefined;
+
+  if (isEligible) {
+    xpAwarded = Math.min(GAME_CONFIG.PROP_DISCIPLINE_XP, maxAllowance);
+
+    let newXp = newState.xp + xpAwarded;
+    let currentLvl = newState.level;
+    let chronicle = newState.chronicle;
+
+    while (newXp >= xpForNextLevel(currentLvl)) {
+      newXp -= xpForNextLevel(currentLvl);
+      currentLvl++;
+      leveledUp = true;
+      chronicle = addChronicleEvent(chronicle, {
+        type: "levelUp",
+        level: currentLvl,
+      });
+    }
+
+    const updatedDailyStats = recordDailyStatEvent(newState.dailyStats, todayStr, {
+      type: "questDone",
+      category: "discipline_prop_day",
+      xp: xpAwarded,
+      coins: 0,
+    });
+
+    newState = {
+      ...newState,
+      xp: newXp,
+      level: currentLvl,
+      chronicle,
+      dailyStats: updatedDailyStats,
+    };
+
+    if (leveledUp) {
+      newLevel = currentLvl;
+    }
+  }
+
+  // Count total discipline prop days across dailyStats
+  let totalPropDaysCount = 0;
+  Object.values(newState.dailyStats).forEach((ds) => {
+    if (ds.questsCompleted?.["discipline_prop_day"]) {
+      totalPropDaysCount++;
+    }
+  });
+
+  if (totalPropDaysCount >= 5 && !newState.achievements["propDisciplined5"]) {
+    newState.achievements = { ...newState.achievements, propDisciplined5: true };
+    newState.chronicle = addChronicleEvent(newState.chronicle, {
+      type: "achievementUnlocked",
+      achievementId: "propDisciplined5",
+    });
+  }
+
+  const { state: finalState, newlyUnlocked } = checkAchievements(newState);
+
+  return {
+    state: finalState,
+    xpAwarded,
+    leveledUp,
+    newLevel,
+    newlyUnlocked,
+  };
+}
+
 export function checkAchievements(
   state: GameState,
   allPlans: any[] = [],

@@ -45,7 +45,7 @@ test.describe("T6a Journal v1 E2E Flow", () => {
     await page.fill("input[placeholder='10000']", "50000");
     await page.click("button[type='submit']:has-text('Сохранить')");
 
-    await expect(page.locator("text=Prop Challenge")).toBeVisible();
+    await expect(page.locator("text=Prop Challenge").first()).toBeVisible();
 
     // 2. Go to Trades tab and add trade
     await page.click("button:has-text('Сделки')");
