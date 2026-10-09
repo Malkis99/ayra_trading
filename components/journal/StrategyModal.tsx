@@ -33,8 +33,6 @@ export function StrategyModal({
   onSave,
   dict,
 }: StrategyModalProps) {
-  if (!isOpen) return null;
-
   const isEditing = !!strategy;
 
   const [name, setName] = useState<string>(strategy?.name || "");
@@ -55,6 +53,8 @@ export function StrategyModal({
   );
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  if (!isOpen) return null;
 
   const handleAddRule = () => {
     if (rules.length >= GAME_CONFIG.MAX_RULES_PER_STRATEGY) {

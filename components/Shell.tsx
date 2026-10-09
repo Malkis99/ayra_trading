@@ -15,6 +15,7 @@ import { SearchModal } from "@/components/SearchModal";
 import { Toast } from "@/components/Toast";
 import { Language } from "@/lib/i18n/types";
 import { JournalProvider } from "@/lib/journal/context";
+import { AuthProvider } from "@/lib/auth/auth-context";
 import { useApp } from "@/lib/context";
 
 function ShellContent({ children }: { children: React.ReactNode }) {
@@ -24,9 +25,13 @@ function ShellContent({ children }: { children: React.ReactNode }) {
   const { isAddTradeModalOpen, setAddTradeModalOpen, isNoteModalOpen, setNoteModalOpen, noteModalLinks } = useApp();
   const [isCleanRedirecting, setIsCleanRedirecting] = useState<boolean>(false);
 
+  const isPublicPath = ["/login", "/auth/callback", "/legal/terms", "/legal/privacy", "/logout"].some(
+    (p) => pathname?.startsWith(p)
+  );
+
   useEffect(() => {
     if (!isLoaded) return;
-    if (pathname === "/awakening") return;
+    if (pathname === "/awakening" || isPublicPath) return;
 
     try {
       const saved = localStorage.getItem("ayra_demo_v1");
@@ -37,7 +42,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore storage errors
     }
-  }, [isLoaded, pathname, router]);
+  }, [isLoaded, pathname, router, isPublicPath]);
 
   if (pathname === "/awakening") {
     return <>{children}</>;
@@ -99,11 +104,13 @@ export function Shell({
 }) {
   return (
     <AppProvider initialLang={initialLang}>
-      <GameProvider>
-        <JournalProvider>
-          <ShellContent>{children}</ShellContent>
-        </JournalProvider>
-      </GameProvider>
+      <AuthProvider>
+        <GameProvider>
+          <JournalProvider>
+            <ShellContent>{children}</ShellContent>
+          </JournalProvider>
+        </GameProvider>
+      </AuthProvider>
     </AppProvider>
   );
 }

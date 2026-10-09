@@ -23,10 +23,6 @@ export function NoTradeModal({
   onSave,
   dict,
 }: NoTradeModalProps) {
-  if (!isOpen) return null;
-
-  const isEditing = !!entry;
-
   const getCurrentLocalDateStr = () => {
     const now = new Date();
     const tzOffset = now.getTimezoneOffset() * 60000;
@@ -53,6 +49,8 @@ export function NoTradeModal({
       setNote(entry.note || "");
     }
   }, [entry]);
+
+  if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

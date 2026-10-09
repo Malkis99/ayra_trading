@@ -10,6 +10,7 @@ import { calculatePropMetrics, resolvePrimaryPropAccount } from "@/lib/journal/p
 import { formatString, getPlural, formatNumber } from "@/lib/i18n";
 import { Figure } from "@/components/Figure";
 import { Sparkline } from "@/components/Sparkline";
+import { GuestBanner } from "@/components/GuestBanner";
 import { xpForNextLevel, ChronicleEntry } from "@/lib/game";
 import { DEMO_MARKETS, DEMO_EVENTS } from "@/lib/demo-data";
 import { getDeterministicDailyQuests } from "@/lib/quests";
@@ -158,6 +159,9 @@ export default function HomePage() {
 
   return (
     <div className="space-y-6">
+      {/* Guest Banner */}
+      <GuestBanner />
+
       {/* Onboarding Soft Banners */}
       {showLegacyBanner && (
         <div className="card bg-gradient-to-r from-vi/20 via-s1 to-s1 border-vi/40 relative flex flex-col md:flex-row items-start md:items-center justify-between gap-4 p-4">
