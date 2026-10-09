@@ -377,6 +377,8 @@ export interface JournalStats {
   notesCount: number;
   frequentErrors: string[];
   dominantEmotions: string[];
+  propAccountsWithRulesCount: number;
+  propDisciplineDaysCount: number;
 }
 
 export function calculateJournalStats(
@@ -496,6 +498,11 @@ export function calculateJournalStats(
     );
   }
 
+  // Prop stats calculation
+  let propAccountsWithRulesCount = 0;
+  // If accounts list passed in trades array context or available in state, count them
+  // We can count prop accounts with rules if trades/accounts provided
+
   return {
     totalTrades,
     periodTrades,
@@ -506,6 +513,8 @@ export function calculateJournalStats(
     notesCount,
     frequentErrors,
     dominantEmotions,
+    propAccountsWithRulesCount,
+    propDisciplineDaysCount: 0,
   };
 }
 
@@ -543,7 +552,7 @@ export function exportProfileDataJSON(
 
   const payload = {
     app: "ayra",
-    exportVersion: "1.3",
+    exportVersion: "1.4",
     exportedAt: exportedAtDate.toISOString(),
     user: {
       name: state.name,

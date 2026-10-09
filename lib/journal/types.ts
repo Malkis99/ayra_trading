@@ -10,6 +10,91 @@ export type AccountCurrency =
   | "KZT"
   | "USDT";
 
+export type PropValueType = "percent" | "money";
+export type PropDailyLossBase = "initialBalance" | "startOfDayBalance";
+export type PropDrawdownMode = "static" | "trailingClosed";
+export type PropUserOutcome = "passed" | "failed" | "ended";
+
+export interface PropValueLimit {
+  type: PropValueType;
+  value: number;
+}
+
+export interface PropDailyLossLimit extends PropValueLimit {
+  base: PropDailyLossBase;
+}
+
+export interface PropDrawdownLimit extends PropValueLimit {
+  mode: PropDrawdownMode;
+  lockAtInitial?: boolean;
+}
+
+export interface PropConsistencyRule {
+  maxSingleDayShare: number; // Percentage (e.g. 50 for 50%)
+}
+
+export interface PropDayReset {
+  timezone: string; // IANA timezone string, e.g. "America/New_York"
+  hour: number; // 0-23
+}
+
+export interface PropRulesSnapshot {
+  phaseLabel?: string;
+  initialBalance?: number;
+  profitTarget?: PropValueLimit;
+  maxDailyLoss?: PropDailyLossLimit;
+  maxTotalDrawdown?: PropDrawdownLimit;
+  minTradingDays?: number;
+  maxTradingDays?: number;
+  minTradingDayMinPnl?: number;
+  consistencyRule?: PropConsistencyRule;
+  dayReset?: PropDayReset;
+  startedAt: string;
+  note?: string;
+}
+
+export interface PropPhaseArchive {
+  phaseLabel: string;
+  initialBalance: number;
+  startedAt: string; // ISO String
+  endedAt: string; // ISO String
+  userOutcome?: PropUserOutcome;
+  finalBalance: number;
+  closedPnl: number;
+  tradingDays: number;
+  maxDailyLossUsedPct?: number; // % of daily limit used
+  maxDrawdownUsedPct?: number; // % of drawdown limit used
+  profitTargetProgressPct?: number; // % of target reached
+  note?: string;
+  propRulesSnapshot: PropRulesSnapshot;
+}
+
+export interface PropRules {
+  phaseLabel?: string; // e.g. "Phase 1", max 40 chars
+  initialBalance?: number;
+  profitTarget?: PropValueLimit;
+  maxDailyLoss?: PropDailyLossLimit;
+  maxTotalDrawdown?: PropDrawdownLimit;
+  minTradingDays?: number;
+  maxTradingDays?: number;
+  minTradingDayMinPnl?: number;
+  consistencyRule?: PropConsistencyRule;
+  dayReset?: PropDayReset;
+  startedAt: string; // ISO String
+  note?: string; // Max 300 chars
+  phaseHistory?: PropPhaseArchive[];
+}
+
+export type PropLimitType = "dailyLoss" | "totalDrawdown" | "profitTarget" | "tradingDays";
+export type PropLimitStatus = "ok" | "caution" | "close" | "reached";
+
+export interface PropToastLogEntry {
+  dayKey: string; // Prop firm day key (e.g. YYYY-MM-DD)
+  shown: string[]; // List of shown level tokens, e.g. ["dailyLoss:caution", "totalDrawdown:close"]
+}
+
+export type PropToastLog = Record<string, PropToastLogEntry>; // accountId -> entry
+
 export interface Account {
   id: string;
   name: string | null; // null for default name ("Основной счёт" / "Main account")
@@ -19,7 +104,8 @@ export interface Account {
   platform: "manual";
   archivedAt?: string | null;
   createdAt: string; // ISO String
-  propRules?: Record<string, unknown> | null; // Placeholder for T6d
+  isPrimaryProp?: boolean;
+  propRules?: PropRules | null;
 }
 
 export type TradeDirection = "long" | "short";
@@ -290,6 +376,8 @@ export interface Note {
 }
 
 export interface JournalRepository {
+  getPrimaryPropAccountId(): string | null | undefined;
+  setPrimaryPropAccountId(id: string | null | undefined): void;
   getAccounts(): Account[];
   getAccount(id: string): Account | null;
   saveAccount(account: Account): Account;

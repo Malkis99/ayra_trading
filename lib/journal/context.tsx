@@ -16,6 +16,8 @@ import { defaultJournalRepository } from "./repository";
 import { defaultAttachmentRepository } from "./attachments/indexeddb-repository";
 
 interface JournalContextType {
+  primaryPropAccountId: string | null | undefined;
+  setPrimaryPropAccountId: (id: string | null | undefined) => void;
   accounts: Account[];
   trades: Trade[];
   strategies: Strategy[];
@@ -29,6 +31,7 @@ interface JournalContextType {
   saveAccount: (account: Account) => Account;
   archiveAccount: (id: string) => Account;
   deleteAccount: (id: string) => boolean;
+  softDeleteAccount: (id: string) => { undo: () => void } | null;
   saveTrade: (trade: Trade) => Trade;
   deleteTrade: (id: string) => boolean;
   saveStrategy: (strategy: Strategy) => Strategy;
@@ -76,10 +79,13 @@ export function JournalProvider({
     percentage: 0,
     isWarning: false,
   });
+  const [primaryPropAccountId, setPrimaryPropAccountIdState] = useState<string | null | undefined>(undefined);
   const [lastSelectedAccountId, setLastSelectedAccountIdState] = useState<string | null>(null);
   const [lastSelectedInstrument, setLastSelectedInstrumentState] = useState<string | null>(null);
+  const pendingDeletionsRef = React.useRef<Map<string, { timer: NodeJS.Timeout; account: Account }>>(new Map());
 
   const refresh = useCallback(() => {
+    setPrimaryPropAccountIdState(repository.getPrimaryPropAccountId());
     setAccounts(repository.getAccounts());
     setTrades(repository.getTrades());
     setStrategies(repository.getStrategies());
@@ -103,6 +109,34 @@ export function JournalProvider({
     }
   }, [refresh, repository]);
 
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      pendingDeletionsRef.current.forEach(({ timer, account }) => {
+        clearTimeout(timer);
+        try {
+          repository.deleteAccount(account.id);
+        } catch {}
+      });
+      pendingDeletionsRef.current.clear();
+    };
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("beforeunload", handleBeforeUnload);
+      return () => {
+        handleBeforeUnload();
+        window.removeEventListener("beforeunload", handleBeforeUnload);
+      };
+    }
+  }, [repository]);
+
+  const setPrimaryPropAccountId = useCallback(
+    (id: string | null | undefined) => {
+      setPrimaryPropAccountIdState(id);
+      repository.setPrimaryPropAccountId(id);
+    },
+    [repository]
+  );
+
   const setLastSelectedAccountId = useCallback((id: string) => {
     setLastSelectedAccountIdState(id);
     if (typeof window !== "undefined") {
@@ -124,6 +158,47 @@ export function JournalProvider({
       return saved;
     },
     [repository, refresh]
+  );
+
+  const softDeleteAccount = useCallback(
+    (id: string) => {
+      const accountToDelete = repository.getAccount(id);
+      if (!accountToDelete) return null;
+
+      const hasTrades = repository.getTrades().some((t) => t.accountId === id);
+      if (hasTrades) {
+        throw new Error("Cannot delete account with trades. Archive it instead.");
+      }
+
+      setAccounts((prev) => prev.filter((a) => a.id !== id));
+
+      const currentPrimary = repository.getPrimaryPropAccountId();
+      if (currentPrimary === id) {
+        setPrimaryPropAccountId(undefined);
+      }
+
+      const timer = setTimeout(() => {
+        pendingDeletionsRef.current.delete(id);
+        try {
+          repository.deleteAccount(id);
+        } catch {}
+        refresh();
+      }, 8000);
+
+      pendingDeletionsRef.current.set(id, { timer, account: accountToDelete });
+
+      const undo = () => {
+        const pending = pendingDeletionsRef.current.get(id);
+        if (pending) {
+          clearTimeout(pending.timer);
+          pendingDeletionsRef.current.delete(id);
+          refresh();
+        }
+      };
+
+      return { undo };
+    },
+    [repository, setPrimaryPropAccountId, refresh]
   );
 
   const archiveAccount = useCallback(
@@ -304,11 +379,14 @@ export function JournalProvider({
         weekPlans,
         notes,
         storageUsage,
+        primaryPropAccountId,
+        setPrimaryPropAccountId,
         lastSelectedAccountId,
         lastSelectedInstrument,
         saveAccount,
         archiveAccount,
         deleteAccount,
+        softDeleteAccount,
         saveTrade,
         deleteTrade,
         saveStrategy,

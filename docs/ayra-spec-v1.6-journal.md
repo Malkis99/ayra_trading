@@ -253,44 +253,103 @@ export interface NoTradeEntry {
 
 ---
 
-## 8. Экспорт JSON (версия `"1.3"`)
+## 8. Prop Rules Tracker (T6d)
 
-Экспорт включает метаданные вложений без двоичных данных картинки:
+### 8.1 Модель и принципы
+- **Информационный характер:** Трекер только информирует, ничего не блокирует и не наказывает. Встроенных пресетов проп-фирм нет, параметры вводит пользователь.
+- **Обязательная дисклеймер-подпись:** «Оценка по записанным сделкам журнала, не заменяет данные фирмы. Сверяйся с правилами и платформой фирмы».
+- **Интервал фазы:** Учитываются только закрытые сделки (`status === "closed"`) с `closedAt >= startedAt` в валюте счёта. Плавающий PnL открытых сделок не учитывается (подпись: «Плавающий результат открытых сделок не учтён»).
+
+### 8.2 Формулы лимитов (`lib/journal/prop.ts`)
+1. **Дневной лимит убытка:**
+   - Граница дня фирмы определяется параметрами `dayReset` (`timezone` и `hour`).
+   - $\text{PnL}_{\text{day}} = \sum \text{pnlMoney}_i$ по сделкам, закрытым в данный интервал дня фирмы.
+   - $\text{LimitInMoney} = \begin{cases} \text{value}, & \text{type} = \text{"money"} \\ \text{baseBalance} \times \frac{\text{value}}{100}, & \text{type} = \text{"percent"} \end{cases}$
+   - $\text{UsedPct} = \frac{\max(0, -\text{PnL}_{\text{day}})}{\text{LimitInMoney}} \times 100\%$
+2. **Общая просадка:**
+   - **Static:** $\text{LimitInMoney} = \text{initialBalance} \times \frac{\text{value}}{100}$, $\text{UsedPct} = \frac{\max(0, \text{initialBalance} - \text{CurrentBalance})}{\text{LimitInMoney}} \times 100\%$
+   - **TrailingClosed:** $\text{PeakBalance} = \max(\text{initialBalance}, \text{HighWaterMarkClosed})$.
+     $\text{TrailingLevel} = \text{PeakBalance} - \text{LimitInMoney}$.
+     Если `lockAtInitial = true`, $\text{TrailingLevel} = \min(\text{initialBalance}, \text{TrailingLevel})$.
+     $\text{UsedPct} = \frac{\max(0, \text{PeakBalance} - \text{CurrentBalance})}{\text{LimitInMoney}} \times 100\%$
+3. **Цель по прибыли:**
+   - $\text{ProgressPct} = \frac{\max(0, \text{CurrentBalance} - \text{initialBalance})}{\text{ProfitTargetInMoney}} \times 100\%$
+4. **Торговые дни и Consistency:**
+   - День считается торговым, если в нем есть closed trade (или $\text{PnL}_{\text{day}} \ge \text{minTradingDayMinPnl}$).
+   - Consistency (доля лучшего дня): $\text{Share} = \frac{\max(\text{PnL}_{\text{day}})}{\sum_{\text{day PnL} > 0} \text{PnL}_{\text{day}}} \times 100\%$
+
+### 8.3 Статусы и Пороги (`lib/game-config.ts`)
+- `ok`: $< 70\%$
+- `caution`: $70–89\%$
+- `close`: $90–99\%$
+- `reached`: $\ge 100\%$
+- `PROP_DISCIPLINE_XP = 10` — XP характеристике «Дисциплина» за день фирмы в рамках лимитов (не чаще 1 раза в день, при наличии сделки и торгового плана с лимитом).
+- `JOURNAL_DISCIPLINE_DAILY_XP_CAP = 25` — общий дневной потолок XP «Дисциплины» из журнала.
+- **Достижения:** `firstPropRules` («Правила проп-счёта настроены») и `propDisciplined5` («5 дней в рамках лимитов»).
+
+---
+
+## 9. Экспорт JSON (версия `"1.4"`)
+
+Экспорт включает поля проп-правил и историю фаз счетов بدون переведённых строк:
 ```json
 {
   "app": "ayra",
-  "exportVersion": "1.3",
+  "exportVersion": "1.4",
   "exportedAt": "2026-10-08T12:00:00.000Z",
   "user": { ... },
   "journal": {
-    "accounts": [ ... ],
+    "accounts": [
+      {
+        "id": "acc_1",
+        "name": "FTMO $100k",
+        "type": "prop",
+        "currency": "USD",
+        "startBalance": 100000,
+        "isPrimaryProp": true,
+        "propRules": {
+          "phaseLabel": "Phase 1",
+          "initialBalance": 100000,
+          "profitTarget": { "type": "percent", "value": 10 },
+          "maxDailyLoss": { "type": "percent", "value": 5, "base": "initialBalance" },
+          "maxTotalDrawdown": { "type": "percent", "value": 10, "mode": "static" },
+          "minTradingDays": 4,
+          "dayReset": { "timezone": "America/New_York", "hour": 17 },
+          "startedAt": "2026-10-01T00:00:00.000Z",
+          "phaseHistory": []
+        }
+      }
+    ],
     "trades": [ ... ],
     "strategies": [ ... ],
     "noTrades": [ ... ],
-    "attachments": [
-      {
-        "id": "att_123",
-        "tradeId": "tr_456",
-        "kind": "before",
-        "width": 1600,
-        "height": 900,
-        "bytes": 240120,
-        "mime": "image/webp",
-        "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "createdAt": "2026-10-08T12:00:00.000Z",
-        "caption": "Breakout setup"
-      }
-    ],
+    "attachments": [ ... ],
     "imagesIncluded": false
   }
 }
 ```
-*Примечание:* Демо-сделки полностью исключаются из экспорта JSON и из расчёта статистики профиля.
 
 ---
 
-## 9. План на следующие этапы (T6c-2c – T7)
+## 10. План на следующие этапы (T6c-2c – T7)
 
+- **T6d.1:** Безопасное удаление и снятие основного проп-счёта (ConfirmDialog, soft delete 8 сек с кнопкой «Отменить», `primaryPropAccountId`, блокировка удаления счетов со сделками).
 - **T6c-2c:** Инструменты разметки графиков (фигуры, стрелки, уровни, текст) поверх скриншотов.
-- **T6d:** Prop Rules Tracker (трекинг правил проп-челленджей) и кастомные расширенные отчеты.
 - **T7:** Облачная синхронизация Supabase (хранение скриншотов в Supabase Storage).
+
+---
+
+## 11. T6d.1 Безопасное удаление и снятие «основного» проп-счёта
+
+### 11.1 Основной проп-счёт (`primaryPropAccountId`)
+Хранится в объекте журнала (`primaryPropAccountId`):
+- `undefined`: автоматический выбор (первый активный проп-счёт с настроенными правилами).
+- `string`: ID явно выбранного счёта.
+- `null`: явно без основного счёта (на Home выводится скрываемая плашка «Основной проп-счёт не выбран» со ссылкой в Счета).
+- Если выбранный `string` счёт удаляется или отправляется в архив, `primaryPropAccountId` сбрасывается в `undefined` (авто).
+
+### 11.2 Окна подтверждений и Мягкое удаление (`ConfirmDialog`)
+- **Счёт со сделками**: удаление заблокировано (T6a). Доступна только архивация («Счёт скроется из списков, данные сохранятся»).
+- **Счёт без сделок**: открытие `ConfirmDialog`. Для проп-счёта с правилами требуется ввод точного названия счёта.
+- **Мягкое удаление (8 сек)**: при подтверждении счёт скрывается из списка, а внизу показывается тост с кнопкой «Отменить» (8 секунд). По истечении 8 секунд или при закрытии страницы (`beforeunload`) удаление завершается окончательно.
+- **Сброс игрового прогресса**: подтверждение с вводом контрольного слова (`СБРОС` / `RESET`).

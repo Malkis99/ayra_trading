@@ -48,11 +48,19 @@ export function TradingPlanTab() {
     weekPlans,
     trades,
     strategies,
+    accounts,
     getTradingPlan,
     saveTradingPlan,
     getWeekPlan,
     saveWeekPlan,
   } = useJournal();
+
+  // Find primary prop account or first prop account with active rules
+  const propAccountWithRules = useMemo(() => {
+    const primary = accounts.find((a) => a.type === "prop" && !a.archivedAt && a.isPrimaryProp && a.propRules && a.propRules.startedAt);
+    if (primary) return primary;
+    return accounts.find((a) => a.type === "prop" && !a.archivedAt && a.propRules && a.propRules.startedAt);
+  }, [accounts]);
 
   // Mode: 'day' | 'week'
   const [mode, setMode] = useState<"day" | "week">("day");
@@ -684,8 +692,8 @@ export function TradingPlanTab() {
             </div>
           )}
 
-          {/* Copy Previous Plan Button */}
-          <div className="flex justify-between items-center">
+          {/* Copy Previous Plan Button & Prop Limits Suggestion */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <button
               onClick={handleCopyPreviousPlan}
               className="btn-ghost text-xs py-1.5 px-3 flex items-center gap-1.5 text-acc hover:text-tx border border-line rounded-xl"
@@ -693,6 +701,37 @@ export function TradingPlanTab() {
               <Copy size={14} />
               <span>{dict.journal.tradingPlan.copyPrevPlanBtn}</span>
             </button>
+
+            {propAccountWithRules && propAccountWithRules.propRules && (
+              <button
+                type="button"
+                onClick={() => {
+                  const r = propAccountWithRules.propRules!;
+                  let maxDailyLossLimit: { type: "r" | "percent"; value: number } | undefined = undefined;
+                  if (r.maxDailyLoss) {
+                    const initBal = r.initialBalance ?? propAccountWithRules.startBalance ?? 0;
+                    if (r.maxDailyLoss.type === "percent") {
+                      maxDailyLossLimit = { type: "percent", value: r.maxDailyLoss.value };
+                    } else if (initBal > 0) {
+                      const pct = Number(((r.maxDailyLoss.value / initBal) * 100).toFixed(2));
+                      maxDailyLossLimit = { type: "percent", value: pct };
+                    }
+                  }
+                  updateDayPlan((prev) => ({
+                    ...prev,
+                    limits: {
+                      ...prev.limits,
+                      maxDailyLoss: maxDailyLossLimit || prev.limits?.maxDailyLoss,
+                    },
+                  }));
+                  showToast(dict.journal.propRules.applyLimitsBtn);
+                }}
+                className="btn-ghost text-xs py-1.5 px-3 flex items-center gap-1.5 text-vi hover:text-tx border border-vi/30 bg-vi/10 rounded-xl font-medium"
+              >
+                <Sparkles size={14} />
+                <span>{dict.journal.propRules.applyLimitsBtn}</span>
+              </button>
+            )}
           </div>
 
           {/* Card Blocks Grid */}

@@ -12,11 +12,12 @@ import {
 import { defaultAttachmentRepository } from "./attachments/indexeddb-repository";
 
 const JOURNAL_STORAGE_KEY = "ayra_journal_v1";
-const CURRENT_JOURNAL_SCHEMA_VERSION = 3;
+const CURRENT_JOURNAL_SCHEMA_VERSION = 5;
 const STORAGE_WARN_THRESHOLD = 0.8; // 80%
 
 export interface JournalStorageData {
   schemaVersion: number;
+  primaryPropAccountId?: string | null;
   accounts: Account[];
   trades: Trade[];
   strategies: Strategy[];
@@ -28,6 +29,7 @@ export interface JournalStorageData {
 
 export const INITIAL_JOURNAL_DATA: JournalStorageData = {
   schemaVersion: CURRENT_JOURNAL_SCHEMA_VERSION,
+  primaryPropAccountId: undefined,
   accounts: [],
   trades: [],
   strategies: [],
@@ -74,13 +76,34 @@ export class LocalStorageJournalRepository implements JournalRepository {
   }
 
   private migrate(raw: any): JournalStorageData {
-    const rawAccounts: Account[] = Array.isArray(raw.accounts) ? raw.accounts : [];
+    let rawAccounts: Account[] = Array.isArray(raw.accounts) ? raw.accounts : [];
     const rawTrades: any[] = Array.isArray(raw.trades) ? raw.trades : [];
     const rawStrategies: Strategy[] = Array.isArray(raw.strategies) ? raw.strategies : [];
     const rawNoTrades: NoTradeEntry[] = Array.isArray(raw.noTrades) ? raw.noTrades : [];
     const rawPlans: TradingPlan[] = Array.isArray(raw.plans) ? raw.plans : [];
     const rawWeekPlans: WeekPlan[] = Array.isArray(raw.weekPlans) ? raw.weekPlans : [];
     const rawNotes: Note[] = Array.isArray(raw.notes) ? raw.notes : [];
+
+    // Migration v5: Migrate primaryPropAccountId
+    let primaryPropAccountId: string | null | undefined = raw.primaryPropAccountId;
+
+    rawAccounts = rawAccounts.map((acc) => {
+      const isProp = acc.type === "prop";
+      return {
+        ...acc,
+        propRules: isProp && acc.propRules ? acc.propRules : (acc.type === "prop" ? acc.propRules || null : null),
+      };
+    });
+
+    // If primaryPropAccountId was not stored explicitly (undefined), check legacy isPrimaryProp flag
+    if (primaryPropAccountId === undefined) {
+      const legacyPrimary = rawAccounts.find(
+        (a) => a.isPrimaryProp && a.type === "prop" && !a.archivedAt
+      );
+      if (legacyPrimary) {
+        primaryPropAccountId = legacyPrimary.id;
+      }
+    }
 
     const trades: Trade[] = rawTrades.map((t) => ({
       ...t,
@@ -95,6 +118,7 @@ export class LocalStorageJournalRepository implements JournalRepository {
 
     return {
       schemaVersion: CURRENT_JOURNAL_SCHEMA_VERSION,
+      primaryPropAccountId,
       accounts: rawAccounts,
       trades,
       strategies: rawStrategies,
@@ -103,6 +127,16 @@ export class LocalStorageJournalRepository implements JournalRepository {
       weekPlans: rawWeekPlans,
       notes: rawNotes,
     };
+  }
+
+  getPrimaryPropAccountId(): string | null | undefined {
+    return this.loadData().primaryPropAccountId;
+  }
+
+  setPrimaryPropAccountId(id: string | null | undefined): void {
+    const data = this.loadData();
+    data.primaryPropAccountId = id;
+    this.saveData(data);
   }
 
   getAccounts(): Account[] {
