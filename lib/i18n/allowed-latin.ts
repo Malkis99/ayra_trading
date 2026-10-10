@@ -66,4 +66,5 @@ export const ALLOWED_LATIN_WORDS = [
   "com",
   "alex",
   "cookies",
+  "Supabase",
 ] as const;

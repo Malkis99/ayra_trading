@@ -22,7 +22,7 @@ import {
   getFilteredOptions,
   QuestionDefinition,
 } from "@/lib/awakening";
-import { ArrowLeft, ArrowRight, SkipForward, Check, Globe, Sparkles, FastForward, Loader2, AlertCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, SkipForward, Check, Globe, Sparkles, FastForward, Loader2, AlertCircle, LogOut } from "lucide-react";
 import { formatString, formatNumber } from "@/lib/i18n";
 
 function AwakeningCanvasAnimation({
@@ -129,7 +129,7 @@ function AwakeningCanvasAnimation({
       {phase !== "final" && (
         <button
           onClick={() => setPhase("final")}
-          className="absolute top-0 right-0 z-30 btn-ghost text-xs py-1.5 px-3 flex items-center gap-1 text-mu hover:text-tx"
+          className="absolute top-0 right-0 z-30 btn-ghost text-xs py-1.5 px-3 flex items-center gap-1 text-mu hover:text-tx cursor-pointer"
         >
           <span>{skipText}</span>
           <FastForward size={14} />
@@ -175,9 +175,8 @@ function AwakeningCanvasAnimation({
           type="button"
           onClick={onComplete}
           disabled={isNavigating}
-          className="group relative w-full h-[56px] min-w-[220px] rounded-2xl font-semibold text-base text-white overflow-hidden transition-all duration-200 active:scale-[0.98] disabled:opacity-70 disabled:cursor-wait shadow-[0_8px_24px_rgba(80,52,143,0.5)] border-t border-go/60 bg-gradient-to-r from-vi via-pri to-vi hover:brightness-110 flex items-center justify-center gap-2"
+          className="group relative w-full h-[56px] min-w-[220px] rounded-2xl font-semibold text-base text-white overflow-hidden transition-all duration-200 active:scale-[0.98] disabled:opacity-70 disabled:cursor-wait shadow-[0_8px_24px_rgba(80,52,143,0.5)] border-t border-go/60 bg-gradient-to-r from-vi via-pri to-vi hover:brightness-110 flex items-center justify-center gap-2 cursor-pointer"
         >
-          {/* Shimmer line */}
           <span className="absolute inset-0 w-1/2 h-full bg-white/20 skew-x-[-20deg] -translate-x-full group-hover:translate-x-[300%] transition-transform duration-1000 ease-out pointer-events-none motion-reduce:hidden" />
 
           {isNavigating ? (
@@ -209,7 +208,7 @@ export default function AwakeningPage() {
     updateMinorMode,
   } = useGame();
 
-  const { user, profile, checkNicknameAvailable, saveNickname } = useAuth();
+  const { user, profile, checkNicknameAvailable, saveNickname, signOut } = useAuth();
 
   const [step, setStep] = useState<number>(gameState.onboarding.step || 1);
   const [subStep, setSubStep] = useState<number>(gameState.onboarding.subStep || 0);
@@ -242,6 +241,7 @@ export default function AwakeningPage() {
   }, [step, subStep]);
 
   const questionsForStep = useMemo(() => getQuestionsForStep(step), [step]);
+
   const currentQuestion: QuestionDefinition | undefined = questionsForStep[subStep];
 
   const minorMode = answers.ageRange === "16-17" || gameState.profile.minorMode;
@@ -414,7 +414,6 @@ export default function AwakeningPage() {
       await saveNickname(nick);
     }
 
-    // Synchronously write onboarding state to localStorage and GameContext store
     const nowIso = new Date().toISOString();
     completeOnboarding();
 
@@ -439,7 +438,6 @@ export default function AwakeningPage() {
     const targetUrl = isEditMode ? "/settings" : "/";
     router.replace(targetUrl);
 
-    // Fallback timer: if pathname hasn't updated within 800ms, force hard assignment
     setTimeout(() => {
       if (typeof window !== "undefined" && window.location.pathname === "/awakening") {
         window.location.assign(targetUrl);
@@ -483,7 +481,7 @@ export default function AwakeningPage() {
               type="button"
               onClick={handleFinishOnboarding}
               disabled={isNavigating}
-              className="group relative w-full h-[56px] min-w-[220px] rounded-2xl font-semibold text-base text-white overflow-hidden transition-all duration-200 active:scale-[0.98] disabled:opacity-70 disabled:cursor-wait shadow-[0_8px_24px_rgba(80,52,143,0.5)] border-t border-go/60 bg-gradient-to-r from-vi via-pri to-vi hover:brightness-110 flex items-center justify-center gap-2"
+              className="group relative w-full h-[56px] min-w-[220px] rounded-2xl font-semibold text-base text-white overflow-hidden transition-all duration-200 active:scale-[0.98] disabled:opacity-70 disabled:cursor-wait shadow-[0_8px_24px_rgba(80,52,143,0.5)] border-t border-go/60 bg-gradient-to-r from-vi via-pri to-vi hover:brightness-110 flex items-center justify-center gap-2 cursor-pointer"
             >
               <span className="absolute inset-0 w-1/2 h-full bg-white/20 skew-x-[-20deg] -translate-x-full group-hover:translate-x-[300%] transition-transform duration-1000 ease-out pointer-events-none motion-reduce:hidden" />
               {isNavigating ? (
@@ -541,7 +539,7 @@ export default function AwakeningPage() {
               <button
                 type="button"
                 onClick={handleTransliterateNickname}
-                className="btn-ghost text-[11px] py-1 px-2 border border-go/40 text-go hover:bg-go/20"
+                className="btn-ghost text-[11px] py-1 px-2 border border-go/40 text-go hover:bg-go/20 cursor-pointer"
               >
                 {dict.awakening.transliterateBtn}
               </button>
@@ -571,7 +569,7 @@ export default function AwakeningPage() {
                   setLanguage("ru");
                   handleAnswerChange("language", "ru");
                 }}
-                className={`p-3.5 rounded-xl border text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
+                className={`p-3.5 rounded-xl border text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
                   lang === "ru"
                     ? "border-vi bg-vi/20 text-tx shadow-md shadow-vi/10 ring-1 ring-vi"
                     : "border-line bg-s2/60 text-mu hover:border-line/80"
@@ -586,7 +584,7 @@ export default function AwakeningPage() {
                   setLanguage("en");
                   handleAnswerChange("language", "en");
                 }}
-                className={`p-3.5 rounded-xl border text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
+                className={`p-3.5 rounded-xl border text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
                   lang === "en"
                     ? "border-vi bg-vi/20 text-tx shadow-md shadow-vi/10 ring-1 ring-vi"
                     : "border-line bg-s2/60 text-mu hover:border-line/80"
@@ -620,12 +618,9 @@ export default function AwakeningPage() {
 
       return (
         <div className="w-full max-w-[1120px] mx-auto py-2">
-          {/* 2-Column CSS Grid with >= 48px gap on lg screens */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
-            {/* Left Column: Figure Preview with single clean border */}
             <div className="lg:col-span-6 flex flex-col items-center justify-center">
               <div className="relative w-full min-w-[320px] lg:min-w-[380px] h-[calc(100vh-280px)] min-h-[460px] max-h-[680px] rounded-3xl bg-radial-gradient from-pri/40 via-s1 to-s1 overflow-hidden border border-vi/40 shadow-2xl shadow-vi/20 grid place-items-center p-6">
-                {/* Soft ground glow ring */}
                 <div className="absolute bottom-6 w-48 h-7 rounded-full border border-vi/50 bg-vi/30 shadow-2xl shadow-vi/60 blur-[1px]" />
 
                 <Figure
@@ -636,9 +631,7 @@ export default function AwakeningPage() {
               </div>
             </div>
 
-            {/* Right Column: Customizer Card */}
             <div className="lg:col-span-6 w-full min-w-[320px] lg:min-w-[400px] lg:max-w-[540px] space-y-5 text-left bg-s1/80 border border-line p-5 md:p-6 rounded-3xl shadow-xl">
-              {/* Skin Tone Section */}
               <div className="space-y-2">
                 <label className="text-xs font-bold text-tx block">
                   {dict.avatar.skinToneLabel}
@@ -654,7 +647,7 @@ export default function AwakeningPage() {
                         updateAvatarAppearance(updated);
                       }}
                       style={{ backgroundColor: st.hex }}
-                      className={`w-7 h-7 md:w-8 md:h-8 rounded-full border-2 transition-all ${
+                      className={`w-7 h-7 md:w-8 md:h-8 rounded-full border-2 transition-all cursor-pointer ${
                         currentApp.skinTone === st.id
                           ? "border-vi scale-110 ring-2 ring-vi/60 shadow-lg shadow-vi/30"
                           : "border-transparent opacity-80 hover:opacity-100 hover:scale-105"
@@ -665,7 +658,6 @@ export default function AwakeningPage() {
                 </div>
               </div>
 
-              {/* Hair Color Section */}
               <div className="space-y-2">
                 <label className="text-xs font-bold text-tx block">
                   {dict.avatar.hairColorLabel}
@@ -681,7 +673,7 @@ export default function AwakeningPage() {
                         updateAvatarAppearance(updated);
                       }}
                       style={{ backgroundColor: hc.hex }}
-                      className={`w-7 h-7 md:w-8 md:h-8 rounded-full border-2 transition-all ${
+                      className={`w-7 h-7 md:w-8 md:h-8 rounded-full border-2 transition-all cursor-pointer ${
                         currentApp.hairColor === hc.id
                           ? "border-vi scale-110 ring-2 ring-vi/60 shadow-lg shadow-vi/30"
                           : "border-transparent opacity-80 hover:opacity-100 hover:scale-105"
@@ -692,7 +684,6 @@ export default function AwakeningPage() {
                 </div>
               </div>
 
-              {/* Hairstyles 4x2 Grid */}
               <div className="space-y-2">
                 <label className="text-xs font-bold text-tx block">
                   {dict.avatar.hairstyleLabel}
@@ -707,7 +698,7 @@ export default function AwakeningPage() {
                         handleAnswerChange("appearance", updated);
                         updateAvatarAppearance(updated);
                       }}
-                      className={`p-2 min-h-[44px] rounded-xl border text-[11px] leading-tight font-medium text-center flex items-center justify-center transition-all ${
+                      className={`p-2 min-h-[44px] rounded-xl border text-[11px] leading-tight font-medium text-center flex items-center justify-center transition-all cursor-pointer ${
                         currentApp.hairstyle === hs.id
                           ? "border-vi bg-vi/20 text-tx font-bold ring-1 ring-vi shadow-md"
                           : "border-line bg-s2/60 text-mu hover:border-vi/50 hover:bg-s2"
@@ -719,7 +710,6 @@ export default function AwakeningPage() {
                 </div>
               </div>
 
-              {/* Outfit Styles 2 Columns */}
               <div className="space-y-2">
                 <label className="text-xs font-bold text-tx block">
                   {dict.avatar.outfitLabel}
@@ -734,7 +724,7 @@ export default function AwakeningPage() {
                         handleAnswerChange("appearance", updated);
                         updateAvatarAppearance(updated);
                       }}
-                      className={`p-2.5 rounded-xl border text-xs font-medium flex items-center justify-between transition-all ${
+                      className={`p-2.5 rounded-xl border text-xs font-medium flex items-center justify-between transition-all cursor-pointer ${
                         currentApp.outfit === o.id
                           ? "border-vi bg-vi/20 text-tx font-bold ring-1 ring-vi shadow-md"
                           : "border-line bg-s2/60 text-mu hover:border-vi/50 hover:bg-s2"
@@ -775,7 +765,7 @@ export default function AwakeningPage() {
                 key={opt.id}
                 type="button"
                 onClick={() => handleSingleSelect(currentQuestion.id, opt.id)}
-                className={`min-h-[52px] p-4 rounded-xl border text-sm font-semibold flex items-center justify-between text-left transition-all duration-200 ${
+                className={`min-h-[52px] p-4 rounded-xl border text-sm font-semibold flex items-center justify-between text-left transition-all duration-200 cursor-pointer ${
                   isSelected
                     ? "border-vi bg-vi/20 text-tx shadow-lg shadow-vi/15 ring-1 ring-vi"
                     : "border-line bg-s2/70 text-mu hover:border-vi/50 hover:bg-s2 hover:text-tx"
@@ -813,7 +803,7 @@ export default function AwakeningPage() {
                 key={opt.id}
                 type="button"
                 onClick={() => handleMultiToggle(currentQuestion.id, opt.id)}
-                className={`min-h-[52px] p-4 rounded-xl border text-sm font-semibold flex items-center justify-between text-left transition-all duration-200 ${
+                className={`min-h-[52px] p-4 rounded-xl border text-sm font-semibold flex items-center justify-between text-left transition-all duration-200 cursor-pointer ${
                   isSelected
                     ? "border-vi bg-vi/20 text-tx shadow-lg shadow-vi/15 ring-1 ring-vi"
                     : "border-line bg-s2/70 text-mu hover:border-vi/50 hover:bg-s2 hover:text-tx"
@@ -865,7 +855,7 @@ export default function AwakeningPage() {
                     key={opt.id}
                     type="button"
                     onClick={() => handleMultiToggle(currentQuestion.id, opt.id)}
-                    className={`min-h-[44px] px-4 py-2.5 rounded-xl border text-xs font-semibold transition-all duration-200 flex items-center gap-2 ${
+                    className={`min-h-[44px] px-4 py-2.5 rounded-xl border text-xs font-semibold transition-all duration-200 flex items-center gap-2 cursor-pointer ${
                       isSelected
                         ? "border-vi bg-vi/25 text-tx font-bold ring-1 ring-vi shadow-md shadow-vi/15"
                         : "border-line bg-s2/70 text-mu hover:border-vi/50 hover:bg-s2 hover:text-tx"
@@ -879,7 +869,6 @@ export default function AwakeningPage() {
             </div>
           )}
 
-          {/* Custom Option Input */}
           <div className="flex items-center gap-2 pt-2">
             <input
               type="text"
@@ -897,13 +886,12 @@ export default function AwakeningPage() {
             <button
               type="button"
               onClick={() => handleAddCustomOption(currentQuestion.id)}
-              className="btn text-xs py-3.5 px-5 flex-none"
+              className="btn text-xs py-3.5 px-5 flex-none cursor-pointer"
             >
               {dict.awakening.addBtn}
             </button>
           </div>
 
-          {/* Added Custom Options Pills */}
           {selectedList.filter((item) => !currentOptions.some((o) => o.id === item)).length > 0 && (
             <div className="flex flex-wrap gap-2 justify-center pt-2">
               {selectedList
@@ -917,7 +905,7 @@ export default function AwakeningPage() {
                     <button
                       type="button"
                       onClick={() => handleRemoveCustomOption(currentQuestion.id, item)}
-                      className="text-mu hover:text-tx text-sm font-bold"
+                      className="text-mu hover:text-tx text-sm font-bold cursor-pointer"
                     >
                       ×
                     </button>
@@ -981,15 +969,12 @@ export default function AwakeningPage() {
     >
       <Starfield />
 
-      {/* Header <= 80px high with progress step bar and centered question counter below */}
       <header className="relative z-20 flex flex-col justify-center px-4 md:px-8 border-b border-line/40 bg-ink/80 backdrop-blur-md flex-none py-2 space-y-1 max-h-[80px]">
         <div className="flex items-center justify-between gap-4">
-          {/* Logo AYRA */}
           <Link href="/" className="font-serif text-lg font-bold tracking-wider text-tx hover:opacity-80 flex-none">
             AYRA
           </Link>
 
-          {/* Centered 5 Step Segments */}
           <div className="flex-1 max-w-xl mx-auto grid grid-cols-5 gap-2 items-center">
             {[1, 2, 3, 4, 5].map((st) => {
               const isPast = st < step;
@@ -1014,13 +999,28 @@ export default function AwakeningPage() {
             })}
           </div>
 
-          {/* Language Switcher RU/EN */}
           <div className="flex items-center gap-2 flex-none">
+            {/* User Email & Logout Badge */}
+            {user && (
+              <div className="flex items-center gap-2 text-[11px] text-tx-muted bg-s2/80 px-2.5 py-1 rounded-lg border border-line">
+                <span className="hidden sm:inline">{dict.auth.headerUserEmail}:</span>
+                <span className="font-mono text-tx font-medium">{user.email}</span>
+                <button
+                  type="button"
+                  onClick={() => signOut()}
+                  className="flex items-center gap-1 text-red-400 hover:text-red-300 font-semibold cursor-pointer ml-1"
+                >
+                  <LogOut className="h-3 w-3" />
+                  <span className="hidden md:inline">{dict.topbar.logout}</span>
+                </button>
+              </div>
+            )}
+
             <div className="flex items-center gap-1 bg-s2/80 p-0.5 rounded-lg border border-line">
               <button
                 type="button"
                 onClick={() => setLanguage("ru")}
-                className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors ${
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors cursor-pointer ${
                   lang === "ru" ? "bg-vi text-white" : "text-mu hover:text-tx"
                 }`}
               >
@@ -1029,7 +1029,7 @@ export default function AwakeningPage() {
               <button
                 type="button"
                 onClick={() => setLanguage("en")}
-                className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors ${
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors cursor-pointer ${
                   lang === "en" ? "bg-vi text-white" : "text-mu hover:text-tx"
                 }`}
               >
@@ -1048,7 +1048,6 @@ export default function AwakeningPage() {
           </div>
         </div>
 
-        {/* Centered Question Counter below the progress bar */}
         {step <= 4 && (
           <div className="text-center text-[12px] text-mu font-medium leading-none py-0.5">
             {formatString(dict.awakening.questionProgress, {
@@ -1060,7 +1059,6 @@ export default function AwakeningPage() {
         )}
       </header>
 
-      {/* Main Content Area */}
       <main className="relative z-10 flex-1 overflow-y-auto p-4 md:p-6 flex flex-col justify-center items-center [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         <div className="w-full max-w-4xl mx-auto text-center space-y-4">
           {step <= 4 && currentQuestion && (
@@ -1079,7 +1077,6 @@ export default function AwakeningPage() {
         </div>
       </main>
 
-      {/* Action Footer */}
       {step <= 4 && (
         <footer className="relative z-20 p-3.5 md:px-8 border-t border-line/40 bg-ink/80 backdrop-blur-md flex-none">
           <div className="max-w-2xl mx-auto flex items-center justify-between gap-3">
@@ -1087,7 +1084,7 @@ export default function AwakeningPage() {
               type="button"
               onClick={handlePrevSubStep}
               disabled={step === 1 && subStep === 0}
-              className="btn-ghost text-xs py-2.5 px-4 flex items-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed"
+              className="btn-ghost text-xs py-2.5 px-4 flex items-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
             >
               <ArrowLeft size={16} />
               <span>{dict.awakening.back}</span>
@@ -1098,7 +1095,7 @@ export default function AwakeningPage() {
                 <button
                   type="button"
                   onClick={handleSkipEntireStep}
-                  className="btn-ghost text-xs py-2.5 px-3 flex items-center gap-1.5 text-mu hover:text-tx"
+                  className="btn-ghost text-xs py-2.5 px-3 flex items-center gap-1.5 text-mu hover:text-tx cursor-pointer"
                 >
                   <SkipForward size={14} />
                   <span className="hidden sm:inline">
@@ -1111,7 +1108,7 @@ export default function AwakeningPage() {
                 <button
                   type="button"
                   onClick={handleSkipOptionalInStep3}
-                  className="btn-ghost text-xs py-2.5 px-3 flex items-center gap-1.5 text-mu hover:text-tx"
+                  className="btn-ghost text-xs py-2.5 px-3 flex items-center gap-1.5 text-mu hover:text-tx cursor-pointer"
                 >
                   <SkipForward size={14} />
                   <span className="hidden sm:inline">
@@ -1124,7 +1121,7 @@ export default function AwakeningPage() {
                 <button
                   type="button"
                   onClick={handleSkipSubStep}
-                  className="btn-ghost text-xs py-2.5 px-4 text-mu hover:text-tx"
+                  className="btn-ghost text-xs py-2.5 px-4 text-mu hover:text-tx cursor-pointer"
                 >
                   {dict.awakening.skipQuestion}
                 </button>
@@ -1134,7 +1131,7 @@ export default function AwakeningPage() {
                 type="button"
                 onClick={handleNextSubStep}
                 disabled={!canGoNext || checkingNickname}
-                className="btn text-xs py-2.5 px-5 flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-vi/20"
+                className="btn text-xs py-2.5 px-5 flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-vi/20 cursor-pointer"
               >
                 {checkingNickname ? (
                   <Loader2 size={16} className="animate-spin text-white" />
