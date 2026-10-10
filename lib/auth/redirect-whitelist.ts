@@ -27,3 +27,25 @@ export function sanitizeRedirectUrl(url: string | null | undefined, fallback = "
     return fallback;
   }
 }
+
+/**
+ * Builds safe redirect link to main site on NEXT_PUBLIC_SITE_URL mismatch.
+ * Extracts path only without query params, tokens, or fragments.
+ */
+export function buildSafeSiteUrlRedirect(siteUrl: string, rawNext: string | null | undefined): string {
+  if (!siteUrl) return "/login";
+  const cleanSiteUrl = siteUrl.trim().replace(/\/+$/, "");
+  let target = `${cleanSiteUrl}/login`;
+
+  if (rawNext) {
+    const sanitized = sanitizeRedirectUrl(rawNext, "");
+    if (sanitized && sanitized.startsWith("/")) {
+      const pathOnly = sanitized.split("?")[0].split("#")[0];
+      if (pathOnly && pathOnly.startsWith("/") && pathOnly !== "/") {
+        target += `?next=${encodeURIComponent(pathOnly)}`;
+      }
+    }
+  }
+
+  return target;
+}
