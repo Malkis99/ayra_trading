@@ -84,8 +84,8 @@ function ShellContent({ children }: { children: React.ReactNode }) {
         // ignore
       }
 
-      // If local onboarding not done or cloud nick still empty and no conflict modal -> go to /awakening
-      if (pathname !== "/awakening" && !conflictNickname) {
+      // If local onboarding not done or cloud nick still empty and no conflict modal -> go to /awakening (unless on /login where multi-tab card is rendered)
+      if (pathname !== "/awakening" && pathname !== "/login" && !conflictNickname) {
         router.replace("/awakening");
       }
     }

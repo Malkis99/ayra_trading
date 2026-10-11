@@ -4,6 +4,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback, use
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isE2EMockEnabled, getSupabaseEnv } from "@/lib/supabase/config";
 import { mapSupabaseError, type SanitizedErrorInfo } from "./error-sanitizer";
+import { authTabChannel } from "./tab-channel";
 import {
   getMockState,
   setMockState,
@@ -126,54 +127,80 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setProfile(mProfile);
       initialResolvedRef.current = true;
       setIsLoading(false);
-      return;
-    }
-
-    const supabase = createSupabaseBrowserClient();
-    if (!supabase) {
-      clearTimeout(timer);
-      initialResolvedRef.current = true;
-      setIsLoading(false);
-      return;
-    }
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      clearTimeout(timer);
-      if (session?.user) {
-        const u = { id: session.user.id, email: session.user.email || "", created_at: session.user.created_at };
-        setUser(u);
-        loadProfile(session.user.id);
+    } else {
+      const supabase = createSupabaseBrowserClient();
+      if (!supabase) {
+        clearTimeout(timer);
+        initialResolvedRef.current = true;
+        setIsLoading(false);
       } else {
-        setUser(null);
-        setProfile(null);
-      }
-      initialResolvedRef.current = true;
-      setIsLoading(false);
-    });
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          clearTimeout(timer);
+          if (session?.user) {
+            const u = { id: session.user.id, email: session.user.email || "", created_at: session.user.created_at };
+            setUser(u);
+            loadProfile(session.user.id);
+          } else {
+            setUser(null);
+            setProfile(null);
+          }
+          initialResolvedRef.current = true;
+          setIsLoading(false);
+        });
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        const u = { id: session.user.id, email: session.user.email || "", created_at: session.user.created_at };
-        setUser(u);
-        loadProfile(session.user.id);
-        if (initialResolvedRef.current && !user) {
-          // Late sign-in detected after timeout
-          setLateSignInNotice(true);
+        const {
+          data: { subscription },
+        } = supabase.auth.onAuthStateChange((_event, session) => {
+          if (session?.user) {
+            const u = { id: session.user.id, email: session.user.email || "", created_at: session.user.created_at };
+            setUser(u);
+            loadProfile(session.user.id);
+            if (initialResolvedRef.current && !user) {
+              setLateSignInNotice(true);
+            }
+          } else {
+            setUser(null);
+            setProfile(null);
+          }
+          initialResolvedRef.current = true;
+          setIsLoading(false);
+        });
+
+        return () => {
+          clearTimeout(timer);
+          subscription.unsubscribe();
+        };
+      }
+    }
+  }, [mockMode, loadProfile]);
+
+  // Subscribe to cross-tab auth state changes
+  useEffect(() => {
+    const unsubscribe = authTabChannel.subscribe((msg) => {
+      if (msg.type === "AUTH_SIGNED_IN" || msg.type === "AUTH_CLAIMED") {
+        if (mockMode) {
+          const { user: mUser, profile: mProfile } = getMockState();
+          setUser(mUser);
+          setProfile(mProfile);
+        } else {
+          const supabase = createSupabaseBrowserClient();
+          if (supabase) {
+            supabase.auth.getSession().then(({ data: { session } }) => {
+              if (session?.user) {
+                const u = { id: session.user.id, email: session.user.email || "", created_at: session.user.created_at };
+                setUser(u);
+                loadProfile(session.user.id);
+              }
+            });
+          }
         }
-      } else {
+      } else if (msg.type === "AUTH_SIGNED_OUT") {
         setUser(null);
         setProfile(null);
       }
-      initialResolvedRef.current = true;
-      setIsLoading(false);
     });
 
-    return () => {
-      clearTimeout(timer);
-      subscription.unsubscribe();
-    };
+    return () => unsubscribe();
   }, [mockMode, loadProfile]);
 
   const signInWithOtp = async (email: string) => {
@@ -322,6 +349,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    authTabChannel.broadcast("AUTH_SIGNED_OUT");
+
     if (mockMode) {
       setMockState(null, null);
       setUser(null);
@@ -365,7 +394,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (available) return cleanBase;
 
     for (let attempt = 1; attempt <= 3; attempt++) {
-      const suffix = Math.floor(100 + Math.random() * 900); // 3-digit suffix
+      const suffix = Math.floor(100 + Math.random() * 900);
       const candidate = `${cleanBase.slice(0, 20)}_${suffix}`;
       const isAvail = await checkNicknameAvailable(candidate);
       if (isAvail) return candidate;
