@@ -5,9 +5,11 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp } from "@/lib/context";
 import { useAuth } from "@/lib/auth/auth-context";
+import { resolvePostLoginRoute } from "@/lib/auth/routing";
+import { authTabChannel } from "@/lib/auth/tab-channel";
 import { sanitizeRedirectUrl, buildSafeSiteUrlRedirect } from "@/lib/auth/redirect-whitelist";
 import { type SanitizedErrorInfo } from "@/lib/auth/error-sanitizer";
-import { Mail, KeyRound, ArrowRight, Check, AlertCircle, RefreshCw, Copy, ExternalLink, ChevronDown } from "lucide-react";
+import { Mail, KeyRound, ArrowRight, Check, AlertCircle, RefreshCw, Copy, ExternalLink, ChevronDown, Sparkles } from "lucide-react";
 
 export default function LoginPage() {
   const { dict } = useApp();
@@ -16,7 +18,16 @@ export default function LoginPage() {
   const searchParams = useSearchParams();
   const rawNextParam = searchParams.get("next");
 
-  const { user, profile, signInWithOtp, verifyOtp, isLoading: authLoading, setGuestDismissed } = useAuth();
+  const {
+    user,
+    profile,
+    signInWithOtp,
+    verifyOtp,
+    isLoading: authLoading,
+    setGuestDismissed,
+    checkNicknameAvailable,
+    saveNickname,
+  } = useAuth();
 
   const [email, setEmail] = useState("");
   const [otpCode, setOtpCode] = useState("");
@@ -30,6 +41,11 @@ export default function LoginPage() {
   const [copyToast, setCopyToast] = useState<string | null>(null);
   const [resendTimer, setResendTimer] = useState(0);
 
+  // Multi-tab coordination state
+  const [otherTabSignedIn, setOtherTabSignedIn] = useState(false);
+  const submittedThisTabRef = useRef(false);
+  const routingExecutedRef = useRef(false);
+  const continueBtnRef = useRef<HTMLButtonElement | null>(null);
   const hiddenCopyRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Site URL mismatch detection
@@ -54,17 +70,59 @@ export default function LoginPage() {
     }
   }, [rawNextParam]);
 
-  // If already logged in, redirect
+  // Subscribe to cross-tab auth messages
+  useEffect(() => {
+    const unsubscribe = authTabChannel.subscribe((msg) => {
+      if (msg.type === "AUTH_SIGNED_IN" || msg.type === "AUTH_CLAIMED") {
+        setOtherTabSignedIn(true);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const executeRouting = async (u = user, p = profile) => {
+    if (!u || routingExecutedRef.current) return;
+    routingExecutedRef.current = true;
+
+    const guestStateRaw = typeof window !== "undefined" ? localStorage.getItem("ayra_demo_v1") : null;
+    const guestState = guestStateRaw ? JSON.parse(guestStateRaw) : null;
+
+    const result = await resolvePostLoginRoute({
+      user: u,
+      profile: p,
+      rawNextParam,
+      guestState,
+      checkNicknameAvailable,
+      saveNickname,
+    });
+
+    router.replace(result.destination);
+  };
+
+  // Handle post-login route resolution when user becomes active
   useEffect(() => {
     if (!authLoading && user) {
-      if (!profile?.nickname) {
-        router.replace("/awakening");
+      if (submittedThisTabRef.current) {
+        authTabChannel.broadcast("AUTH_SIGNED_IN", { userId: user.id });
+        executeRouting(user, profile);
       } else {
-        const destination = sanitizeRedirectUrl(rawNextParam, "/");
-        router.replace(destination);
+        setOtherTabSignedIn(true);
       }
     }
-  }, [user, profile, authLoading, router, rawNextParam]);
+  }, [user, profile, authLoading]);
+
+  // Auto-focus on "Continue here" button when multi-tab card is shown
+  useEffect(() => {
+    if (otherTabSignedIn && user) {
+      continueBtnRef.current?.focus();
+    }
+  }, [otherTabSignedIn, user]);
+
+  const handleContinueHere = async () => {
+    routingExecutedRef.current = false;
+    authTabChannel.broadcast("AUTH_CLAIMED", { userId: user?.id });
+    await executeRouting(user, profile);
+  };
 
   // Resend timer countdown
   useEffect(() => {
@@ -114,13 +172,16 @@ export default function LoginPage() {
       return;
     }
 
+    submittedThisTabRef.current = true;
     setLoading(true);
     const res = await verifyOtp(email.trim(), cleanCode, consentAccepted);
     setLoading(false);
 
     if (res.success) {
-      // Redirect handled by useEffect when user state updates
+      authTabChannel.broadcast("AUTH_SIGNED_IN");
+      // executeRouting handled in useEffect when user state is updated
     } else {
+      submittedThisTabRef.current = false;
       setErrorKey(res.errorKey || "invalidOrExpiredCode");
       if (res.errorDetails) setErrorDetails(res.errorDetails);
     }
@@ -192,6 +253,36 @@ Message: ${errorDetails.sanitizedMessage}${
   };
 
   const isValidOtp = otpCode.replace(/\D/g, "").length >= 6 && otpCode.replace(/\D/g, "").length <= 8;
+
+  // Render Multi-tab Coordination Card if sign-in happened in another tab
+  if (user && otherTabSignedIn && !submittedThisTabRef.current) {
+    return (
+      <div className="flex min-h-[80vh] w-full items-center justify-center px-4 py-8">
+        <div
+          aria-live="polite"
+          className="w-full max-w-md rounded-2xl border border-violet/40 bg-card p-6 md:p-8 shadow-2xl backdrop-blur-md text-center space-y-5"
+        >
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-violet/20 text-violet-glow border border-violet/30 shadow-lg shadow-violet/20">
+            <Sparkles className="h-7 w-7" />
+          </div>
+
+          <div className="space-y-2">
+            <h1 className="font-serif text-2xl font-bold text-tx">{auth.multiTabNoticeTitle}</h1>
+            <p className="text-xs md:text-sm text-tx-muted">{auth.multiTabNoticeSubtitle}</p>
+          </div>
+
+          <button
+            ref={continueBtnRef}
+            type="button"
+            onClick={handleContinueHere}
+            className="w-full rounded-xl bg-violet py-3.5 text-sm font-semibold text-white shadow-lg shadow-violet/30 transition hover:bg-violet-glow cursor-pointer"
+          >
+            {auth.continueHereBtn}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-[80vh] w-full items-center justify-center px-4 py-8">

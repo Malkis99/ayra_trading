@@ -22,7 +22,17 @@ import {
   getFilteredOptions,
   QuestionDefinition,
 } from "@/lib/awakening";
-import { ArrowLeft, ArrowRight, SkipForward, Check, Globe, Sparkles, FastForward, Loader2, AlertCircle, LogOut } from "lucide-react";
+import {
+  acquireLease,
+  renewLease,
+  stealLease,
+  releaseLease,
+  isLeaseOwner,
+  getLeaseInfo,
+  HEARTBEAT_INTERVAL_MS,
+} from "@/lib/auth/awakening-lease";
+import { currentTabId, authTabChannel } from "@/lib/auth/tab-channel";
+import { ArrowLeft, ArrowRight, SkipForward, Check, Globe, Sparkles, FastForward, Loader2, AlertCircle, LogOut, Lock } from "lucide-react";
 import { formatString, formatNumber } from "@/lib/i18n";
 
 function AwakeningCanvasAnimation({
@@ -214,6 +224,10 @@ export default function AwakeningPage() {
   const [subStep, setSubStep] = useState<number>(gameState.onboarding.subStep || 0);
   const [isNavigating, setIsNavigating] = useState<boolean>(false);
 
+  // Multi-tab Lease & Read-Only State
+  const [isReadOnly, setIsReadOnly] = useState<boolean>(false);
+  const leaseBtnRef = useRef<HTMLButtonElement | null>(null);
+
   const [answers, setAnswers] = useState<Record<string, any>>({
     nickname: profile?.nickname || gameState.name || "",
     language: lang || "ru",
@@ -231,6 +245,78 @@ export default function AwakeningPage() {
   const titleRef = useRef<HTMLHeadingElement>(null);
 
   const wasAlreadyDone = gameState.onboarding.status === "done";
+
+  // Lease management & multi-tab protection
+  useEffect(() => {
+    // Attempt lease acquisition on mount
+    const acquired = acquireLease(currentTabId);
+    if (!acquired) {
+      setIsReadOnly(true);
+    }
+
+    // Heartbeat renewal timer
+    const interval = setInterval(() => {
+      const owner = isLeaseOwner(currentTabId);
+      if (owner) {
+        renewLease(currentTabId);
+        setIsReadOnly(false);
+      } else {
+        setIsReadOnly(true);
+      }
+    }, HEARTBEAT_INTERVAL_MS);
+
+    // Storage event listener for lease or tab channel changes
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === "ayra_awakening_lease") {
+        const owner = isLeaseOwner(currentTabId);
+        setIsReadOnly(!owner);
+      }
+    };
+    window.addEventListener("storage", handleStorageChange);
+
+    const unsubscribeChannel = authTabChannel.subscribe((msg) => {
+      if (msg.type === "AUTH_CLAIMED") {
+        const owner = isLeaseOwner(currentTabId);
+        setIsReadOnly(!owner);
+      }
+    });
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("storage", handleStorageChange);
+      unsubscribeChannel();
+      releaseLease(currentTabId);
+    };
+  }, []);
+
+  // Auto focus "Continue here" button when becoming read-only
+  useEffect(() => {
+    if (isReadOnly) {
+      leaseBtnRef.current?.focus();
+    }
+  }, [isReadOnly]);
+
+  const handleStealLease = () => {
+    stealLease(currentTabId);
+    setIsReadOnly(false);
+
+    // Re-read latest onboarding state from localStorage before continuing
+    try {
+      const saved = localStorage.getItem("ayra_demo_v1");
+      if (saved) {
+        const current = JSON.parse(saved);
+        if (current.onboarding) {
+          if (current.onboarding.step) setStep(current.onboarding.step);
+          if (current.onboarding.subStep !== undefined) setSubStep(current.onboarding.subStep);
+          if (current.onboarding.answers) {
+            setAnswers((prev) => ({ ...prev, ...current.onboarding.answers }));
+          }
+        }
+      }
+    } catch {}
+
+    authTabChannel.broadcast("AUTH_CLAIMED");
+  };
 
   useEffect(() => {
     setOnboardingStep(step, subStep);
@@ -252,6 +338,7 @@ export default function AwakeningPage() {
   }, [currentQuestion, minorMode]);
 
   const handleAnswerChange = (key: string, value: any) => {
+    if (isReadOnly) return;
     const updated = { ...answers, [key]: value };
     setAnswers(updated);
     saveOnboardingAnswer(key, value);
@@ -262,11 +349,13 @@ export default function AwakeningPage() {
   };
 
   const handleNicknameChange = (val: string) => {
+    if (isReadOnly) return;
     setNicknameError(null);
     handleAnswerChange("nickname", val);
   };
 
   const handleTransliterateNickname = () => {
+    if (isReadOnly) return;
     if (answers.nickname) {
       const transliterated = transliterateNickname(answers.nickname);
       setNicknameError(null);
@@ -275,10 +364,12 @@ export default function AwakeningPage() {
   };
 
   const handleSingleSelect = (questionId: string, optionId: string) => {
+    if (isReadOnly) return;
     handleAnswerChange(questionId, optionId);
   };
 
   const handleMultiToggle = (questionId: string, optionId: string) => {
+    if (isReadOnly) return;
     const currentList: string[] = Array.isArray(answers[questionId])
       ? answers[questionId]
       : [];
@@ -290,6 +381,7 @@ export default function AwakeningPage() {
   };
 
   const handleAddCustomOption = (questionId: string) => {
+    if (isReadOnly) return;
     const trimmed = customInputText.trim();
     if (!trimmed) return;
     const currentList: string[] = Array.isArray(answers[questionId])
@@ -302,6 +394,7 @@ export default function AwakeningPage() {
   };
 
   const handleRemoveCustomOption = (questionId: string, item: string) => {
+    if (isReadOnly) return;
     const currentList: string[] = Array.isArray(answers[questionId])
       ? answers[questionId]
       : [];
@@ -312,6 +405,7 @@ export default function AwakeningPage() {
   };
 
   const canGoNext = useMemo(() => {
+    if (isReadOnly) return false;
     if (step === 5) return true;
     if (!currentQuestion) return true;
 
@@ -335,7 +429,7 @@ export default function AwakeningPage() {
     }
 
     return true;
-  }, [step, currentQuestion, answers, nicknameError]);
+  }, [step, currentQuestion, answers, nicknameError, isReadOnly]);
 
   const validateNicknameUniqueness = async (nick: string): Promise<boolean> => {
     setCheckingNickname(true);
@@ -350,7 +444,7 @@ export default function AwakeningPage() {
   };
 
   const handleNextSubStep = async () => {
-    if (!canGoNext || checkingNickname) return;
+    if (isReadOnly || !canGoNext || checkingNickname) return;
 
     if (currentQuestion?.id === "nickname") {
       const nick = answers.nickname?.trim() || "";
@@ -375,6 +469,7 @@ export default function AwakeningPage() {
   };
 
   const handlePrevSubStep = () => {
+    if (isReadOnly) return;
     if (subStep > 0) {
       setSubStep(subStep - 1);
     } else if (step > 1) {
@@ -385,6 +480,7 @@ export default function AwakeningPage() {
   };
 
   const handleSkipSubStep = () => {
+    if (isReadOnly) return;
     if (subStep < questionsForStep.length - 1) {
       setSubStep(subStep + 1);
     } else if (step < 5) {
@@ -394,6 +490,7 @@ export default function AwakeningPage() {
   };
 
   const handleSkipEntireStep = () => {
+    if (isReadOnly) return;
     if (step < 5) {
       setStep(step + 1);
       setSubStep(0);
@@ -401,12 +498,13 @@ export default function AwakeningPage() {
   };
 
   const handleSkipOptionalInStep3 = () => {
+    if (isReadOnly) return;
     setStep(4);
     setSubStep(0);
   };
 
   const handleFinishOnboarding = async () => {
-    if (isNavigating) return;
+    if (isReadOnly || isNavigating) return;
     setIsNavigating(true);
 
     const nick = answers.nickname?.trim() || gameState.name || "";
@@ -456,7 +554,7 @@ export default function AwakeningPage() {
               skipText={dict.awakening.skipQuestion}
               startText={dict.awakening.startBtn}
               onComplete={handleFinishOnboarding}
-              isNavigating={isNavigating}
+              isNavigating={isNavigating || isReadOnly}
             />
           </div>
         );
@@ -480,7 +578,7 @@ export default function AwakeningPage() {
             <button
               type="button"
               onClick={handleFinishOnboarding}
-              disabled={isNavigating}
+              disabled={isNavigating || isReadOnly}
               className="group relative w-full h-[56px] min-w-[220px] rounded-2xl font-semibold text-base text-white overflow-hidden transition-all duration-200 active:scale-[0.98] disabled:opacity-70 disabled:cursor-wait shadow-[0_8px_24px_rgba(80,52,143,0.5)] border-t border-go/60 bg-gradient-to-r from-vi via-pri to-vi hover:brightness-110 flex items-center justify-center gap-2 cursor-pointer"
             >
               <span className="absolute inset-0 w-1/2 h-full bg-white/20 skew-x-[-20deg] -translate-x-full group-hover:translate-x-[300%] transition-transform duration-1000 ease-out pointer-events-none motion-reduce:hidden" />
@@ -517,7 +615,8 @@ export default function AwakeningPage() {
               value={nick}
               onChange={(e) => handleNicknameChange(e.target.value)}
               placeholder={dict.awakening.q.nickname.placeholder}
-              className="w-full bg-s2 border border-line rounded-xl p-3.5 text-base text-tx focus:outline-none focus:border-vi focus:ring-1 focus:ring-vi"
+              disabled={isReadOnly}
+              className="w-full bg-s2 border border-line rounded-xl p-3.5 text-base text-tx focus:outline-none focus:border-vi focus:ring-1 focus:ring-vi disabled:opacity-50"
               maxLength={24}
               autoFocus
             />
@@ -539,7 +638,8 @@ export default function AwakeningPage() {
               <button
                 type="button"
                 onClick={handleTransliterateNickname}
-                className="btn-ghost text-[11px] py-1 px-2 border border-go/40 text-go hover:bg-go/20 cursor-pointer"
+                disabled={isReadOnly}
+                className="btn-ghost text-[11px] py-1 px-2 border border-go/40 text-go hover:bg-go/20 cursor-pointer disabled:opacity-50"
               >
                 {dict.awakening.transliterateBtn}
               </button>
@@ -565,11 +665,13 @@ export default function AwakeningPage() {
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
+                disabled={isReadOnly}
                 onClick={() => {
+                  if (isReadOnly) return;
                   setLanguage("ru");
                   handleAnswerChange("language", "ru");
                 }}
-                className={`p-3.5 rounded-xl border text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                className={`p-3.5 rounded-xl border text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 ${
                   lang === "ru"
                     ? "border-vi bg-vi/20 text-tx shadow-md shadow-vi/10 ring-1 ring-vi"
                     : "border-line bg-s2/60 text-mu hover:border-line/80"
@@ -580,11 +682,13 @@ export default function AwakeningPage() {
               </button>
               <button
                 type="button"
+                disabled={isReadOnly}
                 onClick={() => {
+                  if (isReadOnly) return;
                   setLanguage("en");
                   handleAnswerChange("language", "en");
                 }}
-                className={`p-3.5 rounded-xl border text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                className={`p-3.5 rounded-xl border text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50 ${
                   lang === "en"
                     ? "border-vi bg-vi/20 text-tx shadow-md shadow-vi/10 ring-1 ring-vi"
                     : "border-line bg-s2/60 text-mu hover:border-line/80"
@@ -603,8 +707,9 @@ export default function AwakeningPage() {
             <input
               type="text"
               value={answers.timezone || ""}
+              disabled={isReadOnly}
               onChange={(e) => handleAnswerChange("timezone", e.target.value)}
-              className="w-full bg-s2 border border-line rounded-xl p-3.5 text-sm text-tx focus:outline-none focus:border-vi"
+              className="w-full bg-s2 border border-line rounded-xl p-3.5 text-sm text-tx focus:outline-none focus:border-vi disabled:opacity-50"
             />
           </div>
         </div>
@@ -641,13 +746,14 @@ export default function AwakeningPage() {
                     <button
                       key={st.id}
                       type="button"
+                      disabled={isReadOnly}
                       onClick={() => {
                         const updated = { ...currentApp, skinTone: st.id };
                         handleAnswerChange("appearance", updated);
                         updateAvatarAppearance(updated);
                       }}
                       style={{ backgroundColor: st.hex }}
-                      className={`w-7 h-7 md:w-8 md:h-8 rounded-full border-2 transition-all cursor-pointer ${
+                      className={`w-7 h-7 md:w-8 md:h-8 rounded-full border-2 transition-all cursor-pointer disabled:opacity-50 ${
                         currentApp.skinTone === st.id
                           ? "border-vi scale-110 ring-2 ring-vi/60 shadow-lg shadow-vi/30"
                           : "border-transparent opacity-80 hover:opacity-100 hover:scale-105"
@@ -667,13 +773,14 @@ export default function AwakeningPage() {
                     <button
                       key={hc.id}
                       type="button"
+                      disabled={isReadOnly}
                       onClick={() => {
                         const updated = { ...currentApp, hairColor: hc.id };
                         handleAnswerChange("appearance", updated);
                         updateAvatarAppearance(updated);
                       }}
                       style={{ backgroundColor: hc.hex }}
-                      className={`w-7 h-7 md:w-8 md:h-8 rounded-full border-2 transition-all cursor-pointer ${
+                      className={`w-7 h-7 md:w-8 md:h-8 rounded-full border-2 transition-all cursor-pointer disabled:opacity-50 ${
                         currentApp.hairColor === hc.id
                           ? "border-vi scale-110 ring-2 ring-vi/60 shadow-lg shadow-vi/30"
                           : "border-transparent opacity-80 hover:opacity-100 hover:scale-105"
@@ -693,12 +800,13 @@ export default function AwakeningPage() {
                     <button
                       key={hs.id}
                       type="button"
+                      disabled={isReadOnly}
                       onClick={() => {
                         const updated = { ...currentApp, hairstyle: hs.id };
                         handleAnswerChange("appearance", updated);
                         updateAvatarAppearance(updated);
                       }}
-                      className={`p-2 min-h-[44px] rounded-xl border text-[11px] leading-tight font-medium text-center flex items-center justify-center transition-all cursor-pointer ${
+                      className={`p-2 min-h-[44px] rounded-xl border text-[11px] leading-tight font-medium text-center flex items-center justify-center transition-all cursor-pointer disabled:opacity-50 ${
                         currentApp.hairstyle === hs.id
                           ? "border-vi bg-vi/20 text-tx font-bold ring-1 ring-vi shadow-md"
                           : "border-line bg-s2/60 text-mu hover:border-vi/50 hover:bg-s2"
@@ -719,12 +827,13 @@ export default function AwakeningPage() {
                     <button
                       key={o.id}
                       type="button"
+                      disabled={isReadOnly}
                       onClick={() => {
                         const updated = { ...currentApp, outfit: o.id };
                         handleAnswerChange("appearance", updated);
                         updateAvatarAppearance(updated);
                       }}
-                      className={`p-2.5 rounded-xl border text-xs font-medium flex items-center justify-between transition-all cursor-pointer ${
+                      className={`p-2.5 rounded-xl border text-xs font-medium flex items-center justify-between transition-all cursor-pointer disabled:opacity-50 ${
                         currentApp.outfit === o.id
                           ? "border-vi bg-vi/20 text-tx font-bold ring-1 ring-vi shadow-md"
                           : "border-line bg-s2/60 text-mu hover:border-vi/50 hover:bg-s2"
@@ -764,8 +873,9 @@ export default function AwakeningPage() {
               <button
                 key={opt.id}
                 type="button"
+                disabled={isReadOnly}
                 onClick={() => handleSingleSelect(currentQuestion.id, opt.id)}
-                className={`min-h-[52px] p-4 rounded-xl border text-sm font-semibold flex items-center justify-between text-left transition-all duration-200 cursor-pointer ${
+                className={`min-h-[52px] p-4 rounded-xl border text-sm font-semibold flex items-center justify-between text-left transition-all duration-200 cursor-pointer disabled:opacity-50 ${
                   isSelected
                     ? "border-vi bg-vi/20 text-tx shadow-lg shadow-vi/15 ring-1 ring-vi"
                     : "border-line bg-s2/70 text-mu hover:border-vi/50 hover:bg-s2 hover:text-tx"
@@ -802,8 +912,9 @@ export default function AwakeningPage() {
               <button
                 key={opt.id}
                 type="button"
+                disabled={isReadOnly}
                 onClick={() => handleMultiToggle(currentQuestion.id, opt.id)}
-                className={`min-h-[52px] p-4 rounded-xl border text-sm font-semibold flex items-center justify-between text-left transition-all duration-200 cursor-pointer ${
+                className={`min-h-[52px] p-4 rounded-xl border text-sm font-semibold flex items-center justify-between text-left transition-all duration-200 cursor-pointer disabled:opacity-50 ${
                   isSelected
                     ? "border-vi bg-vi/20 text-tx shadow-lg shadow-vi/15 ring-1 ring-vi"
                     : "border-line bg-s2/70 text-mu hover:border-vi/50 hover:bg-s2 hover:text-tx"
@@ -854,8 +965,9 @@ export default function AwakeningPage() {
                   <button
                     key={opt.id}
                     type="button"
+                    disabled={isReadOnly}
                     onClick={() => handleMultiToggle(currentQuestion.id, opt.id)}
-                    className={`min-h-[44px] px-4 py-2.5 rounded-xl border text-xs font-semibold transition-all duration-200 flex items-center gap-2 cursor-pointer ${
+                    className={`min-h-[44px] px-4 py-2.5 rounded-xl border text-xs font-semibold transition-all duration-200 flex items-center gap-2 cursor-pointer disabled:opacity-50 ${
                       isSelected
                         ? "border-vi bg-vi/25 text-tx font-bold ring-1 ring-vi shadow-md shadow-vi/15"
                         : "border-line bg-s2/70 text-mu hover:border-vi/50 hover:bg-s2 hover:text-tx"
@@ -873,6 +985,7 @@ export default function AwakeningPage() {
             <input
               type="text"
               value={customInputText}
+              disabled={isReadOnly}
               onChange={(e) => setCustomInputText(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
@@ -881,12 +994,13 @@ export default function AwakeningPage() {
                 }
               }}
               placeholder={placeholder}
-              className="flex-1 bg-s2 border border-line rounded-xl p-3.5 text-xs text-tx focus:outline-none focus:border-vi"
+              className="flex-1 bg-s2 border border-line rounded-xl p-3.5 text-xs text-tx focus:outline-none focus:border-vi disabled:opacity-50"
             />
             <button
               type="button"
+              disabled={isReadOnly}
               onClick={() => handleAddCustomOption(currentQuestion.id)}
-              className="btn text-xs py-3.5 px-5 flex-none cursor-pointer"
+              className="btn text-xs py-3.5 px-5 flex-none cursor-pointer disabled:opacity-50"
             >
               {dict.awakening.addBtn}
             </button>
@@ -904,8 +1018,9 @@ export default function AwakeningPage() {
                     <span>{item}</span>
                     <button
                       type="button"
+                      disabled={isReadOnly}
                       onClick={() => handleRemoveCustomOption(currentQuestion.id, item)}
-                      className="text-mu hover:text-tx text-sm font-bold cursor-pointer"
+                      className="text-mu hover:text-tx text-sm font-bold cursor-pointer disabled:opacity-50"
                     >
                       ×
                     </button>
@@ -927,12 +1042,13 @@ export default function AwakeningPage() {
         <div className="space-y-2 max-w-[640px] mx-auto text-left">
           <textarea
             value={textVal}
+            disabled={isReadOnly}
             onChange={(e) =>
               handleAnswerChange(currentQuestion.id, e.target.value.slice(0, maxLen))
             }
             placeholder={placeholder}
             rows={4}
-            className="w-full bg-s2 border border-line rounded-xl p-3.5 text-sm text-tx focus:outline-none focus:border-vi resize-none"
+            className="w-full bg-s2 border border-line rounded-xl p-3.5 text-sm text-tx focus:outline-none focus:border-vi resize-none disabled:opacity-50"
             maxLength={maxLen}
           />
           <div className="text-right text-xs text-mu">
@@ -961,13 +1077,37 @@ export default function AwakeningPage() {
     <div
       className="h-screen w-screen overflow-hidden flex flex-col bg-ink text-tx relative z-0 select-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
       onKeyDown={(e) => {
-        if (e.key === "Enter" && canGoNext && !checkingNickname) {
+        if (e.key === "Enter" && canGoNext && !checkingNickname && !isReadOnly) {
           e.preventDefault();
           handleNextSubStep();
         }
       }}
     >
       <Starfield />
+
+      {/* Multi-Tab Read-Only Lease Banner */}
+      {isReadOnly && (
+        <div
+          aria-live="polite"
+          className="relative z-30 bg-amber-500/15 border-b border-amber-500/40 px-4 py-2.5 text-amber-200 text-xs flex flex-col sm:flex-row items-center justify-between gap-2 shadow-lg backdrop-blur-md"
+        >
+          <div className="flex items-center gap-2">
+            <Lock className="h-4 w-4 text-amber-400 shrink-0" />
+            <div>
+              <span className="font-semibold">{dict.awakening.multiTabLeaseNoticeTitle}. </span>
+              <span className="text-amber-300/80">{dict.awakening.multiTabLeaseNoticeSubtitle}</span>
+            </div>
+          </div>
+          <button
+            ref={leaseBtnRef}
+            type="button"
+            onClick={handleStealLease}
+            className="rounded-lg bg-amber-500 hover:bg-amber-400 text-ink font-semibold px-3 py-1.5 text-xs transition cursor-pointer shrink-0"
+          >
+            {dict.awakening.continueHereBtn}
+          </button>
+        </div>
+      )}
 
       <header className="relative z-20 flex flex-col justify-center px-4 md:px-8 border-b border-line/40 bg-ink/80 backdrop-blur-md flex-none py-2 space-y-1 max-h-[80px]">
         <div className="flex items-center justify-between gap-4">
@@ -1000,7 +1140,7 @@ export default function AwakeningPage() {
           </div>
 
           <div className="flex items-center gap-2 flex-none">
-            {/* User Email & Logout Badge */}
+            {/* User Email & Logout Badge (Always enabled even in read-only mode) */}
             {user && (
               <div className="flex items-center gap-2 text-[11px] text-tx-muted bg-s2/80 px-2.5 py-1 rounded-lg border border-line">
                 <span className="hidden sm:inline">{dict.auth.headerUserEmail}:</span>
@@ -1019,8 +1159,12 @@ export default function AwakeningPage() {
             <div className="flex items-center gap-1 bg-s2/80 p-0.5 rounded-lg border border-line">
               <button
                 type="button"
-                onClick={() => setLanguage("ru")}
-                className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors cursor-pointer ${
+                disabled={isReadOnly}
+                onClick={() => {
+                  if (isReadOnly) return;
+                  setLanguage("ru");
+                }}
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors cursor-pointer disabled:opacity-50 ${
                   lang === "ru" ? "bg-vi text-white" : "text-mu hover:text-tx"
                 }`}
               >
@@ -1028,8 +1172,12 @@ export default function AwakeningPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setLanguage("en")}
-                className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors cursor-pointer ${
+                disabled={isReadOnly}
+                onClick={() => {
+                  if (isReadOnly) return;
+                  setLanguage("en");
+                }}
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-colors cursor-pointer disabled:opacity-50 ${
                   lang === "en" ? "bg-vi text-white" : "text-mu hover:text-tx"
                 }`}
               >
@@ -1083,7 +1231,7 @@ export default function AwakeningPage() {
             <button
               type="button"
               onClick={handlePrevSubStep}
-              disabled={step === 1 && subStep === 0}
+              disabled={(step === 1 && subStep === 0) || isReadOnly}
               className="btn-ghost text-xs py-2.5 px-4 flex items-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
             >
               <ArrowLeft size={16} />
@@ -1095,7 +1243,8 @@ export default function AwakeningPage() {
                 <button
                   type="button"
                   onClick={handleSkipEntireStep}
-                  className="btn-ghost text-xs py-2.5 px-3 flex items-center gap-1.5 text-mu hover:text-tx cursor-pointer"
+                  disabled={isReadOnly}
+                  className="btn-ghost text-xs py-2.5 px-3 flex items-center gap-1.5 text-mu hover:text-tx cursor-pointer disabled:opacity-30"
                 >
                   <SkipForward size={14} />
                   <span className="hidden sm:inline">
@@ -1108,7 +1257,8 @@ export default function AwakeningPage() {
                 <button
                   type="button"
                   onClick={handleSkipOptionalInStep3}
-                  className="btn-ghost text-xs py-2.5 px-3 flex items-center gap-1.5 text-mu hover:text-tx cursor-pointer"
+                  disabled={isReadOnly}
+                  className="btn-ghost text-xs py-2.5 px-3 flex items-center gap-1.5 text-mu hover:text-tx cursor-pointer disabled:opacity-30"
                 >
                   <SkipForward size={14} />
                   <span className="hidden sm:inline">
@@ -1121,7 +1271,8 @@ export default function AwakeningPage() {
                 <button
                   type="button"
                   onClick={handleSkipSubStep}
-                  className="btn-ghost text-xs py-2.5 px-4 text-mu hover:text-tx cursor-pointer"
+                  disabled={isReadOnly}
+                  className="btn-ghost text-xs py-2.5 px-4 text-mu hover:text-tx cursor-pointer disabled:opacity-30"
                 >
                   {dict.awakening.skipQuestion}
                 </button>
@@ -1130,7 +1281,7 @@ export default function AwakeningPage() {
               <button
                 type="button"
                 onClick={handleNextSubStep}
-                disabled={!canGoNext || checkingNickname}
+                disabled={!canGoNext || checkingNickname || isReadOnly}
                 className="btn text-xs py-2.5 px-5 flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-vi/20 cursor-pointer"
               >
                 {checkingNickname ? (
