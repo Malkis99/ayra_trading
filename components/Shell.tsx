@@ -18,6 +18,7 @@ import { JournalProvider } from "@/lib/journal/context";
 import { AuthProvider, useAuth } from "@/lib/auth/auth-context";
 import { useApp } from "@/lib/context";
 import { sanitizeRedirectUrl } from "@/lib/auth/redirect-whitelist";
+import { AppStorage } from "@/lib/storage";
 import { NicknameConflictModal } from "./NicknameConflictModal";
 import { UserCheck } from "lucide-react";
 
@@ -64,7 +65,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     // 3. If logged in, but cloud profile has no nickname yet
     if (user && profile && !profile.nickname) {
       try {
-        const saved = localStorage.getItem("ayra_demo_v1");
+        const saved = AppStorage.getItem("ayra_demo_v1");
         if (saved) {
           const parsed = JSON.parse(saved);
           const localNick = parsed.name?.trim();

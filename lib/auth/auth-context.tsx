@@ -5,6 +5,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isE2EMockEnabled, getSupabaseEnv } from "@/lib/supabase/config";
 import { mapSupabaseError, type SanitizedErrorInfo } from "./error-sanitizer";
 import { authTabChannel } from "./tab-channel";
+import { AppStorage } from "@/lib/storage";
 import {
   getMockState,
   setMockState,
@@ -71,11 +72,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const setGuestDismissed = (val: boolean) => {
     setGuestDismissedState(val);
-    if (typeof window !== "undefined") {
-      try {
-        localStorage.setItem("ayra_guest_dismissed", val ? "1" : "0");
-      } catch {}
-    }
+    try {
+      AppStorage.setItem("ayra_guest_dismissed", val ? "1" : "0");
+    } catch {}
   };
 
   const dismissLateSignInNotice = () => {
@@ -83,12 +82,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const d = localStorage.getItem("ayra_guest_dismissed");
-        if (d === "1") setGuestDismissedState(true);
-      } catch {}
-    }
+    AppStorage.setUserId(user ? user.id : null);
+  }, [user]);
+
+  useEffect(() => {
+    try {
+      const d = AppStorage.getItem("ayra_guest_dismissed");
+      if (d === "1") setGuestDismissedState(true);
+    } catch {}
   }, []);
 
   const loadProfile = useCallback(

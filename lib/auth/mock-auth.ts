@@ -17,6 +17,8 @@ export interface MockProfile {
   updated_at: string;
 }
 
+import { AppStorage } from "@/lib/storage";
+
 const TAKEN_NICKNAMES = new Set(["taken_nick", "existing_trader", "admin", "ayra_official"]);
 const MOCK_STORAGE_KEY = "ayra_mock_auth_v1";
 
@@ -25,7 +27,7 @@ export function getMockState(): { user: MockUser | null; profile: MockProfile | 
     return { user: null, profile: null };
   }
   try {
-    const data = localStorage.getItem(MOCK_STORAGE_KEY);
+    const data = AppStorage.getItem(MOCK_STORAGE_KEY);
     if (!data) return { user: null, profile: null };
     return JSON.parse(data);
   } catch {
@@ -37,9 +39,9 @@ export function setMockState(user: MockUser | null, profile: MockProfile | null)
   if (typeof window === "undefined") return;
   try {
     if (!user) {
-      localStorage.removeItem(MOCK_STORAGE_KEY);
+      AppStorage.removeItem(MOCK_STORAGE_KEY);
     } else {
-      localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify({ user, profile }));
+      AppStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify({ user, profile }));
     }
   } catch {
     // Ignore storage errors

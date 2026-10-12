@@ -9,7 +9,8 @@ import {
   StorageUsage,
   JournalRepository,
 } from "./types";
-import { defaultAttachmentRepository } from "./attachments/indexeddb-repository";
+import { defaultAttachmentRepository, IndexedDBAttachmentRepository } from "./attachments/indexeddb-repository";
+import { AppStorage, parseKey } from "@/lib/storage";
 
 const JOURNAL_STORAGE_KEY = "ayra_journal_v1";
 const CURRENT_JOURNAL_SCHEMA_VERSION = 5;
@@ -41,9 +42,11 @@ export const INITIAL_JOURNAL_DATA: JournalStorageData = {
 
 export class LocalStorageJournalRepository implements JournalRepository {
   private key: string;
+  private userId?: string | null;
 
-  constructor(key = JOURNAL_STORAGE_KEY) {
+  constructor(key = JOURNAL_STORAGE_KEY, userId?: string | null) {
     this.key = key;
+    this.userId = userId;
   }
 
   private loadData(): JournalStorageData {
@@ -52,7 +55,7 @@ export class LocalStorageJournalRepository implements JournalRepository {
     }
 
     try {
-      const raw = localStorage.getItem(this.key);
+      const raw = AppStorage.getItem(this.key, this.userId);
       if (!raw) return INITIAL_JOURNAL_DATA;
 
       const parsed = JSON.parse(raw);
@@ -60,7 +63,7 @@ export class LocalStorageJournalRepository implements JournalRepository {
 
       return this.migrate(parsed);
     } catch (e) {
-      console.error("Failed to load journal data from localStorage, falling back to initial", e);
+      console.error("Failed to load journal data from storage, falling back to initial", e);
       return INITIAL_JOURNAL_DATA;
     }
   }
@@ -69,9 +72,9 @@ export class LocalStorageJournalRepository implements JournalRepository {
     if (typeof window === "undefined") return;
 
     try {
-      localStorage.setItem(this.key, JSON.stringify(data));
+      AppStorage.setItem(this.key, JSON.stringify(data), this.userId);
     } catch (e) {
-      console.error("Failed to save journal data to localStorage", e);
+      console.error("Failed to save journal data to storage", e);
     }
   }
 
@@ -331,7 +334,8 @@ export class LocalStorageJournalRepository implements JournalRepository {
 
     // Asynchronously delete attachments for this trade in background
     if (typeof window !== "undefined") {
-      defaultAttachmentRepository.deleteAttachmentsByTradeId(id).catch((err) => {
+      const attRepo = new IndexedDBAttachmentRepository(this.userId);
+      attRepo.deleteAttachmentsByTradeId(id).catch((err) => {
         console.error(`Failed to delete attachments for deleted trade ${id}:`, err);
       });
     }
@@ -421,31 +425,7 @@ export class LocalStorageJournalRepository implements JournalRepository {
   }
 
   getStorageUsage(): StorageUsage {
-    if (typeof window === "undefined") {
-      return { bytesUsed: 0, bytesLimit: 5 * 1024 * 1024, percentage: 0, isWarning: false };
-    }
-
-    let totalBytes = 0;
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key) {
-        const val = localStorage.getItem(key);
-        if (val) {
-          totalBytes += key.length + val.length;
-        }
-      }
-    }
-
-    // Default localStorage limit is usually ~5MB (5,242,880 bytes)
-    const limit = 5 * 1024 * 1024;
-    const percentage = (totalBytes / limit) * 100;
-
-    return {
-      bytesUsed: totalBytes,
-      bytesLimit: limit,
-      percentage,
-      isWarning: percentage >= STORAGE_WARN_THRESHOLD * 100,
-    };
+    return AppStorage.getStorageUsage(this.userId);
   }
 }
 

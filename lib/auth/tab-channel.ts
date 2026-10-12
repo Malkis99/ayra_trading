@@ -8,6 +8,8 @@ export interface AuthChannelMessage {
   timestamp: number;
 }
 
+import { AppStorage } from "@/lib/storage";
+
 const CHANNEL_NAME = "ayra-auth";
 const STORAGE_KEY = "ayra_auth_event";
 
@@ -94,7 +96,7 @@ export class AuthTabChannel {
     // Always write to storage key for storage event fallback
     if (typeof window !== "undefined") {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(msg));
+        AppStorage.setItem(STORAGE_KEY, JSON.stringify(msg));
       } catch {}
     }
   }

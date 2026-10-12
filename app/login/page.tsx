@@ -9,6 +9,7 @@ import { resolvePostLoginRoute } from "@/lib/auth/routing";
 import { authTabChannel } from "@/lib/auth/tab-channel";
 import { sanitizeRedirectUrl, buildSafeSiteUrlRedirect } from "@/lib/auth/redirect-whitelist";
 import { type SanitizedErrorInfo } from "@/lib/auth/error-sanitizer";
+import { AppStorage } from "@/lib/storage";
 import { Mail, KeyRound, ArrowRight, Check, AlertCircle, RefreshCw, Copy, ExternalLink, ChevronDown, Sparkles } from "lucide-react";
 
 export default function LoginPage() {
@@ -84,7 +85,7 @@ export default function LoginPage() {
     if (!u || routingExecutedRef.current) return;
     routingExecutedRef.current = true;
 
-    const guestStateRaw = typeof window !== "undefined" ? localStorage.getItem("ayra_demo_v1") : null;
+    const guestStateRaw = typeof window !== "undefined" ? AppStorage.getItem("ayra_demo_v1") : null;
     const guestState = guestStateRaw ? JSON.parse(guestStateRaw) : null;
 
     const result = await resolvePostLoginRoute({

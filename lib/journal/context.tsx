@@ -14,6 +14,7 @@ import {
 } from "./types";
 import { defaultJournalRepository } from "./repository";
 import { defaultAttachmentRepository } from "./attachments/indexeddb-repository";
+import { AppStorage } from "@/lib/storage";
 
 interface JournalContextType {
   primaryPropAccountId: string | null | undefined;
@@ -99,8 +100,8 @@ export function JournalProvider({
   useEffect(() => {
     refresh();
     if (typeof window !== "undefined") {
-      setLastSelectedAccountIdState(localStorage.getItem(LAST_ACCOUNT_KEY));
-      setLastSelectedInstrumentState(localStorage.getItem(LAST_INSTRUMENT_KEY));
+      setLastSelectedAccountIdState(AppStorage.getItem(LAST_ACCOUNT_KEY));
+      setLastSelectedInstrumentState(AppStorage.getItem(LAST_INSTRUMENT_KEY));
 
       // Quiet background cleanup of orphan attachments
       const currentTrades = repository.getTrades();
@@ -140,14 +141,14 @@ export function JournalProvider({
   const setLastSelectedAccountId = useCallback((id: string) => {
     setLastSelectedAccountIdState(id);
     if (typeof window !== "undefined") {
-      localStorage.setItem(LAST_ACCOUNT_KEY, id);
+      AppStorage.setItem(LAST_ACCOUNT_KEY, id);
     }
   }, []);
 
   const setLastSelectedInstrument = useCallback((inst: string) => {
     setLastSelectedInstrumentState(inst);
     if (typeof window !== "undefined") {
-      localStorage.setItem(LAST_INSTRUMENT_KEY, inst);
+      AppStorage.setItem(LAST_INSTRUMENT_KEY, inst);
     }
   }, []);
 

@@ -29,6 +29,7 @@ import {
 import { ITEMS, FRAMES, TITLES, BACKGROUNDS } from "@/lib/items";
 import { AvatarAppearance, validateAvatarAppearance } from "@/lib/avatar";
 import { OnboardingState, generateProgram } from "@/lib/awakening";
+import { AppStorage } from "@/lib/storage";
 
 const STORAGE_KEY = "ayra_demo_v1";
 
@@ -107,12 +108,12 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [previewItem, setPreviewItem] = useState<number | null>(null);
   const [wardrobeFilter, setWardrobeFilter] = useState<string>("all");
 
-  // Load from localStorage on client mount to avoid SSR hydration mismatch, with safety timer fallback
+  // Load from AppStorage on client mount to avoid SSR hydration mismatch, with safety timer fallback
   useEffect(() => {
     let timer: NodeJS.Timeout;
 
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = AppStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         const resetted = checkAndApplyDateResets(parsed, new Date());
@@ -135,11 +136,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     return () => clearTimeout(timer);
   }, []);
 
-  // Save to localStorage whenever state changes after mount
+  // Save to AppStorage whenever state changes after mount
   useEffect(() => {
     if (!isLoaded) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(gameState));
+      AppStorage.setItem(STORAGE_KEY, JSON.stringify(gameState));
     } catch {
       // ignore storage errors
     }

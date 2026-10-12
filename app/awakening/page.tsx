@@ -32,6 +32,7 @@ import {
   HEARTBEAT_INTERVAL_MS,
 } from "@/lib/auth/awakening-lease";
 import { currentTabId, authTabChannel } from "@/lib/auth/tab-channel";
+import { AppStorage } from "@/lib/storage";
 import { ArrowLeft, ArrowRight, SkipForward, Check, Globe, Sparkles, FastForward, Loader2, AlertCircle, LogOut, Lock } from "lucide-react";
 import { formatString, formatNumber } from "@/lib/i18n";
 
@@ -300,9 +301,9 @@ export default function AwakeningPage() {
     stealLease(currentTabId);
     setIsReadOnly(false);
 
-    // Re-read latest onboarding state from localStorage before continuing
+    // Re-read latest onboarding state from AppStorage before continuing
     try {
-      const saved = localStorage.getItem("ayra_demo_v1");
+      const saved = AppStorage.getItem("ayra_demo_v1");
       if (saved) {
         const current = JSON.parse(saved);
         if (current.onboarding) {
@@ -516,7 +517,7 @@ export default function AwakeningPage() {
     completeOnboarding();
 
     try {
-      const saved = localStorage.getItem("ayra_demo_v1");
+      const saved = AppStorage.getItem("ayra_demo_v1");
       const current = saved ? JSON.parse(saved) : {};
       current.onboarding = {
         ...current.onboarding,
@@ -528,7 +529,7 @@ export default function AwakeningPage() {
       if (nick) {
         current.name = nick;
       }
-      localStorage.setItem("ayra_demo_v1", JSON.stringify(current));
+      AppStorage.setItem("ayra_demo_v1", JSON.stringify(current));
     } catch {
       // ignore
     }
