@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useJournal } from "@/lib/journal/context";
+import { useAuth } from "@/lib/auth/auth-context";
 import { CharacterStage } from "@/components/CharacterStage";
 import { TabHeader } from "@/components/TabHeader";
 import { Sparkline } from "@/components/Sparkline";
@@ -51,6 +52,7 @@ import {
 
 export default function ProfilePage() {
   const { dict, lang, showToast, openAddModal } = useApp();
+  const { isGuest } = useAuth();
   const {
     gameState,
     previewItem,
@@ -398,15 +400,23 @@ export default function ProfilePage() {
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="lvbadge flex-none">{gameState.level}</div>
                   <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <b className="font-serif text-xl font-semibold text-tx truncate">
                         {gameState.name}
                       </b>
+                      {isGuest && (
+                        <span
+                          className="flex-none rounded bg-vi/20 px-1.5 py-0.5 text-[9px] font-bold text-vi leading-none shrink-0"
+                          aria-label={dict.account.guestBadgeLabel}
+                        >
+                          {dict.account.guestBadgeLabel}
+                        </span>
+                      )}
                       <button
                         type="button"
                         onClick={openEditModal}
                         aria-label={dict.profile.editBtn}
-                        className="p-1 text-mu hover:text-tx transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
+                        className="p-1 text-mu hover:text-tx transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi cursor-pointer"
                       >
                         <Pencil size={14} />
                       </button>

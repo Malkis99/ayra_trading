@@ -15,6 +15,7 @@ import {
 import { defaultJournalRepository } from "./repository";
 import { defaultAttachmentRepository } from "./attachments/indexeddb-repository";
 import { AppStorage } from "@/lib/storage";
+import { spaceTabChannel } from "@/lib/auth/space-channel";
 
 interface JournalContextType {
   primaryPropAccountId: string | null | undefined;
@@ -97,6 +98,34 @@ export function JournalProvider({
     setStorageUsage(repository.getStorageUsage());
   }, [repository]);
 
+  // Register flush handler to execute pending soft deletions for current space before switching
+  useEffect(() => {
+    const unregister = AppStorage.registerFlushHandler(() => {
+      pendingDeletionsRef.current.forEach(({ timer, account }) => {
+        clearTimeout(timer);
+        try {
+          repository.deleteAccount(account.id);
+        } catch {}
+      });
+      pendingDeletionsRef.current.clear();
+    });
+    return unregister;
+  }, [repository]);
+
+  // Subscribe to space changes across tabs/locally
+  useEffect(() => {
+    const unsubscribe = spaceTabChannel.subscribe(() => {
+      pendingDeletionsRef.current.forEach(({ timer }) => clearTimeout(timer));
+      pendingDeletionsRef.current.clear();
+      refresh();
+      if (typeof window !== "undefined") {
+        setLastSelectedAccountIdState(AppStorage.getItem(LAST_ACCOUNT_KEY));
+        setLastSelectedInstrumentState(AppStorage.getItem(LAST_INSTRUMENT_KEY));
+      }
+    });
+    return () => unsubscribe();
+  }, [refresh]);
+
   useEffect(() => {
     refresh();
     if (typeof window !== "undefined") {
@@ -141,14 +170,16 @@ export function JournalProvider({
   const setLastSelectedAccountId = useCallback((id: string) => {
     setLastSelectedAccountIdState(id);
     if (typeof window !== "undefined") {
-      AppStorage.setItem(LAST_ACCOUNT_KEY, id);
+      const activeSpaceId = AppStorage.getActiveSpaceId();
+      AppStorage.guardedSetItem(LAST_ACCOUNT_KEY, id, activeSpaceId);
     }
   }, []);
 
   const setLastSelectedInstrument = useCallback((inst: string) => {
     setLastSelectedInstrumentState(inst);
     if (typeof window !== "undefined") {
-      AppStorage.setItem(LAST_INSTRUMENT_KEY, inst);
+      const activeSpaceId = AppStorage.getActiveSpaceId();
+      AppStorage.guardedSetItem(LAST_INSTRUMENT_KEY, inst, activeSpaceId);
     }
   }, []);
 

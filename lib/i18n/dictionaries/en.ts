@@ -1,6 +1,9 @@
 import { Dictionary } from "../types";
 
 export const en: Dictionary = {
+  common: {
+    copied: "Copied to clipboard",
+  },
   nav: {
     home: "Home",
     journal: "Journal",
@@ -1754,6 +1757,10 @@ export const en: Dictionary = {
     siteUrlMismatchLink: "Go to main site",
     signedInBanner: "You signed in",
     signedInContinue: "Continue",
+    spaceChangedBanner: "Account changed in another tab",
+    spaceChangedUpdateBtn: "Update",
+    flushErrorTitle: "Could not save form data",
+    copyTextBtn: "Copy text",
     headerUserEmail: "Signed in as",
     multiTabNoticeTitle: "Signed in in another tab",
     multiTabNoticeSubtitle: "Continue working there or switch session to this tab.",
@@ -1797,6 +1804,7 @@ export const en: Dictionary = {
     deleteDeviceSoon: "Clear device data (coming soon)",
     localDataNotice: "Data is currently stored on this device",
     guestBadge: "Guest",
+    guestBadgeLabel: "Guest",
     signInToCloudBtn: "Sign in to save data in cloud",
   },
   legal: {

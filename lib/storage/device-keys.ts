@@ -10,6 +10,8 @@ export const DEVICE_KEYS = [
   "ayra_guest_banner_dismissed",
   "ayra_awakening_lease",
   "ayra_auth_event",
+  "ayra_space_event",
+  "ayra_had_session",
   "ayra_mock_auth_v1",
 ] as const;
 

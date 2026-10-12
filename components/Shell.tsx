@@ -20,7 +20,49 @@ import { useApp } from "@/lib/context";
 import { sanitizeRedirectUrl } from "@/lib/auth/redirect-whitelist";
 import { AppStorage } from "@/lib/storage";
 import { NicknameConflictModal } from "./NicknameConflictModal";
+import { SpaceChangeBanner } from "./SpaceChangeBanner";
 import { UserCheck } from "lucide-react";
+
+function ShellSkeleton() {
+  return (
+    <div className="flex h-screen overflow-hidden bg-ink text-tx">
+      {/* Sidebar Skeleton */}
+      <aside className="hidden h-full w-[220px] flex-col border-r border-line bg-gradient-to-b from-[#17161e] to-[#121117] p-3 md:flex animate-pulse">
+        <div className="px-2.5 pb-3.5 pt-1.5 font-serif text-xl font-semibold tracking-widest text-tx/30">
+          AYRA<b className="text-go/30">·</b>
+        </div>
+        <div className="flex flex-col gap-2 pt-2">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="h-9 w-full rounded-xl bg-s2/50" />
+          ))}
+        </div>
+        <div className="flex-1" />
+        <div className="h-16 w-full rounded-xl bg-s2/50" />
+      </aside>
+
+      {/* Main View Area Skeleton */}
+      <div className="relative flex flex-1 flex-col min-w-0 h-full overflow-hidden">
+        {/* Topbar Skeleton */}
+        <header className="flex h-14 items-center justify-between border-b border-line bg-[#16151d] px-4 md:px-6 animate-pulse">
+          <div className="h-6 w-24 rounded bg-s2/50" />
+          <div className="flex items-center gap-2">
+            <div className="h-7 w-16 rounded-lg bg-s2/50" />
+            <div className="h-7 w-16 rounded-lg bg-s2/50" />
+          </div>
+        </header>
+
+        {/* Content Skeleton */}
+        <main className="relative z-10 flex-1 overflow-y-auto p-4 md:p-6 space-y-4 animate-pulse">
+          <div className="h-28 w-full rounded-2xl bg-s2/40 border border-line/40" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="h-40 rounded-2xl bg-s2/30 border border-line/30" />
+            <div className="h-40 rounded-2xl bg-s2/30 border border-line/30" />
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
 
 function ShellContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -118,16 +160,16 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  if (!isLoaded || (authLoading && !guestDismissed)) {
-    return (
-      <div className="flex h-screen w-full items-center justify-center bg-ink text-tx">
-        <div className="font-serif text-xl font-bold tracking-wider text-tx animate-pulse">AYRA</div>
-      </div>
-    );
+  if (
+    !isLoaded ||
+    (authLoading && (AppStorage.hadPreviousSession() || !guestDismissed))
+  ) {
+    return <ShellSkeleton />;
   }
 
   return (
     <div className="flex h-screen overflow-hidden bg-ink text-tx">
+      <SpaceChangeBanner />
       {/* Late Sign-In Notice Banner */}
       {lateSignInNotice && (
         <div className="fixed top-4 right-4 z-50 flex items-center gap-3 rounded-xl border border-violet-glow bg-card/95 p-3.5 shadow-2xl backdrop-blur-md text-xs text-tx">

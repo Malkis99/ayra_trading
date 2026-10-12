@@ -31,6 +31,7 @@ import { predictPreTradeUsage, getPhaseTrades, calculatePropMetrics } from "@/li
 import { evaluatePropToastAlert } from "@/lib/journal/prop-toast";
 import { recordLoggedTrade } from "@/lib/game";
 import { AttachmentManager } from "@/components/journal/AttachmentManager";
+import { dirtyFormRegistry } from "@/lib/auth/space-channel";
 
 interface AddTradeModalProps {
   isOpen: boolean;
@@ -193,6 +194,31 @@ export function AddTradeModal({ isOpen, onClose, initialTrade }: AddTradeModalPr
     setErrors({});
     setIsDuplicateWarning(false);
   }, [isOpen, initialTrade]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      dirtyFormRegistry.unregisterForm("add_trade_modal");
+      return;
+    }
+
+    const isDirty = Boolean(
+      instrument.trim() ||
+        pnlInput.trim() ||
+        rInput.trim() ||
+        notes.trim() ||
+        entryReason.trim()
+    );
+
+    dirtyFormRegistry.updateForm(
+      "add_trade_modal",
+      isDirty,
+      async () => {
+        handleSave(false);
+        return { success: true };
+      },
+      () => `${instrument} ${pnlInput} ${rInput} ${notes}`
+    );
+  }, [isOpen, instrument, pnlInput, rInput, notes, entryReason]);
 
   // Check duplicate warning whenever key fields change
   useEffect(() => {

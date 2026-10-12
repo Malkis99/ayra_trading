@@ -5,7 +5,8 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isE2EMockEnabled, getSupabaseEnv } from "@/lib/supabase/config";
 import { mapSupabaseError, type SanitizedErrorInfo } from "./error-sanitizer";
 import { authTabChannel } from "./tab-channel";
-import { AppStorage } from "@/lib/storage";
+import { spaceTabChannel } from "./space-channel";
+import { AppStorage, GUEST_SPACE_ID } from "@/lib/storage";
 import {
   getMockState,
   setMockState,
@@ -37,6 +38,7 @@ export interface AuthUser {
 interface AuthContextType {
   user: AuthUser | null;
   profile: UserProfile | null;
+  activeSpaceId: string;
   isLoading: boolean;
   isGuest: boolean;
   isConfigured: boolean;
@@ -81,9 +83,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLateSignInNotice(false);
   };
 
+  const activeSpaceId = AppStorage.getSpaceId(user ? user.id : null);
+
+  const switchSpaceTo = useCallback(async (newUserId: string | null) => {
+    const oldSpaceId = AppStorage.getActiveSpaceId();
+    const newSpaceId = newUserId ? `account:${newUserId}` : GUEST_SPACE_ID;
+
+    if (oldSpaceId !== newSpaceId) {
+      await AppStorage.flushSpace(oldSpaceId);
+      AppStorage.setUserId(newUserId);
+      spaceTabChannel.broadcastSpaceChange(oldSpaceId, newSpaceId);
+    } else {
+      AppStorage.setUserId(newUserId);
+    }
+  }, []);
+
   useEffect(() => {
-    AppStorage.setUserId(user ? user.id : null);
-  }, [user]);
+    switchSpaceTo(user ? user.id : null);
+  }, [user, switchSpaceTo]);
 
   useEffect(() => {
     try {
@@ -350,12 +367,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    const oldSpaceId = AppStorage.getActiveSpaceId();
+    await AppStorage.flushSpace(oldSpaceId);
+
     authTabChannel.broadcast("AUTH_SIGNED_OUT");
 
     if (mockMode) {
       setMockState(null, null);
       setUser(null);
       setProfile(null);
+      AppStorage.setUserId(null);
+      spaceTabChannel.broadcastSpaceChange(oldSpaceId, GUEST_SPACE_ID);
       return;
     }
 
@@ -365,6 +387,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     setUser(null);
     setProfile(null);
+    AppStorage.setUserId(null);
+    spaceTabChannel.broadcastSpaceChange(oldSpaceId, GUEST_SPACE_ID);
   };
 
   const checkNicknameAvailable = async (nickname: string): Promise<boolean> => {
@@ -452,6 +476,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         profile,
+        activeSpaceId,
         isLoading,
         isGuest: !user,
         isConfigured: envInfo.isConfigured || mockMode,

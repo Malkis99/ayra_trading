@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
+import { useAuth } from "@/lib/auth/auth-context";
 import { Figure } from "@/components/Figure";
 import { xpForNextLevel } from "@/lib/game";
 import { FRAMES, TITLES } from "@/lib/items";
@@ -23,6 +24,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const { dict } = useApp();
   const { gameState } = useGame();
+  const { isGuest } = useAuth();
 
   const navItems = [
     { href: "/", label: dict.nav.home, icon: Home },
@@ -107,9 +109,19 @@ export function Sidebar() {
             <Figure equipment={gameState.equipment} width={32} height={38} />
           </div>
           <div className="flex min-w-0 flex-col gap-0.5 w-full">
-            <span className="truncate text-xs font-semibold text-tx">
-              {gameState.name}
-            </span>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="truncate text-xs font-semibold text-tx">
+                {gameState.name}
+              </span>
+              {isGuest && (
+                <span
+                  className="flex-none rounded bg-vi/20 px-1.5 py-0.5 text-[9px] font-bold text-vi leading-none shrink-0"
+                  aria-label={dict.account.guestBadgeLabel}
+                >
+                  {dict.account.guestBadgeLabel}
+                </span>
+              )}
+            </div>
             <span className="text-[11px] text-mu truncate">
               {dict.topbar.level} {gameState.level}
               {titleName ? ` · ${titleName}` : ` · ${dict.titles.titleNovice}`}
