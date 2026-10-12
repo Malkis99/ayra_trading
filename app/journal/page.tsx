@@ -27,6 +27,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { recordPropRulesSaved } from "@/lib/game";
 import { calculatePropMetrics, resolvePrimaryPropAccount } from "@/lib/journal/prop";
 import { evaluatePropToastAlert } from "@/lib/journal/prop-toast";
+import { AppStorage } from "@/lib/storage";
 
 export default function JournalPage() {
   const { dict, lang, showToast, setAddTradeModalOpen, openNoteModal } = useApp();
@@ -98,7 +99,7 @@ export default function JournalPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const savedUnit = localStorage.getItem("ayra_journal_unit") as "R" | "money" | "percent";
+      const savedUnit = AppStorage.getItem("ayra_journal_unit") as "R" | "money" | "percent";
       if (savedUnit && ["R", "money", "percent"].includes(savedUnit)) {
         setUnit(savedUnit);
       }
@@ -108,7 +109,7 @@ export default function JournalPage() {
   const handleUnitChange = (newUnit: "R" | "money" | "percent") => {
     setUnit(newUnit);
     if (typeof window !== "undefined") {
-      localStorage.setItem("ayra_journal_unit", newUnit);
+      AppStorage.setItem("ayra_journal_unit", newUnit);
     }
   };
 

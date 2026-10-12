@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { Language, Dictionary } from "@/lib/i18n/types";
 import { getDictionary } from "@/lib/i18n";
+import { AppStorage } from "@/lib/storage";
 
 interface AppContextType {
   lang: Language;
@@ -59,7 +60,7 @@ export function AppProvider({
   const setLanguage = (newLang: Language) => {
     setLangState(newLang);
     try {
-      localStorage.setItem("ayra_lang", newLang);
+      AppStorage.setItem("ayra_lang", newLang);
       document.cookie = `NEXT_LOCALE=${newLang}; path=/; max-age=31536000; SameSite=Lax`;
       document.documentElement.lang = newLang;
     } catch {
@@ -69,7 +70,7 @@ export function AppProvider({
 
   useEffect(() => {
     try {
-      const savedLang = localStorage.getItem("ayra_lang") as Language | null;
+      const savedLang = AppStorage.getItem("ayra_lang") as Language | null;
       if (savedLang && (savedLang === "ru" || savedLang === "en")) {
         setLangState(savedLang);
       }

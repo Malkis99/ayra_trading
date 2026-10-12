@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useApp } from "@/lib/context";
+import { AppStorage } from "@/lib/storage";
 import { Cloud, X, LogIn } from "lucide-react";
 
 export function GuestBanner() {
@@ -14,7 +15,7 @@ export function GuestBanner() {
 
   useEffect(() => {
     try {
-      const isDismissed = localStorage.getItem("ayra_guest_banner_dismissed") === "true";
+      const isDismissed = AppStorage.getItem("ayra_guest_banner_dismissed") === "true";
       setDismissed(isDismissed);
     } catch {
       setDismissed(false);
@@ -28,7 +29,7 @@ export function GuestBanner() {
   const handleDismiss = () => {
     setDismissed(true);
     try {
-      localStorage.setItem("ayra_guest_banner_dismissed", "true");
+      AppStorage.setItem("ayra_guest_banner_dismissed", "true");
     } catch {
       // ignore
     }

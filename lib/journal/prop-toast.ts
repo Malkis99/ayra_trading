@@ -9,6 +9,7 @@ import {
   getPropFirmDayKey,
   PropMetricsSummary,
 } from "./prop";
+import { AppStorage } from "@/lib/storage";
 
 const PROP_TOAST_STORAGE_KEY = "ayra_prop_toasts_v1";
 
@@ -22,7 +23,7 @@ const STATUS_ORDER: Record<PropLimitStatus, number> = {
 export function getPropToastLog(): PropToastLog {
   if (typeof window === "undefined") return {};
   try {
-    const raw = localStorage.getItem(PROP_TOAST_STORAGE_KEY);
+    const raw = AppStorage.getItem(PROP_TOAST_STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" ? parsed : {};
@@ -34,9 +35,9 @@ export function getPropToastLog(): PropToastLog {
 export function savePropToastLog(log: PropToastLog): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(PROP_TOAST_STORAGE_KEY, JSON.stringify(log));
+    AppStorage.setItem(PROP_TOAST_STORAGE_KEY, JSON.stringify(log));
   } catch (e) {
-    console.error("Failed to save prop toast log to localStorage", e);
+    console.error("Failed to save prop toast log to AppStorage", e);
   }
 }
 
