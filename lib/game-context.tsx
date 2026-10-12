@@ -30,6 +30,7 @@ import { ITEMS, FRAMES, TITLES, BACKGROUNDS } from "@/lib/items";
 import { AvatarAppearance, validateAvatarAppearance } from "@/lib/avatar";
 import { OnboardingState, generateProgram } from "@/lib/awakening";
 import { AppStorage } from "@/lib/storage";
+import { spaceTabChannel } from "@/lib/auth/space-channel";
 
 const STORAGE_KEY = "ayra_demo_v1";
 
@@ -108,10 +109,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [previewItem, setPreviewItem] = useState<number | null>(null);
   const [wardrobeFilter, setWardrobeFilter] = useState<string>("all");
 
-  // Load from AppStorage on client mount to avoid SSR hydration mismatch, with safety timer fallback
+  const gameStateRef = React.useRef(gameState);
   useEffect(() => {
-    let timer: NodeJS.Timeout;
+    gameStateRef.current = gameState;
+  }, [gameState]);
 
+  const isLoadedRef = React.useRef(isLoaded);
+  useEffect(() => {
+    isLoadedRef.current = isLoaded;
+  }, [isLoaded]);
+
+  const reloadGameState = useCallback(() => {
     try {
       const saved = AppStorage.getItem(STORAGE_KEY);
       if (saved) {
@@ -125,22 +133,55 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     } catch {
       setGameState(INITIAL_GAME_STATE);
     } finally {
+      setPreviewItem(null);
+      setWardrobeFilter("all");
       setIsLoaded(true);
     }
+  }, []);
 
-    // Safety fallback timer: force hydrated = true after 1.5s to prevent infinite whiteout or splash freeze
-    timer = setTimeout(() => {
+  // Register flush handler to write state to active space before switching
+  useEffect(() => {
+    const unregister = AppStorage.registerFlushHandler((targetSpaceId) => {
+      if (gameStateRef.current && isLoadedRef.current) {
+        AppStorage.guardedSetItem(
+          STORAGE_KEY,
+          JSON.stringify(gameStateRef.current),
+          targetSpaceId
+        );
+      }
+    });
+    return unregister;
+  }, []);
+
+  // Load from AppStorage on client mount with fallback timer
+  useEffect(() => {
+    reloadGameState();
+
+    const timer = setTimeout(() => {
       setIsLoaded(true);
     }, 1500);
 
     return () => clearTimeout(timer);
-  }, []);
+  }, [reloadGameState]);
 
-  // Save to AppStorage whenever state changes after mount
+  // Subscribe to cross-tab/local space changes
+  useEffect(() => {
+    const unsubscribe = spaceTabChannel.subscribe(() => {
+      reloadGameState();
+    });
+    return () => unsubscribe();
+  }, [reloadGameState]);
+
+  // Save to AppStorage whenever state changes after mount with space write guard
   useEffect(() => {
     if (!isLoaded) return;
     try {
-      AppStorage.setItem(STORAGE_KEY, JSON.stringify(gameState));
+      const activeSpaceId = AppStorage.getActiveSpaceId();
+      AppStorage.guardedSetItem(
+        STORAGE_KEY,
+        JSON.stringify(gameState),
+        activeSpaceId
+      );
     } catch {
       // ignore storage errors
     }

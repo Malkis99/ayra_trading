@@ -6,6 +6,7 @@ import { formatString } from "@/lib/i18n";
 import { useGame } from "@/lib/game-context";
 import { useJournal } from "@/lib/journal/context";
 import { Note, NoteTemplateKey, NoteLinks } from "@/lib/journal/types";
+import { dirtyFormRegistry } from "@/lib/auth/space-channel";
 import { Pin, Trash2, Archive, X, Plus } from "lucide-react";
 
 interface NoteModalProps {
@@ -71,6 +72,24 @@ export function NoteModal({
       cancelButtonRef.current.focus();
     }
   }, [confirmAction]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      dirtyFormRegistry.unregisterForm("note_modal");
+      return;
+    }
+
+    const isDirty = Boolean(title.trim() || body.trim() || tags.length > 0);
+    dirtyFormRegistry.updateForm(
+      "note_modal",
+      isDirty,
+      async () => {
+        handleSave();
+        return { success: true };
+      },
+      () => `${title}\n\n${body}`
+    );
+  }, [isOpen, title, body, tags]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

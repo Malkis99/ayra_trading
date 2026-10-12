@@ -232,6 +232,7 @@ describe("AppStorage & Device Keys Unit Tests", () => {
     });
 
     it("isolates attachments between User A and User B IndexedDB databases", async () => {
+      AppStorage.setUserId(USER_A_ID);
       const repoA = new IndexedDBAttachmentRepository(USER_A_ID);
       const repoB = new IndexedDBAttachmentRepository(USER_B_ID);
 
@@ -253,6 +254,7 @@ describe("AppStorage & Device Keys Unit Tests", () => {
       expect(itemsA[0].id).toBe(attA.id);
 
       // User B cannot see User A's attachment
+      AppStorage.setUserId(USER_B_ID);
       const itemsB = await repoB.getAttachmentsByTradeId("trade_a");
       expect(itemsB).toHaveLength(0);
     });

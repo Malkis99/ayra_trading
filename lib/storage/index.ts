@@ -3,6 +3,7 @@ import { DEVICE_KEYS, isDeviceKey } from "./device-keys";
 export const GUEST_SPACE_ID = "guest";
 export const CURRENT_STORAGE_SCHEMA_VERSION = 1;
 export const STORAGE_SCHEMA_KEY = "ayra_storage_schema_version";
+export const HAD_SESSION_KEY = "ayra_had_session";
 
 const UUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const MOCK_USER_ID_REGEX = /^(mock-user-id-[\w-]+|mock-[\w-]+)$/;
@@ -10,6 +11,8 @@ const MOCK_USER_ID_REGEX = /^(mock-user-id-[\w-]+|mock-[\w-]+)$/;
 export type StorageSpace =
   | { isGuest: true }
   | { isGuest: false; userId: string };
+
+type FlushHandler = (spaceId: string) => Promise<void> | void;
 
 /**
  * Validates userId format. Must be a valid UUID or mock user ID.
@@ -37,6 +40,16 @@ export function validateKeyName(keyName: string): void {
       `Invalid keyName: "${keyName}". Key names cannot contain colons or whitespace.`
     );
   }
+}
+
+/**
+ * Builds canonical space ID string: "guest" or "account:<userId>".
+ */
+export function getSpaceIdFromSpace(space: StorageSpace): string {
+  if (space.isGuest) {
+    return GUEST_SPACE_ID;
+  }
+  return `account:${space.userId}`;
 }
 
 /**
@@ -101,6 +114,7 @@ export function parseKey(key: string): ParsedKey {
 class AppStorageImpl {
   private activeUserId: string | null = null;
   private schemaVersionInitialized = false;
+  private flushHandlers: Set<FlushHandler> = new Set();
 
   constructor() {
     this.ensureSchemaVersion();
@@ -113,6 +127,7 @@ class AppStorageImpl {
     if (userId !== null && userId !== undefined && userId !== "") {
       validateUserId(userId);
       this.activeUserId = userId;
+      this.markSessionExisted(true);
     } else {
       this.activeUserId = null;
     }
@@ -135,6 +150,93 @@ class AppStorageImpl {
       return { isGuest: true };
     }
     return { isGuest: false, userId: uid };
+  }
+
+  /**
+   * Returns canonical space ID string ("guest" or "account:<userId>").
+   */
+  public getSpaceId(userIdOverride?: string | null): string {
+    const space = this.resolveSpace(userIdOverride);
+    return getSpaceIdFromSpace(space);
+  }
+
+  /**
+   * Returns current active space ID ("guest" or "account:<userId>").
+   */
+  public getActiveSpaceId(): string {
+    return this.getSpaceId();
+  }
+
+  /**
+   * Checks if a write action bound to boundSpaceId is allowed in the current active space.
+   */
+  public isWriteAllowed(boundSpaceId: string): boolean {
+    const currentSpaceId = this.getActiveSpaceId();
+    if (boundSpaceId !== currentSpaceId) {
+      console.warn(
+        `[AppStorage] Write dropped: operation was bound to space "${boundSpaceId}", but current active space is "${currentSpaceId}".`
+      );
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Registers a flush handler to be run before switching active spaces.
+   */
+  public registerFlushHandler(handler: FlushHandler): () => void {
+    this.flushHandlers.add(handler);
+    return () => {
+      this.flushHandlers.delete(handler);
+    };
+  }
+
+  /**
+   * Forcibly flushes all pending operations for the target space (defaults to active space).
+   */
+  public async flushSpace(targetSpaceId?: string): Promise<{ success: boolean; error?: any }> {
+    const spaceId = targetSpaceId || this.getActiveSpaceId();
+    try {
+      const handlers = Array.from(this.flushHandlers);
+      for (const handler of handlers) {
+        await handler(spaceId);
+      }
+      return { success: true };
+    } catch (error) {
+      console.error(`[AppStorage] Flush failed for space "${spaceId}":`, error);
+      return { success: false, error };
+    }
+  }
+
+  /**
+   * Writes item to localStorage if boundSpaceId matches current active space.
+   */
+  public guardedSetItem(
+    key: string,
+    value: string,
+    boundSpaceId: string,
+    userIdOverride?: string | null
+  ): boolean {
+    if (!this.isWriteAllowed(boundSpaceId)) {
+      return false;
+    }
+    this.setItem(key, value, userIdOverride);
+    return true;
+  }
+
+  /**
+   * Removes item from localStorage if boundSpaceId matches current active space.
+   */
+  public guardedRemoveItem(
+    key: string,
+    boundSpaceId: string,
+    userIdOverride?: string | null
+  ): boolean {
+    if (!this.isWriteAllowed(boundSpaceId)) {
+      return false;
+    }
+    this.removeItem(key, boundSpaceId === GUEST_SPACE_ID ? null : userIdOverride);
+    return true;
   }
 
   /**
@@ -272,6 +374,32 @@ class AppStorageImpl {
     }
     validateUserId(space.userId);
     return `ayra:${space.userId}:ayra_attachments_v1`;
+  }
+
+  /**
+   * Checks if an account session previously existed on this device.
+   */
+  public hadPreviousSession(): boolean {
+    if (typeof window === "undefined") return false;
+    try {
+      return localStorage.getItem(HAD_SESSION_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Sets or clears the hadPreviousSession flag.
+   */
+  public markSessionExisted(existed: boolean): void {
+    if (typeof window === "undefined") return;
+    try {
+      if (existed) {
+        localStorage.setItem(HAD_SESSION_KEY, "1");
+      } else {
+        localStorage.removeItem(HAD_SESSION_KEY);
+      }
+    } catch {}
   }
 
   /**

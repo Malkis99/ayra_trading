@@ -1,4 +1,7 @@
 export const ru = {
+  common: {
+    copied: "Скопировано в буфер обмена",
+  },
   nav: {
     home: "Главная",
     journal: "Журнал",
@@ -1752,6 +1755,10 @@ export const ru = {
     siteUrlMismatchLink: "Перейти на основной сайт",
     signedInBanner: "Ты вошёл в аккаунт",
     signedInContinue: "Продолжить",
+    spaceChangedBanner: "Аккаунт изменён в другой вкладке",
+    spaceChangedUpdateBtn: "Обновить",
+    flushErrorTitle: "Не удалось сохранить данные",
+    copyTextBtn: "Скопировать текст",
     headerUserEmail: "Вошёл как",
     multiTabNoticeTitle: "Вход выполнен в другой вкладке",
     multiTabNoticeSubtitle: "Продолжай работу там или переключи сессию на эту вкладку.",
@@ -1795,6 +1802,7 @@ export const ru = {
     deleteDeviceSoon: "Очистить данные устройства (скоро)",
     localDataNotice: "Данные пока хранятся на этом устройстве",
     guestBadge: "Гость",
+    guestBadgeLabel: "Гость",
     signInToCloudBtn: "Войти для сохранения данных в облаке",
   },
   legal: {

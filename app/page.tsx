@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useJournal } from "@/lib/journal/context";
+import { useAuth } from "@/lib/auth/auth-context";
 import { Plus, CheckSquare, BarChart2, X, Sparkles, Compass, Shield } from "lucide-react";
 import { calculatePropMetrics, resolvePrimaryPropAccount } from "@/lib/journal/prop";
 import { formatString, getPlural, formatNumber } from "@/lib/i18n";
@@ -19,6 +20,7 @@ import { TITLES, FRAMES, ITEMS } from "@/lib/items";
 export default function HomePage() {
   const { setAddTradeModalOpen, showToast, dict, lang } = useApp();
   const { accounts, trades, primaryPropAccountId, getTradingPlan } = useJournal();
+  const { isGuest } = useAuth();
   const {
     gameState,
     completeQuest,
@@ -631,8 +633,18 @@ export default function HomePage() {
               {/* Character Info */}
               <div className="flex-1 min-w-0 space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <b className="text-sm font-bold text-tx truncate">{gameState.name}</b>
-                  <span className="text-[11px] font-semibold text-go">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <b className="text-sm font-bold text-tx truncate">{gameState.name}</b>
+                    {isGuest && (
+                      <span
+                        className="flex-none rounded bg-vi/20 px-1.5 py-0.5 text-[9px] font-bold text-vi leading-none shrink-0"
+                        aria-label={dict.account.guestBadgeLabel}
+                      >
+                        {dict.account.guestBadgeLabel}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[11px] font-semibold text-go flex-none ml-1">
                     Lv {gameState.level}
                   </span>
                 </div>

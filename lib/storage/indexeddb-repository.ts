@@ -59,6 +59,10 @@ export class IndexedDBAttachmentRepository implements AttachmentRepository {
   async addAttachment(
     input: Omit<AttachmentRecord, "id" | "createdAt"> & { id?: string; createdAt?: string }
   ): Promise<AttachmentRecord> {
+    const boundSpaceId = AppStorage.getSpaceId(this.userId);
+    if (!AppStorage.isWriteAllowed(boundSpaceId)) {
+      throw new Error(`Write dropped: operation was bound to space "${boundSpaceId}", but current active space is "${AppStorage.getActiveSpaceId()}".`);
+    }
     const db = await this.getDB();
     const id = input.id || `att_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     const createdAt = input.createdAt || new Date().toISOString();
@@ -158,6 +162,10 @@ export class IndexedDBAttachmentRepository implements AttachmentRepository {
     id: string,
     updates: Partial<Pick<AttachmentMetadata, "kind" | "caption">>
   ): Promise<AttachmentMetadata | null> {
+    const boundSpaceId = AppStorage.getSpaceId(this.userId);
+    if (!AppStorage.isWriteAllowed(boundSpaceId)) {
+      return null;
+    }
     const db = await this.getDB();
     const existing = await this.getAttachment(id);
     if (!existing) return null;
@@ -187,6 +195,10 @@ export class IndexedDBAttachmentRepository implements AttachmentRepository {
   }
 
   async deleteAttachment(id: string): Promise<boolean> {
+    const boundSpaceId = AppStorage.getSpaceId(this.userId);
+    if (!AppStorage.isWriteAllowed(boundSpaceId)) {
+      return false;
+    }
     const db = await this.getDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readwrite");
@@ -204,6 +216,10 @@ export class IndexedDBAttachmentRepository implements AttachmentRepository {
   }
 
   async deleteAttachmentsByTradeId(tradeId: string): Promise<number> {
+    const boundSpaceId = AppStorage.getSpaceId(this.userId);
+    if (!AppStorage.isWriteAllowed(boundSpaceId)) {
+      return 0;
+    }
     const db = await this.getDB();
     const items = await this.getAttachmentsByTradeId(tradeId);
     if (items.length === 0) return 0;
@@ -291,6 +307,10 @@ export class IndexedDBAttachmentRepository implements AttachmentRepository {
   }
 
   async cleanupOrphans(validTradeIds: Set<string>): Promise<number> {
+    const boundSpaceId = AppStorage.getSpaceId(this.userId);
+    if (!AppStorage.isWriteAllowed(boundSpaceId)) {
+      return 0;
+    }
     const db = await this.getDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readwrite");

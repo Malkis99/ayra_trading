@@ -6,23 +6,22 @@
   - Local:        http://localhost:3000
 
  ✓ Starting...
- ✓ Ready in 1762ms
+ ✓ Ready in 1683ms
+ ○ Compiling /middleware ...
+ ✓ Compiled /middleware in 1209ms (133 modules)
  ○ Compiling / ...
- ✓ Compiled / in 6s (653 modules)
- HEAD / 200 in 6466ms
- HEAD / 200 in 51ms
- ○ Compiling /journal ...
- ✓ Compiled /journal in 2.2s (734 modules)
- GET /journal 200 in 2613ms
- ✓ Compiled /awakening in 488ms (740 modules)
- GET /journal 200 in 100ms
- GET /journal 200 in 37ms
- GET /journal 200 in 33ms
- GET / 200 in 71ms
- GET /journal 200 in 37ms
- GET / 200 in 28ms
- GET /journal 200 in 42ms
- GET / 200 in 28ms
- GET /journal 200 in 34ms
+ ✓ Compiled / in 7.9s (852 modules)
+ HEAD / 200 in 8295ms
+<w> [webpack.cache.PackFileCacheStrategy] Serializing big strings (113kiB) impacts deserialization performance (consider using Buffer instead and decode when needed)
+<w> [webpack.cache.PackFileCacheStrategy] Serializing big strings (268kiB) impacts deserialization performance (consider using Buffer instead and decode when needed)
  GET / 200 in 50ms
- GET /journal 200 in 62ms
+ GET / 200 in 34ms
+ GET / 200 in 25ms
+ GET / 200 in 30ms
+ ○ Compiling /login ...
+ ✓ Compiled /login in 1110ms (863 modules)
+ GET /login 200 in 1374ms
+ ○ Compiling /awakening ...
+ ✓ Compiled /awakening in 827ms (869 modules)
+ GET /login 200 in 95ms
+ GET /login 200 in 28ms
