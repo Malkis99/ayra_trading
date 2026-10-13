@@ -6,6 +6,7 @@ import { isE2EMockEnabled, getSupabaseEnv } from "@/lib/supabase/config";
 import { mapSupabaseError, type SanitizedErrorInfo } from "./error-sanitizer";
 import { authTabChannel } from "./tab-channel";
 import { spaceTabChannel } from "./space-channel";
+import { resolvePostLoginRoute } from "./routing";
 import { AppStorage, GUEST_SPACE_ID } from "@/lib/storage";
 import {
   getMockState,
@@ -15,6 +16,8 @@ import {
   type MockUser,
   type MockProfile,
 } from "./mock-auth";
+
+export type AuthState = "loading" | "guest" | "authenticated";
 
 export interface UserProfile {
   id: string;
@@ -36,6 +39,8 @@ export interface AuthUser {
 }
 
 interface AuthContextType {
+  authState: AuthState;
+  loadingTimedOut: boolean;
   user: AuthUser | null;
   profile: UserProfile | null;
   activeSpaceId: string;
@@ -46,6 +51,9 @@ interface AuthContextType {
   setGuestDismissed: (val: boolean) => void;
   lateSignInNotice: boolean;
   dismissLateSignInNotice: () => void;
+  explicitGuestChosen: boolean;
+  chooseGuestExplicitly: () => void;
+  lastRouteReason: string | null;
   signInWithOtp: (email: string) => Promise<{ success: boolean; errorKey?: string; errorDetails?: SanitizedErrorInfo }>;
   verifyOtp: (
     email: string,
@@ -62,13 +70,18 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [authState, setAuthState] = useState<AuthState>("loading");
+  const [loadingTimedOut, setLoadingTimedOut] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
   const [guestDismissed, setGuestDismissedState] = useState(false);
+  const [explicitGuestChosen, setExplicitGuestChosen] = useState(false);
   const [lateSignInNotice, setLateSignInNotice] = useState(false);
+  const [lastRouteReason, setLastRouteReason] = useState<string | null>(null);
 
-  const initialResolvedRef = useRef(false);
+  const prevAuthStateRef = useRef<AuthState>("loading");
+  const routingExecutedUserIdRef = useRef<string | null>(null);
+
   const envInfo = getSupabaseEnv();
   const mockMode = isE2EMockEnabled();
 
@@ -83,24 +96,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLateSignInNotice(false);
   };
 
-  const activeSpaceId = AppStorage.getSpaceId(user ? user.id : null);
+  const chooseGuestExplicitly = () => {
+    setExplicitGuestChosen(true);
+    setGuestDismissed(true);
+    setAuthState("guest");
+    setLoadingTimedOut(false);
+  };
 
-  const switchSpaceTo = useCallback(async (newUserId: string | null) => {
+  // Derive ActiveSpace strictly from AuthState
+  const activeSpaceId =
+    authState === "authenticated" && user
+      ? `account:${user.id}`
+      : authState === "guest"
+      ? GUEST_SPACE_ID
+      : GUEST_SPACE_ID; // When loading, no storage writes occur
+
+  const switchSpaceTo = useCallback(async (targetState: AuthState, targetUserId: string | null) => {
     const oldSpaceId = AppStorage.getActiveSpaceId();
-    const newSpaceId = newUserId ? `account:${newUserId}` : GUEST_SPACE_ID;
+    const newSpaceId = targetState === "authenticated" && targetUserId ? `account:${targetUserId}` : GUEST_SPACE_ID;
 
     if (oldSpaceId !== newSpaceId) {
       await AppStorage.flushSpace(oldSpaceId);
-      AppStorage.setUserId(newUserId);
+      AppStorage.setUserId(targetState === "authenticated" ? targetUserId : null);
       spaceTabChannel.broadcastSpaceChange(oldSpaceId, newSpaceId);
     } else {
-      AppStorage.setUserId(newUserId);
+      AppStorage.setUserId(targetState === "authenticated" ? targetUserId : null);
     }
   }, []);
 
   useEffect(() => {
-    switchSpaceTo(user ? user.id : null);
-  }, [user, switchSpaceTo]);
+    if (authState !== "loading") {
+      switchSpaceTo(authState, user ? user.id : null);
+    }
+  }, [authState, user, switchSpaceTo]);
 
   useEffect(() => {
     try {
@@ -114,83 +142,147 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (mockMode) {
         const { profile: mProfile } = getMockState();
         setProfile(mProfile);
-        return;
+        return mProfile;
       }
 
       const supabase = createSupabaseBrowserClient();
-      if (!supabase) return;
+      if (!supabase) return null;
 
       const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).single();
 
       if (!error && data) {
-        setProfile(data as UserProfile);
+        const prof = data as UserProfile;
+        setProfile(prof);
+        return prof;
       }
+      return null;
     },
     [mockMode]
   );
 
+  // Unified session listener and AuthState manager
   useEffect(() => {
-    // 1.5s timeout guard to prevent UI locking on slow auth resolution
+    let isMounted = true;
+
+    // ~1.5s timeout guard: show "Checking login..." banner if still loading
     const timer = setTimeout(() => {
-      if (!initialResolvedRef.current) {
-        initialResolvedRef.current = true;
-        setIsLoading(false);
+      if (isMounted && prevAuthStateRef.current === "loading") {
+        setLoadingTimedOut(true);
       }
     }, 1500);
 
+    const updateToAuthenticated = async (u: AuthUser, initialSessionOrChange = false) => {
+      setUser(u);
+      const loadedProfile = await loadProfile(u.id);
+
+      if (!isMounted) return;
+
+      const wasLoading = prevAuthStateRef.current === "loading";
+      const wasGuest = prevAuthStateRef.current === "guest";
+
+      setAuthState("authenticated");
+      setLoadingTimedOut(false);
+
+      if (wasGuest && explicitGuestChosen) {
+        setLateSignInNotice(true);
+      }
+
+      // Execute single post-login route resolution on loading -> authenticated transition
+      if ((wasLoading || routingExecutedUserIdRef.current !== u.id) && u.id !== routingExecutedUserIdRef.current) {
+        routingExecutedUserIdRef.current = u.id;
+
+        const guestStateRaw = typeof window !== "undefined" ? AppStorage.getItem("ayra_demo_v1") : null;
+        const guestState = guestStateRaw ? JSON.parse(guestStateRaw) : null;
+
+        const res = await resolvePostLoginRoute({
+          user: u,
+          profile: loadedProfile,
+          guestState,
+          checkNicknameAvailable: mockMode
+            ? async (nick) => mockIsNicknameAvailable(nick)
+            : async (nick) => {
+                const sb = createSupabaseBrowserClient();
+                if (!sb) return true;
+                const { data } = await sb.rpc("is_nickname_available", { nick });
+                return Boolean(data);
+              },
+          saveNickname: async (nick) => {
+            if (mockMode) {
+              const ok = mockSetNickname(nick);
+              return { success: ok };
+            }
+            const sb = createSupabaseBrowserClient();
+            if (!sb) return { success: false };
+            const { error } = await sb.from("profiles").update({ nickname: nick }).eq("id", u.id);
+            return { success: !error };
+          },
+        });
+
+        setLastRouteReason(res.source);
+      }
+
+      prevAuthStateRef.current = "authenticated";
+    };
+
+    const updateToGuest = () => {
+      setUser(null);
+      setProfile(null);
+      setAuthState("guest");
+      setLoadingTimedOut(false);
+      prevAuthStateRef.current = "guest";
+    };
+
     if (mockMode) {
       clearTimeout(timer);
-      const { user: mUser, profile: mProfile } = getMockState();
-      setUser(mUser);
-      setProfile(mProfile);
-      initialResolvedRef.current = true;
-      setIsLoading(false);
+      const { user: mUser } = getMockState();
+      if (mUser) {
+        updateToAuthenticated(mUser);
+      } else {
+        updateToGuest();
+      }
     } else {
       const supabase = createSupabaseBrowserClient();
       if (!supabase) {
         clearTimeout(timer);
-        initialResolvedRef.current = true;
-        setIsLoading(false);
+        updateToGuest();
       } else {
+        // 1. Initial session check (getInitialSession)
         supabase.auth.getSession().then(({ data: { session } }) => {
-          clearTimeout(timer);
+          if (!isMounted) return;
           if (session?.user) {
             const u = { id: session.user.id, email: session.user.email || "", created_at: session.user.created_at };
-            setUser(u);
-            loadProfile(session.user.id);
+            updateToAuthenticated(u, true);
           } else {
-            setUser(null);
-            setProfile(null);
+            updateToGuest();
           }
-          initialResolvedRef.current = true;
-          setIsLoading(false);
         });
 
+        // 2. Auth state change listener (INITIAL_SESSION, SIGNED_IN, TOKEN_REFRESHED, SIGNED_OUT)
         const {
           data: { subscription },
         } = supabase.auth.onAuthStateChange((_event, session) => {
+          if (!isMounted) return;
           if (session?.user) {
             const u = { id: session.user.id, email: session.user.email || "", created_at: session.user.created_at };
-            setUser(u);
-            loadProfile(session.user.id);
-            if (initialResolvedRef.current && !user) {
-              setLateSignInNotice(true);
-            }
+            updateToAuthenticated(u);
           } else {
-            setUser(null);
-            setProfile(null);
+            updateToGuest();
           }
-          initialResolvedRef.current = true;
-          setIsLoading(false);
         });
 
         return () => {
+          isMounted = false;
           clearTimeout(timer);
           subscription.unsubscribe();
         };
       }
     }
-  }, [mockMode, loadProfile]);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [mockMode, loadProfile, explicitGuestChosen]);
 
   // Subscribe to cross-tab auth state changes
   useEffect(() => {
@@ -198,8 +290,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (msg.type === "AUTH_SIGNED_IN" || msg.type === "AUTH_CLAIMED") {
         if (mockMode) {
           const { user: mUser, profile: mProfile } = getMockState();
-          setUser(mUser);
-          setProfile(mProfile);
+          if (mUser) {
+            setUser(mUser);
+            setProfile(mProfile);
+            setAuthState("authenticated");
+          }
         } else {
           const supabase = createSupabaseBrowserClient();
           if (supabase) {
@@ -208,6 +303,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 const u = { id: session.user.id, email: session.user.email || "", created_at: session.user.created_at };
                 setUser(u);
                 loadProfile(session.user.id);
+                setAuthState("authenticated");
               }
             });
           }
@@ -215,6 +311,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else if (msg.type === "AUTH_SIGNED_OUT") {
         setUser(null);
         setProfile(null);
+        setAuthState("guest");
+        routingExecutedUserIdRef.current = null;
       }
     });
 
@@ -320,6 +418,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setMockState(mUser, mProfile);
       setUser(mUser);
       setProfile(mProfile);
+      setAuthState("authenticated");
 
       return { success: true };
     }
@@ -361,6 +460,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .eq("id", newUser.id);
 
       await loadProfile(newUser.id);
+      setAuthState("authenticated");
     }
 
     return { success: true };
@@ -376,6 +476,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setMockState(null, null);
       setUser(null);
       setProfile(null);
+      setAuthState("guest");
+      routingExecutedUserIdRef.current = null;
       AppStorage.setUserId(null);
       spaceTabChannel.broadcastSpaceChange(oldSpaceId, GUEST_SPACE_ID);
       return;
@@ -387,6 +489,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     setUser(null);
     setProfile(null);
+    setAuthState("guest");
+    routingExecutedUserIdRef.current = null;
     AppStorage.setUserId(null);
     spaceTabChannel.broadcastSpaceChange(oldSpaceId, GUEST_SPACE_ID);
   };
@@ -474,16 +578,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider
       value={{
+        authState,
+        loadingTimedOut,
         user,
         profile,
         activeSpaceId,
-        isLoading,
-        isGuest: !user,
+        isLoading: authState === "loading",
+        isGuest: authState === "guest",
         isConfigured: envInfo.isConfigured || mockMode,
         guestDismissed,
         setGuestDismissed,
         lateSignInNotice,
         dismissLateSignInNotice,
+        explicitGuestChosen,
+        chooseGuestExplicitly,
+        lastRouteReason,
         signInWithOtp,
         verifyOtp,
         signOut,
