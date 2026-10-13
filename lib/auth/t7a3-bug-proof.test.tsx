@@ -83,6 +83,7 @@ describe("T7a.3 Multi-Tab Login & Callback Verification", () => {
     const req = new NextRequest("http://localhost:3000/auth/callback?code=mock-code");
     const response = await handleCallbackGet(req);
 
-    expect(response.headers.get("location")).toBe("http://localhost:3000/");
+    // The callback only exchanges the code and always hands over to the single post-login router.
+    expect(response.headers.get("location")).toBe("http://localhost:3000/auth/continue");
   });
 });

@@ -6,7 +6,6 @@ import { isE2EMockEnabled, getSupabaseEnv } from "@/lib/supabase/config";
 import { mapSupabaseError, type SanitizedErrorInfo } from "./error-sanitizer";
 import { authTabChannel } from "./tab-channel";
 import { spaceTabChannel } from "./space-channel";
-import { resolvePostLoginRoute, readAccountGameState } from "./routing";
 import { AppStorage, GUEST_SPACE_ID } from "@/lib/storage";
 import { authDebug, describeGameState } from "./debug";
 import {
@@ -19,6 +18,9 @@ import {
 } from "./mock-auth";
 
 export type AuthState = "loading" | "guest" | "authenticated";
+
+/** Result of the last cloud profile read: "missing" = no row, "error" = the read failed (retry). */
+export type ProfileStatus = "idle" | "loading" | "loaded" | "missing" | "error";
 
 export interface UserProfile {
   id: string;
@@ -44,6 +46,7 @@ interface AuthContextType {
   loadingTimedOut: boolean;
   user: AuthUser | null;
   profile: UserProfile | null;
+  profileStatus: ProfileStatus;
   activeSpaceId: string;
   /** True once local storage and providers have actually switched to activeSpaceId. */
   isSpaceReady: boolean;
@@ -59,6 +62,7 @@ interface AuthContextType {
   explicitGuestChosen: boolean;
   chooseGuestExplicitly: () => void;
   lastRouteReason: string | null;
+  reportRouteReason: (reason: string) => void;
   signInWithOtp: (email: string) => Promise<{ success: boolean; errorKey?: string; errorDetails?: SanitizedErrorInfo }>;
   verifyOtp: (
     email: string,
@@ -79,13 +83,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loadingTimedOut, setLoadingTimedOut] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profileStatus, setProfileStatus] = useState<ProfileStatus>("idle");
   const [guestDismissed, setGuestDismissedState] = useState(false);
   const [explicitGuestChosen, setExplicitGuestChosen] = useState(false);
   const [lateSignInNotice, setLateSignInNotice] = useState(false);
   const [lastRouteReason, setLastRouteReason] = useState<string | null>(null);
 
   const prevAuthStateRef = useRef<AuthState>("loading");
-  const routingExecutedUserIdRef = useRef<string | null>(null);
 
   const envInfo = getSupabaseEnv();
   const mockMode = isE2EMockEnabled();
@@ -152,18 +156,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (mockMode) {
         const { profile: mProfile } = getMockState();
         setProfile(mProfile);
+        setProfileStatus(mProfile ? "loaded" : "missing");
         return mProfile;
       }
 
       const supabase = createSupabaseBrowserClient();
-      if (!supabase) return null;
+      if (!supabase) {
+        setProfileStatus("error");
+        return null;
+      }
 
-      const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).single();
-
-      if (!error && data) {
-        const prof = data as UserProfile;
-        setProfile(prof);
-        return prof;
+      setProfileStatus((s) => (s === "loaded" ? s : "loading"));
+      try {
+        const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).single();
+        if (!error && data) {
+          const prof = data as UserProfile;
+          setProfile(prof);
+          setProfileStatus("loaded");
+          return prof;
+        }
+        const status: ProfileStatus = error?.code === "PGRST116" ? "missing" : "error";
+        authDebug("profile.load", { ok: false, status, code: error?.code ?? null });
+        setProfileStatus((s) => (s === "loaded" ? s : status));
+      } catch {
+        setProfileStatus((s) => (s === "loaded" ? s : "error"));
       }
       return null;
     },
@@ -205,38 +221,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLateSignInNotice(true);
       }
 
-      // Execute single post-login route resolution on loading -> authenticated transition
-      if ((wasLoading || routingExecutedUserIdRef.current !== u.id) && u.id !== routingExecutedUserIdRef.current) {
-        routingExecutedUserIdRef.current = u.id;
-
-        const res = await resolvePostLoginRoute({
-          user: u,
-          profile: loadedProfile,
-          guestState: readAccountGameState(u.id),
-          checkNicknameAvailable: mockMode
-            ? async (nick) => mockIsNicknameAvailable(nick)
-            : async (nick) => {
-                const sb = createSupabaseBrowserClient();
-                if (!sb) return true;
-                const { data } = await sb.rpc("is_nickname_available", { nick });
-                return Boolean(data);
-              },
-          saveNickname: async (nick) => {
-            if (mockMode) {
-              const ok = mockSetNickname(nick);
-              return { success: ok };
-            }
-            const sb = createSupabaseBrowserClient();
-            if (!sb) return { success: false };
-            const { error } = await sb.from("profiles").update({ nickname: nick }).eq("id", u.id);
-            return { success: !error };
-          },
-        });
-
-        authDebug("resolvePostLoginRoute", { destination: res.destination, source: res.source, navigated: false });
-        setLastRouteReason(res.source);
-      }
-
+      // Where to go after sign-in is decided only by /auth/continue (lib/auth/routing.ts).
       prevAuthStateRef.current = "authenticated";
     };
 
@@ -244,6 +229,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       authDebug("guest", { prevAuthState: prevAuthStateRef.current });
       setUser(null);
       setProfile(null);
+      setProfileStatus("idle");
       setAuthState("guest");
       setLoadingTimedOut(false);
       prevAuthStateRef.current = "guest";
@@ -312,6 +298,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (mUser) {
             setUser(mUser);
             setProfile(mProfile);
+            setProfileStatus(mProfile ? "loaded" : "missing");
             setAuthState("authenticated");
           }
         } else {
@@ -331,7 +318,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(null);
         setProfile(null);
         setAuthState("guest");
-        routingExecutedUserIdRef.current = null;
       }
     });
 
@@ -437,6 +423,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setMockState(mUser, mProfile);
       setUser(mUser);
       setProfile(mProfile);
+      setProfileStatus(mProfile ? "loaded" : "missing");
       setAuthState("authenticated");
 
       return { success: true };
@@ -496,7 +483,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       setProfile(null);
       setAuthState("guest");
-      routingExecutedUserIdRef.current = null;
       AppStorage.setUserId(null);
       spaceTabChannel.notifyLocal(oldSpaceId, GUEST_SPACE_ID);
       spaceTabChannel.broadcastSpaceChange(oldSpaceId, GUEST_SPACE_ID);
@@ -510,7 +496,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setProfile(null);
     setAuthState("guest");
-    routingExecutedUserIdRef.current = null;
     AppStorage.setUserId(null);
     spaceTabChannel.notifyLocal(oldSpaceId, GUEST_SPACE_ID);
     spaceTabChannel.broadcastSpaceChange(oldSpaceId, GUEST_SPACE_ID);
@@ -603,6 +588,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loadingTimedOut,
         user,
         profile,
+        profileStatus,
         activeSpaceId,
         isSpaceReady: authState !== "loading" && readySpaceId === activeSpaceId,
         isLoading: authState === "loading",
@@ -616,6 +602,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         explicitGuestChosen,
         chooseGuestExplicitly,
         lastRouteReason,
+        reportRouteReason: setLastRouteReason,
         signInWithOtp,
         verifyOtp,
         signOut,

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useCallback } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AppProvider } from "@/lib/context";
 import { GameProvider, useGame } from "@/lib/game-context";
@@ -17,11 +17,9 @@ import { Language } from "@/lib/i18n/types";
 import { JournalProvider } from "@/lib/journal/context";
 import { AuthProvider, useAuth } from "@/lib/auth/auth-context";
 import { useApp } from "@/lib/context";
-import { sanitizeRedirectUrl } from "@/lib/auth/redirect-whitelist";
 import { AppStorage } from "@/lib/storage";
-import { readAccountGameState } from "@/lib/auth/routing";
-import { authDebug, describeGameState } from "@/lib/auth/debug";
-import { NicknameConflictModal } from "./NicknameConflictModal";
+import { hasCloudNickname, postLoginRouterUrl, POST_LOGIN_ROUTER } from "@/lib/auth/routing";
+import { authDebug } from "@/lib/auth/debug";
 import { SpaceChangeBanner } from "./SpaceChangeBanner";
 import { OwnerDiagnosticsBlock } from "@/components/OwnerDiagnosticsBlock";
 import { UserCheck } from "lucide-react";
@@ -92,15 +90,23 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     lateSignInNotice,
     dismissLateSignInNotice,
     chooseGuestExplicitly,
-    saveNickname,
     isSpaceReady,
+    profileStatus,
   } = useAuth();
 
-  const [conflictNickname, setConflictNickname] = useState<string | null>(null);
-
-  const isPublicPath = ["/login", "/auth/callback", "/legal/terms", "/legal/privacy", "/logout"].some(
+  const isPublicPath = ["/login", "/auth/", "/legal/terms", "/legal/privacy", "/logout"].some(
     (p) => pathname?.startsWith(p)
   );
+
+  // A signed-in account whose cloud profile is not loaded yet or has no nickname (onboarding not finished)
+  // must not see app pages such as Home: the post-login router decides where it goes.
+  const isOnboardingPath = pathname === "/awakening" || pathname === "/profile-select";
+  const mustUsePostLoginRouter =
+    authState === "authenticated" &&
+    Boolean(user) &&
+    !isPublicPath &&
+    !isOnboardingPath &&
+    !(profileStatus === "loaded" && hasCloudNickname(profile));
 
   // Migration & routing logic
   const handleAuthAndLocalSync = useCallback(async () => {
@@ -121,45 +127,16 @@ function ShellContent({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // 3. If logged in, but cloud profile has no nickname yet.
-    // Only the account's own space decides: guest data on this device never makes an account "existing".
-    if (user && profile && !profile.nickname) {
-      const accountState = readAccountGameState(user.id);
-      authDebug("shell.noNickname", {
-        pathname,
-        activeSpace: AppStorage.getActiveSpaceId(),
-        accountState: describeGameState(accountState ? JSON.stringify(accountState) : null),
-      });
-      if (pathname === "/profile-select") return;
-
-      try {
-        if (accountState) {
-          const localNick = accountState.name?.trim();
-          const localDone = accountState.onboarding?.status === "done";
-
-          if (localDone && localNick) {
-            // Attempt to save local nickname to cloud profile
-            const res = await saveNickname(localNick);
-            if (!res.success) {
-              // Nickname taken -> show conflict modal
-              setConflictNickname(localNick);
-              return;
-            }
-          }
-        }
-      } catch {
-        // ignore
-      }
-
-      // If local onboarding not done or cloud nick still empty and no conflict modal -> go to /awakening (unless on /login where multi-tab card is rendered)
-      if (pathname !== "/awakening" && pathname !== "/login" && !conflictNickname) {
-        router.replace("/awakening");
-      }
+    // 3. Signed in, but onboarding not finished or profile not loaded: hand over to the post-login router.
+    if (mustUsePostLoginRouter) {
+      authDebug("shell.toRouter", { pathname, profileStatus, activeSpace: AppStorage.getActiveSpaceId() });
+      router.replace(postLoginRouterUrl(pathname));
+      return;
     }
 
-    // 4. If logged in with nickname, and user is on /login
-    if (user && profile?.nickname && pathname === "/login") {
-      router.replace("/");
+    // 4. Signed in with a finished profile and still on /login: the router sends to "next".
+    if (user && hasCloudNickname(profile) && pathname === "/login") {
+      router.replace(postLoginRouterUrl(new URLSearchParams(window.location.search).get("next")));
     }
   }, [
     authLoading,
@@ -171,8 +148,8 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     pathname,
     user,
     profile,
-    saveNickname,
-    conflictNickname,
+    profileStatus,
+    mustUsePostLoginRouter,
     router,
     isSpaceReady,
   ]);
@@ -181,7 +158,9 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     handleAuthAndLocalSync();
   }, [handleAuthAndLocalSync]);
 
-  const isFocusPage = pathname === "/awakening" || pathname === "/profile-select";
+  const isFocusPage = isOnboardingPath || pathname === POST_LOGIN_ROUTER;
+
+  if (mustUsePostLoginRouter) return <FocusPageLoader />;
 
   // Focus pages read the game state on mount, so they must not render before the space is ready.
   if (isFocusPage && !loadingTimedOut) {
@@ -235,17 +214,6 @@ function ShellContent({ children }: { children: React.ReactNode }) {
             {dict.auth.signedInContinue}
           </button>
         </div>
-      )}
-
-      {/* Nickname Conflict Resolver Modal */}
-      {conflictNickname && (
-        <NicknameConflictModal
-          initialNickname={conflictNickname}
-          onResolved={() => {
-            setConflictNickname(null);
-            router.replace("/");
-          }}
-        />
       )}
 
       {/* Fixed Desktop Sidebar */}
