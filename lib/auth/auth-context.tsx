@@ -50,6 +50,8 @@ interface AuthContextType {
   isLoading: boolean;
   isGuest: boolean;
   isConfigured: boolean;
+  /** Not signed in and did not choose "continue without signing in": sees only public content. */
+  isPublicVisitor: boolean;
   guestDismissed: boolean;
   setGuestDismissed: (val: boolean) => void;
   lateSignInNotice: boolean;
@@ -606,6 +608,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading: authState === "loading",
         isGuest: authState === "guest",
         isConfigured: envInfo.isConfigured || mockMode,
+        isPublicVisitor: authState === "guest" && (envInfo.isConfigured || mockMode) && !guestDismissed,
         guestDismissed,
         setGuestDismissed,
         lateSignInNotice,

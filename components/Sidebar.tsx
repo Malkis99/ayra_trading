@@ -12,6 +12,7 @@ import {
   GraduationCap,
   Settings,
   HelpCircle,
+  LogIn,
 } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
@@ -24,7 +25,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const { dict } = useApp();
   const { gameState } = useGame();
-  const { isGuest } = useAuth();
+  const { isGuest, isPublicVisitor } = useAuth();
 
   const navItems = [
     { href: "/", label: dict.nav.home, icon: Home },
@@ -94,7 +95,16 @@ export function Sidebar() {
 
       {/* Footer Area with Profile Card, Settings, Help */}
       <div className="flex flex-col gap-1.5">
-        {/* Profile Card */}
+        {/* Profile Card (public visitors see a sign-in entry instead of personal data) */}
+        {isPublicVisitor ? (
+          <Link
+            href="/login"
+            className="flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-vi/40 bg-pri/20 p-2.5 text-xs font-semibold text-tx transition-colors hover:border-vi"
+          >
+            <LogIn size={15} aria-hidden="true" />
+            <span>{dict.publicHome.signInBtn}</span>
+          </Link>
+        ) : (
         <Link
           href="/profile"
           className={`flex items-center gap-2.5 rounded-xl border border-line bg-gradient-to-b from-[#211f2b] to-[#1a1922] p-2.5 transition-colors hover:border-vi ${
@@ -135,6 +145,7 @@ export function Sidebar() {
             <span className="text-[10px] text-mu">{dict.topbar.reputation}</span>
           </div>
         </Link>
+        )}
 
         {/* Settings & Help */}
         <div className="flex flex-col gap-0.5 text-xs text-mu">

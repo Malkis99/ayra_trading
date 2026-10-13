@@ -113,8 +113,9 @@ function ShellContent({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // 2. If Supabase IS configured, no session, and !guestDismissed, send to /login
-    if (isConfigured && isGuest && !guestDismissed && !isPublicPath) {
+    // 2. If Supabase IS configured, no session, and !guestDismissed, send to /login.
+    // Home stays open for such visitors and shows only public content.
+    if (isConfigured && isGuest && !guestDismissed && !isPublicPath && pathname !== "/") {
       const nextParam = pathname !== "/" ? `?next=${encodeURIComponent(pathname)}` : "";
       router.replace(`/login${nextParam}`);
       return;
