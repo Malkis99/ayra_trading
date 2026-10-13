@@ -19,7 +19,8 @@ import { AuthProvider, useAuth } from "@/lib/auth/auth-context";
 import { useApp } from "@/lib/context";
 import { sanitizeRedirectUrl } from "@/lib/auth/redirect-whitelist";
 import { AppStorage } from "@/lib/storage";
-import { shouldOfferProfileSelect } from "@/lib/storage/profile-transfer";
+import { readAccountGameState } from "@/lib/auth/routing";
+import { authDebug, describeGameState } from "@/lib/auth/debug";
 import { NicknameConflictModal } from "./NicknameConflictModal";
 import { SpaceChangeBanner } from "./SpaceChangeBanner";
 import { OwnerDiagnosticsBlock } from "@/components/OwnerDiagnosticsBlock";
@@ -66,6 +67,14 @@ function ShellSkeleton() {
   );
 }
 
+function FocusPageLoader() {
+  return (
+    <div className="flex h-screen w-full items-center justify-center bg-ink">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-vi/30 border-t-vi motion-reduce:animate-none" aria-hidden="true" />
+    </div>
+  );
+}
+
 function ShellContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -84,6 +93,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     dismissLateSignInNotice,
     chooseGuestExplicitly,
     saveNickname,
+    isSpaceReady,
   } = useAuth();
 
   const [conflictNickname, setConflictNickname] = useState<string | null>(null);
@@ -94,7 +104,8 @@ function ShellContent({ children }: { children: React.ReactNode }) {
 
   // Migration & routing logic
   const handleAuthAndLocalSync = useCallback(async () => {
-    if (authLoading || !isLoaded) return;
+    // Never route on data of the previous space: wait until storage switched to the auth space.
+    if (authLoading || !isLoaded || !isSpaceReady) return;
 
     // 1. If Supabase is NOT configured and on /login, send to /
     if (!isConfigured && pathname === "/login") {
@@ -102,29 +113,29 @@ function ShellContent({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // 2. If Supabase IS configured, no session, and !guestDismissed, send to /login
-    if (isConfigured && isGuest && !guestDismissed && !isPublicPath) {
+    // 2. If Supabase IS configured, no session, and !guestDismissed, send to /login.
+    // Home stays open for such visitors and shows only public content.
+    if (isConfigured && isGuest && !guestDismissed && !isPublicPath && pathname !== "/") {
       const nextParam = pathname !== "/" ? `?next=${encodeURIComponent(pathname)}` : "";
       router.replace(`/login${nextParam}`);
       return;
     }
 
-    // 3. If logged in, but cloud profile has no nickname yet
+    // 3. If logged in, but cloud profile has no nickname yet.
+    // Only the account's own space decides: guest data on this device never makes an account "existing".
     if (user && profile && !profile.nickname) {
-      // 3a. Empty account on a device with a guest profile: the user decides on /profile-select,
-      // which also performs the follow-up routing itself.
+      const accountState = readAccountGameState(user.id);
+      authDebug("shell.noNickname", {
+        pathname,
+        activeSpace: AppStorage.getActiveSpaceId(),
+        accountState: describeGameState(accountState ? JSON.stringify(accountState) : null),
+      });
       if (pathname === "/profile-select") return;
-      if (shouldOfferProfileSelect(user.id, profile.nickname)) {
-        if (pathname !== "/login") router.replace("/profile-select");
-        return;
-      }
 
       try {
-        const saved = AppStorage.getItem("ayra_demo_v1");
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          const localNick = parsed.name?.trim();
-          const localDone = parsed.onboarding?.status === "done";
+        if (accountState) {
+          const localNick = accountState.name?.trim();
+          const localDone = accountState.onboarding?.status === "done";
 
           if (localDone && localNick) {
             // Attempt to save local nickname to cloud profile
@@ -163,18 +174,24 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     saveNickname,
     conflictNickname,
     router,
+    isSpaceReady,
   ]);
 
   useEffect(() => {
     handleAuthAndLocalSync();
   }, [handleAuthAndLocalSync]);
 
-  if (pathname === "/awakening" || pathname === "/profile-select") {
+  const isFocusPage = pathname === "/awakening" || pathname === "/profile-select";
+
+  // Focus pages read the game state on mount, so they must not render before the space is ready.
+  if (isFocusPage && !loadingTimedOut) {
+    if (!isLoaded || !isSpaceReady) return <FocusPageLoader />;
     return <>{children}</>;
   }
 
   // When authState === 'loading', always show neutral skeleton (never show guest or account data)
-  if (!isLoaded || authState === "loading") {
+  // Public pages (login, legal) show no space data and must not remount during the switch.
+  if (!isLoaded || authState === "loading" || (!isSpaceReady && !loadingTimedOut && !isPublicPath)) {
     if (loadingTimedOut) {
       return (
         <div className="flex h-screen w-full flex-col items-center justify-center p-4 bg-ink text-tx">

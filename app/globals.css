@@ -2,18 +2,43 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: dark; }
-body { @apply bg-ink text-tx antialiased; background-image: radial-gradient(900px 480px at 78% -8%, #50348f26, transparent 70%); }
-* { scrollbar-width: thin; scrollbar-color: #3a3750 transparent; }
-:focus-visible { outline: 2px solid #a38ad1; outline-offset: 2px; }
+/* Design tokens (docs/redesign-v1.md). Colors as "R G B" channels for Tailwind opacity modifiers. */
+:root {
+  color-scheme: dark;
+  --c-ink: 18 17 23;      /* #121117 app background */
+  --c-s1: 24 23 31;       /* #18171f cards */
+  --c-s2: 32 31 41;       /* #201f29 fields, nested, hover */
+  --c-line: 44 42 56;     /* #2c2a38 borders */
+  --c-tx: 235 233 243;    /* #ebe9f3 text */
+  --c-mu: 160 158 178;    /* #a09eb2 secondary text */
+  --c-vi: 163 138 209;    /* #a38ad1 accent: links, focus, progress */
+  --c-pri: 80 52 143;     /* #50348f primary actions */
+  --c-go: 214 169 74;     /* #d6a94a achievements and rare items only */
+  --c-danger: 229 138 138;
+  --c-success: 111 207 151;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+}
 
+body { @apply bg-ink text-tx antialiased; background-image: radial-gradient(900px 480px at 78% -8%, rgb(var(--c-pri) / 0.15), transparent 70%); }
+* { scrollbar-width: thin; scrollbar-color: #3a3750 transparent; }
+:focus-visible { outline: 2px solid rgb(var(--c-vi)); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
+/* Legacy component classes, restyled on the new tokens during the migration to components/ui. */
 @layer components {
-  .card { @apply rounded-2xl border border-line p-4; background: linear-gradient(180deg, #1c1b24, #18171f); box-shadow: inset 0 1px 0 #ffffff0a; }
-  .card .card { @apply rounded-xl; background: #ffffff06; box-shadow: none; }
-  .h4 { @apply mb-2 text-xs font-medium text-mu; }
-  .chip { @apply inline-flex items-center rounded-full border border-line bg-s2 px-3 py-0.5 text-[11px] text-mu; }
-  .btn { @apply rounded-xl px-4 py-2 font-semibold text-white transition hover:brightness-110 disabled:opacity-50; background: linear-gradient(180deg, #6443b4, #50348f); box-shadow: 0 6px 18px #50348f55; }
-  .btn-ghost { @apply rounded-xl border border-line bg-s1 px-3 py-2 text-sm transition hover:border-vi; }
+  .card { @apply rounded-lg border border-line bg-s1 p-4; }
+  .card .card { @apply rounded-md border-transparent bg-s2/60; }
+  .h4 { @apply mb-2 text-sm font-semibold text-tx; }
+  .chip { @apply inline-flex items-center rounded-full border border-line bg-s2 px-3 py-0.5 text-xs text-mu; }
+  .btn { @apply rounded-md bg-pri px-4 py-2 font-semibold text-white transition-colors hover:bg-[#5d3fa3] disabled:opacity-50; }
+  .btn-secondary { @apply rounded-md border border-line bg-s2 px-4 py-2 font-semibold text-tx transition-colors hover:border-vi; }
+  .btn-danger { @apply rounded-md border border-danger/40 bg-danger/10 px-4 py-2 font-semibold text-danger transition-colors hover:bg-danger/20; }
+  .btn-ghost { @apply rounded-md border border-line bg-transparent px-3 py-2 text-sm transition-colors hover:border-vi hover:bg-s2; }
   .xp { @apply h-[5px] overflow-hidden rounded bg-white/10; }
   .xp > i { @apply block h-full rounded; }
   .tabs { @apply mb-4 flex gap-5 overflow-x-auto border-b border-line; scrollbar-width: none; }

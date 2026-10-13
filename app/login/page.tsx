@@ -6,7 +6,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useApp } from "@/lib/context";
 import { useAuth } from "@/lib/auth/auth-context";
 import { resolvePostLoginRoute, readAccountGameState } from "@/lib/auth/routing";
-import { shouldOfferProfileSelect } from "@/lib/storage/profile-transfer";
 import { authTabChannel } from "@/lib/auth/tab-channel";
 import { sanitizeRedirectUrl, buildSafeSiteUrlRedirect } from "@/lib/auth/redirect-whitelist";
 import { type SanitizedErrorInfo } from "@/lib/auth/error-sanitizer";
@@ -91,7 +90,6 @@ export default function LoginPage() {
       profile: p,
       rawNextParam,
       guestState: readAccountGameState(u.id),
-      offerProfileSelect: shouldOfferProfileSelect(u.id, p?.nickname),
       checkNicknameAvailable,
       saveNickname,
     });

@@ -26,6 +26,25 @@ async function signIn(page: Page, email: string) {
   await page.click("button[type='submit']");
 }
 
+async function completeOnboarding(page: Page, nickname: string) {
+  await page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]').fill(nickname);
+  await page.click('button:has-text("Продолжить")');
+  await page.click('button:has-text("Продолжить")');
+  await page.click('button:has-text("Продолжить")');
+  await page.click('button:has-text("18–24 года")');
+  await page.click('button:has-text("Продолжить")');
+  await page.click('button:has-text("Пропустить шаг целиком")');
+  await page.click('button:has-text("1–2 года")');
+  await page.click('button:has-text("Продолжить")');
+  await page.click('button:has-text("Крипто")');
+  await page.click('button:has-text("Продолжить")');
+  await page.click('button:has-text("Дисциплина")');
+  await page.click('button:has-text("Продолжить")');
+  await page.click('button:has-text("Пропустить необязательные вопросы")');
+  await page.click('button:has-text("Пропустить шаг целиком")');
+  await page.click('button:has-text("Начать")');
+}
+
 async function accountGameState(page: Page) {
   return page.evaluate(() => {
     const key = Object.keys(localStorage).find((k) => /^ayra:.+:ayra_demo_v1$/.test(k));
@@ -33,73 +52,76 @@ async function accountGameState(page: Page) {
   });
 }
 
-test.describe("C1 /profile-select", () => {
-  test("guest profile -> sign in -> 'Использовать этот профиль' copies it into the account", async ({ page }) => {
+async function signInAndOnboard(page: Page, email: string, nickname: string) {
+  await signIn(page, email);
+  // A new account always starts with its own onboarding, regardless of guest data on the device
+  await page.waitForURL("**/awakening**", { timeout: 5000 });
+  await expect(page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]')).not.toHaveValue("GuestZed");
+  await completeOnboarding(page, nickname);
+}
+
+test.describe("C1 /profile-select after onboarding", () => {
+  test("guest data -> new account -> onboarding -> 'Перенести данные гостя' keeps account identity", async ({ page }) => {
     await seedGuest(page, GUEST_STATE);
     await page.goto("/");
     await expect(page.locator("body")).toContainText("GuestZed");
 
-    await signIn(page, "c1_use@example.com");
+    await signInAndOnboard(page, "c1_use@example.com", "AccOne");
     await page.waitForURL("**/profile-select**", { timeout: 5000 });
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("На этом устройстве есть профиль");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Перенести данные гостя?");
     await expect(page.locator("main")).toContainText("GuestZed");
 
-    await page.click("button:has-text('Использовать этот профиль')");
+    await page.click("button:has-text('Перенести данные гостя')");
     await page.waitForURL((url) => url.pathname === "/", { timeout: 5000 });
-    await expect(page.locator("body")).toContainText("GuestZed");
+    await expect(page.locator("body")).toContainText("AccOne");
 
     const account = await accountGameState(page);
-    expect(account?.name).toBe("GuestZed");
+    expect(account?.name).toBe("AccOne");
     expect(account?.level).toBe(3);
     const guest = await page.evaluate(() => JSON.parse(localStorage.getItem("ayra_demo_v1")!));
     expect(guest.name).toBe("GuestZed");
   });
 
-  test("'Начать заново' opens onboarding without guest data, guest stays intact", async ({ page }) => {
+  test("'Не переносить' keeps the account clean and the decision is remembered", async ({ page }) => {
     await seedGuest(page, GUEST_STATE);
     await page.goto("/");
-    await signIn(page, "c1_fresh@example.com");
+    await signInAndOnboard(page, "c1_fresh@example.com", "AccTwo");
     await page.waitForURL("**/profile-select**", { timeout: 5000 });
 
-    await page.click("button:has-text('Начать заново')");
-    await page.waitForURL("**/awakening**", { timeout: 5000 });
-    await expect(page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]')).not.toHaveValue("GuestZed");
-
+    await page.click("button:has-text('Не переносить')");
+    await page.waitForURL((url) => url.pathname === "/", { timeout: 5000 });
     const account = await accountGameState(page);
-    expect(account?.name ?? "").not.toBe("GuestZed");
-    const guest = await page.evaluate(() => JSON.parse(localStorage.getItem("ayra_demo_v1")!));
-    expect(guest.name).toBe("GuestZed");
+    expect(account?.name).toBe("AccTwo");
+    expect(account?.level ?? 1).toBe(1);
 
-    // Decision is remembered: reload does not bring the selection screen back
-    await page.goto("/");
-    await page.waitForTimeout(1000);
-    expect(page.url()).not.toContain("/profile-select");
+    await page.goto("/profile-select");
+    await page.waitForURL((url) => url.pathname === "/", { timeout: 5000 });
   });
 
-  test("'Решить позже' signs out and returns to the guest profile", async ({ page }) => {
+  test("'Решить позже' goes Home and Settings still offers the transfer", async ({ page }) => {
     await seedGuest(page, GUEST_STATE);
     await page.goto("/");
-    await signIn(page, "c1_later@example.com");
+    await signInAndOnboard(page, "c1_later@example.com", "AccThree");
     await page.waitForURL("**/profile-select**", { timeout: 5000 });
 
     await page.click("button:has-text('Решить позже')");
     await page.waitForURL((url) => url.pathname === "/", { timeout: 5000 });
-    await expect(page.locator("body")).toContainText("GuestZed");
-    await expect(page.locator("body")).toContainText("Гость");
+    await page.goto("/settings");
+    await expect(page.getByRole("button", { name: "Скопировать в аккаунт" })).toBeVisible();
   });
 
-  test("clean device without guest data goes straight to onboarding", async ({ page }) => {
+  test("clean device without guest data: onboarding then Home, no transfer screen", async ({ page }) => {
     await seedGuest(page, null);
     await page.goto("/");
-    await signIn(page, "c1_clean@example.com");
-    await page.waitForURL("**/awakening**", { timeout: 5000 });
+    await signInAndOnboard(page, "c1_clean@example.com", "AccFour");
+    await page.waitForURL((url) => url.pathname === "/", { timeout: 5000 });
   });
 
   test("360px layout has no horizontal overflow", async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 740 });
     await seedGuest(page, GUEST_STATE);
     await page.goto("/");
-    await signIn(page, "c1_mobile@example.com");
+    await signInAndOnboard(page, "c1_mobile@example.com", "AccFive");
     await page.waitForURL("**/profile-select**", { timeout: 5000 });
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);

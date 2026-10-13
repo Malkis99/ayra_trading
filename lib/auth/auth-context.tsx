@@ -8,7 +8,7 @@ import { authTabChannel } from "./tab-channel";
 import { spaceTabChannel } from "./space-channel";
 import { resolvePostLoginRoute, readAccountGameState } from "./routing";
 import { AppStorage, GUEST_SPACE_ID } from "@/lib/storage";
-import { shouldOfferProfileSelect } from "@/lib/storage/profile-transfer";
+import { authDebug, describeGameState } from "./debug";
 import {
   getMockState,
   setMockState,
@@ -45,9 +45,13 @@ interface AuthContextType {
   user: AuthUser | null;
   profile: UserProfile | null;
   activeSpaceId: string;
+  /** True once local storage and providers have actually switched to activeSpaceId. */
+  isSpaceReady: boolean;
   isLoading: boolean;
   isGuest: boolean;
   isConfigured: boolean;
+  /** Not signed in and did not choose "continue without signing in": sees only public content. */
+  isPublicVisitor: boolean;
   guestDismissed: boolean;
   setGuestDismissed: (val: boolean) => void;
   lateSignInNotice: boolean;
@@ -112,10 +116,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       ? GUEST_SPACE_ID
       : GUEST_SPACE_ID; // When loading, no storage writes occur
 
+  const [readySpaceId, setReadySpaceId] = useState<string | null>(null);
+
   const switchSpaceTo = useCallback(async (targetState: AuthState, targetUserId: string | null) => {
     const oldSpaceId = AppStorage.getActiveSpaceId();
     const newSpaceId = targetState === "authenticated" && targetUserId ? `account:${targetUserId}` : GUEST_SPACE_ID;
 
+    authDebug("switchSpace", { targetState, from: oldSpaceId, to: newSpaceId });
     if (oldSpaceId !== newSpaceId) {
       await AppStorage.flushSpace(oldSpaceId);
       AppStorage.setUserId(targetState === "authenticated" ? targetUserId : null);
@@ -128,7 +135,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (authState !== "loading") {
-      switchSpaceTo(authState, user ? user.id : null);
+      const target = authState === "authenticated" && user ? `account:${user.id}` : GUEST_SPACE_ID;
+      switchSpaceTo(authState, user ? user.id : null).then(() => setReadySpaceId(target));
     }
   }, [authState, user, switchSpaceTo]);
 
@@ -176,6 +184,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const updateToAuthenticated = async (u: AuthUser, initialSessionOrChange = false) => {
       setUser(u);
       const loadedProfile = await loadProfile(u.id);
+      authDebug("authenticated", {
+        prevAuthState: prevAuthStateRef.current,
+        activeSpace: AppStorage.getActiveSpaceId(),
+        profileLoaded: !!loadedProfile,
+        profileHasNickname: !!loadedProfile?.nickname,
+        accountState: describeGameState(AppStorage.getItem("ayra_demo_v1", u.id)),
+        guestState: describeGameState(AppStorage.getItem("ayra_demo_v1", null)),
+      });
 
       if (!isMounted) return;
 
@@ -197,7 +213,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           user: u,
           profile: loadedProfile,
           guestState: readAccountGameState(u.id),
-          offerProfileSelect: shouldOfferProfileSelect(u.id, loadedProfile?.nickname),
           checkNicknameAvailable: mockMode
             ? async (nick) => mockIsNicknameAvailable(nick)
             : async (nick) => {
@@ -218,6 +233,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           },
         });
 
+        authDebug("resolvePostLoginRoute", { destination: res.destination, source: res.source, navigated: false });
         setLastRouteReason(res.source);
       }
 
@@ -225,6 +241,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     const updateToGuest = () => {
+      authDebug("guest", { prevAuthState: prevAuthStateRef.current });
       setUser(null);
       setProfile(null);
       setAuthState("guest");
@@ -248,6 +265,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         // 1. Initial session check (getInitialSession)
         supabase.auth.getSession().then(({ data: { session } }) => {
+          authDebug("getSession", { hasSession: !!session?.user });
           if (!isMounted) return;
           if (session?.user) {
             const u = { id: session.user.id, email: session.user.email || "", created_at: session.user.created_at };
@@ -261,6 +279,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const {
           data: { subscription },
         } = supabase.auth.onAuthStateChange((_event, session) => {
+          authDebug("onAuthStateChange", { event: _event, hasSession: !!session?.user });
           if (!isMounted) return;
           if (session?.user) {
             const u = { id: session.user.id, email: session.user.email || "", created_at: session.user.created_at };
@@ -585,9 +604,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         profile,
         activeSpaceId,
+        isSpaceReady: authState !== "loading" && readySpaceId === activeSpaceId,
         isLoading: authState === "loading",
         isGuest: authState === "guest",
         isConfigured: envInfo.isConfigured || mockMode,
+        isPublicVisitor: authState === "guest" && (envInfo.isConfigured || mockMode) && !guestDismissed,
         guestDismissed,
         setGuestDismissed,
         lateSignInNotice,

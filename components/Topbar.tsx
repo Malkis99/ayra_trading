@@ -2,7 +2,8 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { Search, Plus, Bell } from "lucide-react";
+import { Search, Plus, Bell, LogIn } from "lucide-react";
+import { useAuth } from "@/lib/auth/auth-context";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { Figure } from "@/components/Figure";
@@ -20,6 +21,7 @@ export function Topbar() {
   } = useApp();
 
   const { gameState } = useGame();
+  const { isPublicVisitor } = useAuth();
   const [isProfileMenuOpen, setProfileMenuOpen] = useState(false);
 
   const frameColor = FRAMES[gameState.frame]?.color || "#a38ad1";
@@ -67,15 +69,15 @@ export function Topbar() {
 
       <div className="flex-1" />
 
-      {/* Coins Chip */}
-      <CoinsChip value={gameState.coins} />
+      {/* Coins Chip (personal; hidden for public visitors) */}
+      {!isPublicVisitor && <CoinsChip value={gameState.coins} />}
 
       {/* Plan Chip */}
       <Link
         href="/plans"
         className="rounded-xl border border-go bg-go/10 px-3 py-1 text-xs font-semibold text-go transition-colors hover:bg-go/20 flex-none"
       >
-        ★ {gameState.plan}
+        ★ {isPublicVisitor ? "Free" : gameState.plan}
       </Link>
 
       {/* Notification Bell */}
@@ -87,7 +89,19 @@ export function Topbar() {
         <Bell size={16} />
       </button>
 
+      {/* Public visitors: sign-in entry instead of the personal avatar menu (mobile) */}
+      {isPublicVisitor && (
+        <Link
+          href="/login"
+          aria-label={dict.publicHome.signInBtn}
+          className="grid h-9 w-9 place-items-center rounded-full border border-vi/40 bg-pri/20 text-tx md:hidden"
+        >
+          <LogIn size={16} aria-hidden="true" />
+        </Link>
+      )}
+
       {/* Avatar (Mobile Topbar) */}
+      {!isPublicVisitor && (
       <div className="relative md:hidden">
         <button
           onClick={() => setProfileMenuOpen((prev) => !prev)}
@@ -144,6 +158,7 @@ export function Topbar() {
           </div>
         )}
       </div>
+      )}
     </header>
   );
 }

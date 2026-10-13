@@ -10,17 +10,23 @@ import { Plus, CheckSquare, BarChart2, X, Sparkles, Compass, Shield } from "luci
 import { calculatePropMetrics, resolvePrimaryPropAccount } from "@/lib/journal/prop";
 import { formatString, getPlural, formatNumber } from "@/lib/i18n";
 import { Figure } from "@/components/Figure";
-import { Sparkline } from "@/components/Sparkline";
 import { GuestBanner } from "@/components/GuestBanner";
 import { xpForNextLevel, ChronicleEntry } from "@/lib/game";
-import { DEMO_MARKETS, DEMO_EVENTS } from "@/lib/demo-data";
+import { PublicHome } from "@/components/home/PublicHome";
+import {
+  CalendarMiniCard,
+  CommunityFeedCard,
+  FinancialDisclaimer,
+  MarketMiniCard,
+  TopicOfDayCard,
+} from "@/components/home/SharedBlocks";
 import { getDeterministicDailyQuests } from "@/lib/quests";
 import { TITLES, FRAMES, ITEMS } from "@/lib/items";
 
 export default function HomePage() {
   const { setAddTradeModalOpen, showToast, dict, lang } = useApp();
   const { accounts, trades, primaryPropAccountId, getTradingPlan } = useJournal();
-  const { isGuest } = useAuth();
+  const { isGuest, isPublicVisitor } = useAuth();
   const {
     gameState,
     completeQuest,
@@ -158,6 +164,9 @@ export default function HomePage() {
     gameState.onboarding.status === "legacy" &&
     !gameState.onboarding.legacyDismissed;
   const showInProgressBanner = gameState.onboarding.status === "inProgress";
+
+  // Not signed in and not in "continue without signing in" mode: public Home without personal data
+  if (isPublicVisitor) return <PublicHome />;
 
   return (
     <div className="space-y-6">
@@ -681,80 +690,10 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Markets Mini Cards */}
-          <div className="card space-y-2.5">
-            <div className="flex justify-between items-center">
-              <h4 className="h4">{dict.home.marketBlock.title}</h4>
-              <span className="text-[10px] font-bold text-mu uppercase tracking-wider bg-white/5 px-2 py-0.5 rounded border border-line">
-                {dict.home.marketBlock.demoBadge}
-              </span>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              {DEMO_MARKETS.map((m) => {
-                const name =
-                  m.symbol === "DXY"
-                    ? dict.market.dxy
-                    : m.symbol === "S&P 500"
-                    ? dict.market.sp500
-                    : m.symbol === "Nasdaq"
-                    ? dict.market.nasdaq
-                    : m.symbol === "Gold"
-                    ? dict.market.gold
-                    : m.symbol === "Oil"
-                    ? dict.market.oil
-                    : dict.market.btc;
-                return (
-                  <Link
-                    key={m.symbol}
-                    href="/market"
-                    className="card p-2 text-left hover:border-vi transition-colors"
-                  >
-                    <div className="text-[11px] font-semibold text-mu">{name}</div>
-                    <div className="mt-1">
-                      <Sparkline points={m.points} isUp={m.isUp} />
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Calendar Mini Block */}
-          <div className="card space-y-2.5">
-            <div className="flex justify-between items-center">
-              <h4 className="h4">{dict.home.calendarBlock.title}</h4>
-              <span className="text-[10px] font-bold text-mu uppercase tracking-wider bg-white/5 px-2 py-0.5 rounded border border-line">
-                {dict.home.calendarBlock.demoBadge}
-              </span>
-            </div>
-            <div className="space-y-1.5">
-              {DEMO_EVENTS.map((ev, i) => {
-                const title =
-                  ev.titleKey === "calendar.cpiUsd"
-                    ? dict.calendar.cpiUsd
-                    : ev.titleKey === "calendar.fomcMinutes"
-                    ? dict.calendar.fomcMinutes
-                    : dict.calendar.pmiEuro;
-                const dayLabel =
-                  ev.dayType === "today"
-                    ? dict.home.calendarBlock.days.today
-                    : ev.dayType === "tomorrow"
-                    ? dict.home.calendarBlock.days.tomorrow
-                    : dict.home.calendarBlock.days.friday;
-
-                return (
-                  <div key={i} className="flex items-center gap-2 text-xs">
-                    <span
-                      className="w-2 h-2 rounded-full flex-none"
-                      style={{ backgroundColor: ev.color }}
-                    />
-                    <span className="flex-1">{title}</span>
-                    <span className="text-mu text-[11px]">{dayLabel}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <MarketMiniCard />
+          <CalendarMiniCard />
+          <TopicOfDayCard />
+          <CommunityFeedCard />
 
           {/* AI Brief */}
           <div className="card space-y-2">
@@ -783,6 +722,8 @@ export default function HomePage() {
           </div>
         </div>
       </div>
+
+      <FinancialDisclaimer />
     </div>
   );
 }

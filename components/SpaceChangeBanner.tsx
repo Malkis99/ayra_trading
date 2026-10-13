@@ -26,15 +26,14 @@ export function SpaceChangeBanner() {
         ? null
         : toSpaceId.replace(/^account:/, "");
 
+    const fromSpaceId = AppStorage.getActiveSpaceId();
     AppStorage.setUserId(targetUserId);
     setPendingChange(null);
     setFlushError(null);
 
-    // Notify local subscribers that space has changed locally
-    spaceTabChannel.broadcastSpaceChange(
-      AppStorage.getActiveSpaceId(),
-      toSpaceId
-    );
+    // Providers of this tab must reload from the new space; broadcastSpaceChange only reaches other tabs
+    spaceTabChannel.notifyLocal(fromSpaceId, toSpaceId);
+    spaceTabChannel.broadcastSpaceChange(fromSpaceId, toSpaceId);
   }, []);
 
   useEffect(() => {

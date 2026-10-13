@@ -31,6 +31,7 @@ import { AvatarAppearance, validateAvatarAppearance } from "@/lib/avatar";
 import { OnboardingState, generateProgram } from "@/lib/awakening";
 import { AppStorage } from "@/lib/storage";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
+import { authDebug, describeGameState } from "@/lib/auth/debug";
 
 const STORAGE_KEY = "ayra_demo_v1";
 
@@ -119,9 +120,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     isLoadedRef.current = isLoaded;
   }, [isLoaded]);
 
+  // Space the in-memory state was loaded from. State is never written into any other space.
+  const loadedSpaceRef = React.useRef<string | null>(null);
+
   const reloadGameState = useCallback(() => {
     try {
+      loadedSpaceRef.current = AppStorage.getActiveSpaceId();
       const saved = AppStorage.getItem(STORAGE_KEY);
+      authDebug("game.reload", { activeSpace: AppStorage.getActiveSpaceId(), ...describeGameState(saved) });
       if (saved) {
         const parsed = JSON.parse(saved);
         const resetted = checkAndApplyDateResets(parsed, new Date());
@@ -142,6 +148,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   // Register flush handler to write state to active space before switching
   useEffect(() => {
     const unregister = AppStorage.registerFlushHandler((targetSpaceId) => {
+      if (targetSpaceId !== loadedSpaceRef.current) {
+        authDebug("game.flushSkipped", { targetSpaceId, loadedSpace: loadedSpaceRef.current });
+        return;
+      }
       if (gameStateRef.current && isLoadedRef.current) {
         AppStorage.guardedSetItem(
           STORAGE_KEY,
@@ -177,6 +187,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     if (!isLoaded) return;
     try {
       const activeSpaceId = AppStorage.getActiveSpaceId();
+      if (activeSpaceId !== loadedSpaceRef.current) {
+        authDebug("game.saveSkipped", { activeSpaceId, loadedSpace: loadedSpaceRef.current });
+        return;
+      }
       AppStorage.guardedSetItem(
         STORAGE_KEY,
         JSON.stringify(gameState),

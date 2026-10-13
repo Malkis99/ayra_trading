@@ -37,10 +37,6 @@ test.describe("T7a-B2 Space Switching & Isolation E2E", () => {
     await page.fill("#otp-input", "123456");
     await page.click("button[type='submit']");
 
-    // New account on a device with a guest profile: choose "start fresh" on /profile-select (C1)
-    await page.waitForURL("**/profile-select**", { timeout: 5000 });
-    await page.click("button:has-text('Начать заново')");
-
     // Arrives on /awakening for new account
     await page.waitForURL("**/awakening**", { timeout: 5000 });
     // Verify TraderOne is NOT present in account space
