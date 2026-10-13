@@ -70,8 +70,10 @@ test.describe("Awakening Onboarding E2E Tests", () => {
   });
 
   test("Legacy profile shows soft banner on Home without forced redirect", async ({ page }) => {
-    await page.goto("/awakening");
-    await page.evaluate(() => {
+    // Seed before any app script runs, so the app cannot overwrite the seed on navigation.
+    await page.addInitScript(() => {
+      if (sessionStorage.getItem("e2e_seeded")) return;
+      sessionStorage.setItem("e2e_seeded", "1");
       localStorage.setItem(
         "ayra_demo_v1",
         JSON.stringify({
@@ -90,8 +92,10 @@ test.describe("Awakening Onboarding E2E Tests", () => {
   });
 
   test("InProgress onboarding shows Continue soft banner on Home without forced redirect", async ({ page }) => {
-    await page.goto("/awakening");
-    await page.evaluate(() => {
+    // Seed before any app script runs, so the app cannot overwrite the seed on navigation.
+    await page.addInitScript(() => {
+      if (sessionStorage.getItem("e2e_seeded")) return;
+      sessionStorage.setItem("e2e_seeded", "1");
       localStorage.setItem(
         "ayra_demo_v1",
         JSON.stringify({
@@ -107,5 +111,51 @@ test.describe("Awakening Onboarding E2E Tests", () => {
     expect(page.url()).not.toContain("/awakening");
     const banner = page.locator("text=Продолжить знакомство");
     await expect(banner).toBeVisible();
+  });
+
+  test("Mobile 360px: header keeps logout reachable and appearance step is not clipped", async ({ page }) => {
+    await page.setViewportSize({ width: 360, height: 740 });
+    await page.addInitScript(() => {
+      (window as any).__AYRA_E2E_AUTH_MOCK__ = true;
+    });
+    await page.goto("/awakening");
+    await page.evaluate(() => {
+      localStorage.clear();
+      const id = "mock-user-id-mobile";
+      localStorage.setItem(
+        "ayra_mock_auth_v1",
+        JSON.stringify({
+          user: { id, email: "very.long.email.address@example.com", created_at: new Date().toISOString() },
+          profile: {
+            id,
+            nickname: null,
+            locale: "ru",
+            timezone: "UTC",
+            age_group: null,
+            minor_mode: false,
+            consent_at: null,
+            consent_version: null,
+            created_at: "",
+            updated_at: "",
+          },
+        })
+      );
+    });
+    await page.goto("/awakening");
+
+    const header = page.locator("header");
+    await expect(header.getByRole("button", { name: "Выйти" })).toBeInViewport();
+    const overflow = await header.evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+
+    await page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]').fill("Mobile_42");
+    await page.click('button:has-text("Продолжить")');
+    await page.click('button:has-text("Продолжить")');
+
+    const title = page.getByRole("heading", { level: 1 });
+    await expect(title).toBeInViewport();
+    const titleTop = await title.evaluate((el) => el.getBoundingClientRect().top);
+    const headerBottom = await header.evaluate((el) => el.getBoundingClientRect().bottom);
+    expect(titleTop).toBeGreaterThanOrEqual(headerBottom);
   });
 });
