@@ -9,6 +9,7 @@ import { Sparkles, Shield, Compass, HardDrive, AlertTriangle, User, LogOut, LogI
 import { defaultAttachmentRepository } from "@/lib/journal/attachments/indexeddb-repository";
 import { AttachmentStorageEstimate } from "@/lib/journal/attachments/types";
 import { OwnerDiagnosticsBlock } from "@/components/OwnerDiagnosticsBlock";
+import { DeviceDataCard } from "@/components/DeviceDataCard";
 
 export default function SettingsPage() {
   const { dict, lang, setLanguage } = useApp();
@@ -68,9 +69,6 @@ export default function SettingsPage() {
                 <span className="rounded-lg border border-line bg-s1 px-2.5 py-1 text-[11px]" title="T7d">
                   {dict.account.deleteAccountSoon}
                 </span>
-                <span className="rounded-lg border border-line bg-s1 px-2.5 py-1 text-[11px]" title="T7d">
-                  {dict.account.deleteDeviceSoon}
-                </span>
               </div>
             </div>
           </div>
@@ -98,6 +96,8 @@ export default function SettingsPage() {
           </div>
         )}
       </div>
+
+      <DeviceDataCard />
 
       {/* Onboarding & Personalization Card */}
       <div className="card space-y-4">
