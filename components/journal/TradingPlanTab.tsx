@@ -31,6 +31,7 @@ import {
   Sparkles,
   Info,
 } from "lucide-react";
+import { Checkbox, DateTimePicker, Segmented } from "@/components/ui";
 
 export const STANDARD_CHECKLIST_KEYS = [
   "bias_defined",
@@ -570,16 +571,17 @@ export function TradingPlanTab() {
             >
               {dict.journal.today}
             </button>
-            <input
-              type="date"
+            <DateTimePicker
+              mode="date"
+              showNow={false}
               value={dayStr}
-              onChange={(e) => {
-                if (e.target.value) {
-                  const [y, m, d] = e.target.value.split("-").map(Number);
+              onChange={(v) => {
+                if (v) {
+                  const [y, m, d] = v.split("-").map(Number);
                   setSelectedDayDate(new Date(y, m - 1, d));
                 }
               }}
-              className="input text-xs py-1 px-2 border-line bg-s1"
+              className="w-48"
             />
             <button
               onClick={handleNextDay}
@@ -797,7 +799,7 @@ export function TradingPlanTab() {
                                 : "text-mu hover:text-tx"
                             }`}
                           >
-                            Bullish
+                            {dict.journal.overview.bias.bullish}
                           </button>
                           <button
                             type="button"
@@ -808,7 +810,7 @@ export function TradingPlanTab() {
                                 : "text-mu hover:text-tx"
                             }`}
                           >
-                            Bearish
+                            {dict.journal.overview.bias.bearish}
                           </button>
                           <button
                             type="button"
@@ -819,7 +821,7 @@ export function TradingPlanTab() {
                                 : "text-mu hover:text-tx"
                             }`}
                           >
-                            Neutral
+                            {dict.journal.overview.bias.neutral}
                           </button>
                         </div>
 
@@ -1024,10 +1026,10 @@ export function TradingPlanTab() {
                       placeholder="1"
                       className="input text-xs w-full"
                     />
-                    <select
+                    <Segmented<"r" | "percent">
+                      name={dict.journal.tradingPlan.maxRiskPerTrade}
                       value={dayPlan.limits?.maxRiskPerTrade?.type || "r"}
-                      onChange={(e) => {
-                        const t = e.target.value as "r" | "percent";
+                      onChange={(t) => {
                         handleUpdateLimits((prev) => ({
                           ...prev,
                           maxRiskPerTrade: prev.maxRiskPerTrade
@@ -1035,11 +1037,12 @@ export function TradingPlanTab() {
                             : undefined,
                         }));
                       }}
-                      className="input text-xs w-16 uppercase flex-none"
-                    >
-                      <option value="r">R</option>
-                      <option value="percent">%</option>
-                    </select>
+                      className="w-28 flex-none"
+                      options={[
+                        { value: "r", label: "R", tone: "neutral" },
+                        { value: "percent", label: "%", tone: "neutral" },
+                      ]}
+                    />
                   </div>
                 </div>
 
@@ -1069,10 +1072,10 @@ export function TradingPlanTab() {
                       placeholder="2"
                       className="input text-xs w-full"
                     />
-                    <select
+                    <Segmented<"r" | "percent">
+                      name={dict.journal.tradingPlan.maxDailyLoss}
                       value={dayPlan.limits?.maxDailyLoss?.type || "r"}
-                      onChange={(e) => {
-                        const t = e.target.value as "r" | "percent";
+                      onChange={(t) => {
                         handleUpdateLimits((prev) => ({
                           ...prev,
                           maxDailyLoss: prev.maxDailyLoss
@@ -1080,11 +1083,12 @@ export function TradingPlanTab() {
                             : undefined,
                         }));
                       }}
-                      className="input text-xs w-16 uppercase flex-none"
-                    >
-                      <option value="r">R</option>
-                      <option value="percent">%</option>
-                    </select>
+                      className="w-28 flex-none"
+                      options={[
+                        { value: "r", label: "R", tone: "neutral" },
+                        { value: "percent", label: "%", tone: "neutral" },
+                      ]}
+                    />
                   </div>
                 </div>
 
@@ -1130,22 +1134,11 @@ export function TradingPlanTab() {
                   return (
                     <div
                       key={idx}
-                      onClick={() => handleToggleChecklist(idx)}
-                      className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition-colors ${
-                        item.done
-                          ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300"
-                          : "bg-s2/60 border-line text-tx/80 hover:border-line/80"
+                      className={`flex items-center justify-between gap-2 rounded-md border px-3 transition-colors ${
+                        item.done ? "border-long/40 bg-long/10" : "border-line bg-s2/60 hover:border-edge"
                       }`}
                     >
-                      <div className="flex items-center gap-2.5">
-                        <input
-                          type="checkbox"
-                          checked={item.done}
-                          onChange={() => {}} // Handled by div click
-                          className="w-4 h-4 rounded border-line text-vi focus:ring-vi flex-none"
-                        />
-                        <span className="font-medium">{label}</span>
-                      </div>
+                      <Checkbox label={label} checked={item.done} onChange={() => handleToggleChecklist(idx)} className="flex-1" />
 
                       {!item.key && (
                         <button

@@ -13,6 +13,7 @@ import {
 import { calculatePropMetrics } from "@/lib/journal/prop";
 import { Trade } from "@/lib/journal/types";
 import { HelpCircle, Copy, ArrowRight, Check, History } from "lucide-react";
+import { Checkbox, DateTimePicker, Modal, Segmented, Select } from "@/components/ui";
 
 interface PropRulesModalProps {
   isOpen: boolean;
@@ -310,23 +311,16 @@ export const PropRulesModal: React.FC<PropRulesModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4 overflow-y-auto"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={dict.journal.propRules.title}
+      subtitle={account.name || dict.journal.accountsTab.mainAccountDefaultName}
+      closeLabel={dict.journal.addTradeModal.closeLabel}
+      size="lg"
+      data-testid="prop-rules-modal"
     >
-      <div className="card w-full max-w-lg space-y-4 shadow-xl border border-line p-5">
-        <div className="flex justify-between items-center border-b border-line pb-3">
-          <div>
-            <h3 className="h3">{dict.journal.propRules.title}</h3>
-            <span className="text-xs text-mu">{account.name || dict.journal.accountsTab.mainAccountDefaultName}</span>
-          </div>
-          <button onClick={onClose} className="text-mu hover:text-tx text-lg font-bold">
-            ✕
-          </button>
-        </div>
-
+      <div className="space-y-4">
         {errorMessage && (
           <div className="p-3 bg-rose-500/15 border border-rose-500/40 rounded-xl text-xs text-rose-300">
             {errorMessage}
@@ -350,15 +344,16 @@ export const PropRulesModal: React.FC<PropRulesModalProps> = ({
               <label className="text-mu block mb-1 font-medium">
                 {dict.journal.propRules.changePhase.userOutcomeLabel}
               </label>
-              <select
+              <Select<PropUserOutcome>
+                aria-label={dict.journal.propRules.changePhase.userOutcomeLabel}
                 value={userOutcome}
-                onChange={(e) => setUserOutcome(e.target.value as PropUserOutcome)}
-                className="input text-xs w-full"
-              >
-                <option value="passed">{dict.journal.propRules.changePhase.outcomePassed}</option>
-                <option value="failed">{dict.journal.propRules.changePhase.outcomeFailed}</option>
-                <option value="ended">{dict.journal.propRules.changePhase.outcomeEnded}</option>
-              </select>
+                onChange={setUserOutcome}
+                options={[
+                  { value: "passed", label: dict.journal.propRules.changePhase.outcomePassed },
+                  { value: "failed", label: dict.journal.propRules.changePhase.outcomeFailed },
+                  { value: "ended", label: dict.journal.propRules.changePhase.outcomeEnded },
+                ]}
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-2">
@@ -392,12 +387,7 @@ export const PropRulesModal: React.FC<PropRulesModalProps> = ({
               <label className="text-mu block mb-1 font-medium">
                 {dict.journal.propRules.changePhase.newPhaseStartedAt}
               </label>
-              <input
-                type="date"
-                value={newPhaseStartedAt}
-                onChange={(e) => setNewPhaseStartedAt(e.target.value)}
-                className="input text-xs w-full"
-              />
+              <DateTimePicker mode="date" value={newPhaseStartedAt} onChange={(v) => v && setNewPhaseStartedAt(v)} />
             </div>
 
             <div className="flex justify-between items-center pt-3 border-t border-line">
@@ -455,21 +445,16 @@ export const PropRulesModal: React.FC<PropRulesModalProps> = ({
                       <Copy size={12} />
                       <span>{dict.journal.propRules.wizard.copyFromAccount}</span>
                     </label>
-                    <select
-                      onChange={(e) => e.target.value && handleCopyRules(e.target.value)}
-                      defaultValue=""
-                      className="input text-xs w-full"
-                    >
-                      <option value="" disabled>
-                        {dict.journal.propRules.wizard.selectSourceAccount}
-                      </option>
-                      {otherPropAccounts.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.name || dict.journal.accountsTab.mainAccountDefaultName} (
-                          {a.propRules?.phaseLabel || "Prop"})
-                        </option>
-                      ))}
-                    </select>
+                    <Select
+                      aria-label={dict.journal.propRules.wizard.copyFromAccount}
+                      value=""
+                      onChange={(v) => v && handleCopyRules(v)}
+                      placeholder={dict.journal.propRules.wizard.selectSourceAccount}
+                      options={otherPropAccounts.map((a) => ({
+                        value: a.id,
+                        label: `${a.name || dict.journal.accountsTab.mainAccountDefaultName} (${a.propRules?.phaseLabel || dict.journal.accountsTab.typeProp})`,
+                      }))}
+                    />
                   </div>
                 )}
 
@@ -514,12 +499,7 @@ export const PropRulesModal: React.FC<PropRulesModalProps> = ({
                       <HelpCircle size={12} className="text-mu" />
                     </span>
                   </label>
-                  <input
-                    type="date"
-                    value={startedAt}
-                    onChange={(e) => setStartedAt(e.target.value)}
-                    className="input text-xs w-full"
-                  />
+                  <DateTimePicker mode="date" value={startedAt} onChange={(v) => v && setStartedAt(v)} data-testid="prop-started-at" />
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -530,34 +510,26 @@ export const PropRulesModal: React.FC<PropRulesModalProps> = ({
                         <HelpCircle size={12} className="text-mu" />
                       </span>
                     </label>
-                    <select
+                    <Select
+                      aria-label={dict.journal.propRules.wizard.dayResetTimezone}
                       value={tz}
-                      onChange={(e) => setTz(e.target.value)}
-                      className="input text-xs w-full"
-                    >
-                      {COMMON_TIMEZONES.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={setTz}
+                      searchable
+                      options={COMMON_TIMEZONES.map((t) => ({ value: t, label: t }))}
+                    />
                   </div>
 
                   <div>
                     <label className="text-mu block mb-1 font-medium">
                       {dict.journal.propRules.wizard.dayResetHour}
                     </label>
-                    <select
-                      value={resetHour}
-                      onChange={(e) => setResetHour(parseInt(e.target.value, 10))}
-                      className="input text-xs w-full"
-                    >
-                      {Array.from({ length: 24 }).map((_, h) => (
-                        <option key={h} value={h}>
-                          {String(h).padStart(2, "0")}:00
-                        </option>
-                      ))}
-                    </select>
+                    <Select
+                      aria-label={dict.journal.propRules.wizard.dayResetHour}
+                      value={String(resetHour)}
+                      onChange={(v) => setResetHour(parseInt(v, 10))}
+                      searchable={false}
+                      options={Array.from({ length: 24 }, (_, h) => ({ value: String(h), label: `${String(h).padStart(2, "0")}:00` }))}
+                    />
                   </div>
                 </div>
 
@@ -595,32 +567,30 @@ export const PropRulesModal: React.FC<PropRulesModalProps> = ({
                       placeholder="5"
                       className="input text-xs w-full"
                     />
-                    <select
+                    <Segmented<PropValueType>
+                      name={dict.journal.propRules.wizard.maxDailyLoss}
                       value={dailyLossType}
-                      onChange={(e) => setDailyLossType(e.target.value as PropValueType)}
-                      className="input text-xs w-full"
-                    >
-                      <option value="percent">%</option>
-                      <option value="money">$</option>
-                    </select>
+                      onChange={setDailyLossType}
+                      options={[
+                        { value: "percent", label: "%", tone: "neutral" },
+                        { value: "money", label: "$", tone: "neutral" },
+                      ]}
+                    />
                   </div>
                   {dailyLossType === "percent" && (
                     <div>
                       <label className="text-[11px] text-mu block mb-0.5">
                         {dict.journal.propRules.wizard.maxDailyLossBase}
                       </label>
-                      <select
+                      <Select<PropDailyLossBase>
+                        aria-label={dict.journal.propRules.wizard.maxDailyLossBase}
                         value={dailyLossBase}
-                        onChange={(e) => setDailyLossBase(e.target.value as PropDailyLossBase)}
-                        className="input text-xs w-full"
-                      >
-                        <option value="initialBalance">
-                          {dict.journal.propRules.wizard.baseInitial}
-                        </option>
-                        <option value="startOfDayBalance">
-                          {dict.journal.propRules.wizard.baseStartOfDay}
-                        </option>
-                      </select>
+                        onChange={setDailyLossBase}
+                        options={[
+                          { value: "initialBalance", label: dict.journal.propRules.wizard.baseInitial },
+                          { value: "startOfDayBalance", label: dict.journal.propRules.wizard.baseStartOfDay },
+                        ]}
+                      />
                     </div>
                   )}
                 </div>
@@ -641,40 +611,32 @@ export const PropRulesModal: React.FC<PropRulesModalProps> = ({
                       placeholder="10"
                       className="input text-xs w-full"
                     />
-                    <select
+                    <Segmented<PropValueType>
+                      name={dict.journal.propRules.wizard.maxTotalDrawdown}
                       value={drawdownType}
-                      onChange={(e) => setDrawdownType(e.target.value as PropValueType)}
-                      className="input text-xs w-full"
-                    >
-                      <option value="percent">%</option>
-                      <option value="money">$</option>
-                    </select>
+                      onChange={setDrawdownType}
+                      options={[
+                        { value: "percent", label: "%", tone: "neutral" },
+                        { value: "money", label: "$", tone: "neutral" },
+                      ]}
+                    />
                   </div>
                   <div>
                     <label className="text-[11px] text-mu block mb-0.5">
                       {dict.journal.propRules.wizard.drawdownMode}
                     </label>
-                    <select
+                    <Select<PropDrawdownMode>
+                      aria-label={dict.journal.propRules.wizard.drawdownMode}
                       value={drawdownMode}
-                      onChange={(e) => setDrawdownMode(e.target.value as PropDrawdownMode)}
-                      className="input text-xs w-full"
-                    >
-                      <option value="static">{dict.journal.propRules.wizard.modeStatic}</option>
-                      <option value="trailingClosed">
-                        {dict.journal.propRules.wizard.modeTrailingClosed}
-                      </option>
-                    </select>
+                      onChange={setDrawdownMode}
+                      options={[
+                        { value: "static", label: dict.journal.propRules.wizard.modeStatic },
+                        { value: "trailingClosed", label: dict.journal.propRules.wizard.modeTrailingClosed },
+                      ]}
+                    />
                   </div>
                   {drawdownMode === "trailingClosed" && (
-                    <label className="flex items-center gap-2 text-[11px] text-tx cursor-pointer pt-1">
-                      <input
-                        type="checkbox"
-                        checked={lockAtInitial}
-                        onChange={(e) => setLockAtInitial(e.target.checked)}
-                        className="rounded border-line bg-s2 text-vi focus:ring-vi"
-                      />
-                      <span>{dict.journal.propRules.wizard.lockAtInitial}</span>
-                    </label>
+                    <Checkbox label={dict.journal.propRules.wizard.lockAtInitial} checked={lockAtInitial} onChange={setLockAtInitial} />
                   )}
                 </div>
 
@@ -694,14 +656,15 @@ export const PropRulesModal: React.FC<PropRulesModalProps> = ({
                       placeholder="10"
                       className="input text-xs w-full"
                     />
-                    <select
+                    <Segmented<PropValueType>
+                      name={dict.journal.propRules.wizard.profitTarget}
                       value={targetType}
-                      onChange={(e) => setTargetType(e.target.value as PropValueType)}
-                      className="input text-xs w-full"
-                    >
-                      <option value="percent">%</option>
-                      <option value="money">$</option>
-                    </select>
+                      onChange={setTargetType}
+                      options={[
+                        { value: "percent", label: "%", tone: "neutral" },
+                        { value: "money", label: "$", tone: "neutral" },
+                      ]}
+                    />
                   </div>
                 </div>
               </div>
@@ -823,6 +786,6 @@ export const PropRulesModal: React.FC<PropRulesModalProps> = ({
           </form>
         )}
       </div>
-    </div>
+    </Modal>
   );
-};
+}

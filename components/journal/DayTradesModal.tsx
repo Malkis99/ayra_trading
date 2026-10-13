@@ -5,7 +5,8 @@ import { Trade, Account } from "@/lib/journal/types";
 import { CalendarDayStat } from "@/lib/journal/stats";
 import { useJournal } from "@/lib/journal/context";
 import { useApp } from "@/lib/context";
-import { X, Plus, ArrowUpRight, ArrowDownRight, FileText, CheckCircle2 } from "lucide-react";
+import { Plus, ArrowUpRight, ArrowDownRight, CheckCircle2 } from "lucide-react";
+import { Button, Modal } from "@/components/ui";
 
 interface DayTradesModalProps {
   dayStat: CalendarDayStat;
@@ -57,43 +58,54 @@ export const DayTradesModal: React.FC<DayTradesModalProps> = ({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="card w-full max-w-lg space-y-4 shadow-2xl border border-line p-5 max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="flex justify-between items-center border-b border-line pb-3">
-          <div>
-            <h3 className="h3 font-serif">
-              {dict.journal.calendar.dayModal.title.replace("{date}", dayStat.dateStr)}
-            </h3>
-            <span className="text-xs text-mu">
-              {dayStat.tradesCount} {dict.journal.tradesWord}
-            </span>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-mu hover:text-tx text-lg font-bold p-1 rounded-lg hover:bg-white/5"
-            aria-label="Close modal"
+    <Modal
+      isOpen
+      onClose={onClose}
+      title={dict.journal.calendar.dayModal.title.replace("{date}", dayStat.dateStr)}
+      subtitle={`${dayStat.tradesCount} ${dict.journal.tradesWord}`}
+      closeLabel={dict.journal.addTradeModal.closeLabel}
+      data-testid="day-trades-modal"
+      footer={
+        <div className="flex w-full flex-wrap items-center justify-between gap-2">
+          <Button
+            variant="ghost"
+            onClick={() => {
+              openNoteModal({ date: dayStat.dateStr });
+              onClose();
+            }}
           >
-            <X size={18} />
-          </button>
+            <Plus size={16} aria-hidden="true" />
+            <span>{dict.journal.notes.addLinkedNoteBtn}</span>
+          </Button>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={onClose}>
+              {dict.journal.cancel}
+            </Button>
+            <Button
+              onClick={() => {
+                onAddTradeForDate(dayStat.dateStr);
+                onClose();
+              }}
+            >
+              <Plus size={16} aria-hidden="true" />
+              <span>{dict.journal.calendar.dayModal.addTradeDateBtn}</span>
+            </Button>
+          </div>
         </div>
-
+      }
+    >
+      <div className="space-y-4">
         {/* Day Summary */}
         <div className="p-3 bg-s2/60 rounded-xl border border-line flex justify-between items-center text-xs">
           <span className="text-mu font-semibold">
             {dict.journal.calendar.dayModal.daySummary}:
           </span>
           <b
-            className={`font-mono text-sm font-bold ${
+            className={`tabular-nums text-sm font-bold ${
               dayStat.totalR > 0
-                ? "text-emerald-400"
+                ? "text-long"
                 : dayStat.totalR < 0
-                ? "text-rose-400"
+                ? "text-short"
                 : "text-tx"
             }`}
           >
@@ -113,7 +125,7 @@ export const DayTradesModal: React.FC<DayTradesModalProps> = ({
                 {dict.journal.tradingPlan.dayTab}
               </span>
               {plan.review?.completedAt && (
-                <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                <span className="text-[10px] text-long font-semibold flex items-center gap-1">
                   <CheckCircle2 size={11} />
                   {dict.journal.tradingPlan.completedBadge}
                 </span>
@@ -122,19 +134,19 @@ export const DayTradesModal: React.FC<DayTradesModalProps> = ({
 
             {plan.bias && plan.bias.length > 0 && (
               <div className="flex flex-wrap gap-1 items-center text-[11px]">
-                <span className="text-mu">Bias:</span>
+                <span className="text-mu">{dict.journal.tradingPlan.biasTitle}:</span>
                 {plan.bias.map((b, idx) => (
                   <span
                     key={idx}
                     className={`px-1.5 py-0.2 rounded font-bold text-[10px] ${
                       b.direction === "bullish"
-                        ? "bg-emerald-500/20 text-emerald-400"
+                        ? "bg-emerald-500/20 text-long"
                         : b.direction === "bearish"
-                        ? "bg-rose-500/20 text-rose-400"
+                        ? "bg-rose-500/20 text-short"
                         : "bg-amber-500/20 text-amber-300"
                     }`}
                   >
-                    {b.instrument} ({b.direction.toUpperCase()})
+                    {b.instrument} · {dict.journal.overview.bias[b.direction]}
                   </span>
                 ))}
               </div>
@@ -196,8 +208,8 @@ export const DayTradesModal: React.FC<DayTradesModalProps> = ({
                     <span
                       className={`p-1 rounded ${
                         t.direction === "long"
-                          ? "bg-emerald-500/20 text-emerald-400"
-                          : "bg-rose-500/20 text-rose-400"
+                          ? "bg-emerald-500/20 text-long"
+                          : "bg-rose-500/20 text-short"
                       }`}
                     >
                       {t.direction === "long" ? (
@@ -209,7 +221,7 @@ export const DayTradesModal: React.FC<DayTradesModalProps> = ({
                     <div>
                       <b className="text-tx font-bold block">{t.instrument}</b>
                       <span className="text-[10px] text-mu">
-                        {acc?.name || "Main"} ·{" "}
+                        {acc?.name || dict.journal.accountsTab.mainAccountDefaultName} ·{" "}
                         {new Date(t.openedAt).toLocaleTimeString([], {
                           hour: "2-digit",
                           minute: "2-digit",
@@ -219,11 +231,11 @@ export const DayTradesModal: React.FC<DayTradesModalProps> = ({
                   </div>
 
                   <b
-                    className={`font-mono ${
+                    className={`tabular-nums ${
                       isWin
-                        ? "text-emerald-400"
+                        ? "text-long"
                         : isLoss
-                        ? "text-rose-400"
+                        ? "text-short"
                         : "text-tx"
                     }`}
                   >
@@ -237,36 +249,7 @@ export const DayTradesModal: React.FC<DayTradesModalProps> = ({
           </div>
         )}
 
-        {/* Actions */}
-        <div className="pt-2 border-t border-line flex justify-between items-center gap-2">
-          <button
-            onClick={() => {
-              openNoteModal({ date: dayStat.dateStr });
-              onClose();
-            }}
-            className="btn-ghost text-xs py-1.5 px-3 flex items-center gap-1 text-acc font-semibold border border-line rounded-xl"
-          >
-            <Plus size={13} />
-            <span>{dict.journal.notes.addLinkedNoteBtn}</span>
-          </button>
-
-          <div className="flex gap-2">
-            <button onClick={onClose} className="btn-ghost text-xs py-2 px-3">
-              {dict.journal.cancel}
-            </button>
-            <button
-              onClick={() => {
-                onAddTradeForDate(dayStat.dateStr);
-                onClose();
-              }}
-              className="btn text-xs py-2 px-3 flex items-center gap-1.5 font-semibold"
-            >
-              <Plus size={15} />
-              <span>{dict.journal.calendar.dayModal.addTradeDateBtn}</span>
-            </button>
-          </div>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 };

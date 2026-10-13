@@ -10,6 +10,7 @@ import {
   generateReportCSV,
 } from "@/lib/journal/stats";
 import { ProcessMatrix } from "./ProcessMatrix";
+import { FilterChip } from "@/components/ui";
 import { Download, ArrowUpDown, ChevronDown, ChevronUp } from "lucide-react";
 
 interface ReportsTabProps {
@@ -199,33 +200,27 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <h3 className="h3 font-serif">{dict.journal.reports.title}</h3>
 
-          <div className="flex gap-2 text-xs">
-            <select
-              value={filterAccount}
-              onChange={(e) => setFilterAccount(e.target.value)}
-              className="input text-xs"
-            >
-              <option value="all">{dict.journal.dashboard.filters.allAccounts}</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name || dict.journal.accountsTab.mainAccountDefaultName}
-                </option>
-              ))}
-            </select>
-
-            <select
+          <div className="flex flex-wrap items-center gap-2">
+            <FilterChip
+              name={dict.journal.overview.filters.account}
+              value={filterAccount === "all" ? null : filterAccount}
+              onChange={(v) => setFilterAccount(v ?? "all")}
+              clearLabel={dict.journal.overview.filters.clearFilter}
+              options={accounts.map((a) => ({ value: a.id, label: a.name || dict.journal.accountsTab.mainAccountDefaultName }))}
+            />
+            <FilterChip
+              name={dict.journal.overview.filters.period}
               value={filterPeriod}
-              onChange={(e) => setFilterPeriod(e.target.value)}
-              className="input text-xs"
-            >
-              <option value="30d">{dict.journal.dashboard.filters.period30d}</option>
-              <option value="7d">{dict.journal.dashboard.filters.period7d}</option>
-              <option value="90d">{dict.journal.dashboard.filters.period90d}</option>
-              <option value="currentMonth">
-                {dict.journal.dashboard.filters.periodCurrentMonth}
-              </option>
-              <option value="all">{dict.journal.dashboard.filters.periodAll}</option>
-            </select>
+              onChange={(v) => setFilterPeriod(v ?? "all")}
+              clearLabel={dict.journal.overview.filters.clearFilter}
+              options={[
+                { value: "7d", label: dict.journal.dashboard.filters.period7d },
+                { value: "30d", label: dict.journal.dashboard.filters.period30d },
+                { value: "90d", label: dict.journal.dashboard.filters.period90d },
+                { value: "currentMonth", label: dict.journal.dashboard.filters.periodCurrentMonth },
+                { value: "all", label: dict.journal.dashboard.filters.periodAll },
+              ]}
+            />
 
             <button
               onClick={handleDownloadCSV}

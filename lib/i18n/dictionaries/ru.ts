@@ -911,6 +911,8 @@ export const ru = {
         withoutMistakes: "Без ошибок",
         clearAll: "Сбросить",
         noStrategy: "Без стратегии",
+        tag: "Тег",
+        link: "Привязка",
         clearFilter: "Сбросить фильтр «{name}»",
       },
       sort: { label: "Сортировка", date: "Дата", result: "Результат", instrument: "Инструмент" },

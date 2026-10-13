@@ -3,7 +3,10 @@ import type { Page } from "@playwright/test";
 /** Picks an option in a custom <Select> (components/ui/forms) by its trigger test id. */
 export async function pickOption(page: Page, testId: string, label: string | RegExp) {
   await page.getByTestId(testId).click();
-  await page.getByRole("listbox").getByRole("option", { name: label }).click();
+  // A string matches the start of the option name (options may add a description), e.g. "USD" but not "USDT".
+  const escaped = typeof label === "string" ? label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : "";
+  const name = typeof label === "string" ? new RegExp(`^${escaped}(\\s|$)`) : label;
+  await page.getByRole("listbox").getByRole("option", { name }).click();
 }
 
 /** Opens a collapsed section of the add-trade drawer. */

@@ -24,6 +24,11 @@ export default {
         edge: token("edge"),
         long: token("long"),
         short: token("short"),
+        // Legacy names still used by older screens (were undefined before)
+        acc: token("vi"),
+        card: token("s1"),
+        "tx-muted": token("mu"),
+        violet: { DEFAULT: token("pri"), glow: token("vi") },
       },
       borderRadius: {
         sm: "8px",

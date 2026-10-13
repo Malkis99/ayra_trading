@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { openJournalTab } from "./helpers/forms";
+import { openJournalTab, pickOption } from "./helpers/forms";
 
 test.describe("T6a Journal v1 E2E Flow", () => {
   test.beforeEach(async ({ page }) => {
@@ -41,8 +41,8 @@ test.describe("T6a Journal v1 E2E Flow", () => {
     await page.click("button:has-text('Добавить счёт')");
 
     await page.fill("input[placeholder='Основной счёт']", "Prop Challenge");
-    await page.selectOption("select >> nth=0", "prop");
-    await page.selectOption("select >> nth=1", "USD");
+    await pickOption(page, "account-type-select", "Проп");
+    await pickOption(page, "account-currency-select", "USD");
     await page.fill("input[placeholder='10000']", "50000");
     await page.click("button[type='submit']:has-text('Сохранить')");
 

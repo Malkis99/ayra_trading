@@ -33,6 +33,7 @@ const ALL_PAGES = [
   ["settings", "/settings"],
   ["plans", "/plans"],
   ["journal-analytics", "/journal?tab=analytics"],
+  ["journal-plan", "/journal?tab=plan"],
 ];
 // Dialog shots (viewport only): [name, path, action]
 const DIALOGS = process.env.SHOTS_JOURNAL
@@ -45,6 +46,18 @@ const DIALOGS = process.env.SHOTS_JOURNAL
         const row = page.locator("tr", { hasText: "EURUSD" }).first();
         if (await row.isVisible().catch(() => false)) await row.click();
         else await page.locator("text=EURUSD >> visible=true").first().click();
+      }],
+      ["journal-strategy-modal", "/journal?tab=strategies", async (page) => {
+        await page.getByRole("button", { name: /Создать стратегию|Новая стратегия/ }).first().click();
+      }],
+      ["journal-account-modal", "/journal?tab=accounts", async (page) => {
+        await page.getByRole("button", { name: "Добавить счёт" }).first().click();
+      }],
+      ["journal-no-trade-modal", "/journal", async (page) => {
+        const today = page.getByTestId("today-panel");
+        const toggle = today.getByRole("button", { name: /Сегодня/ });
+        if (await toggle.isVisible().catch(() => false)) await toggle.click();
+        await today.getByRole("button", { name: /Не вошёл/ }).click();
       }],
       ["journal-add-detailed", "/journal", async (page) => {
         await page.getByRole("button", { name: "Добавить сделку" }).first().click();

@@ -48,7 +48,7 @@ test.describe("T6d Prop Rules Tracker E2E Flow", () => {
     // 2. Create Prop Account
     await page.click("button:has-text('Добавить счёт')");
     await page.fill("input[placeholder='Основной счёт']", "My FTMO Account");
-    await page.selectOption("select", "prop");
+    await pickOption(page, "account-type-select", "Проп");
     await page.fill("input[placeholder='10000']", "100000");
     await page.click("button[type='submit']:has-text('Сохранить')");
 

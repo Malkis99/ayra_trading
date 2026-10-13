@@ -356,7 +356,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                   <div className="flex items-center gap-2">
                     <Shield size={16} className="text-vi" />
                     <b className="text-xs font-bold text-tx">{acc.name || dict.journal.accountsTab.mainAccountDefaultName}</b>
-                    <span className="chip text-[10px] uppercase">{acc.propRules.phaseLabel || "Prop"}</span>
+                    <span className="chip text-[10px] uppercase">{acc.propRules.phaseLabel || dict.journal.accountsTab.typeProp}</span>
                   </div>
                   <button onClick={onGoToTrades} className="text-xs text-vi hover:underline flex items-center gap-1 font-medium">
                     <span>{dict.journal.propRules.homeBlock.viewDetails}</span>
@@ -410,11 +410,11 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                         <span className="font-bold text-tx text-[11px] truncate max-w-[120px]">
                           {pAcc.name || dict.journal.accountsTab.mainAccountDefaultName}
                         </span>
-                        <span className="chip text-[9px]">{pAcc.propRules?.phaseLabel || "Prop"}</span>
+                        <span className="chip text-[9px]">{pAcc.propRules?.phaseLabel || dict.journal.accountsTab.typeProp}</span>
                       </div>
                       <div className="flex justify-between text-[10px] text-mu font-mono">
-                        <span>DL: {pMetrics?.dailyLoss ? `${pMetrics.dailyLoss.usedPct.toFixed(0)}%` : "—"}</span>
-                        <span>DD: {pMetrics?.totalDrawdown ? `${pMetrics.totalDrawdown.usedPct.toFixed(0)}%` : "—"}</span>
+                        <span>{dict.journal.propRules.metrics.dailyLoss}: {pMetrics?.dailyLoss ? `${pMetrics.dailyLoss.usedPct.toFixed(0)}%` : "—"}</span>
+                        <span>{dict.journal.propRules.metrics.totalDrawdown}: {pMetrics?.totalDrawdown ? `${pMetrics.totalDrawdown.usedPct.toFixed(0)}%` : "—"}</span>
                       </div>
                     </div>
                   );

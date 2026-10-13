@@ -18,7 +18,7 @@ import { NotesTab } from "@/components/journal/NotesTab";
 import { calculateProcessScore } from "@/lib/journal/process-score";
 import { getDemoTrades, DEMO_ACCOUNT } from "@/lib/journal/demo-trades";
 import { Plus, Download, AlertTriangle, Trash2, Edit2 } from "lucide-react";
-import { TabsWithMore, Segmented, Button } from "@/components/ui";
+import { TabsWithMore, Segmented, Button, Input, Modal, NumberInput, Select } from "@/components/ui";
 import { JournalKpiStrip, type JournalUnit } from "@/components/journal/JournalKpiStrip";
 import { TodayPanel } from "@/components/journal/TodayPanel";
 import { TradesTable } from "@/components/journal/TradesTable";
@@ -823,107 +823,59 @@ export default function JournalPage() {
       )}
 
       {/* ACCOUNT MODAL */}
-      {isAccountModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setIsAccountModalOpen(false);
-          }}
-        >
-          <form
-            onSubmit={handleSaveAccountSubmit}
-            className="card w-full max-w-md space-y-4 p-5 shadow-xl border border-line"
-          >
-            <div className="flex justify-between items-center border-b border-line pb-3">
-              <h3 className="h3">
-                {editingAccount
-                  ? dict.journal.accountsTab.editBtn
-                  : dict.journal.accountsTab.addAccountBtn}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setIsAccountModalOpen(false)}
-                className="text-mu hover:text-tx text-lg font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div>
-              <label className="text-xs text-mu block mb-1">
-                {dict.journal.accountNameLabel}
-              </label>
-              <input
-                type="text"
-                value={accName}
-                onChange={(e) => setAccName(e.target.value)}
-                placeholder={dict.journal.accountsTab.mainAccountDefaultName}
-                className="input text-xs w-full"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-xs text-mu block mb-1">
-                  {dict.journal.accountTypeLabel}
-                </label>
-                <select
-                  value={accType}
-                  onChange={(e) => setAccType(e.target.value as AccountType)}
-                  className="input text-xs w-full"
-                >
-                  <option value="personal">{dict.journal.accountsTab.typePersonal}</option>
-                  <option value="prop">{dict.journal.accountsTab.typeProp}</option>
-                  <option value="demo">{dict.journal.accountsTab.typeDemo}</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs text-mu block mb-1">
-                  {dict.journal.currencyLabel}
-                </label>
-                <select
-                  value={accCurrency}
-                  onChange={(e) => setAccCurrency(e.target.value as AccountCurrency)}
-                  className="input text-xs w-full"
-                >
-                  {["USD", "EUR", "GBP", "GEL", "RUB", "UAH", "KZT", "USDT"].map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="text-xs text-mu block mb-1">
-                {dict.journal.accountsTab.startBalance}
-              </label>
-              <input
-                type="text"
-                value={accStartBalance}
-                onChange={(e) => setAccStartBalance(e.target.value)}
-                placeholder="10000"
-                className="input text-xs w-full"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-line">
-              <button
-                type="button"
-                onClick={() => setIsAccountModalOpen(false)}
-                className="btn-ghost py-2 px-4 text-xs"
-              >
-                {dict.journal.cancel}
-              </button>
-              <button type="submit" className="btn-primary py-2 px-5 text-xs font-semibold">
-                {dict.journal.save}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+      <Modal
+        isOpen={isAccountModalOpen}
+        onClose={() => setIsAccountModalOpen(false)}
+        title={editingAccount ? dict.journal.accountsTab.editBtn : dict.journal.accountsTab.addAccountBtn}
+        closeLabel={dict.journal.addTradeModal.closeLabel}
+        data-testid="account-modal"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setIsAccountModalOpen(false)}>
+              {dict.journal.cancel}
+            </Button>
+            <Button type="submit" form="journal-account-form">
+              {dict.journal.save}
+            </Button>
+          </>
+        }
+      >
+        <form id="journal-account-form" onSubmit={handleSaveAccountSubmit} className="space-y-4">
+          <Input
+            label={dict.journal.accountNameLabel}
+            value={accName}
+            onChange={(e) => setAccName(e.target.value)}
+            placeholder={dict.journal.accountsTab.mainAccountDefaultName}
+          />
+          <div className="grid grid-cols-2 gap-3">
+            <Select<AccountType>
+              label={dict.journal.accountTypeLabel}
+              value={accType}
+              onChange={setAccType}
+              data-testid="account-type-select"
+              options={[
+                { value: "personal", label: dict.journal.accountsTab.typePersonal },
+                { value: "prop", label: dict.journal.accountsTab.typeProp },
+                { value: "demo", label: dict.journal.accountsTab.typeDemo },
+              ]}
+            />
+            <Select<AccountCurrency>
+              label={dict.journal.currencyLabel}
+              value={accCurrency}
+              onChange={setAccCurrency}
+              data-testid="account-currency-select"
+              options={(["USD", "EUR", "GBP", "GEL", "RUB", "UAH", "KZT", "USDT"] as AccountCurrency[]).map((c) => ({ value: c, label: c }))}
+            />
+          </div>
+          <NumberInput
+            label={dict.journal.accountsTab.startBalance}
+            optional
+            value={accStartBalance}
+            onChange={(e) => setAccStartBalance(e.target.value)}
+            placeholder="10000"
+          />
+        </form>
+      </Modal>
     </div>
   );
 }

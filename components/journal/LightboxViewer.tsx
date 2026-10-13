@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useApp } from "@/lib/context";
 import { AttachmentKind, AttachmentMetadata, AttachmentRecord } from "@/lib/journal/attachments/types";
+import { Segmented } from "@/components/ui";
 
 interface LightboxViewerProps {
   attachments: AttachmentRecord[];
@@ -222,15 +223,17 @@ export function LightboxViewer({
           <div className="flex items-center gap-2 flex-none">
             {/* Kind Switcher */}
             {onUpdateMetadata && (
-              <select
+              <Segmented<AttachmentKind>
+                name={dictAtt.kindLabel}
                 value={currentItem.kind}
-                onChange={(e) => handleKindChange(e.target.value as AttachmentKind)}
-                className="input py-1 px-2 text-xs bg-s1 border-line"
-              >
-                <option value="before">{dictAtt.kinds.before}</option>
-                <option value="after">{dictAtt.kinds.after}</option>
-                <option value="other">{dictAtt.kinds.other}</option>
-              </select>
+                onChange={handleKindChange}
+                className="w-[240px]"
+                options={[
+                  { value: "before", label: dictAtt.kinds.before, tone: "neutral" },
+                  { value: "after", label: dictAtt.kinds.after, tone: "neutral" },
+                  { value: "other", label: dictAtt.kinds.other, tone: "neutral" },
+                ]}
+              />
             )}
 
             {/* Zoom level indicator */}
