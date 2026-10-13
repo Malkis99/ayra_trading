@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useGame } from "@/lib/game-context";
 import { useApp } from "@/lib/context";
-import { Figure } from "@/components/Figure";
+import { Character } from "@/components/Character";
 import { SlotName, ITEMS, FRAMES, SLOT_KEY_MAP, LEFT_SLOTS, RIGHT_SLOTS } from "@/lib/items";
 import { formatString, formatNumber } from "@/lib/i18n";
 import {
@@ -266,10 +266,10 @@ export function CharacterStage({ onSlotClick, selectedSlot }: CharacterStageProp
           {/* 3D Turn Container */}
           <div className="turn-3d h-full flex items-center justify-center" style={{ transform: `rotateY(${ry}deg)` }}>
             <div className="front-3d flex justify-center items-center h-full">
-              <Figure equipment={effectiveEquipment} viewBox="0 0 100 230" width="85%" height="85%" back={false} />
+              <Character appearance={gameState.profile.appearance} equipment={effectiveEquipment} size="fill" />
             </div>
             <div className="bk-3d flex justify-center items-center h-full">
-              <Figure equipment={effectiveEquipment} viewBox="0 0 100 230" width="85%" height="85%" back={true} />
+              <Character appearance={gameState.profile.appearance} equipment={effectiveEquipment} size="fill" variant="back" />
             </div>
           </div>
         </div>

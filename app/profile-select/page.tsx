@@ -14,7 +14,7 @@ import {
   type SpaceSummary,
 } from "@/lib/storage/profile-transfer";
 import { validateAvatarAppearance, type AvatarAppearance } from "@/lib/avatar";
-import { Figure } from "@/components/Figure";
+import { Character } from "@/components/Character";
 import { formatNumber, formatString } from "@/lib/i18n";
 import { AlertCircle, ArrowRight, Clock, Loader2, X } from "lucide-react";
 
@@ -128,11 +128,10 @@ export default function ProfileSelectPage() {
           className="flex items-center gap-4 rounded-2xl border border-vi/40 bg-s1/80 p-4 shadow-xl shadow-vi/10"
         >
           <div className="grid h-24 w-16 flex-none place-items-center rounded-xl bg-s2/60">
-            <Figure
+            <Character
               appearance={validateAvatarAppearance(summary.appearance as Partial<AvatarAppearance> | null)}
               equipment={summary.equipment}
-              width={48}
-              height={88}
+              size="mini"
             />
           </div>
           <div className="min-w-0 space-y-1">

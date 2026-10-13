@@ -7,7 +7,7 @@ import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useAuth } from "@/lib/auth/auth-context";
 import { Starfield } from "@/components/Starfield";
-import { Figure } from "@/components/Figure";
+import { Character } from "@/components/Character";
 import { isValidLatinNickname, transliterateNickname } from "@/lib/stats";
 import {
   SKIN_TONES,
@@ -158,11 +158,10 @@ function AwakeningCanvasAnimation({
         />
 
         <div className="relative z-20 transition-all duration-1000">
-          <Figure
+          <Character
             appearance={appearance}
             equipment={equipment}
-            width={120}
-            height={200}
+            size="preview"
             className={
               phase === "dark" || phase === "spiral"
                 ? "brightness-0 opacity-40 transition-all duration-1000"
@@ -556,7 +555,7 @@ export default function AwakeningPage() {
         return (
           <div className="space-y-6 max-w-md mx-auto py-2">
             <AwakeningCanvasAnimation
-              appearance={validateAvatarAppearance(answers.appearance)}
+              appearance={gameState.profile.appearance}
               equipment={gameState.equipment}
               skipText={dict.awakening.skipQuestion}
               startText={dict.awakening.startBtn}
@@ -724,9 +723,8 @@ export default function AwakeningPage() {
     }
 
     if (currentQuestion.id === "appearance") {
-      const currentApp: AvatarAppearance = validateAvatarAppearance(
-        answers.appearance
-      );
+      // Single source of truth: the saved profile appearance (answers.appearance is kept in sync by updateAvatarAppearance).
+      const currentApp: AvatarAppearance = gameState.profile.appearance;
 
       return (
         <div className="w-full max-w-[1120px] mx-auto py-2">
@@ -735,8 +733,10 @@ export default function AwakeningPage() {
               <div className="relative w-full max-w-[420px] lg:max-w-none lg:min-w-[380px] h-[min(46vh,360px)] lg:h-[calc(100vh-280px)] lg:min-h-[460px] lg:max-h-[680px] rounded-3xl bg-radial-gradient from-pri/40 via-s1 to-s1 overflow-hidden border border-vi/40 shadow-2xl shadow-vi/20 grid place-items-center p-6">
                 <div className="absolute bottom-4 lg:bottom-6 w-32 lg:w-48 h-5 lg:h-7 rounded-full border border-vi/50 bg-vi/30 shadow-2xl shadow-vi/60 blur-[1px]" />
 
-                <Figure
+                <Character
                   appearance={currentApp}
+                  equipment={gameState.equipment}
+                  size="fill"
                   rotateSlowly
                   className="h-[85%] w-auto relative z-10"
                 />
@@ -754,6 +754,7 @@ export default function AwakeningPage() {
                       key={st.id}
                       type="button"
                       disabled={isReadOnly}
+                      aria-pressed={currentApp.skinTone === st.id}
                       onClick={() => {
                         const updated = { ...currentApp, skinTone: st.id };
                         handleAnswerChange("appearance", updated);
@@ -781,6 +782,7 @@ export default function AwakeningPage() {
                       key={hc.id}
                       type="button"
                       disabled={isReadOnly}
+                      aria-pressed={currentApp.hairColor === hc.id}
                       onClick={() => {
                         const updated = { ...currentApp, hairColor: hc.id };
                         handleAnswerChange("appearance", updated);
@@ -808,6 +810,7 @@ export default function AwakeningPage() {
                       key={hs.id}
                       type="button"
                       disabled={isReadOnly}
+                      aria-pressed={currentApp.hairstyle === hs.id}
                       onClick={() => {
                         const updated = { ...currentApp, hairstyle: hs.id };
                         handleAnswerChange("appearance", updated);
@@ -835,6 +838,7 @@ export default function AwakeningPage() {
                       key={o.id}
                       type="button"
                       disabled={isReadOnly}
+                      aria-pressed={currentApp.outfit === o.id}
                       onClick={() => {
                         const updated = { ...currentApp, outfit: o.id };
                         handleAnswerChange("appearance", updated);

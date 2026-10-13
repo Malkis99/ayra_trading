@@ -17,7 +17,7 @@ import {
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useAuth } from "@/lib/auth/auth-context";
-import { Figure } from "@/components/Figure";
+import { Character } from "@/components/Character";
 import { xpForNextLevel } from "@/lib/game";
 import { FRAMES, TITLES } from "@/lib/items";
 
@@ -116,7 +116,7 @@ export function Sidebar() {
             className="relative grid h-10 w-10 flex-none place-items-center overflow-hidden rounded-full border-2 bg-[#241d3a]"
             style={{ borderColor: frameColor }}
           >
-            <Figure equipment={gameState.equipment} width={32} height={38} />
+            <Character appearance={gameState.profile.appearance} equipment={gameState.equipment} size="avatar" />
           </div>
           <div className="flex min-w-0 flex-col gap-0.5 w-full">
             <div className="flex items-center gap-1.5 min-w-0">

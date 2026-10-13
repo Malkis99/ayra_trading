@@ -6,7 +6,7 @@ import { Search, Plus, Bell, LogIn } from "lucide-react";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
-import { Figure } from "@/components/Figure";
+import { Character } from "@/components/Character";
 import { CoinsChip } from "@/components/CoinsChip";
 import { FRAMES } from "@/lib/items";
 
@@ -109,7 +109,7 @@ export function Topbar() {
           style={{ borderColor: frameColor }}
           aria-label={dict.topbar.profile}
         >
-          <Figure equipment={gameState.equipment} width={30} height={34} />
+          <Character appearance={gameState.profile.appearance} equipment={gameState.equipment} size="avatar" />
           <small className="absolute -bottom-1 -right-1 rounded bg-go px-1 text-[8px] font-bold text-black">
             {gameState.level}
           </small>

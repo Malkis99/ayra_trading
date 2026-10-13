@@ -36,15 +36,17 @@ export interface EquipmentItem {
   rarity: 0 | 1 | 2; // 0: Common, 1: Rare, 2: Epic
   color: string;
   reqLevel: number;
+  /** Starter clothes: drawn in the colours of the outfit style chosen in onboarding. */
+  starter?: boolean;
 }
 
 export const ITEMS: EquipmentItem[] = [
-  { id: 0, slot: "Верх", nameKey: "items.graphiteShirt", rarity: 0, color: "#3a3a48", reqLevel: 1 },
+  { id: 0, slot: "Верх", nameKey: "items.graphiteShirt", rarity: 0, color: "#3a3a48", reqLevel: 1, starter: true },
   { id: 1, slot: "Верх", nameKey: "items.violetHoodie", rarity: 1, color: "#50348f", reqLevel: 1 },
   { id: 2, slot: "Верх", nameKey: "items.nightSuit", rarity: 2, color: "#241d6b", reqLevel: 3 },
-  { id: 3, slot: "Низ", nameKey: "items.darkPants", rarity: 0, color: "#2b2b36", reqLevel: 1 },
+  { id: 3, slot: "Низ", nameKey: "items.darkPants", rarity: 0, color: "#2b2b36", reqLevel: 1, starter: true },
   { id: 4, slot: "Низ", nameKey: "items.suitPants", rarity: 1, color: "#1c1850", reqLevel: 2 },
-  { id: 5, slot: "Обувь", nameKey: "items.sneakers", rarity: 0, color: "#cfcfd8", reqLevel: 1 },
+  { id: 5, slot: "Обувь", nameKey: "items.sneakers", rarity: 0, color: "#cfcfd8", reqLevel: 1, starter: true },
   { id: 6, slot: "Обувь", nameKey: "items.shoes", rarity: 1, color: "#111116", reqLevel: 2 },
   { id: 7, slot: "Верхняя", nameKey: "items.bomber", rarity: 0, color: "#3b3b4a", reqLevel: 1 },
   { id: 8, slot: "Верхняя", nameKey: "items.blazer", rarity: 1, color: "#30286e", reqLevel: 2 },

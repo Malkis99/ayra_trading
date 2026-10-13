@@ -4,33 +4,37 @@ import React from "react";
 import { ITEMS, SlotName } from "@/lib/items";
 import {
   AvatarAppearance,
-  DEFAULT_AVATAR_APPEARANCE,
   getSkinTonePreset,
   getHairColorPreset,
   getOutfitPreset,
   validateAvatarAppearance,
 } from "@/lib/avatar";
 
+/** SVG renderer behind <Character>. Use <Character> in pages and components, not Figure directly. */
 interface FigureProps {
-  equipment?: Record<string, number>;
-  appearance?: AvatarAppearance;
+  equipment: Record<string, number>;
+  appearance: AvatarAppearance;
   viewBox?: string;
   width?: number | string;
   height?: number | string;
   back?: boolean;
   className?: string;
   rotateSlowly?: boolean;
+  "data-character"?: string;
+  "data-equipment"?: string;
 }
 
 export function Figure({
-  equipment = {},
-  appearance = DEFAULT_AVATAR_APPEARANCE,
+  equipment,
+  appearance,
   viewBox = "0 0 100 230",
   width = "100%",
   height = "100%",
   back = false,
   className = "",
   rotateSlowly = false,
+  "data-character": dataCharacter,
+  "data-equipment": dataEquipment,
 }: FigureProps) {
   const validApp = validateAvatarAppearance(appearance);
   const skinPreset = getSkinTonePreset(validApp.skinTone);
@@ -43,7 +47,7 @@ export function Figure({
 
   function getColor(slot: SlotName, defaultColor: string): string {
     const itemIdx = equipment[slot];
-    if (itemIdx != null && ITEMS[itemIdx]) {
+    if (itemIdx != null && ITEMS[itemIdx] && !ITEMS[itemIdx].starter) {
       return ITEMS[itemIdx].color;
     }
     return defaultColor;
@@ -131,6 +135,8 @@ export function Figure({
         rotateSlowly ? "motion-safe:animate-[slowRotate_12s_linear_infinite]" : ""
       } ${className}`}
       xmlns="http://www.w3.org/2000/svg"
+      data-character={dataCharacter}
+      data-equipment={dataEquipment}
     >
       <defs>
         <style>
