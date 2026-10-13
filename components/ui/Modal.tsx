@@ -16,13 +16,18 @@ type ModalProps = {
   /** Optional line under the title. */
   subtitle?: React.ReactNode;
   "data-testid"?: string;
+  /** On phones (< 768px) show as a bottom sheet instead of a centred dialog. */
+  sheetOnMobile?: boolean;
 };
+
+/** Open dialogs, top last: only the top one reacts to Esc and Tab (a confirm dialog over a wizard). */
+const openStack: symbol[] = [];
 
 const SIZES = { sm: "max-w-sm", md: "max-w-lg", lg: "max-w-2xl", xl: "max-w-4xl" };
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /** Centered dialog above everything: focus trap, Esc and backdrop click close, focus returns to the opener. */
-export function Modal({ isOpen, onClose, title, closeLabel, children, footer, size = "md", subtitle, "data-testid": testId }: ModalProps) {
+export function Modal({ isOpen, onClose, title, closeLabel, children, footer, size = "md", subtitle, "data-testid": testId, sheetOnMobile }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
 
@@ -31,11 +36,14 @@ export function Modal({ isOpen, onClose, title, closeLabel, children, footer, si
 
   useEffect(() => {
     if (!isOpen) return;
+    const me = Symbol("modal");
+    openStack.push(me);
     const opener = document.activeElement as HTMLElement | null;
     const dialog = dialogRef.current;
     dialog?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
 
     const onKeyDown = (e: KeyboardEvent) => {
+      if (openStack[openStack.length - 1] !== me) return;
       // Popovers and viewers inside handle Esc first and mark it as handled.
       if (e.key === "Escape" && !e.defaultPrevented) {
         e.preventDefault();
@@ -57,6 +65,7 @@ export function Modal({ isOpen, onClose, title, closeLabel, children, footer, si
     };
     document.addEventListener("keydown", onKeyDown);
     return () => {
+      openStack.splice(openStack.indexOf(me), 1);
       document.removeEventListener("keydown", onKeyDown);
       opener?.focus?.();
     };
@@ -66,7 +75,7 @@ export function Modal({ isOpen, onClose, title, closeLabel, children, footer, si
 
   // Portal: dialogs opened from inside <main> must not be trapped in its stacking context.
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+    <div className={cn("fixed inset-0 z-[100] flex justify-center", sheetOnMobile ? "items-end p-0 md:items-center md:p-4" : "items-center p-4")}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
       <div
         ref={dialogRef}
@@ -74,7 +83,11 @@ export function Modal({ isOpen, onClose, title, closeLabel, children, footer, si
         aria-modal="true"
         aria-labelledby={titleId}
         data-testid={testId}
-        className={cn("relative flex max-h-[90dvh] w-full flex-col rounded-lg border border-edge bg-s1 shadow-float", SIZES[size])}
+        className={cn(
+          "relative flex w-full flex-col border border-edge bg-s1 shadow-float",
+          sheetOnMobile ? "max-h-[92dvh] rounded-t-2xl md:max-h-[90dvh] md:rounded-lg" : "max-h-[90dvh] rounded-lg",
+          SIZES[size]
+        )}
       >
         <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-4">
           <div className="min-w-0">

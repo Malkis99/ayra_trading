@@ -343,6 +343,34 @@ export class LocalStorageJournalRepository implements JournalRepository {
     return true;
   }
 
+  /** Adds many trades in one write (import). Trades whose id already exists are skipped. Returns how many were added. */
+  importTrades(trades: Trade[]): number {
+    const data = this.loadData();
+    const ids = new Set(data.trades.map((t) => t.id));
+    const fresh = trades.filter((t) => !ids.has(t.id));
+    data.trades.push(...fresh);
+    this.saveData(data);
+    return fresh.length;
+  }
+
+  /** Deletes every trade of one import batch (undo import), including their screenshots. Returns the number deleted. */
+  deleteTradesByBatch(batchId: string): number {
+    const data = this.loadData();
+    const removed = data.trades.filter((t) => t.importBatchId === batchId);
+    if (removed.length === 0) return 0;
+    data.trades = data.trades.filter((t) => t.importBatchId !== batchId);
+    this.saveData(data);
+    if (typeof window !== "undefined") {
+      const attRepo = new IndexedDBAttachmentRepository(this.userId);
+      removed.forEach((t) =>
+        attRepo.deleteAttachmentsByTradeId(t.id).catch((err) => {
+          console.error(`Failed to delete attachments for trade ${t.id}:`, err);
+        })
+      );
+    }
+    return removed.length;
+  }
+
   getStrategies(): Strategy[] {
     return this.loadData().strategies || [];
   }

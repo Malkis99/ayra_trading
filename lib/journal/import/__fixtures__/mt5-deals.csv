@@ -1,0 +1,5 @@
+Time,Deal,Symbol,Type,Direction,Volume,Price,Order,Commission,Fee,Swap,Profit,Balance,Comment
+2024.03.04 08:00:00,1,,balance,,,,,0,0,0,10000,10000,Deposit
+2024.03.04 10:15:00,2,USDJPY,buy,in,0.30,150.100,11,-0.90,0,0,0,9999.10,
+2024.03.04 10:40:00,3,USDJPY,buy,in,0.20,150.200,12,-0.60,0,0,0,9998.50,
+2024.03.04 13:00:00,4,USDJPY,sell,out,0.50,150.500,13,-1.50,0,-0.30,120.00,10116.70,

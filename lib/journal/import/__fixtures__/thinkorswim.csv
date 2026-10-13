@@ -1,0 +1,6 @@
+Account Statement for 123 since 3/1/24 through 3/5/24
+
+Account Trade History
+,Exec Time,Spread,Side,Qty,Pos Effect,Symbol,Exp,Strike,Type,Price,Net Price,Order Type
+,3/4/24 10:00:00,STOCK,BUY,+100,TO OPEN,AMD,,,STOCK,180.00,180.00,MKT
+,3/4/24 11:00:00,STOCK,SELL,-100,TO CLOSE,AMD,,,STOCK,182.50,182.50,LMT

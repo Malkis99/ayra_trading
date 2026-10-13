@@ -1,0 +1,3 @@
+Pair,Time,Side,Filled Price,Executed Amount,Total,Fee,Role
+MX_USDT,2024-03-04 10:00:00,BUY,3.00,100,300,0.3,Taker
+MX_USDT,2024-03-04 11:00:00,SELL,3.30,100,330,0.33,Maker

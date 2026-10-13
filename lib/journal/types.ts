@@ -113,7 +113,7 @@ export type TradeStatus = "open" | "closed";
 export type TradeResult = "win" | "loss" | "breakeven";
 export type TradeSession = "asia" | "london" | "newyork" | "overlap" | "other";
 export type TradeVerification = "unverified" | "imported" | "connected" | "verified";
-export type TradeSource = "manual";
+export type TradeSource = "manual" | "import";
 
 export interface Trade {
   id: string;
@@ -129,6 +129,7 @@ export interface Trade {
   takeProfit?: number;
   size?: number;
   fees?: number;
+  swap?: number; // Swap / financing in account money (signed), imported trades
   riskAmount?: number; // Risk in account money
   pnlMoney?: number; // Net result in money
   rMultiple?: number; // Entered or calculated R
@@ -147,6 +148,12 @@ export interface Trade {
   processScore?: number | null;
   processScoreSnapshot?: ProcessScoreSnapshot | null;
   attachmentIds?: string[];
+  /** Import batch that created this trade (lets the user undo one import). */
+  importBatchId?: string;
+  /** Duplicate-protection key: platform ticket/ID or a hash of instrument+time+price+size. */
+  importKey?: string;
+  /** Ticket / position / trade ID in the source platform. */
+  externalId?: string;
   createdAt: string; // ISO String
   updatedAt: string; // ISO String
   schemaVersion: number;
@@ -388,6 +395,8 @@ export interface JournalRepository {
   getTrade(id: string): Trade | null;
   saveTrade(trade: Trade): Trade;
   deleteTrade(id: string): boolean;
+  importTrades(trades: Trade[]): number;
+  deleteTradesByBatch(batchId: string): number;
 
   getStrategies(): Strategy[];
   getStrategy(id: string): Strategy | null;

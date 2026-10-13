@@ -1,0 +1,4 @@
+Name,Symbol,Side,Status,Filled,Total Qty,Price,Avg Price,Time-in-Force,Placed Time,Filled Time
+NVIDIA,NVDA,Short,Filled,3,3,@MKT,850.00,DAY,03/04/2024 10:00:00 EST,03/04/2024 10:00:01 EST
+NVIDIA,NVDA,Buy,Filled,3,3,@MKT,840.00,DAY,03/04/2024 11:00:00 EST,03/04/2024 11:00:01 EST
+NVIDIA,NVDA,Buy,Cancelled,0,3,830,,DAY,03/04/2024 12:00:00 EST,

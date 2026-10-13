@@ -26,6 +26,8 @@ type Props = {
   onOpenTrade: (t: Trade) => void;
   onAddTrade: () => void;
   readOnly?: boolean;
+  /** Reports the trades left after the table filters (used by "Export → as in the table"). */
+  onFilteredChange?: (trades: Trade[]) => void;
 };
 
 type Filters = {
@@ -41,7 +43,7 @@ type Filters = {
 const NO_FILTERS: Filters = { account: null, instrument: null, strategy: null, result: null, mistakes: null, period: null, direction: null, screenshots: null };
 
 /** Trades list: filter chips, sorting, grouping by day, R bars, density, mobile cards. Opens a trade in the quick view. */
-export function TradesTable({ trades, accounts, strategies, tz, unit, dict, lang, formatTradeValue, onOpenTrade, onAddTrade, readOnly }: Props) {
+export function TradesTable({ trades, accounts, strategies, tz, unit, dict, lang, formatTradeValue, onOpenTrade, onAddTrade, readOnly, onFilteredChange }: Props) {
   const t = dict.journal.overview;
   const tt = dict.journal.tradesTab;
   const [query, setQuery] = useState("");
@@ -102,6 +104,9 @@ export function TradesTable({ trades, accounts, strategies, tz, unit, dict, lang
   }, [trades, filters, query]);
 
   const sorted = useMemo(() => sortTrades(filtered, sortKey, sortDir), [filtered, sortKey, sortDir]);
+  useEffect(() => {
+    onFilteredChange?.(filtered);
+  }, [filtered, onFilteredChange]);
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const pageTrades = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const groups = sortKey === "date" ? groupTradesByDay(pageTrades, tz) : [{ dateKey: "", trades: pageTrades, netR: 0, netMoney: null }];

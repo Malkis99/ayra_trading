@@ -1,0 +1,4 @@
+Account,Status,Buy/Sell,Qty To Fill,Qty Filled,Symbol,Exchange,Avg Fill Price,Commission Fill Rate,Closed Profit/Loss,Update Time,Order Number
+APEX-1,Filled,B,1,1,CLK4,NYMEX,78.50,2.04,0.00,2024-03-04 09:00:00,r1
+APEX-1,Cancelled,S,1,0,CLK4,NYMEX,,0,0,2024-03-04 09:05:00,r2
+APEX-1,Filled,S,1,1,CLK4,NYMEX,78.70,2.04,200.00,2024-03-04 09:20:00,r3

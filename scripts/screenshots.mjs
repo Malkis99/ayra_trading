@@ -59,6 +59,28 @@ const DIALOGS = process.env.SHOTS_JOURNAL
         if (await toggle.isVisible().catch(() => false)) await toggle.click();
         await today.getByRole("button", { name: /Не вошёл/ }).click();
       }],
+      ["journal-import", "/journal", async (page) => {
+        await page.getByTestId("journal-import").click();
+      }],
+      ["journal-import-preview", "/journal", async (page) => {
+        await page.getByTestId("journal-import").click();
+        const w = page.getByTestId("import-wizard");
+        await w.getByTestId("import-next").click();
+        await w.getByTestId("import-file-input").setInputFiles("lib/journal/import/__fixtures__/mt4.html");
+        await w.getByTestId("import-file-summary").waitFor();
+        for (let i = 0; i < 3; i++) await w.getByTestId("import-next").click();
+      }],
+      ["journal-import-mapping", "/journal", async (page) => {
+        await page.getByTestId("journal-import").click();
+        const w = page.getByTestId("import-wizard");
+        await w.getByTestId("import-next").click();
+        await w.getByTestId("import-file-input").setInputFiles("lib/journal/import/__fixtures__/universal.csv");
+        await w.getByTestId("import-file-summary").waitFor();
+        await w.getByTestId("import-next").click();
+      }],
+      ["journal-export", "/journal", async (page) => {
+        await page.getByTestId("journal-export").click();
+      }],
       ["journal-add-detailed", "/journal", async (page) => {
         await page.getByRole("button", { name: "Добавить сделку" }).first().click();
         await page.getByRole("button", { name: /Развернуть всё|Подробно/ }).first().click();
