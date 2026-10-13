@@ -16,6 +16,10 @@
   --c-go: 214 169 74;     /* #d6a94a achievements and rare items only */
   --c-danger: 229 138 138;
   --c-success: 111 207 151;
+  --c-field: 15 14 20;    /* #0f0e14 form field background (darker than cards) */
+  --c-edge: 78 75 102;    /* #4e4b66 form field border (contrast >= 3:1 on s1) */
+  --c-long: 52 211 153;   /* long / profit */
+  --c-short: 251 113 133; /* short / loss */
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
@@ -24,6 +28,8 @@
 body { @apply bg-ink text-tx antialiased; background-image: radial-gradient(900px 480px at 78% -8%, rgb(var(--c-pri) / 0.15), transparent 70%); }
 * { scrollbar-width: thin; scrollbar-color: #3a3750 transparent; }
 :focus-visible { outline: 2px solid rgb(var(--c-vi)); outline-offset: 2px; }
+
+@keyframes ayraPop { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
@@ -38,6 +44,12 @@ body { @apply bg-ink text-tx antialiased; background-image: radial-gradient(900p
   .btn { @apply rounded-md bg-pri px-4 py-2 font-semibold text-white transition-colors hover:bg-[#5d3fa3] disabled:opacity-50; }
   .btn-secondary { @apply rounded-md border border-line bg-s2 px-4 py-2 font-semibold text-tx transition-colors hover:border-vi; }
   .btn-danger { @apply rounded-md border border-danger/40 bg-danger/10 px-4 py-2 font-semibold text-danger transition-colors hover:bg-danger/20; }
+  /* Plain form fields (legacy markup): same look as components/ui/forms. */
+  .input { @apply min-h-[44px] w-full rounded-md border border-edge bg-field px-3 py-2 text-sm text-tx transition-colors placeholder:text-mu/70 hover:border-mu/60 focus:border-vi focus:outline-none focus:ring-2 focus:ring-vi/30 disabled:cursor-not-allowed disabled:opacity-50; }
+  .input[aria-invalid="true"] { @apply border-danger ring-2 ring-danger/25; }
+  select.input { @apply appearance-none pr-9; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23a09eb2' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 0.75rem center; }
+  select.input option { background-color: rgb(var(--c-s1)); color: rgb(var(--c-tx)); }
+  textarea.input { @apply min-h-[88px] leading-relaxed; }
   .btn-ghost { @apply rounded-md border border-line bg-transparent px-3 py-2 text-sm transition-colors hover:border-vi hover:bg-s2; }
   .xp { @apply h-[5px] overflow-hidden rounded bg-white/10; }
   .xp > i { @apply block h-full rounded; }
