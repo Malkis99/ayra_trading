@@ -9,6 +9,9 @@ import {
   listGuestDataKeys,
   setProfileChoice,
   getProfileChoice,
+  exportGuestData,
+  deleteGuestData,
+  deleteAccountDeviceData,
 } from "./profile-transfer";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
 import { resolvePostLoginRoute } from "@/lib/auth/routing";
@@ -110,5 +113,55 @@ describe("profile-transfer (C1)", () => {
       offerProfileSelect: true,
     });
     expect(res).toEqual({ destination: "/profile-select?next=%2Fjournal", source: "profile_select" });
+  });
+
+  it("copies with the cloud nickname taking precedence over the guest name", async () => {
+    seedGuest();
+    AppStorage.setUserId(USER);
+    await copyGuestToAccount(USER, { nickname: "CloudNick" });
+    expect(JSON.parse(AppStorage.getItem("ayra_demo_v1", USER)!).name).toBe("CloudNick");
+    expect(JSON.parse(localStorage.getItem("ayra_demo_v1")!).name).toBe("GuestZed");
+  });
+
+  it("exports guest data as JSON without device keys or account data", async () => {
+    seedGuest();
+    localStorage.setItem("ayra_lang", "en");
+    AppStorage.setItem("ayra_demo_v1", JSON.stringify({ name: "Acc" }), USER);
+    const exported = await exportGuestData();
+    expect(exported.kind).toBe("guest-device-data");
+    expect(Object.keys(exported.data).sort()).toEqual(["ayra_demo_v1", "ayra_journal_v1"]);
+    expect((exported.data.ayra_demo_v1 as any).name).toBe("GuestZed");
+  });
+
+  it("deletes guest data only while an account is active and keeps account data", async () => {
+    seedGuest();
+    localStorage.setItem("ayra_lang", "en");
+    localStorage.setItem("sb-project-auth-token", "keep");
+    AppStorage.setItem("ayra_demo_v1", JSON.stringify({ name: "Acc" }), USER);
+
+    await expect(deleteGuestData()).rejects.toThrow();
+
+    AppStorage.setUserId(USER);
+    const res = await deleteGuestData();
+    expect(res.removedKeys).toBe(2);
+    expect(localStorage.getItem("ayra_demo_v1")).toBeNull();
+    expect(localStorage.getItem("ayra_lang")).toBe("en");
+    expect(localStorage.getItem("sb-project-auth-token")).toBe("keep");
+    expect(AppStorage.getItem("ayra_demo_v1", USER)).not.toBeNull();
+  });
+
+  it("deletes account device data only after sign-out and keeps guest data", async () => {
+    seedGuest();
+    AppStorage.setItem("ayra_demo_v1", JSON.stringify({ name: "Acc" }), USER);
+    AppStorage.setItem("ayra_journal_v1", "{}", USER);
+
+    AppStorage.setUserId(USER);
+    await expect(deleteAccountDeviceData(USER)).rejects.toThrow();
+
+    AppStorage.setUserId(null);
+    const res = await deleteAccountDeviceData(USER);
+    expect(res.removedKeys).toBe(2);
+    expect(AppStorage.getItem("ayra_demo_v1", USER)).toBeNull();
+    expect(JSON.parse(localStorage.getItem("ayra_demo_v1")!).name).toBe("GuestZed");
   });
 });
