@@ -22,6 +22,13 @@ export type AuthState = "loading" | "guest" | "authenticated";
 /** Result of the last cloud profile read: "missing" = no row, "error" = the read failed (retry). */
 export type ProfileStatus = "idle" | "loading" | "loaded" | "missing" | "error";
 
+/** Why the last profile read failed (diagnostics only; no tokens or personal data). */
+export interface ProfileLoadError {
+  status: number | null;
+  code: string | null;
+  message: string;
+}
+
 export interface UserProfile {
   id: string;
   nickname: string | null;
@@ -47,6 +54,7 @@ interface AuthContextType {
   user: AuthUser | null;
   profile: UserProfile | null;
   profileStatus: ProfileStatus;
+  profileError: ProfileLoadError | null;
   activeSpaceId: string;
   /** True once local storage and providers have actually switched to activeSpaceId. */
   isSpaceReady: boolean;
@@ -84,6 +92,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [profileStatus, setProfileStatus] = useState<ProfileStatus>("idle");
+  const [profileError, setProfileError] = useState<ProfileLoadError | null>(null);
   const [guestDismissed, setGuestDismissedState] = useState(false);
   const [explicitGuestChosen, setExplicitGuestChosen] = useState(false);
   const [lateSignInNotice, setLateSignInNotice] = useState(false);
@@ -160,28 +169,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return mProfile;
       }
 
-      const supabase = createSupabaseBrowserClient();
-      if (!supabase) {
-        setProfileStatus("error");
+      const fail = (err: ProfileLoadError) => {
+        authDebug("profile.load", { ok: false, ...err });
+        setProfileError(err);
+        setProfileStatus((s) => (s === "loaded" ? s : "error"));
         return null;
-      }
+      };
+
+      const supabase = createSupabaseBrowserClient();
+      if (!supabase) return fail({ status: null, code: null, message: "Supabase client not configured" });
 
       setProfileStatus((s) => (s === "loaded" ? s : "loading"));
       try {
-        const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).single();
-        if (!error && data) {
-          const prof = data as UserProfile;
-          setProfile(prof);
-          setProfileStatus("loaded");
-          return prof;
+        // No row is a normal state (new account, nickname not chosen yet), not an error.
+        const { data, error, status } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
+        if (error) return fail({ status: status ?? null, code: error.code ?? null, message: error.message ?? "" });
+        setProfileError(null);
+        if (!data) {
+          authDebug("profile.load", { ok: true, row: false });
+          setProfile(null);
+          setProfileStatus("missing");
+          return null;
         }
-        const status: ProfileStatus = error?.code === "PGRST116" ? "missing" : "error";
-        authDebug("profile.load", { ok: false, status, code: error?.code ?? null });
-        setProfileStatus((s) => (s === "loaded" ? s : status));
-      } catch {
-        setProfileStatus((s) => (s === "loaded" ? s : "error"));
+        const prof = data as UserProfile;
+        setProfile(prof);
+        setProfileStatus("loaded");
+        return prof;
+      } catch (e) {
+        return fail({ status: null, code: "network", message: e instanceof Error ? e.message : String(e) });
       }
-      return null;
     },
     [mockMode]
   );
@@ -562,13 +578,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { success: false, errorKey: "errorNicknameTaken" };
     }
 
-    const { error } = await supabase
+    const { data: updated, error } = await supabase
       .from("profiles")
       .update({ nickname: clean })
-      .eq("id", user.id);
+      .eq("id", user.id)
+      .select("id");
 
     if (error) {
       return { success: false, errorKey: "errorNicknameTaken" };
+    }
+    // No profile row on the server: the nickname was not stored anywhere.
+    if (!updated || updated.length === 0) {
+      authDebug("saveNickname", { ok: false, reason: "no profile row" });
+      return { success: false, errorKey: "profileMissing" };
     }
 
     await loadProfile(user.id);
@@ -589,6 +611,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         profile,
         profileStatus,
+        profileError,
         activeSpaceId,
         isSpaceReady: authState !== "loading" && readySpaceId === activeSpaceId,
         isLoading: authState === "loading",
