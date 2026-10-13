@@ -33,6 +33,7 @@ import {
 } from "@/lib/auth/awakening-lease";
 import { currentTabId, authTabChannel } from "@/lib/auth/tab-channel";
 import { AppStorage } from "@/lib/storage";
+import { shouldOfferProfileSelect } from "@/lib/storage/profile-transfer";
 import { ArrowLeft, ArrowRight, SkipForward, Check, Globe, Sparkles, FastForward, Loader2, AlertCircle, LogOut, Lock } from "lucide-react";
 import { formatString, formatNumber } from "@/lib/i18n";
 
@@ -534,7 +535,12 @@ export default function AwakeningPage() {
       // ignore
     }
 
-    const targetUrl = isEditMode ? "/settings" : "/";
+    // A guest profile on this device is offered for transfer only now, after the account's own onboarding.
+    const targetUrl = isEditMode
+      ? "/settings"
+      : user && shouldOfferProfileSelect(user.id)
+      ? "/profile-select"
+      : "/";
     router.replace(targetUrl);
 
     setTimeout(() => {

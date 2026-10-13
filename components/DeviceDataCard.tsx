@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { formatNumber, formatString } from "@/lib/i18n";
 import {
+  accountHasProgress,
   copyGuestToAccount,
   deleteAccountDeviceData,
   deleteGuestData,
@@ -44,7 +45,7 @@ export function DeviceDataCard() {
 
   const refresh = useCallback(() => {
     setGuest(summarizeSpace(null));
-    setAccountHasData(user ? summarizeSpace(user.id).hasData : true);
+    setAccountHasData(user ? accountHasProgress(user.id) : true);
   }, [user]);
 
   useEffect(() => {

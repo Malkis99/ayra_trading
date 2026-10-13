@@ -78,19 +78,36 @@ export function setProfileChoice(userId: string, choice: ProfileChoice): void {
 }
 
 /**
- * True when a freshly signed-in account should be asked whether to reuse the guest profile:
- * the cloud profile has no nickname yet, no decision was recorded, the account space on this
- * device is still empty, and the guest space holds real data.
+ * True when the account on this device has no progress beyond onboarding answers:
+ * no levels, XP or Coins earned and no journal entries.
  */
-export function shouldOfferProfileSelect(
-  userId: string,
-  cloudNickname: string | null | undefined
-): boolean {
+export function accountHasProgress(userId: string): boolean {
+  const game = readJson(GAME_KEY, userId);
+  const journal = readJson(JOURNAL_KEY, userId);
+  const journalItems = ["trades", "accounts", "notes"].reduce(
+    (sum, k) => sum + (Array.isArray(journal?.[k]) ? journal[k].length : 0),
+    0
+  );
+  const level = typeof game?.level === "number" ? game.level : 1;
+  return journalItems > 0 || level > 1 || (game?.xp ?? 0) > 0 || (game?.coins ?? 0) > 0;
+}
+
+/**
+ * True when the user may be offered to transfer the guest profile into the account
+ * (/profile-select after onboarding, or "Copy to account" in Settings): the guest space holds
+ * real data, no decision was recorded, and the account has no progress of its own yet.
+ * It never applies before the account finished onboarding: a new account always starts at /awakening.
+ */
+export function shouldOfferProfileSelect(userId: string): boolean {
   if (typeof window === "undefined") return false;
-  if (cloudNickname && cloudNickname.trim().length > 0) return false;
   if (getProfileChoice(userId)) return false;
-  if (summarizeSpace(userId).hasData) return false;
+  if (accountHasProgress(userId)) return false;
   return summarizeSpace(null).hasData;
+}
+
+/** True when the account finished onboarding on this device. */
+export function isAccountOnboarded(userId: string): boolean {
+  return readJson(GAME_KEY, userId)?.onboarding?.status === "done";
 }
 
 /**
@@ -150,8 +167,9 @@ export async function copyGuestToAccount(
   for (const key of keys) {
     let value = AppStorage.getItem(key, null);
     if (value === null) continue;
-    if (key === GAME_KEY && options.nickname) {
-      value = withNickname(value, options.nickname);
+    if (key === GAME_KEY) {
+      value = withAccountIdentity(value, AppStorage.getItem(GAME_KEY, userId));
+      if (options.nickname) value = withNickname(value, options.nickname);
     }
     AppStorage.setItem(key, value, userId);
   }
@@ -159,6 +177,21 @@ export async function copyGuestToAccount(
   spaceTabChannel.notifyLocal(spaceId, spaceId);
 
   return { copiedKeys: keys.length, copiedAttachments, failedAttachments };
+}
+
+/**
+ * Guest progress (level, XP, Coins, quests, items, chronicle) moves into the account, but an account
+ * that already finished onboarding keeps its own identity: nickname, onboarding answers and appearance.
+ */
+function withAccountIdentity(rawGuest: string, rawAccount: string | null): string {
+  try {
+    const account = rawAccount ? JSON.parse(rawAccount) : null;
+    if (account?.onboarding?.status !== "done") return rawGuest;
+    const guest = JSON.parse(rawGuest);
+    return JSON.stringify({ ...guest, name: account.name, onboarding: account.onboarding, profile: account.profile });
+  } catch {
+    return rawGuest;
+  }
 }
 
 /** The cloud nickname always wins over the copied guest name. */

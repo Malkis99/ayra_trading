@@ -9,6 +9,8 @@ import {
   listGuestDataKeys,
   setProfileChoice,
   getProfileChoice,
+  accountHasProgress,
+  isAccountOnboarded,
   exportGuestData,
   deleteGuestData,
   deleteAccountDeviceData,
@@ -41,24 +43,26 @@ describe("profile-transfer (C1)", () => {
     expect(summary).toMatchObject({ hasData: true, nickname: "GuestZed", level: 4, tradesCount: 2 });
   });
 
-  it("offers the choice only for an empty account without nickname or prior decision", () => {
+  it("offers the transfer to an onboarded account without progress until a decision is recorded", () => {
     seedGuest();
-    expect(shouldOfferProfileSelect(USER, null)).toBe(true);
-    expect(shouldOfferProfileSelect(USER, "CloudNick")).toBe(false);
+    AppStorage.setItem("ayra_demo_v1", JSON.stringify({ name: "AccNick", level: 1, onboarding: { status: "done" } }), USER);
+    expect(isAccountOnboarded(USER)).toBe(true);
+    expect(shouldOfferProfileSelect(USER)).toBe(true);
 
     setProfileChoice(USER, "fresh");
     expect(getProfileChoice(USER)).toBe("fresh");
-    expect(shouldOfferProfileSelect(USER, null)).toBe(false);
+    expect(shouldOfferProfileSelect(USER)).toBe(false);
   });
 
-  it("does not offer the choice when the account space already has data", () => {
+  it("does not offer the transfer when the account already has progress", () => {
     seedGuest();
     AppStorage.setItem("ayra_demo_v1", JSON.stringify({ name: "AccNick", level: 2, onboarding: { status: "done" } }), USER);
-    expect(shouldOfferProfileSelect(USER, null)).toBe(false);
+    expect(accountHasProgress(USER)).toBe(true);
+    expect(shouldOfferProfileSelect(USER)).toBe(false);
   });
 
-  it("does not offer the choice when the guest space is empty", () => {
-    expect(shouldOfferProfileSelect(USER, null)).toBe(false);
+  it("does not offer the transfer when the guest space is empty", () => {
+    expect(shouldOfferProfileSelect(USER)).toBe(false);
   });
 
   it("lists only AYRA guest data keys (no device keys, schema tag, or foreign keys)", () => {
@@ -104,15 +108,28 @@ describe("profile-transfer (C1)", () => {
     notify.mockRestore();
   });
 
-  it("routes to /profile-select (keeping next) when offered, before onboarding rules", async () => {
+  it("new account always goes to /awakening even when the device holds a finished guest profile", async () => {
+    seedGuest();
     const res = await resolvePostLoginRoute({
       user: { id: USER, email: "a@example.com" },
       profile: null,
-      rawNextParam: "/journal",
-      guestState: null,
-      offerProfileSelect: true,
+      guestState: null, // account space is empty
     });
-    expect(res).toEqual({ destination: "/profile-select?next=%2Fjournal", source: "profile_select" });
+    expect(res.destination).toBe("/awakening");
+  });
+
+  it("transfer into an onboarded account keeps the account identity and takes guest progress", async () => {
+    seedGuest();
+    AppStorage.setItem(
+      "ayra_demo_v1",
+      JSON.stringify({ name: "AccNick", level: 1, onboarding: { status: "done", answers: { nickname: "AccNick" } }, profile: { minorMode: false } }),
+      USER
+    );
+    AppStorage.setUserId(USER);
+    await copyGuestToAccount(USER);
+    const account = JSON.parse(AppStorage.getItem("ayra_demo_v1", USER)!);
+    expect(account).toMatchObject({ name: "AccNick", level: 4, xp: 10 });
+    expect(account.onboarding.answers.nickname).toBe("AccNick");
   });
 
   it("copies with the cloud nickname taking precedence over the guest name", async () => {

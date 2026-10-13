@@ -4,9 +4,10 @@ import React, { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp } from "@/lib/context";
 import { useAuth } from "@/lib/auth/auth-context";
-import { resolvePostLoginRoute, readAccountGameState } from "@/lib/auth/routing";
+import { sanitizeRedirectUrl } from "@/lib/auth/redirect-whitelist";
 import {
   copyGuestToAccount,
+  isAccountOnboarded,
   setProfileChoice,
   shouldOfferProfileSelect,
   summarizeSpace,
@@ -15,7 +16,7 @@ import {
 import { validateAvatarAppearance, type AvatarAppearance } from "@/lib/avatar";
 import { Figure } from "@/components/Figure";
 import { formatNumber, formatString } from "@/lib/i18n";
-import { AlertCircle, ArrowRight, Loader2, LogOut, RotateCcw } from "lucide-react";
+import { AlertCircle, ArrowRight, Clock, Loader2, X } from "lucide-react";
 
 type Busy = null | "copy" | "fresh" | "later";
 
@@ -24,15 +25,8 @@ export default function ProfileSelectPage() {
   const searchParams = useSearchParams();
   const { dict, lang } = useApp();
   const t = dict.profileSelect;
-  const {
-    authState,
-    user,
-    profile,
-    signOut,
-    setGuestDismissed,
-    checkNicknameAvailable,
-    saveNickname,
-  } = useAuth();
+  const { authState, user, profile } = useAuth();
+  const nextDestination = sanitizeRedirectUrl(searchParams.get("next"), "/");
 
   const [summary, setSummary] = useState<SpaceSummary | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
@@ -48,12 +42,17 @@ export default function ProfileSelectPage() {
       router.replace("/");
       return;
     }
-    if (!shouldOfferProfileSelect(user.id, profile?.nickname)) {
-      router.replace("/");
+    // Offered only after onboarding: a new account always starts with its own /awakening.
+    if (!isAccountOnboarded(user.id)) {
+      router.replace("/awakening");
+      return;
+    }
+    if (!shouldOfferProfileSelect(user.id)) {
+      router.replace(nextDestination);
       return;
     }
     setSummary(summarizeSpace(null));
-  }, [authState, user, profile, router]);
+  }, [authState, user, router, nextDestination]);
 
   useEffect(() => {
     if (summary) titleRef.current?.focus();
@@ -65,23 +64,15 @@ export default function ProfileSelectPage() {
     setBusy("copy");
     setError(null);
     try {
-      const result = await copyGuestToAccount(user.id);
+      const result = await copyGuestToAccount(user.id, { nickname: profile?.nickname });
       setProfileChoice(user.id, "copied");
-      const route = await resolvePostLoginRoute({
-        user,
-        profile,
-        rawNextParam: searchParams.get("next"),
-        guestState: readAccountGameState(user.id),
-        checkNicknameAvailable,
-        saveNickname,
-      });
       if (result.failedAttachments > 0) {
         setFailedAttachments(result.failedAttachments);
-        setPendingDestination(route.destination);
+        setPendingDestination(nextDestination);
         setBusy(null);
         return;
       }
-      router.replace(route.destination);
+      router.replace(nextDestination);
     } catch {
       decidedRef.current = false;
       setError(t.copyError);
@@ -94,16 +85,14 @@ export default function ProfileSelectPage() {
     decidedRef.current = true;
     setBusy("fresh");
     setProfileChoice(user.id, "fresh");
-    router.replace("/awakening");
+    router.replace(nextDestination);
   };
 
-  const handleDecideLater = async () => {
+  const handleDecideLater = () => {
     if (busy) return;
     decidedRef.current = true;
     setBusy("later");
-    await signOut();
-    setGuestDismissed(true);
-    router.replace("/");
+    router.replace(nextDestination);
   };
 
   if (!summary) {
@@ -217,7 +206,7 @@ export default function ProfileSelectPage() {
                 aria-describedby="profile-select-fresh-hint"
                 className="flex w-full items-center justify-center gap-2 rounded-xl border border-line bg-s2/70 py-3 text-sm font-semibold text-tx transition hover:border-vi/50 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
               >
-                <RotateCcw size={16} aria-hidden="true" />
+                <X size={16} aria-hidden="true" />
                 <span>{t.startFreshBtn}</span>
               </button>
               <p id="profile-select-fresh-hint" className="px-1 text-xs text-mu">
@@ -233,7 +222,7 @@ export default function ProfileSelectPage() {
                 aria-describedby="profile-select-later-hint"
                 className="btn-ghost flex w-full items-center justify-center gap-2 py-3 text-sm text-mu hover:text-tx disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
               >
-                <LogOut size={16} aria-hidden="true" />
+                <Clock size={16} aria-hidden="true" />
                 <span>{t.decideLaterBtn}</span>
               </button>
               <p id="profile-select-later-hint" className="px-1 text-xs text-mu">
