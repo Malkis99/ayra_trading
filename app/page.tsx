@@ -169,7 +169,7 @@ export default function HomePage() {
   if (isPublicVisitor) return <PublicHome />;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-testid="home-dashboard">
       {/* Guest Banner */}
       <GuestBanner />
 

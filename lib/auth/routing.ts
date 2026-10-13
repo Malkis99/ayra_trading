@@ -1,7 +1,14 @@
-import { sanitizeRedirectUrl } from "./redirect-whitelist";
+import { safeNextAfterLogin } from "./post-login";
 import { isValidLatinNickname } from "@/lib/stats";
 import { AppStorage } from "@/lib/storage";
 import type { UserProfile, AuthUser } from "./auth-context";
+
+export { POST_LOGIN_ROUTER, safeNextAfterLogin, postLoginRouterUrl } from "./post-login";
+
+/** True when the cloud profile has a nickname, i.e. the account finished onboarding (on any device). */
+export function hasCloudNickname(profile: Pick<UserProfile, "nickname"> | null | undefined): boolean {
+  return Boolean(profile?.nickname && profile.nickname.trim().length >= 3);
+}
 
 /**
  * Reads the game state stored in the signed-in account's own space (never the guest space),
@@ -54,10 +61,10 @@ export async function resolvePostLoginRoute(options: ResolveRouteOptions): Promi
     return { destination: "/login", source: "cloud" };
   }
 
-  const safeNext = sanitizeRedirectUrl(rawNextParam, "/");
+  const safeNext = safeNextAfterLogin(rawNextParam);
 
   // Rule 1: If cloud profile already has a nickname, local nickname NEVER overwrites it.
-  if (profile?.nickname && profile.nickname.trim().length >= 3) {
+  if (hasCloudNickname(profile)) {
     return {
       destination: safeNext,
       source: "cloud",

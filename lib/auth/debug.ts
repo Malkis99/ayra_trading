@@ -1,10 +1,19 @@
+import { AppStorage } from "@/lib/storage";
+
 /**
  * Temporary auth-flow diagnostics. Off by default; enable with NEXT_PUBLIC_AYRA_AUTH_DEBUG=1 at build
- * time or `window.__AYRA_AUTH_DEBUG__ = true` in the browser. Never logs emails or tokens.
+ * time, `window.__AYRA_AUTH_DEBUG__ = true`, or `localStorage.setItem("ayra_auth_debug", "1")` in the
+ * browser console (the latter also covers a tab opened from the email link). Never logs emails or tokens.
  */
 export function isAuthDebugEnabled(): boolean {
   if (process.env.NEXT_PUBLIC_AYRA_AUTH_DEBUG === "1") return true;
-  return typeof window !== "undefined" && Boolean((window as any).__AYRA_AUTH_DEBUG__);
+  if (typeof window === "undefined") return false;
+  if ((window as any).__AYRA_AUTH_DEBUG__) return true;
+  try {
+    return AppStorage.getItem("ayra_auth_debug") === "1";
+  } catch {
+    return false;
+  }
 }
 
 export function authDebug(event: string, data: Record<string, unknown> = {}): void {

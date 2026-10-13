@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp } from "@/lib/context";
 import { useAuth } from "@/lib/auth/auth-context";
-import { resolvePostLoginRoute, readAccountGameState } from "@/lib/auth/routing";
+import { postLoginRouterUrl } from "@/lib/auth/routing";
 import { authTabChannel } from "@/lib/auth/tab-channel";
 import { sanitizeRedirectUrl, buildSafeSiteUrlRedirect } from "@/lib/auth/redirect-whitelist";
 import { type SanitizedErrorInfo } from "@/lib/auth/error-sanitizer";
@@ -19,16 +19,7 @@ export default function LoginPage() {
   const searchParams = useSearchParams();
   const rawNextParam = searchParams.get("next");
 
-  const {
-    user,
-    profile,
-    signInWithOtp,
-    verifyOtp,
-    isLoading: authLoading,
-    setGuestDismissed,
-    checkNicknameAvailable,
-    saveNickname,
-  } = useAuth();
+  const { user, signInWithOtp, verifyOtp, isLoading: authLoading, setGuestDismissed } = useAuth();
 
   const [email, setEmail] = useState("");
   const [otpCode, setOtpCode] = useState("");
@@ -81,20 +72,11 @@ export default function LoginPage() {
     return () => unsubscribe();
   }, []);
 
-  const executeRouting = async (u = user, p = profile) => {
-    if (!u || routingExecutedRef.current) return;
+  // Where to go after sign-in is decided only by the post-login router (/auth/continue).
+  const executeRouting = () => {
+    if (routingExecutedRef.current) return;
     routingExecutedRef.current = true;
-
-    const result = await resolvePostLoginRoute({
-      user: u,
-      profile: p,
-      rawNextParam,
-      guestState: readAccountGameState(u.id),
-      checkNicknameAvailable,
-      saveNickname,
-    });
-
-    router.replace(result.destination);
+    router.replace(postLoginRouterUrl(rawNextParam));
   };
 
   // Handle post-login route resolution when user becomes active
@@ -102,12 +84,12 @@ export default function LoginPage() {
     if (!authLoading && user) {
       if (submittedThisTabRef.current) {
         authTabChannel.broadcast("AUTH_SIGNED_IN", { userId: user.id });
-        executeRouting(user, profile);
+        executeRouting();
       } else {
         setOtherTabSignedIn(true);
       }
     }
-  }, [user, profile, authLoading]);
+  }, [user, authLoading]);
 
   // Auto-focus on "Continue here" button when multi-tab card is shown
   useEffect(() => {
@@ -119,7 +101,7 @@ export default function LoginPage() {
   const handleContinueHere = async () => {
     routingExecutedRef.current = false;
     authTabChannel.broadcast("AUTH_CLAIMED", { userId: user?.id });
-    await executeRouting(user, profile);
+    executeRouting();
   };
 
   // Resend timer countdown

@@ -23,6 +23,7 @@ export function createFakeSupabase() {
   const lastLinkByEmail = new Map();
   const tokens = new Map(); // access/refresh token -> user id
   const takenNicknames = new Set(["taken_nick", "admin"]);
+  let profileFailuresLeft = 0; // next N profile reads fail with 500 (flaky network / cold database)
 
   function getOrCreateUser(email) {
     let user = usersByEmail.get(email);
@@ -106,6 +107,10 @@ export function createFakeSupabase() {
       const link = lastLinkByEmail.get(url.searchParams.get("email"));
       return link ? send(200, { link }) : send(404, { error: "no link" });
     }
+    if (path === "/__test/fail-profile-reads") {
+      profileFailuresLeft = Number(url.searchParams.get("count") || 0);
+      return send(200, { profileFailuresLeft });
+    }
     if (path === "/__test/profile") {
       const user = usersByEmail.get(url.searchParams.get("email"));
       return send(200, user ? profiles.get(user.id) : null);
@@ -158,6 +163,10 @@ export function createFakeSupabase() {
       const idFilter = (url.searchParams.get("id") || "").replace(/^eq\./, "");
       const row = user && idFilter === user.id ? profiles.get(user.id) : null;
       if (req.method === "GET") {
+        if (profileFailuresLeft > 0) {
+          profileFailuresLeft--;
+          return send(500, { code: "XX000", message: "fake transient failure" });
+        }
         const wantsObject = (req.headers.accept || "").includes("vnd.pgrst.object");
         if (wantsObject) return row ? send(200, row) : send(406, { code: "PGRST116", message: "0 rows" });
         return send(200, row ? [row] : []);
