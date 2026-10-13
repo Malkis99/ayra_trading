@@ -21,6 +21,7 @@ import { sanitizeRedirectUrl } from "@/lib/auth/redirect-whitelist";
 import { AppStorage } from "@/lib/storage";
 import { NicknameConflictModal } from "./NicknameConflictModal";
 import { SpaceChangeBanner } from "./SpaceChangeBanner";
+import { OwnerDiagnosticsBlock } from "@/components/OwnerDiagnosticsBlock";
 import { UserCheck } from "lucide-react";
 
 function ShellSkeleton() {
@@ -70,6 +71,8 @@ function ShellContent({ children }: { children: React.ReactNode }) {
   const { isLoaded } = useGame();
   const { dict, isAddTradeModalOpen, setAddTradeModalOpen, isNoteModalOpen, setNoteModalOpen, noteModalLinks } = useApp();
   const {
+    authState,
+    loadingTimedOut,
     user,
     profile,
     isLoading: authLoading,
@@ -78,6 +81,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     guestDismissed,
     lateSignInNotice,
     dismissLateSignInNotice,
+    chooseGuestExplicitly,
     saveNickname,
   } = useAuth();
 
@@ -160,10 +164,32 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  if (
-    !isLoaded ||
-    (authLoading && (AppStorage.hadPreviousSession() || !guestDismissed))
-  ) {
+  // When authState === 'loading', always show neutral skeleton (never show guest or account data)
+  if (!isLoaded || authState === "loading") {
+    if (loadingTimedOut) {
+      return (
+        <div className="flex h-screen w-full flex-col items-center justify-center p-4 bg-ink text-tx">
+          <div className="w-full max-w-sm rounded-2xl border border-line bg-card p-6 text-center space-y-4 shadow-2xl backdrop-blur-md">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-violet/20 text-violet-glow border border-violet/30 font-serif text-xl font-bold">
+              A
+            </div>
+            <div className="space-y-1">
+              <h2 className="font-serif text-lg font-bold text-tx">{dict.auth.checkingAuth}</h2>
+            </div>
+            <button
+              type="button"
+              onClick={chooseGuestExplicitly}
+              className="w-full rounded-xl bg-violet py-3 text-xs font-semibold text-white shadow-lg shadow-violet/30 hover:bg-violet-glow transition cursor-pointer"
+            >
+              {dict.auth.continueAsGuestBtn}
+            </button>
+            <div className="pt-2 text-left">
+              <OwnerDiagnosticsBlock />
+            </div>
+          </div>
+        </div>
+      );
+    }
     return <ShellSkeleton />;
   }
 

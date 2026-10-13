@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { Sparkles, Shield, Compass, HardDrive, AlertTriangle, User, LogOut, LogIn, Database } from "lucide-react";
 import { defaultAttachmentRepository } from "@/lib/journal/attachments/indexeddb-repository";
 import { AttachmentStorageEstimate } from "@/lib/journal/attachments/types";
+import { OwnerDiagnosticsBlock } from "@/components/OwnerDiagnosticsBlock";
 
 export default function SettingsPage() {
   const { dict, lang, setLanguage } = useApp();
@@ -196,6 +197,11 @@ export default function SettingsPage() {
         <div className="text-xs text-mu space-y-2 pt-2">
           <p>{dict.settings.themeInfo}</p>
           <p>{dict.settings.notificationsInfo}</p>
+        </div>
+
+        {/* Diagnostics Block for Owner */}
+        <div className="pt-2">
+          <OwnerDiagnosticsBlock />
         </div>
       </div>
 

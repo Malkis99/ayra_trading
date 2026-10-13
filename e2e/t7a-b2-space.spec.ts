@@ -14,18 +14,18 @@ test.describe("T7a-B2 Space Switching & Isolation E2E", () => {
       localStorage.setItem(
         "ayra_demo_v1",
         JSON.stringify({
-          name: "GuestHero",
+          name: "TraderOne",
           level: 2,
           xp: 50,
-          onboarding: { status: "done" },
+          onboarding: { status: "none", step: 0, answers: {} },
         })
       );
       localStorage.setItem("ayra_guest_dismissed", "1");
     });
     await page.reload();
 
-    // Verify Guest sees "GuestHero" and "Гость" badge
-    await expect(page.locator("body")).toContainText("GuestHero");
+    // Verify Guest sees "TraderOne" and "Гость" badge
+    await expect(page.locator("body")).toContainText("TraderOne");
     await expect(page.locator("body")).toContainText("Гость");
 
     // 2. Login to new account
@@ -38,16 +38,16 @@ test.describe("T7a-B2 Space Switching & Isolation E2E", () => {
 
     // Arrives on /awakening for new account
     await page.waitForURL("**/awakening**", { timeout: 5000 });
-    // Verify GuestHero is NOT present in account space
-    await expect(page.locator("body")).not.toContainText("GuestHero");
+    // Verify TraderOne is NOT present in account space
+    await expect(page.locator("body")).not.toContainText("TraderOne");
 
     // 3. Logout
     await page.goto("/settings");
     await page.click("button:has-text('Выйти')");
 
-    // 4. Returns to Guest mode with GuestHero restored and "Гость" badge
+    // 4. Returns to Guest mode with TraderOne restored and "Гость" badge
     await page.goto("/");
-    await expect(page.locator("body")).toContainText("GuestHero");
+    await expect(page.locator("body")).toContainText("TraderOne");
     await expect(page.locator("body")).toContainText("Гость");
   });
 
