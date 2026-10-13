@@ -142,7 +142,7 @@ test.describe("Journal page", () => {
     await expect(page.getByTestId("process-matrix")).toContainText("Правильно");
   });
 
-  test("rare tabs live in the 'More' menu; the chosen one is shown as active", async ({ page }) => {
+  test("tabs keep the chosen section in the URL (?tab=)", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await seed(page);
     await page.goto("/journal");

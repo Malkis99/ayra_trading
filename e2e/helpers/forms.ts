@@ -15,13 +15,7 @@ export async function openTradeSection(page: Page, title: string) {
   if ((await btn.getAttribute("aria-expanded")) !== "true") await btn.click();
 }
 
-/** Opens a Journal tab; rare tabs are inside the "Ещё" menu. */
+/** Opens a Journal tab (all tabs are visible in one row). */
 export async function openJournalTab(page: Page, name: string) {
-  const tab = page.getByRole("tab", { name, exact: true });
-  if (await tab.count()) {
-    await tab.first().click();
-    return;
-  }
-  await page.getByRole("tab", { name: /Ещё|Отчёты|Стратегии|Счета|Заметки/ }).last().click();
-  await page.getByRole("menuitemradio", { name }).click();
+  await page.getByRole("tab", { name, exact: true }).first().click();
 }
