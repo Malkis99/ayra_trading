@@ -1,0 +1,9 @@
+You can use this transaction report to inform your likely tax obligations.
+
+Transactions
+User,Alex,id-1
+ID,Timestamp,Transaction Type,Asset,Quantity Transacted,Spot Price Currency,Spot Price at Transaction,Subtotal,Total (inclusive of fees and/or spread),Fees and/or Spread,Notes
+c1,2024-03-04 10:00:00 UTC,Buy,ETH,0.1,USD,3500.00,350.00,355.00,5.00,Bought 0.1 ETH
+c2,2024-03-04 12:00:00 UTC,Send,ETH,0.01,USD,3550.00,,,,Sent
+c3,2024-03-04 15:00:00 UTC,Sell,ETH,0.09,USD,3600.00,324.00,320.00,4.00,Sold
+c4,2024-03-04 16:00:00 UTC,Sell,ETH,0.01,USD,3600.00,36.00,35.00,1.00,Sold

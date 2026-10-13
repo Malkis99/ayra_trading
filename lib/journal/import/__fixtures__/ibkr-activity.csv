@@ -1,0 +1,6 @@
+Statement,Header,Field Name,Field Value
+Statement,Data,Title,Activity Statement
+Trades,Header,DataDiscriminator,Asset Category,Currency,Symbol,Date/Time,Quantity,T. Price,C. Price,Proceeds,Comm/Fee,Basis,Realized P/L,MTM P/L,Code
+Trades,Data,Order,Stocks,USD,TSLA,"2024-03-04, 10:00:00",5,200.00,201.00,-1000,-1,1001,0,5,O
+Trades,Data,Order,Stocks,USD,TSLA,"2024-03-04, 11:00:00",-5,210.00,209.00,1050,-1,-1001,48,0,C
+Trades,SubTotal,,Stocks,USD,TSLA,,0,,,50,-2,0,48,5,

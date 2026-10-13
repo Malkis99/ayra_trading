@@ -1,0 +1,2 @@
+Position ID,Instrument,Side,Amount,Open Time,Open Price,Close Time,Close Price,Stop Loss,Take Profit,Commission,Swap,Net P&L
+TL-3,XAUUSD,buy,0.1,2024-03-04 09:00:00,2100.00,2024-03-04 10:00:00,2110.00,2095.00,2115.00,-0.70,0.00,99.30

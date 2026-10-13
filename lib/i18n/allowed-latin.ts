@@ -1,5 +1,15 @@
 export const ALLOWED_LATIN_WORDS = [
   "AYRA",
+  // file formats and technical names in import/export texts
+  "CFD",
+  "CSV",
+  "TXT",
+  "XLSX",
+  "HTML",
+  "UTF",
+  "ID",
+  "Excel",
+  "Google",
   // keyboard key names in shortcut hints
   "Ctrl",
   "Enter",

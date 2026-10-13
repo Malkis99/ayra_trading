@@ -36,6 +36,8 @@ interface JournalContextType {
   softDeleteAccount: (id: string) => { undo: () => void } | null;
   saveTrade: (trade: Trade) => Trade;
   deleteTrade: (id: string) => boolean;
+  importTrades: (trades: Trade[]) => number;
+  deleteTradesByBatch: (batchId: string) => number;
   saveStrategy: (strategy: Strategy) => Strategy;
   archiveStrategy: (id: string) => Strategy;
   deleteStrategy: (id: string) => boolean;
@@ -271,6 +273,24 @@ export function JournalProvider({
     [repository, refresh]
   );
 
+  const importTrades = useCallback(
+    (list: Trade[]) => {
+      const added = repository.importTrades(list);
+      refresh();
+      return added;
+    },
+    [repository, refresh]
+  );
+
+  const deleteTradesByBatch = useCallback(
+    (batchId: string) => {
+      const removed = repository.deleteTradesByBatch(batchId);
+      refresh();
+      return removed;
+    },
+    [repository, refresh]
+  );
+
   const saveStrategy = useCallback(
     (strategy: Strategy) => {
       const saved = repository.saveStrategy(strategy);
@@ -421,6 +441,8 @@ export function JournalProvider({
         softDeleteAccount,
         saveTrade,
         deleteTrade,
+        importTrades,
+        deleteTradesByBatch,
         saveStrategy,
         archiveStrategy,
         deleteStrategy,

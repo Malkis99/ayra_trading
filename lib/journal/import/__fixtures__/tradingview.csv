@@ -1,0 +1,6 @@
+Symbol,Side,Type,Qty,Limit Price,Stop Price,Fill Price,Status,Commission,Placing Time,Closing Time,Order ID
+NASDAQ:AAPL,Buy,Market,10,,,170.00,Filled,0,2024-03-04 15:30:00,2024-03-04 15:30:01,o1
+NASDAQ:AAPL,Sell,Limit,10,172.00,,172.00,Filled,0,2024-03-04 15:40:00,2024-03-04 16:00:00,o2
+NASDAQ:AAPL,Buy,Limit,5,160.00,,,Cancelled,0,2024-03-04 16:10:00,2024-03-04 16:20:00,o3
+CME_MINI:NQ1!,Sell,Market,1,,,18000.25,Filled,2.5,2024-03-05 15:30:00,2024-03-05 15:30:00,o4
+CME_MINI:NQ1!,Buy,Market,1,,,17990.25,Filled,2.5,2024-03-05 15:50:00,2024-03-05 15:50:00,o5
