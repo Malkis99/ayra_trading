@@ -17,8 +17,13 @@ import { TradingPlanTab } from "@/components/journal/TradingPlanTab";
 import { NotesTab } from "@/components/journal/NotesTab";
 import { calculateProcessScore } from "@/lib/journal/process-score";
 import { getDemoTrades, DEMO_ACCOUNT } from "@/lib/journal/demo-trades";
-import { Plus, Download, AlertTriangle, Trash2, Edit2 } from "lucide-react";
-import { TabsWithMore, Segmented, Button, Input, Modal, NumberInput, Select } from "@/components/ui";
+import { Plus, Download, AlertTriangle, Trash2, Edit2, FileUp, FileDown } from "lucide-react";
+import dynamic from "next/dynamic";
+
+// Loaded only when opened: parsers for ~25 platforms are not needed for the everyday journal.
+const ImportWizard = dynamic(() => import("@/components/journal/ImportWizard").then((m) => m.ImportWizard), { ssr: false });
+const ExportDialog = dynamic(() => import("@/components/journal/ExportDialog").then((m) => m.ExportDialog), { ssr: false });
+import { Tabs, Segmented, Button, Input, Modal, NumberInput, Select } from "@/components/ui";
 import { JournalKpiStrip, type JournalUnit } from "@/components/journal/JournalKpiStrip";
 import { TodayPanel } from "@/components/journal/TodayPanel";
 import { TradesTable } from "@/components/journal/TradesTable";
@@ -111,6 +116,9 @@ export default function JournalPage() {
   const [unit, setUnit] = useState<JournalUnit>("R");
   const [kpiPeriod, setKpiPeriod] = useState<KpiPeriod>("month");
   const [isNoTradeModalOpen, setNoTradeModalOpen] = useState(false);
+  const [isImportOpen, setImportOpen] = useState(false);
+  const [isExportOpen, setExportOpen] = useState(false);
+  const [tableTrades, setTableTrades] = useState<Trade[]>([]);
   const tz = gameState.profile?.timezone || "UTC";
   const todayPlan = getTradingPlan(getLocalDateString(new Date(), gameState.profile?.timezone));
 
@@ -199,12 +207,11 @@ export default function JournalPage() {
     }
   };
 
-  const primaryTabs: Array<{ id: JournalTab; label: string }> = [
+  // All sections are visible at once (no "More" menu); the row scrolls on phones.
+  const journalTabs: Array<{ id: JournalTab; label: string }> = [
     { id: "trades", label: dict.journal.tabs.trades },
     { id: "analytics", label: dict.journal.tabs.analytics },
     { id: "plan", label: dict.journal.tabs.plan },
-  ];
-  const moreTabs: Array<{ id: JournalTab; label: string }> = [
     { id: "reports", label: dict.journal.tabs.reports },
     { id: "strategies", label: dict.journal.tabs.strategies },
     { id: "accounts", label: dict.journal.tabs.accounts },
@@ -446,11 +453,23 @@ export default function JournalPage() {
           <p className="mt-0.5 text-sm text-mu">{dict.journal.subtitle}</p>
         </div>
         {!isDemoMode && (
+          <div className="flex shrink-0 items-center gap-2">
+          <Button variant="secondary" onClick={() => setImportOpen(true)} data-testid="journal-import">
+            <FileUp size={18} aria-hidden="true" />
+            <span className="hidden sm:inline">{dict.journal.importExport.importBtn}</span>
+            <span className="sr-only sm:hidden">{dict.journal.importExport.importBtn}</span>
+          </Button>
+          <Button variant="secondary" onClick={() => setExportOpen(true)} data-testid="journal-export">
+            <FileDown size={18} aria-hidden="true" />
+            <span className="hidden sm:inline">{dict.journal.importExport.exportBtn}</span>
+            <span className="sr-only sm:hidden">{dict.journal.importExport.exportBtn}</span>
+          </Button>
           <Button onClick={openAddTrade} className="shrink-0">
             <Plus size={18} aria-hidden="true" />
             <span className="hidden sm:inline">{dict.home.quickActions.addTrade}</span>
             <span className="sm:hidden">{dict.journal.overview.addTrade}</span>
           </Button>
+          </div>
         )}
       </div>
 
@@ -482,14 +501,7 @@ export default function JournalPage() {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-start">
         <div className="order-2 min-w-0 space-y-4 xl:order-1">
-          <TabsWithMore<JournalTab>
-            primary={primaryTabs}
-            more={moreTabs}
-            value={activeTab}
-            onChange={setActiveTab}
-            label={dict.journal.title}
-            moreLabel={dict.journal.overview.more}
-          />
+          <Tabs<JournalTab> items={journalTabs} value={activeTab} onChange={setActiveTab} label={dict.journal.title} idPrefix="journal" />
 
       {/* TRADES */}
       {activeTab === "trades" && (
@@ -526,6 +538,7 @@ export default function JournalPage() {
               onOpenTrade={setSelectedTrade}
               onAddTrade={openAddTrade}
               readOnly={isDemoMode}
+              onFilteredChange={setTableTrades}
             />
           )}
         </div>
@@ -788,6 +801,19 @@ export default function JournalPage() {
         }}
         dict={dict}
       />
+
+      {isImportOpen && <ImportWizard isOpen={isImportOpen} onClose={() => setImportOpen(false)} accounts={accounts} trades={trades} userTimeZone={tz} />}
+      {isExportOpen && (
+      <ExportDialog
+        isOpen={isExportOpen}
+        onClose={() => setExportOpen(false)}
+        trades={trades}
+        filteredTrades={tableTrades}
+        accounts={accounts}
+        strategies={strategies}
+        notes={notes}
+      />
+      )}
 
       {/* TRADE QUICK VIEW */}
       <TradeQuickView
