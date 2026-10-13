@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp } from "@/lib/context";
 import { useAuth } from "@/lib/auth/auth-context";
-import { resolvePostLoginRoute } from "@/lib/auth/routing";
+import { resolvePostLoginRoute, readAccountGameState } from "@/lib/auth/routing";
+import { shouldOfferProfileSelect } from "@/lib/storage/profile-transfer";
 import { authTabChannel } from "@/lib/auth/tab-channel";
 import { sanitizeRedirectUrl, buildSafeSiteUrlRedirect } from "@/lib/auth/redirect-whitelist";
 import { type SanitizedErrorInfo } from "@/lib/auth/error-sanitizer";
@@ -85,14 +86,12 @@ export default function LoginPage() {
     if (!u || routingExecutedRef.current) return;
     routingExecutedRef.current = true;
 
-    const guestStateRaw = typeof window !== "undefined" ? AppStorage.getItem("ayra_demo_v1") : null;
-    const guestState = guestStateRaw ? JSON.parse(guestStateRaw) : null;
-
     const result = await resolvePostLoginRoute({
       user: u,
       profile: p,
       rawNextParam,
-      guestState,
+      guestState: readAccountGameState(u.id),
+      offerProfileSelect: shouldOfferProfileSelect(u.id, p?.nickname),
       checkNicknameAvailable,
       saveNickname,
     });

@@ -8,9 +8,10 @@ test.describe("T7a-B2 Space Switching & Isolation E2E", () => {
   });
 
   test("1. Guest profile -> login new account -> awakening without guest data -> logout -> guest restored with 'Гость' badge", async ({ page }) => {
-    // 1. Set up guest data in localStorage
-    await page.goto("/");
-    await page.evaluate(() => {
+    // 1. Set up guest data in localStorage before any app script runs (avoids the app overwriting the seed)
+    await page.addInitScript(() => {
+      if (sessionStorage.getItem("e2e_seeded")) return;
+      sessionStorage.setItem("e2e_seeded", "1");
       localStorage.setItem(
         "ayra_demo_v1",
         JSON.stringify({
@@ -22,7 +23,7 @@ test.describe("T7a-B2 Space Switching & Isolation E2E", () => {
       );
       localStorage.setItem("ayra_guest_dismissed", "1");
     });
-    await page.reload();
+    await page.goto("/");
 
     // Verify Guest sees "TraderOne" and "Гость" badge
     await expect(page.locator("body")).toContainText("TraderOne");
@@ -35,6 +36,10 @@ test.describe("T7a-B2 Space Switching & Isolation E2E", () => {
     await page.click("button[type='submit']");
     await page.fill("#otp-input", "123456");
     await page.click("button[type='submit']");
+
+    // New account on a device with a guest profile: choose "start fresh" on /profile-select (C1)
+    await page.waitForURL("**/profile-select**", { timeout: 5000 });
+    await page.click("button:has-text('Начать заново')");
 
     // Arrives on /awakening for new account
     await page.waitForURL("**/awakening**", { timeout: 5000 });

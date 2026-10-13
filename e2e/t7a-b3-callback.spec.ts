@@ -52,6 +52,12 @@ test.describe("T7a-B3 Bug Proof E2E", () => {
 
     await pageB.goto("/auth/callback?code=mock-code");
 
+    // Tab B may first land on /profile-select (C1) when the guest profile survived; choose "start fresh"
+    await pageB.waitForURL(/\/(awakening|profile-select)/, { timeout: 5000 });
+    if (pageB.url().includes("/profile-select")) {
+      await pageB.click("button:has-text('Начать заново')");
+    }
+
     // Expect Tab B to end up at /awakening and NOT show guest name "GuestLevel10"
     await pageB.waitForURL("**/awakening**", { timeout: 5000 });
     const guestText = pageB.locator("text=GuestLevel10");
