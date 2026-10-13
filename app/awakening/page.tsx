@@ -724,10 +724,10 @@ export default function AwakeningPage() {
 
       return (
         <div className="w-full max-w-[1120px] mx-auto py-2">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-12 items-center">
             <div className="lg:col-span-6 flex flex-col items-center justify-center">
-              <div className="relative w-full min-w-[320px] lg:min-w-[380px] h-[calc(100vh-280px)] min-h-[460px] max-h-[680px] rounded-3xl bg-radial-gradient from-pri/40 via-s1 to-s1 overflow-hidden border border-vi/40 shadow-2xl shadow-vi/20 grid place-items-center p-6">
-                <div className="absolute bottom-6 w-48 h-7 rounded-full border border-vi/50 bg-vi/30 shadow-2xl shadow-vi/60 blur-[1px]" />
+              <div className="relative w-full max-w-[420px] lg:max-w-none lg:min-w-[380px] h-[min(46vh,360px)] lg:h-[calc(100vh-280px)] lg:min-h-[460px] lg:max-h-[680px] rounded-3xl bg-radial-gradient from-pri/40 via-s1 to-s1 overflow-hidden border border-vi/40 shadow-2xl shadow-vi/20 grid place-items-center p-6">
+                <div className="absolute bottom-4 lg:bottom-6 w-32 lg:w-48 h-5 lg:h-7 rounded-full border border-vi/50 bg-vi/30 shadow-2xl shadow-vi/60 blur-[1px]" />
 
                 <Figure
                   appearance={currentApp}
@@ -737,7 +737,7 @@ export default function AwakeningPage() {
               </div>
             </div>
 
-            <div className="lg:col-span-6 w-full min-w-[320px] lg:min-w-[400px] lg:max-w-[540px] space-y-5 text-left bg-s1/80 border border-line p-5 md:p-6 rounded-3xl shadow-xl">
+            <div className="lg:col-span-6 w-full lg:min-w-[400px] lg:max-w-[540px] space-y-5 text-left bg-s1/80 border border-line p-5 md:p-6 rounded-3xl shadow-xl">
               <div className="space-y-2">
                 <label className="text-xs font-bold text-tx block">
                   {dict.avatar.skinToneLabel}
@@ -1111,12 +1111,12 @@ export default function AwakeningPage() {
       )}
 
       <header className="relative z-20 flex flex-col justify-center px-4 md:px-8 border-b border-line/40 bg-ink/80 backdrop-blur-md flex-none py-2 space-y-1 max-h-[80px]">
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center justify-between gap-3 md:gap-4">
           <Link href="/" className="font-serif text-lg font-bold tracking-wider text-tx hover:opacity-80 flex-none">
             AYRA
           </Link>
 
-          <div className="flex-1 max-w-xl mx-auto grid grid-cols-5 gap-2 items-center">
+          <div className="flex-1 min-w-[80px] max-w-xl mx-auto grid grid-cols-5 gap-1.5 md:gap-2 items-center">
             {[1, 2, 3, 4, 5].map((st) => {
               const isPast = st < step;
               const isCurrent = st === step;
@@ -1143,15 +1143,22 @@ export default function AwakeningPage() {
           <div className="flex items-center gap-2 flex-none">
             {/* User Email & Logout Badge (Always enabled even in read-only mode) */}
             {user && (
-              <div className="flex items-center gap-2 text-[11px] text-tx-muted bg-s2/80 px-2.5 py-1 rounded-lg border border-line">
-                <span className="hidden sm:inline">{dict.auth.headerUserEmail}:</span>
-                <span className="font-mono text-tx font-medium">{user.email}</span>
+              <div className="flex min-w-0 items-center gap-2 text-[11px] text-tx-muted bg-s2/80 px-2 py-1 rounded-lg border border-line">
+                <span className="hidden lg:inline whitespace-nowrap">{dict.auth.headerUserEmail}:</span>
+                <span
+                  className="hidden sm:inline font-mono text-tx font-medium truncate max-w-[120px] lg:max-w-[220px]"
+                  title={user.email}
+                >
+                  {user.email}
+                </span>
                 <button
                   type="button"
                   onClick={() => signOut()}
-                  className="flex items-center gap-1 text-red-400 hover:text-red-300 font-semibold cursor-pointer ml-1"
+                  aria-label={dict.topbar.logout}
+                  title={dict.topbar.logout}
+                  className="flex items-center gap-1 text-red-400 hover:text-red-300 font-semibold cursor-pointer rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
                 >
-                  <LogOut className="h-3 w-3" />
+                  <LogOut className="h-3.5 w-3.5" />
                   <span className="hidden md:inline">{dict.topbar.logout}</span>
                 </button>
               </div>
@@ -1208,8 +1215,8 @@ export default function AwakeningPage() {
         )}
       </header>
 
-      <main className="relative z-10 flex-1 overflow-y-auto p-4 md:p-6 flex flex-col justify-center items-center [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-        <div className="w-full max-w-4xl mx-auto text-center space-y-4">
+      <main className="relative z-10 flex-1 overflow-y-auto p-4 md:p-6 flex flex-col items-center [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <div className="w-full max-w-4xl mx-auto my-auto text-center space-y-4">
           {step <= 4 && currentQuestion && (
             <div className="space-y-1">
               <h1
