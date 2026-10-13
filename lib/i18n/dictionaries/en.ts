@@ -913,6 +913,8 @@ export const en: Dictionary = {
         withoutMistakes: "Without mistakes",
         clearAll: "Reset",
         noStrategy: "No strategy",
+        tag: "Tag",
+        link: "Link",
         clearFilter: "Clear filter “{name}”",
       },
       sort: { label: "Sort", date: "Date", result: "Result", instrument: "Instrument" },

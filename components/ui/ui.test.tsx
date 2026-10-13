@@ -49,7 +49,7 @@ describe("components/ui", () => {
     expect(dialog.getAttribute("aria-modal")).toBe("true");
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
-    fireEvent.click(container.querySelector('[aria-hidden="true"]')!);
+    fireEvent.click(document.body.querySelector('div[aria-hidden="true"]')!); // backdrop (rendered in a portal)
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 

@@ -48,7 +48,7 @@ test.describe("T6d.1 Prop Rules & Safe Deletion E2E Flow", () => {
     // 2. Create first prop account ("FTMO Phase 1")
     await page.click("button:has-text('Добавить счёт')");
     await page.fill("input[placeholder='Основной счёт']", "FTMO Phase 1");
-    await page.selectOption("select", "prop");
+    await pickOption(page, "account-type-select", "Проп");
     await page.fill("input[placeholder='10000']", "100000");
     await page.click("button[type='submit']:has-text('Сохранить')");
 
@@ -62,7 +62,7 @@ test.describe("T6d.1 Prop Rules & Safe Deletion E2E Flow", () => {
     // 3. Create second prop account ("Funded Account")
     await page.click("button:has-text('Добавить счёт')");
     await page.fill("input[placeholder='Основной счёт']", "Funded Account");
-    await page.selectOption("select", "prop");
+    await pickOption(page, "account-type-select", "Проп");
     await page.fill("input[placeholder='10000']", "200000");
     await page.click("button[type='submit']:has-text('Сохранить')");
 

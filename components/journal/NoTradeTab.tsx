@@ -3,7 +3,8 @@
 import React, { useState, useMemo } from "react";
 import { NoTradeEntry, NoTradeReason, Account } from "@/lib/journal/types";
 import { NoTradeModal } from "./NoTradeModal";
-import { Plus, Edit2, Trash2, ShieldCheck, Filter } from "lucide-react";
+import { Plus, Edit2, Trash2, ShieldCheck } from "lucide-react";
+import { Button, FilterChip } from "@/components/ui";
 
 interface NoTradeTabProps {
   noTrades: NoTradeEntry[];
@@ -61,45 +62,31 @@ export function NoTradeTab({
   return (
     <div className="space-y-4">
       {/* Filters Bar */}
-      <div className="card p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+      <div className="flex flex-col gap-3 rounded-lg border border-line bg-s1 p-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1.5 text-mu">
-            <Filter size={14} />
-            <span className="font-semibold">{dict.journal.tradesTab.periodAll}:</span>
-          </div>
-
-          <select
-            value={filterPeriod}
-            onChange={(e) => setFilterPeriod(e.target.value)}
-            className="input text-xs"
-          >
-            <option value="all">{dict.journal.tradesTab.periodAll}</option>
-            <option value="7d">{dict.journal.tradesTab.period7d}</option>
-            <option value="30d">{dict.journal.tradesTab.period30d}</option>
-            <option value="90d">{dict.journal.tradesTab.period90d}</option>
-          </select>
-
-          <select
-            value={filterReason}
-            onChange={(e) => setFilterReason(e.target.value)}
-            className="input text-xs"
-          >
-            <option value="all">{dict.journal.noTrade.filterReasonAll}</option>
-            {Object.keys(dict.journal.noTrade.reasons).map((r) => (
-              <option key={r} value={r}>
-                {dict.journal.noTrade.reasons[r]}
-              </option>
-            ))}
-          </select>
+          <FilterChip
+            name={dict.journal.overview.filters.period}
+            value={filterPeriod === "all" ? null : filterPeriod}
+            onChange={(v) => setFilterPeriod(v ?? "all")}
+            clearLabel={dict.journal.overview.filters.clearFilter}
+            options={[
+              { value: "7d", label: dict.journal.tradesTab.period7d },
+              { value: "30d", label: dict.journal.tradesTab.period30d },
+              { value: "90d", label: dict.journal.tradesTab.period90d },
+            ]}
+          />
+          <FilterChip
+            name={dict.journal.noTrade.reasonLabel}
+            value={filterReason === "all" ? null : filterReason}
+            onChange={(v) => setFilterReason(v ?? "all")}
+            clearLabel={dict.journal.overview.filters.clearFilter}
+            options={Object.keys(dict.journal.noTrade.reasons).map((r) => ({ value: r, label: dict.journal.noTrade.reasons[r] }))}
+          />
         </div>
-
-        <button
-          onClick={handleOpenAdd}
-          className="btn text-xs py-2 px-4 flex items-center gap-1.5 font-semibold flex-none self-start sm:self-auto"
-        >
-          <Plus size={16} />
+        <Button onClick={handleOpenAdd} className="self-start sm:self-auto">
+          <Plus size={16} aria-hidden="true" />
           <span>{dict.journal.noTrade.addBtn}</span>
-        </button>
+        </Button>
       </div>
 
       {/* Empty State */}

@@ -15,6 +15,7 @@ import {
   Edit2,
   FileText,
 } from "lucide-react";
+import { FilterChip } from "@/components/ui";
 
 export function NotesTab() {
   const { dict, lang } = useApp();
@@ -160,45 +161,37 @@ export function NotesTab() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-          {/* Tag Filter */}
-          <select
-            value={selectedTag}
-            onChange={(e) => setSelectedTag(e.target.value)}
-            className="input text-xs"
-          >
-            <option value="all">{dict.journal.notes.allTags}</option>
-            {allUserTags.map((t) => (
-              <option key={t} value={t}>
-                #{t}
-              </option>
-            ))}
-          </select>
-
-          {/* Period Filter */}
-          <select
-            value={selectedPeriod}
-            onChange={(e) => setSelectedPeriod(e.target.value)}
-            className="input text-xs"
-          >
-            <option value="all">{dict.journal.tradesTab.periodAll}</option>
-            <option value="7d">{dict.journal.tradesTab.period7d}</option>
-            <option value="30d">{dict.journal.tradesTab.period30d}</option>
-            <option value="90d">{dict.journal.tradesTab.period90d}</option>
-          </select>
-
-          {/* Link Filter */}
-          <select
-            value={selectedLinkType}
-            onChange={(e) => setSelectedLinkType(e.target.value)}
-            className="input text-xs col-span-2 sm:col-span-1"
-          >
-            <option value="all">{dict.journal.notes.allLinks}</option>
-            <option value="trade">{dict.journal.notes.linkTrade}</option>
-            <option value="date">{dict.journal.notes.linkDate}</option>
-            <option value="instrument">{dict.journal.notes.linkInstrument}</option>
-            <option value="strategy">{dict.journal.notes.linkStrategy}</option>
-          </select>
+        <div className="flex flex-wrap gap-2">
+          <FilterChip
+            name={dict.journal.overview.filters.tag}
+            value={selectedTag === "all" ? null : selectedTag}
+            onChange={(v) => setSelectedTag(v ?? "all")}
+            clearLabel={dict.journal.overview.filters.clearFilter}
+            options={allUserTags.map((t) => ({ value: t, label: `#${t}` }))}
+          />
+          <FilterChip
+            name={dict.journal.overview.filters.period}
+            value={selectedPeriod === "all" ? null : selectedPeriod}
+            onChange={(v) => setSelectedPeriod(v ?? "all")}
+            clearLabel={dict.journal.overview.filters.clearFilter}
+            options={[
+              { value: "7d", label: dict.journal.tradesTab.period7d },
+              { value: "30d", label: dict.journal.tradesTab.period30d },
+              { value: "90d", label: dict.journal.tradesTab.period90d },
+            ]}
+          />
+          <FilterChip
+            name={dict.journal.overview.filters.link}
+            value={selectedLinkType === "all" ? null : selectedLinkType}
+            onChange={(v) => setSelectedLinkType(v ?? "all")}
+            clearLabel={dict.journal.overview.filters.clearFilter}
+            options={[
+              { value: "trade", label: dict.journal.notes.linkTrade },
+              { value: "date", label: dict.journal.notes.linkDate },
+              { value: "instrument", label: dict.journal.notes.linkInstrument },
+              { value: "strategy", label: dict.journal.notes.linkStrategy },
+            ]}
+          />
         </div>
       </div>
 

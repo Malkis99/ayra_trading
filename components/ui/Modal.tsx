@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "./cn";
 
@@ -11,16 +12,22 @@ type ModalProps = {
   closeLabel: string;
   children: React.ReactNode;
   footer?: React.ReactNode;
-  size?: "sm" | "md" | "lg";
+  size?: "sm" | "md" | "lg" | "xl";
+  /** Optional line under the title. */
+  subtitle?: React.ReactNode;
+  "data-testid"?: string;
 };
 
-const SIZES = { sm: "max-w-sm", md: "max-w-lg", lg: "max-w-2xl" };
+const SIZES = { sm: "max-w-sm", md: "max-w-lg", lg: "max-w-2xl", xl: "max-w-4xl" };
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /** Centered dialog above everything: focus trap, Esc and backdrop click close, focus returns to the opener. */
-export function Modal({ isOpen, onClose, title, closeLabel, children, footer, size = "md" }: ModalProps) {
+export function Modal({ isOpen, onClose, title, closeLabel, children, footer, size = "md", subtitle, "data-testid": testId }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
+
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -29,9 +36,10 @@ export function Modal({ isOpen, onClose, title, closeLabel, children, footer, si
     dialog?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      // Popovers and viewers inside handle Esc first and mark it as handled.
+      if (e.key === "Escape" && !e.defaultPrevented) {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== "Tab" || !dialog) return;
@@ -52,11 +60,12 @@ export function Modal({ isOpen, onClose, title, closeLabel, children, footer, si
       document.removeEventListener("keydown", onKeyDown);
       opener?.focus?.();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
-  if (!isOpen) return null;
+  if (!isOpen || typeof document === "undefined") return null;
 
-  return (
+  // Portal: dialogs opened from inside <main> must not be trapped in its stacking context.
+  return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
       <div
@@ -64,12 +73,16 @@ export function Modal({ isOpen, onClose, title, closeLabel, children, footer, si
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={cn("relative w-full rounded-lg border border-line bg-s1 shadow-float", SIZES[size])}
+        data-testid={testId}
+        className={cn("relative flex max-h-[90dvh] w-full flex-col rounded-lg border border-edge bg-s1 shadow-float", SIZES[size])}
       >
         <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-4">
-          <h2 id={titleId} className="text-base font-semibold text-tx">
-            {title}
-          </h2>
+          <div className="min-w-0">
+            <h2 id={titleId} className="text-base font-semibold text-tx">
+              {title}
+            </h2>
+            {subtitle && <p className="mt-0.5 text-sm text-mu">{subtitle}</p>}
+          </div>
           <button
             type="button"
             onClick={onClose}
@@ -79,9 +92,10 @@ export function Modal({ isOpen, onClose, title, closeLabel, children, footer, si
             <X size={18} aria-hidden="true" />
           </button>
         </div>
-        <div className="max-h-[70vh] overflow-y-auto px-5 py-4">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">{children}</div>
         {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-line px-5 py-4">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

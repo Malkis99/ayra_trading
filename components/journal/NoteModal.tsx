@@ -8,6 +8,7 @@ import { useJournal } from "@/lib/journal/context";
 import { Note, NoteTemplateKey, NoteLinks } from "@/lib/journal/types";
 import { dirtyFormRegistry } from "@/lib/auth/space-channel";
 import { Pin, Trash2, Archive, X, Plus } from "lucide-react";
+import { Modal } from "@/components/ui";
 
 interface NoteModalProps {
   isOpen: boolean;
@@ -92,18 +93,16 @@ export function NoteModal({
   }, [isOpen, title, body, tags]);
 
   useEffect(() => {
+    // Esc first cancels an open archive/delete confirmation; otherwise the Modal closes itself.
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
-        if (confirmAction) {
-          setConfirmAction(null);
-        } else {
-          onClose();
-        }
+      if (e.key === "Escape" && isOpen && confirmAction) {
+        e.preventDefault();
+        setConfirmAction(null);
       }
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, confirmAction, onClose]);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [isOpen, confirmAction]);
 
   if (!isOpen) return null;
 
@@ -194,43 +193,76 @@ export function NoteModal({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-bg/80 backdrop-blur-sm p-4 overflow-y-auto"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="card w-full max-w-2xl max-h-[90vh] overflow-y-auto space-y-4 shadow-xl border border-line p-5">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-line pb-3">
-          <div className="flex items-center gap-2">
-            <h3 className="h3">
-              {initialNote
-                ? dict.journal.notes.editNoteTitle
-                : dict.journal.notes.createNoteTitle}
-            </h3>
-            <button
-              type="button"
-              onClick={() => setPinned(!pinned)}
-              className={`p-1.5 rounded-lg border transition-colors ${
-                pinned
-                  ? "bg-amber-500/20 text-amber-300 border-amber-500/40 font-bold"
-                  : "bg-s2 text-mu border-line hover:text-tx"
-              }`}
-              title={dict.journal.notes.pinTooltip}
-            >
-              <Pin size={15} />
-            </button>
-          </div>
-
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="lg"
+      closeLabel={dict.journal.addTradeModal.closeLabel}
+      data-testid="note-modal"
+      title={
+        <span className="flex items-center gap-2">
+          {initialNote ? dict.journal.notes.editNoteTitle : dict.journal.notes.createNoteTitle}
           <button
-            onClick={onClose}
-            className="text-mu hover:text-tx p-1 font-bold text-lg"
+            type="button"
+            onClick={() => setPinned(!pinned)}
+            aria-pressed={pinned}
+            aria-label={dict.journal.notes.pinTooltip}
+            title={dict.journal.notes.pinTooltip}
+            className={`grid h-9 w-9 place-items-center rounded-md border transition-colors ${
+              pinned ? "border-amber-400/50 bg-amber-400/15 text-amber-300" : "border-line bg-s2 text-mu hover:text-tx"
+            }`}
           >
-            ✕
+            <Pin size={15} aria-hidden="true" />
           </button>
-        </div>
-
+        </span>
+      }
+      footer={
+        <div className="flex w-full flex-wrap items-center justify-between gap-2">
+                  {initialNote ? (
+                    <div className="flex gap-2">
+                      {!initialNote.archivedAt && (
+                        <button
+                          type="button"
+                          onClick={() => setConfirmAction("archive")}
+                          className="btn-ghost text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1"
+                        >
+                          <Archive size={14} />
+                          <span>{dict.journal.notes.archiveBtn}</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setConfirmAction("delete")}
+                        className="btn-ghost text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1"
+                      >
+                        <Trash2 size={14} />
+                        <span>{dict.journal.notes.deleteBtn}</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div />
+                  )}
+        
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="btn-ghost text-xs py-2 px-4"
+                    >
+                      {dict.journal.cancel}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSave}
+                      className="btn-primary text-xs py-2 px-5 font-semibold"
+                    >
+                      {dict.journal.save}
+                    </button>
+                  </div>
+                </div>
+      }
+    >
+      <div className="space-y-4">
         {/* Inline Confirmation Warning */}
         {confirmAction && (
           <div className="p-3 bg-rose-500/15 border border-rose-500/40 rounded-xl space-y-3">
@@ -401,51 +433,7 @@ export function NoteModal({
           </div>
         )}
 
-        {/* Actions Footer */}
-        <div className="flex justify-between items-center pt-3 border-t border-line">
-          {initialNote ? (
-            <div className="flex gap-2">
-              {!initialNote.archivedAt && (
-                <button
-                  type="button"
-                  onClick={() => setConfirmAction("archive")}
-                  className="btn-ghost text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1"
-                >
-                  <Archive size={14} />
-                  <span>{dict.journal.notes.archiveBtn}</span>
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setConfirmAction("delete")}
-                className="btn-ghost text-xs text-rose-400 hover:text-rose-300 flex items-center gap-1"
-              >
-                <Trash2 size={14} />
-                <span>{dict.journal.notes.deleteBtn}</span>
-              </button>
-            </div>
-          ) : (
-            <div />
-          )}
-
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="btn-ghost text-xs py-2 px-4"
-            >
-              {dict.journal.cancel}
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              className="btn-primary text-xs py-2 px-5 font-semibold"
-            >
-              {dict.journal.save}
-            </button>
-          </div>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }
