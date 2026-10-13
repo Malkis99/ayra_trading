@@ -39,19 +39,56 @@ const DIALOGS = process.env.SHOTS_JOURNAL
       ["journal-add", "/journal", async (page) => {
         await page.getByRole("button", { name: "Добавить сделку" }).first().click();
       }],
+      ["journal-trade-view", "/journal", async (page) => {
+        await page.getByRole("button", { name: "Сделки" }).first().click().catch(() => {});
+        const row = page.locator("tr", { hasText: "EURUSD" }).first();
+        if (await row.isVisible().catch(() => false)) await row.click();
+        else await page.locator("text=EURUSD >> visible=true").first().click();
+      }],
       ["journal-add-detailed", "/journal", async (page) => {
         await page.getByRole("button", { name: "Добавить сделку" }).first().click();
         await page.getByRole("button", { name: /Развернуть всё|Подробно/ }).first().click();
       }],
     ]
   : [];
-const JOURNAL_SEED = process.env.SHOTS_JOURNAL
-  ? {
-      schemaVersion: 5,
-      accounts: [{ id: "acc_shots", name: "Main", type: "personal", currency: "USD", platform: "manual", createdAt: "2026-01-01T00:00:00.000Z" }],
-      trades: [],
-    }
-  : null;
+// Example trades relative to "now" (local machine time = browser time), plus today's plan.
+function exampleJournal() {
+  const pad = (n) => String(n).padStart(2, "0");
+  const now = new Date();
+  const at = (daysAgo, h, m = 10) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysAgo, h, m).toISOString();
+  const rows = [
+    [0, 9, "XAUUSD", "long", 2.1, ["calm"], [], 88, "london"],
+    [0, 11, "EURUSD", "short", -1, ["anxious"], ["fomo"], 42, "newyork"],
+    [1, 10, "NAS100", "long", 1.6, ["focused"], [], 81, "newyork"],
+    [1, 14, "GBPUSD", "short", 0.4, ["calm"], [], 74, "london"],
+    [2, 9, "XAUUSD", "short", -1, ["impatient"], ["early_entry"], 51, "london"],
+    [3, 15, "BTCUSD", "long", 3.2, ["confident"], [], 92, "overlap"],
+    [4, 10, "US30", "long", -0.5, ["calm"], [], 70, "newyork"],
+  ];
+  const trades = rows.map(([d, h, instrument, direction, r, emotions, mistakes, ps, session], i) => ({
+    id: `shot_${i}`, accountId: "acc_shots", instrument, direction, status: "closed",
+    openedAt: at(d, h), closedAt: at(d, h, 40), rMultiple: r, pnlMoney: Math.round(r * 250), riskAmount: 250,
+    result: r > 0.05 ? "win" : r < -0.05 ? "loss" : "breakeven", emotions, mistakes, processScore: ps, session,
+    executionRating: ps > 80 ? 5 : ps > 60 ? 4 : 2, verification: "unverified", source: "manual",
+    createdAt: at(d, h), updatedAt: at(d, h), schemaVersion: 3,
+  }));
+  const todayKey = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  return {
+    schemaVersion: 5,
+    accounts: [{ id: "acc_shots", name: "Main", type: "personal", currency: "USD", startBalance: 25000, platform: "manual", createdAt: "2026-01-01T00:00:00.000Z" }],
+    trades,
+    strategies: [],
+    plans: [{
+      date: todayKey,
+      bias: [{ instrument: "XAUUSD", direction: "bullish" }, { instrument: "EURUSD", direction: "neutral" }],
+      levels: [], events: [],
+      limits: { maxDailyLoss: { type: "r", value: 3 }, maxTrades: 4 },
+      checklist: [{ key: "bias_defined", done: true }, { key: "key_levels_marked", done: true }, { key: "events_checked", done: false }],
+      createdAt: now.toISOString(), updatedAt: now.toISOString(),
+    }],
+  };
+}
+const JOURNAL_SEED = process.env.SHOTS_JOURNAL ? exampleJournal() : null;
 
 const only = process.env.SHOTS_PAGES?.split(",");
 const pages = only ? ALL_PAGES.filter(([name]) => only.includes(name)) : ALL_PAGES;

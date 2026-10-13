@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "./cn";
 
@@ -71,9 +72,10 @@ export function Drawer({ isOpen, onClose, title, subtitle, closeLabel, children,
     };
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  if (!isOpen || typeof document === "undefined") return null;
 
-  return (
+  // Portal: a drawer opened from inside <main> must not be trapped in its stacking context.
+  return createPortal(
     <div className="fixed inset-0 z-[100]">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px] motion-safe:animate-[ayraFade_160ms_ease-out]" onClick={onClose} aria-hidden="true" />
       <div
@@ -111,7 +113,8 @@ export function Drawer({ isOpen, onClose, title, subtitle, closeLabel, children,
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">{children}</div>
         {footer && <div className="shrink-0 border-t border-line bg-s1 px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

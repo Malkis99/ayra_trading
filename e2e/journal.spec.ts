@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { openJournalTab } from "./helpers/forms";
 
 test.describe("T6a Journal v1 E2E Flow", () => {
   test.beforeEach(async ({ page }) => {
@@ -36,7 +37,7 @@ test.describe("T6a Journal v1 E2E Flow", () => {
     page,
   }) => {
     // 1. Go to Accounts tab and create account
-    await page.click("button:has-text('Счета')");
+    await openJournalTab(page, "Счета");
     await page.click("button:has-text('Добавить счёт')");
 
     await page.fill("input[placeholder='Основной счёт']", "Prop Challenge");
@@ -48,7 +49,7 @@ test.describe("T6a Journal v1 E2E Flow", () => {
     await expect(page.locator("text=Prop Challenge").first()).toBeVisible();
 
     // 2. Go to Trades tab and add trade
-    await page.click("button:has-text('Сделки')");
+    await openJournalTab(page, "Сделки");
     await page.click("button:has-text('Добавить сделку')");
 
     // Fill trade form
@@ -64,11 +65,11 @@ test.describe("T6a Journal v1 E2E Flow", () => {
 
     // 4. Reload page and check persistence
     await page.reload();
-    await page.click("button:has-text('Сделки')");
+    await openJournalTab(page, "Сделки");
     await expect(page.locator("text=XAUUSD").first()).toBeVisible();
 
     // 5. Switch units ($ / %)
-    await page.getByRole("button", { name: "$", exact: true }).click();
+    await page.getByRole("radio", { name: "$", exact: true }).click();
     await expect(page.locator("text=300").first()).toBeVisible();
 
     // 6. Open trade card, edit and save

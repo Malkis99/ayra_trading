@@ -7,3 +7,5 @@ export { Autocomplete } from "./Autocomplete";
 export { DateTimePicker, toLocalDateTime, toDateKey } from "./DateTimePicker";
 export { Segmented, ChipMultiSelect, StarRating, Toggle, Checkbox } from "./choice";
 export type { SegmentOption, SegmentTone, ChipOption, ChipTone } from "./choice";
+export { FilterChip } from "./FilterChip";
+export type { FilterOption } from "./FilterChip";

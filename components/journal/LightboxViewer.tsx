@@ -87,6 +87,9 @@ export function LightboxViewer({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // Handled here first (capture), so a drawer or dialog behind the viewer stays open.
+        e.preventDefault();
+        e.stopPropagation();
         onClose();
       } else if (e.key === "ArrowLeft") {
         handlePrev();
@@ -95,8 +98,8 @@ export function LightboxViewer({
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [isOpen, onClose, handlePrev, handleNext]);
 
   // Mouse wheel zoom

@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { openJournalTab } from "./helpers/forms";
 
 test.describe("T6b Journal Dashboard, Calendar & Reports E2E Flow", () => {
   test.beforeEach(async ({ page }) => {
@@ -52,6 +53,7 @@ test.describe("T6b Journal Dashboard, Calendar & Reports E2E Flow", () => {
     page,
   }) => {
     // 1. Enable Demo Mode from empty state
+    await openJournalTab(page, "Аналитика");
     await expect(page.locator("button:has-text('Показать пример')")).toBeVisible();
     await page.click("button:has-text('Показать пример')");
 
@@ -60,7 +62,7 @@ test.describe("T6b Journal Dashboard, Calendar & Reports E2E Flow", () => {
     await expect(page.locator("text=Кривая капитала (Equity)")).toBeVisible();
 
     // 2. Unit Switcher (R / $ / %)
-    await page.getByRole("button", { name: "$", exact: true }).click();
+    await page.getByRole("radio", { name: "$", exact: true }).click();
     await page.getByRole("button", { name: "%", exact: true }).click();
     await page.getByRole("button", { name: "R", exact: true }).click();
 
@@ -75,7 +77,7 @@ test.describe("T6b Journal Dashboard, Calendar & Reports E2E Flow", () => {
     }
 
     // 4. Reports Tab & Process x Outcome Matrix
-    await page.click("button:has-text('Отчёты')");
+    await openJournalTab(page, "Отчёты");
     await expect(page.locator("text=Матрица «Процесс × Результат»")).toBeVisible();
     await expect(page.locator("text=Правильно")).toBeVisible();
 
@@ -84,7 +86,7 @@ test.describe("T6b Journal Dashboard, Calendar & Reports E2E Flow", () => {
     await expect(page.locator("table")).toBeVisible();
 
     // 5. Exit Demo Mode
-    await page.click("button:has-text('Дашборд')");
+    await openJournalTab(page, "Аналитика");
     await page.click("button:has-text('Выйти из примера')");
     await expect(page.locator("text=Демо-данные (только просмотр)")).not.toBeVisible();
 

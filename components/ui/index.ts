@@ -3,6 +3,8 @@ export { Button, buttonClasses } from "./Button";
 export type { ButtonVariant, ButtonSize } from "./Button";
 export { Chip } from "./Chip";
 export { Tabs } from "./Tabs";
+export { TabsWithMore } from "./TabsWithMore";
+export type { TabEntry } from "./TabsWithMore";
 export type { TabItem } from "./Tabs";
 export { Modal } from "./Modal";
 export { Drawer, FormSection } from "./Drawer";

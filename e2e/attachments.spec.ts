@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { pickOption, openTradeSection } from "./helpers/forms";
+import { pickOption, openTradeSection, openJournalTab } from "./helpers/forms";
 import path from "path";
 
 test.describe("T6c-2b Screenshot Attachments E2E Flow", () => {
@@ -78,12 +78,12 @@ test.describe("T6c-2b Screenshot Attachments E2E Flow", () => {
     await page.click("button:has-text('Сохранить сделку')");
 
     // 3. Switch to Trades subtab and verify trade entry
-    await page.click("button:has-text('Сделки')");
+    await openJournalTab(page, "Сделки");
     await expect(page.locator("text=BTCUSD").first()).toBeVisible();
 
     // 4. Reload page to verify persistence
     await page.reload();
-    await page.click("button:has-text('Сделки')");
+    await openJournalTab(page, "Сделки");
     await expect(page.locator("text=BTCUSD").first()).toBeVisible();
 
     // 5. Open trade view modal and click screenshot thumbnail to trigger Lightbox
@@ -102,7 +102,7 @@ test.describe("T6c-2b Screenshot Attachments E2E Flow", () => {
     await expect(page.locator("button:has-text('Скачать')")).not.toBeVisible();
 
     // Close trade detail modal by clicking close button
-    await page.locator(".card button:has-text('✕')").click();
+    await page.getByTestId("trade-quick-view").getByRole("button", { name: "Закрыть" }).click();
 
     // 6. Test SVG / Disguised file rejection
     await page.click("button:has-text('Добавить сделку')");
@@ -119,8 +119,9 @@ test.describe("T6c-2b Screenshot Attachments E2E Flow", () => {
 
     // 7. Delete trade and verify clean removal
     await page.locator("text=BTCUSD").first().click();
-    await page.locator("button:has-text('Удалить')").last().click();
-    await page.locator(".bg-rose-600:has-text('Удалить')").click();
+    const view = page.getByTestId("trade-quick-view");
+    await view.getByRole("button", { name: "Удалить" }).click();
+    await view.getByRole("alert").getByRole("button").first().click();
 
     await expect(page.locator("text=BTCUSD")).not.toBeVisible();
   });
@@ -130,7 +131,9 @@ test.describe("T6c-2b Screenshot Attachments E2E Flow", () => {
     await page.goto("/journal");
 
     await expect(page.getByRole("heading", { name: "Журнал" })).toBeVisible();
-    await page.click("button:has-text('Сделки')");
-    await expect(page.locator("select").first()).toBeVisible();
+    await openJournalTab(page, "Сделки");
+    await expect(page.getByRole("tab", { name: "Сделки" })).toHaveAttribute("aria-selected", "true");
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
   });
 });
