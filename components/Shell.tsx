@@ -19,6 +19,7 @@ import { AuthProvider, useAuth } from "@/lib/auth/auth-context";
 import { useApp } from "@/lib/context";
 import { sanitizeRedirectUrl } from "@/lib/auth/redirect-whitelist";
 import { AppStorage } from "@/lib/storage";
+import { shouldOfferProfileSelect } from "@/lib/storage/profile-transfer";
 import { NicknameConflictModal } from "./NicknameConflictModal";
 import { SpaceChangeBanner } from "./SpaceChangeBanner";
 import { OwnerDiagnosticsBlock } from "@/components/OwnerDiagnosticsBlock";
@@ -110,6 +111,14 @@ function ShellContent({ children }: { children: React.ReactNode }) {
 
     // 3. If logged in, but cloud profile has no nickname yet
     if (user && profile && !profile.nickname) {
+      // 3a. Empty account on a device with a guest profile: the user decides on /profile-select,
+      // which also performs the follow-up routing itself.
+      if (pathname === "/profile-select") return;
+      if (shouldOfferProfileSelect(user.id, profile.nickname)) {
+        if (pathname !== "/login") router.replace("/profile-select");
+        return;
+      }
+
       try {
         const saved = AppStorage.getItem("ayra_demo_v1");
         if (saved) {
@@ -160,7 +169,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     handleAuthAndLocalSync();
   }, [handleAuthAndLocalSync]);
 
-  if (pathname === "/awakening") {
+  if (pathname === "/awakening" || pathname === "/profile-select") {
     return <>{children}</>;
   }
 

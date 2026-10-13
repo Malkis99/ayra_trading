@@ -6,8 +6,9 @@ import { isE2EMockEnabled, getSupabaseEnv } from "@/lib/supabase/config";
 import { mapSupabaseError, type SanitizedErrorInfo } from "./error-sanitizer";
 import { authTabChannel } from "./tab-channel";
 import { spaceTabChannel } from "./space-channel";
-import { resolvePostLoginRoute } from "./routing";
+import { resolvePostLoginRoute, readAccountGameState } from "./routing";
 import { AppStorage, GUEST_SPACE_ID } from "@/lib/storage";
+import { shouldOfferProfileSelect } from "@/lib/storage/profile-transfer";
 import {
   getMockState,
   setMockState,
@@ -118,6 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (oldSpaceId !== newSpaceId) {
       await AppStorage.flushSpace(oldSpaceId);
       AppStorage.setUserId(targetState === "authenticated" ? targetUserId : null);
+      spaceTabChannel.notifyLocal(oldSpaceId, newSpaceId);
       spaceTabChannel.broadcastSpaceChange(oldSpaceId, newSpaceId);
     } else {
       AppStorage.setUserId(targetState === "authenticated" ? targetUserId : null);
@@ -191,13 +193,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if ((wasLoading || routingExecutedUserIdRef.current !== u.id) && u.id !== routingExecutedUserIdRef.current) {
         routingExecutedUserIdRef.current = u.id;
 
-        const guestStateRaw = typeof window !== "undefined" ? AppStorage.getItem("ayra_demo_v1") : null;
-        const guestState = guestStateRaw ? JSON.parse(guestStateRaw) : null;
-
         const res = await resolvePostLoginRoute({
           user: u,
           profile: loadedProfile,
-          guestState,
+          guestState: readAccountGameState(u.id),
+          offerProfileSelect: shouldOfferProfileSelect(u.id, loadedProfile?.nickname),
           checkNicknameAvailable: mockMode
             ? async (nick) => mockIsNicknameAvailable(nick)
             : async (nick) => {
@@ -479,6 +479,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setAuthState("guest");
       routingExecutedUserIdRef.current = null;
       AppStorage.setUserId(null);
+      spaceTabChannel.notifyLocal(oldSpaceId, GUEST_SPACE_ID);
       spaceTabChannel.broadcastSpaceChange(oldSpaceId, GUEST_SPACE_ID);
       return;
     }
@@ -492,6 +493,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAuthState("guest");
     routingExecutedUserIdRef.current = null;
     AppStorage.setUserId(null);
+    spaceTabChannel.notifyLocal(oldSpaceId, GUEST_SPACE_ID);
     spaceTabChannel.broadcastSpaceChange(oldSpaceId, GUEST_SPACE_ID);
   };
 

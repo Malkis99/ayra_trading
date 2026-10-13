@@ -75,6 +75,20 @@ export class SpaceTabChannel {
     });
   }
 
+  /**
+   * Notifies subscribers in this tab only (providers reload data of the now-active space).
+   * broadcastSpaceChange reaches other tabs only, so same-tab switches must call this too.
+   */
+  public notifyLocal(fromSpaceId: string, toSpaceId: string) {
+    this.notifyListeners({
+      type: "SPACE_CHANGED",
+      tabId: currentTabId,
+      fromSpaceId,
+      toSpaceId,
+      timestamp: Date.now(),
+    });
+  }
+
   public broadcastSpaceChange(fromSpaceId: string, toSpaceId: string) {
     const msg: SpaceChannelMessage = {
       type: "SPACE_CHANGED",

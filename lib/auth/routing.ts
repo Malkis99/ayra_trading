@@ -1,12 +1,28 @@
 import { sanitizeRedirectUrl } from "./redirect-whitelist";
 import { isValidLatinNickname } from "@/lib/stats";
+import { AppStorage } from "@/lib/storage";
 import type { UserProfile, AuthUser } from "./auth-context";
+
+/**
+ * Reads the game state stored in the signed-in account's own space (never the guest space),
+ * regardless of which space is active at the moment of the call.
+ */
+export function readAccountGameState(userId: string): any {
+  try {
+    const raw = AppStorage.getItem("ayra_demo_v1", userId);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface ResolveRouteOptions {
   user: AuthUser | null;
   profile: UserProfile | null;
   rawNextParam?: string | null;
   guestState?: any;
+  /** Account space is empty and the device holds a guest profile: let the user choose (C1). */
+  offerProfileSelect?: boolean;
   checkNicknameAvailable?: (nick: string) => Promise<boolean>;
   saveNickname?: (nick: string) => Promise<{ success: boolean }>;
   updateProfile?: (updates: Partial<UserProfile>) => Promise<boolean>;
@@ -14,7 +30,7 @@ export interface ResolveRouteOptions {
 
 export interface ResolveRouteResult {
   destination: string;
-  source: "cloud" | "onboarding_answers" | "guest_name" | "conflict" | "guest_in_progress";
+  source: "cloud" | "onboarding_answers" | "guest_name" | "conflict" | "guest_in_progress" | "profile_select";
   nicknameConflict?: boolean;
   candidateNickname?: string;
 }
@@ -30,6 +46,7 @@ export async function resolvePostLoginRoute(options: ResolveRouteOptions): Promi
     profile,
     rawNextParam,
     guestState,
+    offerProfileSelect,
     checkNicknameAvailable,
     saveNickname,
     updateProfile,
@@ -46,6 +63,15 @@ export async function resolvePostLoginRoute(options: ResolveRouteOptions): Promi
     return {
       destination: safeNext,
       source: "cloud",
+    };
+  }
+
+  // New account on a device with a guest profile: ask before copying anything into the account.
+  if (offerProfileSelect) {
+    const nextQuery = safeNext !== "/" ? `?next=${encodeURIComponent(safeNext)}` : "";
+    return {
+      destination: `/profile-select${nextQuery}`,
+      source: "profile_select",
     };
   }
 
