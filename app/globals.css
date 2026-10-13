@@ -29,6 +29,9 @@ body { @apply bg-ink text-tx antialiased; background-image: radial-gradient(900p
 * { scrollbar-width: thin; scrollbar-color: #3a3750 transparent; }
 :focus-visible { outline: 2px solid rgb(var(--c-vi)); outline-offset: 2px; }
 
+@keyframes ayraFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ayraSheetUp { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes ayraSlideIn { from { transform: translateX(100%); } to { transform: none; } }
 @keyframes ayraPop { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
 
 @media (prefers-reduced-motion: reduce) {

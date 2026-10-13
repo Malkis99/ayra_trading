@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { pickOption, openTradeSection, openJournalTab } from "./helpers/forms";
 
 test.describe("T6d.1 Prop Rules & Safe Deletion E2E Flow", () => {
   test.beforeEach(async ({ page }) => {
@@ -42,7 +43,7 @@ test.describe("T6d.1 Prop Rules & Safe Deletion E2E Flow", () => {
     page,
   }) => {
     // 1. Navigate to Accounts tab
-    await page.click("button:has-text('Счета')");
+    await openJournalTab(page, "Счета");
 
     // 2. Create first prop account ("FTMO Phase 1")
     await page.click("button:has-text('Добавить счёт')");
@@ -86,7 +87,7 @@ test.describe("T6d.1 Prop Rules & Safe Deletion E2E Flow", () => {
 
     // 5. Unset primary prop account by clicking Star again
     await page.goto("/journal");
-    await page.click("button:has-text('Счета')");
+    await openJournalTab(page, "Счета");
     const starToUnset = page
       .locator("div.card")
       .filter({ hasText: "Funded Account" })
@@ -101,7 +102,7 @@ test.describe("T6d.1 Prop Rules & Safe Deletion E2E Flow", () => {
 
     // 6. Click link in banner to go back to Accounts tab and reset auto selection
     await page.click("text=Выбрать в Счетах");
-    await page.click("button:has-text('Счета')");
+    await openJournalTab(page, "Счета");
     await expect(page.locator("text=Выбирать автоматически")).toBeVisible();
     await page.click("text=Выбирать автоматически");
 
@@ -130,15 +131,15 @@ test.describe("T6d.1 Prop Rules & Safe Deletion E2E Flow", () => {
     await expect(page.locator("text=Funded Account").first()).toBeVisible();
 
     // 8. Test Trade-blocking constraint on "FTMO Phase 1"
-    await page.click("button:has-text('Сделки')");
+    await openJournalTab(page, "Сделки");
     await page.click("button:has-text('Добавить сделку')");
-    await page.selectOption("[data-testid='account-select']", { label: "FTMO Phase 1 (USD)" });
+    await pickOption(page, "account-select", "FTMO Phase 1 (USD)");
     await page.fill("input[placeholder='XAUUSD, EURUSD...']", "EURUSD");
     await page.fill("input[placeholder='150 / -50']", "500");
     await page.click("button:has-text('Сохранить сделку')");
 
     // Attempt to delete FTMO Phase 1
-    await page.click("button:has-text('Счета')");
+    await openJournalTab(page, "Счета");
     const ftmoDeleteBtn = page
       .locator("div.card")
       .filter({ hasText: "FTMO Phase 1" })

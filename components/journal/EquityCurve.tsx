@@ -83,7 +83,7 @@ export const EquityCurve: React.FC<EquityCurveProps> = ({
     <div className="card p-4 space-y-3 relative">
       <div className="flex justify-between items-center">
         <h4 className="h4 text-sm font-serif">{dict.journal.dashboard.equityCurve.title}</h4>
-        <span className="text-[11px] text-mu font-mono">
+        <span className="text-[11px] text-mu tabular-nums">
           {points.length} {dict.journal.tradesWord}
         </span>
       </div>
@@ -174,7 +174,7 @@ export const EquityCurve: React.FC<EquityCurveProps> = ({
             x={padding.left - 6}
             y={padding.top + 10}
             textAnchor="end"
-            className="text-[10px] fill-slate-400 font-mono"
+            className="text-[10px] fill-slate-400 tabular-nums"
           >
             {formatValue(maxY)}
           </text>
@@ -182,7 +182,7 @@ export const EquityCurve: React.FC<EquityCurveProps> = ({
             x={padding.left - 6}
             y={padding.top + chartHeight - 4}
             textAnchor="end"
-            className="text-[10px] fill-slate-400 font-mono"
+            className="text-[10px] fill-slate-400 tabular-nums"
           >
             {formatValue(minY)}
           </text>
@@ -194,7 +194,7 @@ export const EquityCurve: React.FC<EquityCurveProps> = ({
                 x={padding.left}
                 y={height - 8}
                 textAnchor="start"
-                className="text-[10px] fill-slate-400 font-mono"
+                className="text-[10px] fill-slate-400 tabular-nums"
               >
                 {points[0].dateStr}
               </text>
@@ -203,7 +203,7 @@ export const EquityCurve: React.FC<EquityCurveProps> = ({
                   x={width / 2}
                   y={height - 8}
                   textAnchor="middle"
-                  className="text-[10px] fill-slate-400 font-mono"
+                  className="text-[10px] fill-slate-400 tabular-nums"
                 >
                   {points[Math.floor(points.length / 2)].dateStr}
                 </text>
@@ -212,7 +212,7 @@ export const EquityCurve: React.FC<EquityCurveProps> = ({
                 x={width - padding.right}
                 y={height - 8}
                 textAnchor="end"
-                className="text-[10px] fill-slate-400 font-mono"
+                className="text-[10px] fill-slate-400 tabular-nums"
               >
                 {points[points.length - 1].dateStr}
               </text>
@@ -230,7 +230,7 @@ export const EquityCurve: React.FC<EquityCurveProps> = ({
             }}
           >
             <div className="font-bold">{activePoint.pt.dateStr}</div>
-            <div className="text-purple-400 font-mono">
+            <div className="text-purple-400 tabular-nums">
               {dict.journal.dashboard.equityCurve.tradeTooltip
                 .replace("{index}", String(activePoint.pt.index))
                 .replace("{date}", activePoint.pt.dateStr)

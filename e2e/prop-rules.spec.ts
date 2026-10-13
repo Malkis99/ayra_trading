@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { pickOption, openTradeSection, openJournalTab } from "./helpers/forms";
 
 test.describe("T6d Prop Rules Tracker E2E Flow", () => {
   test.beforeEach(async ({ page }) => {
@@ -42,7 +43,7 @@ test.describe("T6d Prop Rules Tracker E2E Flow", () => {
     page,
   }) => {
     // 1. Navigate to Accounts tab
-    await page.click("button:has-text('Счета')");
+    await openJournalTab(page, "Счета");
 
     // 2. Create Prop Account
     await page.click("button:has-text('Добавить счёт')");
@@ -75,9 +76,9 @@ test.describe("T6d Prop Rules Tracker E2E Flow", () => {
     await expect(page.locator("text=Торговые дни")).toBeVisible();
 
     // 5. Add a losing trade to trigger caution alert
-    await page.click("button:has-text('Сделки')");
+    await openJournalTab(page, "Сделки");
     await page.click("button:has-text('Добавить сделку')");
-    await page.selectOption("[data-testid='account-select']", { label: "My FTMO Account (USD)" });
+    await pickOption(page, "account-select", "My FTMO Account (USD)");
     await page.fill("input[placeholder='XAUUSD, EURUSD...']", "EURUSD");
     await page.fill("input[placeholder='150 / -50']", "-4000");
     await page.fill("input[placeholder='2.5 / -1']", "-1");
@@ -88,24 +89,24 @@ test.describe("T6d Prop Rules Tracker E2E Flow", () => {
 
     // 6. Test Pre-Trade check in Add Trade Modal
     await page.click("button:has-text('Добавить сделку')");
-    await page.selectOption("[data-testid='account-select']", { label: "My FTMO Account (USD)" });
+    await pickOption(page, "account-select", "My FTMO Account (USD)");
     await page.fill("input[placeholder='XAUUSD, EURUSD...']", "GBPUSD");
-    await page.click("button:has-text('Подробно')");
+    await openTradeSection(page, "Риск и размер");
     await page.fill("input[placeholder='100']", "2000");
 
     await expect(page.locator("text=Если эта сделка закроется по стопу:")).toBeVisible();
-    await page.click("button[aria-label='Close']");
+    await page.getByRole("button", { name: "Закрыть" }).first().click();
 
     // 7. Add winning trade to reach Profit Target
     await page.click("button:has-text('Добавить сделку')");
-    await page.selectOption("[data-testid='account-select']", { label: "My FTMO Account (USD)" });
+    await pickOption(page, "account-select", "My FTMO Account (USD)");
     await page.fill("input[placeholder='XAUUSD, EURUSD...']", "BTCUSD");
     await page.fill("input[placeholder='150 / -50']", "15000");
     await page.fill("input[placeholder='2.5 / -1']", "3");
     await page.click("button:has-text('Сохранить сделку')");
 
     // 8. Change Phase via Modal
-    await page.click("button:has-text('Счета')");
+    await openJournalTab(page, "Счета");
     await page.click("button:has-text('Правила проп-счёта')");
     await page.click("button:has-text('Сменить фазу')");
 
@@ -130,7 +131,7 @@ test.describe("T6d Prop Rules Tracker E2E Flow", () => {
   test("Mobile Viewport Layout Check (360px)", async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 740 });
     await page.goto("/journal");
-    await page.click("button:has-text('Счета')");
+    await openJournalTab(page, "Счета");
 
     await expect(page.locator("body")).toBeVisible();
   });

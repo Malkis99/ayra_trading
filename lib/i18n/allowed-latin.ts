@@ -1,5 +1,9 @@
 export const ALLOWED_LATIN_WORDS = [
   "AYRA",
+  // keyboard key names in shortcut hints
+  "Ctrl",
+  "Enter",
+  "Esc",
   "Free",
   "Pro",
   "Elite",
