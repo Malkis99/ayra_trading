@@ -32,6 +32,7 @@ const ALL_PAGES = [
   ["profile", "/profile"],
   ["settings", "/settings"],
   ["plans", "/plans"],
+  ["journal-analytics", "/journal?tab=analytics"],
 ];
 // Dialog shots (viewport only): [name, path, action]
 const DIALOGS = process.env.SHOTS_JOURNAL

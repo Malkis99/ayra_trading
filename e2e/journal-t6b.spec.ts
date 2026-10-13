@@ -63,8 +63,8 @@ test.describe("T6b Journal Dashboard, Calendar & Reports E2E Flow", () => {
 
     // 2. Unit Switcher (R / $ / %)
     await page.getByRole("radio", { name: "$", exact: true }).click();
-    await page.getByRole("button", { name: "%", exact: true }).click();
-    await page.getByRole("button", { name: "R", exact: true }).click();
+    await page.getByRole("radio", { name: "%", exact: true }).click();
+    await page.getByRole("radio", { name: "R", exact: true }).click();
 
     // 3. Calendar Interaction
     await expect(page.locator("text=Итог месяца")).toBeVisible();

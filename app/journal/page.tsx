@@ -10,7 +10,6 @@ import { calculatePnlPercent } from "@/lib/journal/calc";
 import { exportProfileDataJSON, calculateJournalStats } from "@/lib/stats";
 import { AddTradeModal } from "@/components/AddTradeModal";
 import { DashboardTab } from "@/components/journal/DashboardTab";
-import { CalendarTab } from "@/components/journal/CalendarTab";
 import { ReportsTab } from "@/components/journal/ReportsTab";
 import { StrategiesTab } from "@/components/journal/StrategiesTab";
 import { NoTradeTab } from "@/components/journal/NoTradeTab";
@@ -538,6 +537,8 @@ export default function JournalPage() {
           <DashboardTab
             trades={activeTrades}
             accounts={activeAccounts}
+            strategies={strategies}
+            onAddTradeForDate={handleAddTradeForDate}
             unit={unit}
             onUnitChange={handleUnitChange}
             onGoToTrades={() => setActiveTab("trades")}
@@ -548,17 +549,6 @@ export default function JournalPage() {
             lang={lang}
           />
 
-          {/* Embedded Calendar Section */}
-          <div className="pt-2 border-t border-line">
-            <CalendarTab
-              trades={activeTrades}
-              accounts={activeAccounts}
-              unit={unit}
-              onAddTradeForDate={handleAddTradeForDate}
-              dict={dict}
-              lang={lang}
-            />
-          </div>
         </div>
       )}
 

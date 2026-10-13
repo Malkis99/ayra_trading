@@ -126,6 +126,22 @@ test.describe("Journal page", () => {
     await expect(view).toBeHidden();
   });
 
+  test("analytics: metrics with explanations, equity, calendar, breakdowns and matrix", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await seed(page);
+    await page.goto("/journal?tab=analytics");
+    await expect(page.locator('[data-metric="result"]')).toContainText("+1.50 R");
+    await page.getByRole("button", { name: "Что означает «Profit Factor»" }).click();
+    await expect(page.getByRole("dialog", { name: "Profit Factor" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.locator("text=Кривая капитала (Equity)")).toBeVisible();
+    await expect(page.locator("text=Итог месяца")).toBeVisible();
+    await expect(page.getByTestId("slice-mistake")).toContainText("FOMO");
+    await expect(page.getByTestId("slice-mistake")).toContainText("Без ошибок");
+    await expect(page.getByTestId("process-matrix")).toContainText("Правильно");
+  });
+
   test("rare tabs live in the 'More' menu; the chosen one is shown as active", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await seed(page);

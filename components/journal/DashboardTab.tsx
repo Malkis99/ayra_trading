@@ -1,21 +1,31 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { Account, Trade } from "@/lib/journal/types";
+import { Account, Strategy, Trade } from "@/lib/journal/types";
 import {
   calculateJournalAnalytics,
   calculateEquityCurve,
+  calculateReportSlice,
+  type ReportSliceRow,
+  type ReportSliceType,
 } from "@/lib/journal/stats";
 import { EquityCurve } from "./EquityCurve";
-import { HelpCircle, Sparkles, X, ChevronRight, AlertCircle, ArrowUpRight, ArrowDownRight, Shield, Star } from "lucide-react";
+import { CalendarTab } from "./CalendarTab";
+import { ProcessMatrix } from "./ProcessMatrix";
+import { HelpCircle, Sparkles, AlertCircle, Shield, Search } from "lucide-react";
 import { calculatePropMetrics } from "@/lib/journal/prop";
+import { formatString } from "@/lib/i18n";
+import { Button, EmptyState, FilterChip, Input, Modal } from "@/components/ui";
+import { cn } from "@/components/ui/cn";
 
 interface DashboardTabProps {
   trades: Trade[];
   accounts: Account[];
+  strategies?: Strategy[];
   unit: "R" | "money" | "percent";
   onUnitChange: (unit: "R" | "money" | "percent") => void;
   onGoToTrades: () => void;
+  onAddTradeForDate?: (dateStr: string) => void;
   isDemoMode: boolean;
   onEnableDemoMode: () => void;
   onExitDemoMode: () => void;
@@ -23,136 +33,101 @@ interface DashboardTabProps {
   lang: string;
 }
 
+type MetricKey = "result" | "winrate" | "profitFactor" | "expectancyR" | "avgWinLoss" | "trades" | "drawdown";
+
+/** Section title used across the analytics tab. */
+function SectionTitle({ children, aside }: { children: React.ReactNode; aside?: React.ReactNode }) {
+  return (
+    <div className="mb-3 flex items-center justify-between gap-2">
+      <h3 className="text-base font-semibold text-tx">{children}</h3>
+      {aside}
+    </div>
+  );
+}
+
+/**
+ * Journal analytics: filters, key metrics (with explanations), equity curve, calendar heatmap,
+ * breakdowns by session / strategy / mistake and the Process × Outcome matrix.
+ * All numbers come from lib/journal/stats (unchanged).
+ */
 export const DashboardTab: React.FC<DashboardTabProps> = ({
   trades,
   accounts,
+  strategies = [],
   unit,
-  onUnitChange,
   onGoToTrades,
+  onAddTradeForDate,
   isDemoMode,
   onEnableDemoMode,
   onExitDemoMode,
   dict,
   lang,
 }) => {
-  // Filters State
+  const a = dict.journal.analytics;
   const [filterAccount, setFilterAccount] = useState<string>("all");
   const [filterPeriod, setFilterPeriod] = useState<string>("30d"); // 'currentMonth' | '7d' | '30d' | '90d' | 'all'
   const [filterVerification, setFilterVerification] = useState<string>("all"); // 'all' | 'verified'
   const [filterInstrument, setFilterInstrument] = useState<string>("");
+  const [activeTooltip, setActiveTooltip] = useState<MetricKey | null>(null);
 
-  // Tooltip modal state
-  const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
-
-  // Filter Trades
   const filteredTrades = useMemo(() => {
     const nowMs = Date.now();
     const now = new Date();
-
     return trades.filter((t) => {
-      // Filter closed trades only for analytics
       if (t.status !== "closed") return false;
-
-      // Account filter
       if (filterAccount !== "all" && t.accountId !== filterAccount) return false;
-
-      // Verification filter
       if (filterVerification === "verified" && t.verification !== "verified") return false;
-
-      // Instrument filter
-      if (filterInstrument.trim()) {
-        const query = filterInstrument.trim().toUpperCase();
-        if (!t.instrument.toUpperCase().includes(query)) return false;
-      }
-
-      // Period filter
+      if (filterInstrument.trim() && !t.instrument.toUpperCase().includes(filterInstrument.trim().toUpperCase())) return false;
       const tradeMs = new Date(t.closedAt || t.openedAt || t.createdAt).getTime();
       const diffDays = (nowMs - tradeMs) / (1000 * 60 * 60 * 24);
-
       if (filterPeriod === "7d" && diffDays > 7) return false;
       if (filterPeriod === "30d" && diffDays > 30) return false;
       if (filterPeriod === "90d" && diffDays > 90) return false;
       if (filterPeriod === "currentMonth") {
-        const tradeDate = new Date(t.closedAt || t.openedAt || t.createdAt);
-        if (
-          tradeDate.getFullYear() !== now.getFullYear() ||
-          tradeDate.getMonth() !== now.getMonth()
-        ) {
-          return false;
-        }
+        const d = new Date(t.closedAt || t.openedAt || t.createdAt);
+        if (d.getFullYear() !== now.getFullYear() || d.getMonth() !== now.getMonth()) return false;
       }
-
       return true;
     });
   }, [trades, filterAccount, filterPeriod, filterVerification, filterInstrument]);
 
-  // Analytics Calculation
-  const analytics = useMemo(() => {
-    return calculateJournalAnalytics(filteredTrades, accounts);
-  }, [filteredTrades, accounts]);
+  const analytics = useMemo(() => calculateJournalAnalytics(filteredTrades, accounts), [filteredTrades, accounts]);
 
-  // Prop Accounts with rules
-  const propAccountsWithRules = useMemo(() => {
-    return accounts.filter((a) => a.type === "prop" && !a.archivedAt && a.propRules && a.propRules.startedAt);
-  }, [accounts]);
+  const propAccountsWithRules = useMemo(
+    () => accounts.filter((acc) => acc.type === "prop" && !acc.archivedAt && acc.propRules && acc.propRules.startedAt),
+    [accounts]
+  );
 
-  // Process Score & Rules Metrics
   const processMetrics = useMemo(() => {
     const rated = filteredTrades.filter(
-      (t) =>
-        (typeof t.processScore === "number" && t.processScore >= 0) ||
-        (typeof t.executionRating === "number" && t.executionRating > 0)
+      (t) => (typeof t.processScore === "number" && t.processScore >= 0) || (typeof t.executionRating === "number" && t.executionRating > 0)
     );
-
-    if (rated.length === 0) {
-      return { avgScore: null, compliancePercent: null };
-    }
-
-    const scores = rated.map((t) => {
-      if (typeof t.processScore === "number") return t.processScore;
-      return (t.executionRating || 3) * 20;
-    });
-
-    const avg = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+    if (rated.length === 0) return { avgScore: null, compliancePercent: null };
+    const scores = rated.map((t) => (typeof t.processScore === "number" ? t.processScore : (t.executionRating || 3) * 20));
+    const avg = Math.round(scores.reduce((x, y) => x + y, 0) / scores.length);
     const goodCount = scores.filter((s) => s >= 80).length;
-    const pct = Math.round((goodCount / scores.length) * 100);
-
-    return { avgScore: avg, compliancePercent: pct };
+    return { avgScore: avg, compliancePercent: Math.round((goodCount / scores.length) * 100) };
   }, [filteredTrades]);
 
-  // Equity Curve Points
-  const equityPoints = useMemo(() => {
-    return calculateEquityCurve(filteredTrades, accounts);
+  const equityPoints = useMemo(() => calculateEquityCurve(filteredTrades, accounts), [filteredTrades, accounts]);
+
+  const slices = useMemo(() => {
+    const make = (type: ReportSliceType) =>
+      calculateReportSlice(type, filteredTrades, accounts)
+        .filter((r) => r.tradesCount > 0)
+        .sort((x, y) => y.tradesCount - x.tradesCount)
+        .slice(0, 6);
+    return { session: make("session"), strategy: make("strategy"), mistake: make("mistake") };
   }, [filteredTrades, accounts]);
 
-  // Currency symbol
-  const selectedAcc = accounts.find((a) => a.id === filterAccount);
+  const selectedAcc = accounts.find((acc) => acc.id === filterAccount);
   const currencySymbol = selectedAcc?.currency || "USD";
 
-  // Recent Trades (5-8 trades)
-  const recentTrades = useMemo(() => {
-    return [...filteredTrades]
-      .sort(
-        (a, b) =>
-          new Date(b.closedAt || b.openedAt).getTime() -
-          new Date(a.closedAt || a.openedAt).getTime()
-      )
-      .slice(0, 6);
-  }, [filteredTrades]);
-
-  // Format metric value helper
   const formatValue = (val: number | null, overrideUnit?: "R" | "money" | "percent") => {
     if (val === null || val === undefined) return "—";
     const targetUnit = overrideUnit || unit;
-
-    if (targetUnit === "R") {
-      return `${val > 0 ? "+" : ""}${val.toFixed(2)} R`;
-    }
-    if (targetUnit === "percent") {
-      return `${val > 0 ? "+" : ""}${val.toFixed(2)}%`;
-    }
-
-    // Money
+    if (targetUnit === "R") return `${val > 0 ? "+" : ""}${val.toFixed(2)} R`;
+    if (targetUnit === "percent") return `${val > 0 ? "+" : ""}${val.toFixed(2)}%`;
     try {
       const formatted = new Intl.NumberFormat(lang === "ru" ? "ru-RU" : "en-US", {
         style: "currency",
@@ -166,30 +141,206 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     }
   };
 
+  const hasData = filteredTrades.length > 0 || isDemoMode;
+  const lowData = analytics.hasLowData ? formatString(dict.journal.dashboard.kpi.lowDataTag, { count: analytics.totalTrades }) : null;
+  const resultValue = unit === "R" ? analytics.totalR : unit === "percent" ? analytics.totalPnlPercent : analytics.totalMoney;
+  const toneOf = (v: number | null | undefined) => (v == null || v === 0 ? "text-tx" : v > 0 ? "text-long" : "text-short");
+  const shots = filteredTrades.filter((t) => t.attachmentIds && t.attachmentIds.length > 0).length;
+
+  const metrics: Array<{ key: string; help?: MetricKey; label: string; value: React.ReactNode; tone?: string; sub?: React.ReactNode }> = [
+    { key: "result", help: "result", label: dict.journal.dashboard.kpi.result, value: formatValue(resultValue ?? null), tone: toneOf(resultValue), sub: lowData },
+    {
+      key: "winrate",
+      help: "winrate",
+      label: dict.journal.dashboard.kpi.winrate,
+      value: `${(analytics.winRate * 100).toFixed(1)}%`,
+      sub:
+        analytics.totalTrades > 0 ? (
+          <span className="mt-1 flex h-1.5 overflow-hidden rounded-full bg-s2" aria-hidden="true">
+            <span className="bg-long" style={{ width: `${(analytics.winsCount / analytics.totalTrades) * 100}%` }} />
+            <span className="bg-mu/50" style={{ width: `${(analytics.breakevenCount / analytics.totalTrades) * 100}%` }} />
+            <span className="bg-short" style={{ width: `${(analytics.lossesCount / analytics.totalTrades) * 100}%` }} />
+          </span>
+        ) : null,
+    },
+    {
+      key: "profitFactor",
+      help: "profitFactor",
+      label: dict.journal.dashboard.kpi.profitFactor,
+      value:
+        unit === "money" && analytics.profitFactorMoney !== null
+          ? analytics.profitFactorMoney.toFixed(2)
+          : analytics.profitFactorR !== null
+          ? analytics.profitFactorR.toFixed(2)
+          : "—",
+    },
+    {
+      key: "expectancyR",
+      help: "expectancyR",
+      label: dict.journal.dashboard.kpi.expectancyR,
+      value: analytics.expectancyR !== null ? formatValue(analytics.expectancyR, "R") : "—",
+      tone: toneOf(analytics.expectancyR),
+      sub: formatString(a.rKnown, { known: analytics.knownRCount, total: analytics.totalTrades }),
+    },
+    {
+      key: "avgWinLoss",
+      help: "avgWinLoss",
+      label: dict.journal.dashboard.kpi.avgWinLoss,
+      value: (
+        <span className="text-base">
+          <span className="text-long">{analytics.avgWinR !== null ? `+${analytics.avgWinR.toFixed(2)}R` : "—"}</span>
+          <span className="mx-1 text-mu">/</span>
+          <span className="text-short">{analytics.avgLossR !== null ? `${analytics.avgLossR.toFixed(2)}R` : "—"}</span>
+        </span>
+      ),
+      sub: `${a.payoff}: ${analytics.payoff !== null ? analytics.payoff.toFixed(2) : "—"}`,
+    },
+    {
+      key: "trades",
+      help: "trades",
+      label: dict.journal.dashboard.kpi.trades,
+      value: analytics.totalTrades,
+      sub: formatString(a.tradesPerDay, { value: analytics.tradesPerDay.toFixed(1) }),
+    },
+    {
+      key: "drawdown",
+      help: "drawdown",
+      label: dict.journal.dashboard.kpi.drawdown,
+      value:
+        unit === "money" && analytics.maxDrawdownMoney !== null
+          ? `-${analytics.maxDrawdownMoney.toFixed(0)} ${currencySymbol}`
+          : `-${analytics.maxDrawdownR.toFixed(2)} R`,
+      tone: analytics.maxDrawdownR > 0 ? "text-short" : "text-tx",
+      sub: a.peakToTrough,
+    },
+    {
+      key: "process",
+      label: dict.journal.processScoreLabel,
+      value: processMetrics.avgScore !== null ? `${processMetrics.avgScore}/100` : "—",
+      tone: "text-vi",
+    },
+    {
+      key: "rules",
+      label: `${dict.journal.ruleChecklistTitle}, %`,
+      value: processMetrics.compliancePercent !== null ? `${processMetrics.compliancePercent}%` : "—",
+      sub: a.rulesFollowed,
+    },
+    {
+      key: "screenshots",
+      label: dict.journal.attachments.statsCard,
+      value: filteredTrades.length < 20 ? `${shots} / ${filteredTrades.length}` : `${Math.round((shots / Math.max(1, filteredTrades.length)) * 100)}%`,
+      sub: filteredTrades.length < 20 ? formatString(dict.journal.dashboard.kpi.lowDataTag, { count: filteredTrades.length }) : `${shots} / ${filteredTrades.length}`,
+    },
+  ];
+
+  const sliceLabel = (type: "session" | "strategy" | "mistake", key: string) => {
+    if (type === "strategy") {
+      if (key === "no_strategy") return dict.journal.noStrategySelected;
+      return strategies.find((s) => s.id === key)?.name || dict.journal.strategiesTab.defaultName;
+    }
+    if (type === "session") return dict.journal.sessions[key] || key;
+    if (key === "none") return dict.journal.overview.filters.withoutMistakes;
+    return dict.journal.mistakes[key] || key;
+  };
+
+  const SliceCard = ({ title, type, rows }: { title: string; type: "session" | "strategy" | "mistake"; rows: ReportSliceRow[] }) => {
+    const maxAbs = Math.max(1, ...rows.map((r) => Math.abs(r.totalR)));
+    return (
+      <div className="rounded-lg border border-line bg-s1 p-4" data-testid={`slice-${type}`}>
+        <h4 className="mb-3 text-sm font-semibold text-tx">{title}</h4>
+        {rows.length === 0 ? (
+          <p className="text-sm text-mu">{a.noBreakdown}</p>
+        ) : (
+          <ul className="space-y-2.5">
+            {rows.map((r) => (
+              <li key={r.key} className="space-y-1">
+                <div className="flex items-baseline justify-between gap-2 text-sm">
+                  <span className="truncate text-tx">{sliceLabel(type, r.key)}</span>
+                  <span className={cn("shrink-0 font-semibold tabular-nums", toneOf(r.totalR))}>{formatValue(r.totalR, "R")}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-s2" aria-hidden="true">
+                    <span
+                      className={cn("block h-full rounded-full", r.totalR >= 0 ? "bg-long" : "bg-short")}
+                      style={{ width: `${Math.max(3, (Math.abs(r.totalR) / maxAbs) * 100)}%` }}
+                    />
+                  </span>
+                  <span className="shrink-0 text-xs text-mu">
+                    {formatString(a.tradesCount, { count: r.tradesCount })} · {formatString(a.winRateValue, { value: Math.round(r.winRate * 100) })}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  };
+
   return (
-    <div className="space-y-5">
-      {/* Demo Banner */}
+    <div className="space-y-6">
       {isDemoMode && (
-        <div className="card bg-gradient-to-r from-amber-500/20 via-s1 to-s1 border-amber-500/40 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex flex-col items-start justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 sm:flex-row sm:items-center">
           <div className="flex items-center gap-2.5">
-            <Sparkles size={18} className="text-amber-400 flex-none" />
+            <Sparkles size={18} className="flex-none text-amber-300" aria-hidden="true" />
             <div>
-              <b className="text-xs text-amber-200 block font-bold">
-                {dict.journal.dashboard.demoMode.banner}
-              </b>
-              <p className="text-[11px] text-mu mt-0.5">
-                {dict.journal.dashboard.demoMode.infoNote}
-              </p>
+              <b className="block text-sm font-semibold text-amber-100">{dict.journal.dashboard.demoMode.banner}</b>
+              <p className="mt-0.5 text-xs text-mu">{dict.journal.dashboard.demoMode.infoNote}</p>
             </div>
           </div>
-          <button
-            onClick={onExitDemoMode}
-            className="btn-secondary text-xs py-1.5 px-3 flex-none self-end sm:self-auto"
-          >
+          <Button variant="secondary" onClick={onExitDemoMode}>
             {dict.journal.dashboard.demoMode.exitDemoBtn}
-          </button>
+          </Button>
         </div>
       )}
+
+      {/* Filters */}
+      <div className="space-y-3 rounded-lg border border-line bg-s1 p-3">
+        <div className="-mx-1 flex flex-wrap gap-2 px-1">
+          <FilterChip
+            name={dict.journal.overview.filters.account}
+            value={filterAccount === "all" ? null : filterAccount}
+            onChange={(v) => setFilterAccount(v ?? "all")}
+            clearLabel={dict.journal.overview.filters.clearFilter}
+            options={accounts.map((acc) => ({ value: acc.id, label: acc.name || dict.journal.accountsTab.mainAccountDefaultName }))}
+          />
+          <FilterChip
+            name={dict.journal.overview.filters.period}
+            value={filterPeriod}
+            onChange={(v) => setFilterPeriod(v ?? "all")}
+            clearLabel={dict.journal.overview.filters.clearFilter}
+            options={[
+              { value: "7d", label: dict.journal.dashboard.filters.period7d },
+              { value: "30d", label: dict.journal.dashboard.filters.period30d },
+              { value: "90d", label: dict.journal.dashboard.filters.period90d },
+              { value: "currentMonth", label: dict.journal.dashboard.filters.periodCurrentMonth },
+              { value: "all", label: dict.journal.dashboard.filters.periodAll },
+            ]}
+          />
+          <FilterChip
+            name={a.verification}
+            value={filterVerification === "all" ? null : filterVerification}
+            onChange={(v) => setFilterVerification(v ?? "all")}
+            clearLabel={dict.journal.overview.filters.clearFilter}
+            options={[{ value: "verified", label: dict.journal.dashboard.filters.verificationVerified }]}
+          />
+          <Input
+            aria-label={dict.journal.tradesTab.searchPlaceholder}
+            value={filterInstrument}
+            onChange={(e) => setFilterInstrument(e.target.value)}
+            placeholder={dict.journal.tradesTab.searchPlaceholder}
+            leading={<Search size={16} aria-hidden="true" />}
+            className="min-h-[40px]"
+            containerClassName="min-w-[200px] flex-1 sm:max-w-xs"
+          />
+        </div>
+        {analytics.isMultiCurrency && filterAccount === "all" && unit === "money" && (
+          <p className="flex items-center gap-1.5 text-xs text-amber-200">
+            <AlertCircle size={14} className="flex-none" aria-hidden="true" />
+            <span>{dict.journal.dashboard.multiCurrencyWarning}</span>
+          </p>
+        )}
+      </div>
 
       {/* Prop Account Dashboard Block */}
       {(() => {
@@ -275,521 +426,76 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
         return null;
       })()}
 
-      {/* Top Filters & Unit Switcher */}
-      <div className="card p-3.5 space-y-3">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          {/* Unit Switcher */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-mu">
-              {dict.journal.tradesTab.unitSwitcher}
-            </span>
-            <div className="flex rounded-lg border border-line bg-s2 p-0.5 text-xs">
-              <button
-                onClick={() => onUnitChange("R")}
-                className={`px-3 py-1 font-bold rounded-md transition-colors ${
-                  unit === "R" ? "bg-vi text-white" : "text-mu hover:text-tx"
-                }`}
-              >
-                R
-              </button>
-              <button
-                onClick={() => {
-                  if (analytics.isMultiCurrency && filterAccount === "all") {
-                    // Lock money unit if multi currency
-                    return;
-                  }
-                  onUnitChange("money");
-                }}
-                disabled={analytics.isMultiCurrency && filterAccount === "all"}
-                className={`px-3 py-1 font-bold rounded-md transition-colors ${
-                  unit === "money" ? "bg-vi text-white" : "text-mu hover:text-tx"
-                } ${
-                  analytics.isMultiCurrency && filterAccount === "all"
-                    ? "opacity-40 cursor-not-allowed"
-                    : ""
-                }`}
-                title={
-                  analytics.isMultiCurrency && filterAccount === "all"
-                    ? dict.journal.dashboard.multiCurrencyWarning
-                    : ""
-                }
-              >
-                $
-              </button>
-              <button
-                onClick={() => onUnitChange("percent")}
-                className={`px-3 py-1 font-bold rounded-md transition-colors ${
-                  unit === "percent" ? "bg-vi text-white" : "text-mu hover:text-tx"
-                }`}
-              >
-                %
-              </button>
-            </div>
-          </div>
 
-          {/* Filter Dropdowns */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs flex-1 max-w-2xl">
-            {/* Account */}
-            <select
-              value={filterAccount}
-              onChange={(e) => setFilterAccount(e.target.value)}
-              className="input text-xs"
-            >
-              <option value="all">{dict.journal.dashboard.filters.allAccounts}</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name || dict.journal.accountsTab.mainAccountDefaultName}
-                </option>
-              ))}
-            </select>
-
-            {/* Period */}
-            <select
-              value={filterPeriod}
-              onChange={(e) => setFilterPeriod(e.target.value)}
-              className="input text-xs"
-            >
-              <option value="30d">{dict.journal.dashboard.filters.period30d}</option>
-              <option value="7d">{dict.journal.dashboard.filters.period7d}</option>
-              <option value="90d">{dict.journal.dashboard.filters.period90d}</option>
-              <option value="currentMonth">
-                {dict.journal.dashboard.filters.periodCurrentMonth}
-              </option>
-              <option value="all">{dict.journal.dashboard.filters.periodAll}</option>
-            </select>
-
-            {/* Verification */}
-            <select
-              value={filterVerification}
-              onChange={(e) => setFilterVerification(e.target.value)}
-              className="input text-xs"
-            >
-              <option value="all">{dict.journal.dashboard.filters.verificationAll}</option>
-              <option value="verified">
-                {dict.journal.dashboard.filters.verificationVerified}
-              </option>
-            </select>
-
-            {/* Instrument Search */}
-            <input
-              type="text"
-              value={filterInstrument}
-              onChange={(e) => setFilterInstrument(e.target.value)}
-              placeholder={dict.journal.tradesTab.searchPlaceholder}
-              className="input text-xs"
-            />
-          </div>
-        </div>
-
-        {/* Multi-currency notice if money mode disabled */}
-        {analytics.isMultiCurrency && filterAccount === "all" && unit === "money" && (
-          <div className="text-[11px] text-amber-300 flex items-center gap-1.5 pt-1">
-            <AlertCircle size={14} className="flex-none" />
-            <span>{dict.journal.dashboard.multiCurrencyWarning}</span>
-          </div>
-        )}
-      </div>
-
-      {/* Empty State / Demo Mode Prompt */}
       {filteredTrades.length === 0 && !isDemoMode && (
-        <div className="card text-center p-8 space-y-3 border-dashed">
-          <h3 className="h3">{dict.journal.tradesTab.emptyTitle}</h3>
-          <p className="text-xs text-mu max-w-md mx-auto">
-            {dict.journal.tradesTab.emptyDesc}
-          </p>
-          <button
-            onClick={onEnableDemoMode}
-            className="btn text-xs py-2 px-4 inline-flex items-center gap-1.5"
-          >
-            <Sparkles size={16} />
-            <span>{dict.journal.dashboard.demoMode.showExampleBtn}</span>
-          </button>
-        </div>
-      )}
-
-      {/* KPI Cards Grid */}
-      {(filteredTrades.length > 0 || isDemoMode) && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-          {/* CARD 1: Result */}
-          <div className="card p-3.5 space-y-2 relative">
-            <div className="flex justify-between items-center text-xs text-mu">
-              <span>{dict.journal.dashboard.kpi.result}</span>
-              <button
-                onClick={() => setActiveTooltip("result")}
-                className="text-mu hover:text-tx focus-visible:outline-none"
-              >
-                <HelpCircle size={14} />
-              </button>
-            </div>
-            <b
-              className={`block text-xl font-mono font-bold ${
-                (analytics.totalR > 0 && unit === "R") ||
-                ((analytics.totalMoney ?? 0) > 0 && unit === "money") ||
-                ((analytics.totalPnlPercent ?? 0) > 0 && unit === "percent")
-                  ? "text-emerald-400"
-                  : (analytics.totalR < 0 && unit === "R") ||
-                    ((analytics.totalMoney ?? 0) < 0 && unit === "money") ||
-                    ((analytics.totalPnlPercent ?? 0) < 0 && unit === "percent")
-                  ? "text-rose-400"
-                  : "text-tx"
-              }`}
-            >
-              {unit === "R"
-                ? formatValue(analytics.totalR, "R")
-                : unit === "percent"
-                ? formatValue(analytics.totalPnlPercent, "percent")
-                : formatValue(analytics.totalMoney, "money")}
-            </b>
-            {analytics.hasLowData && (
-              <span className="inline-block text-[10px] text-mu bg-white/5 border border-line px-1.5 py-0.5 rounded">
-                {dict.journal.dashboard.kpi.lowDataTag.replace(
-                  "{count}",
-                  String(analytics.totalTrades)
-                )}
-              </span>
-            )}
-          </div>
-
-          {/* CARD 9: Screenshots ratio */}
-          {(() => {
-            const tradesWithScreenshots = filteredTrades.filter(
-              (t) => t.attachmentIds && t.attachmentIds.length > 0
-            ).length;
-            const screenshotRatio =
-              filteredTrades.length > 0
-                ? Math.round((tradesWithScreenshots / filteredTrades.length) * 100)
-                : 0;
-
-            return (
-              <div className="card p-3.5 space-y-2 relative">
-                <div className="flex justify-between items-center text-xs text-mu">
-                  <span>{dict.journal.attachments.statsCard}</span>
-                </div>
-                <b className="block text-xl font-mono font-bold text-tx">
-                  {filteredTrades.length < 20 ? (
-                    <span className="text-xs text-mu font-sans font-normal">
-                      {dict.journal.dashboard.kpi.lowDataTag.replace(
-                        "{count}",
-                        String(filteredTrades.length)
-                      )}
-                    </span>
-                  ) : (
-                    `${screenshotRatio}%`
-                  )}
-                </b>
-                <span className="text-[10px] text-mu block">
-                  {tradesWithScreenshots} / {filteredTrades.length}
-                </span>
-              </div>
-            );
-          })()}
-
-          {/* CARD 2: Winrate */}
-          <div className="card p-3.5 space-y-2 relative">
-            <div className="flex justify-between items-center text-xs text-mu">
-              <span>{dict.journal.dashboard.kpi.winrate}</span>
-              <button
-                onClick={() => setActiveTooltip("winrate")}
-                className="text-mu hover:text-tx focus-visible:outline-none"
-              >
-                <HelpCircle size={14} />
-              </button>
-            </div>
-            <b className="block text-xl font-mono font-bold text-tx">
-              {(analytics.winRate * 100).toFixed(1)}%
-            </b>
-
-            {/* Segmented Bar: Win / Breakeven / Loss */}
-            {analytics.totalTrades > 0 && (
-              <div className="space-y-1">
-                <div className="h-2 rounded-full overflow-hidden flex bg-s2 border border-line/40">
-                  <div
-                    style={{
-                      width: `${(analytics.winsCount / analytics.totalTrades) * 100}%`,
-                    }}
-                    className="bg-emerald-500 h-full"
-                  />
-                  <div
-                    style={{
-                      width: `${
-                        (analytics.breakevenCount / analytics.totalTrades) * 100
-                      }%`,
-                    }}
-                    className="bg-slate-400 h-full"
-                  />
-                  <div
-                    style={{
-                      width: `${
-                        (analytics.lossesCount / analytics.totalTrades) * 100
-                      }%`,
-                    }}
-                    className="bg-rose-500 h-full"
-                  />
-                </div>
-                <div className="flex justify-between text-[10px] text-mu font-mono">
-                  <span className="text-emerald-400">{analytics.winsCount}W</span>
-                  <span className="text-slate-400">{analytics.breakevenCount}BE</span>
-                  <span className="text-rose-400">{analytics.lossesCount}L</span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* CARD 3: Profit Factor */}
-          <div className="card p-3.5 space-y-2 relative">
-            <div className="flex justify-between items-center text-xs text-mu">
-              <span>{dict.journal.dashboard.kpi.profitFactor}</span>
-              <button
-                onClick={() => setActiveTooltip("profitFactor")}
-                className="text-mu hover:text-tx focus-visible:outline-none"
-              >
-                <HelpCircle size={14} />
-              </button>
-            </div>
-            <b className="block text-xl font-mono font-bold text-tx">
-              {unit === "money" && analytics.profitFactorMoney !== null
-                ? analytics.profitFactorMoney.toFixed(2)
-                : analytics.profitFactorR !== null
-                ? analytics.profitFactorR.toFixed(2)
-                : "—"}
-            </b>
-            {analytics.hasLowData && (
-              <span className="inline-block text-[10px] text-mu bg-white/5 border border-line px-1.5 py-0.5 rounded">
-                {dict.journal.dashboard.kpi.lowDataTag.replace(
-                  "{count}",
-                  String(analytics.totalTrades)
-                )}
-              </span>
-            )}
-          </div>
-
-          {/* CARD 4: Expectancy (R) */}
-          <div className="card p-3.5 space-y-2 relative">
-            <div className="flex justify-between items-center text-xs text-mu">
-              <span>{dict.journal.dashboard.kpi.expectancyR}</span>
-              <button
-                onClick={() => setActiveTooltip("expectancyR")}
-                className="text-mu hover:text-tx focus-visible:outline-none"
-              >
-                <HelpCircle size={14} />
-              </button>
-            </div>
-            <b className="block text-xl font-mono font-bold text-tx">
-              {analytics.expectancyR !== null
-                ? formatValue(analytics.expectancyR, "R")
-                : "—"}
-            </b>
-            <span className="text-[10px] text-mu block">
-              R known: {analytics.knownRCount} / {analytics.totalTrades}
-            </span>
-          </div>
-
-          {/* CARD 5: Avg Win / Loss & Payoff */}
-          <div className="card p-3.5 space-y-2 relative">
-            <div className="flex justify-between items-center text-xs text-mu">
-              <span>{dict.journal.dashboard.kpi.avgWinLoss}</span>
-              <button
-                onClick={() => setActiveTooltip("avgWinLoss")}
-                className="text-mu hover:text-tx focus-visible:outline-none"
-              >
-                <HelpCircle size={14} />
-              </button>
-            </div>
-            <div className="flex items-center justify-between font-mono text-xs">
-              <span className="text-emerald-400 font-bold">
-                {analytics.avgWinR !== null ? `+${analytics.avgWinR.toFixed(2)}R` : "—"}
-              </span>
-              <span className="text-mu">/</span>
-              <span className="text-rose-400 font-bold">
-                {analytics.avgLossR !== null ? `${analytics.avgLossR.toFixed(2)}R` : "—"}
-              </span>
-            </div>
-            <div className="text-[10px] text-mu">
-              Payoff:{" "}
-              <b className="text-tx font-mono">
-                {analytics.payoff !== null ? analytics.payoff.toFixed(2) : "—"}
-              </b>
-            </div>
-          </div>
-
-          {/* CARD 6: Trades */}
-          <div className="card p-3.5 space-y-2 relative">
-            <div className="flex justify-between items-center text-xs text-mu">
-              <span>{dict.journal.dashboard.kpi.trades}</span>
-              <button
-                onClick={() => setActiveTooltip("trades")}
-                className="text-mu hover:text-tx focus-visible:outline-none"
-              >
-                <HelpCircle size={14} />
-              </button>
-            </div>
-            <b className="block text-xl font-mono font-bold text-tx">
-              {analytics.totalTrades}
-            </b>
-            <span className="text-[10px] text-mu block">
-              ~{analytics.tradesPerDay.toFixed(1)} trades / day
-            </span>
-          </div>
-
-          {/* CARD 7: Max Drawdown */}
-          <div className="card p-3.5 space-y-2 relative col-span-2 sm:col-span-1">
-            <div className="flex justify-between items-center text-xs text-mu">
-              <span>{dict.journal.dashboard.kpi.drawdown}</span>
-              <button
-                onClick={() => setActiveTooltip("drawdown")}
-                className="text-mu hover:text-tx focus-visible:outline-none"
-              >
-                <HelpCircle size={14} />
-              </button>
-            </div>
-            <b className="block text-xl font-mono font-bold text-rose-400">
-              {unit === "money" && analytics.maxDrawdownMoney !== null
-                ? `-${analytics.maxDrawdownMoney.toFixed(0)} ${currencySymbol}`
-                : `-${analytics.maxDrawdownR.toFixed(2)} R`}
-            </b>
-            <span className="text-[10px] text-mu block">Peak to trough</span>
-          </div>
-
-          {/* CARD 8: Process Score */}
-          <div className="card p-3.5 space-y-2 relative">
-            <div className="flex justify-between items-center text-xs text-mu">
-              <span>{dict.journal.processScoreLabel}</span>
-            </div>
-            <b className="block text-xl font-mono font-bold text-vi">
-              {processMetrics.avgScore !== null ? `${processMetrics.avgScore}/100` : "—"}
-            </b>
-            {analytics.hasLowData && (
-              <span className="inline-block text-[10px] text-mu bg-white/5 border border-line px-1.5 py-0.5 rounded">
-                {dict.journal.dashboard.kpi.lowDataTag.replace(
-                  "{count}",
-                  String(analytics.totalTrades)
-                )}
-              </span>
-            )}
-          </div>
-
-          {/* CARD 9: Rules Followed % */}
-          <div className="card p-3.5 space-y-2 relative">
-            <div className="flex justify-between items-center text-xs text-mu">
-              <span>{dict.journal.ruleChecklistTitle}, %</span>
-            </div>
-            <b className="block text-xl font-mono font-bold text-emerald-400">
-              {processMetrics.compliancePercent !== null
-                ? `${processMetrics.compliancePercent}%`
-                : "—"}
-            </b>
-            <span className="text-[10px] text-mu block">
-              Process Score ≥ 80
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* SVG Equity Curve Chart */}
-      {(filteredTrades.length > 0 || isDemoMode) && (
-        <EquityCurve
-          points={equityPoints}
-          unit={unit}
-          currencySymbol={currencySymbol}
-          dict={dict}
+        <EmptyState
+          icon={<Sparkles size={18} />}
+          title={dict.journal.tradesTab.emptyTitle}
+          description={dict.journal.tradesTab.emptyDesc}
+          action={
+            <Button onClick={onEnableDemoMode}>
+              <Sparkles size={16} aria-hidden="true" />
+              <span>{dict.journal.dashboard.demoMode.showExampleBtn}</span>
+            </Button>
+          }
         />
       )}
 
-      {/* Recent Trades Table (5-8) */}
-      {(recentTrades.length > 0 || isDemoMode) && (
-        <div className="card p-4 space-y-3">
-          <div className="flex justify-between items-center">
-            <h4 className="h4 text-sm font-serif">
-              {dict.journal.dashboard.recentTrades.title}
-            </h4>
-            <button
-              onClick={onGoToTrades}
-              className="text-xs text-vi font-semibold hover:underline flex items-center gap-1"
-            >
-              <span>{dict.journal.dashboard.recentTrades.viewAllBtn}</span>
-              <ChevronRight size={14} />
-            </button>
-          </div>
-
-          <div className="divide-y divide-line/40 text-xs">
-            {recentTrades.map((t) => {
-              const isWin = t.result === "win";
-              const isLoss = t.result === "loss";
-
-              return (
-                <div
-                  key={t.id}
-                  onClick={onGoToTrades}
-                  className="py-2 flex items-center justify-between hover:bg-s2/40 px-2 rounded-lg cursor-pointer transition-colors"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span
-                      className={`p-1 rounded ${
-                        t.direction === "long"
-                          ? "bg-emerald-500/20 text-emerald-400"
-                          : "bg-rose-500/20 text-rose-400"
-                      }`}
+      {hasData && (
+        <section>
+          <SectionTitle>{a.keyMetrics}</SectionTitle>
+          <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+            {metrics.map((m) => (
+              <div key={m.key} className="rounded-lg border border-line bg-s1 px-3 py-2.5" data-metric={m.key}>
+                <dt className="flex items-center justify-between gap-1 text-xs font-medium text-mu">
+                  <span className="truncate">{m.label}</span>
+                  {m.help && (
+                    <button
+                      type="button"
+                      onClick={() => setActiveTooltip(m.help!)}
+                      aria-label={formatString(a.helpLabel, { name: m.label })}
+                      className="-mr-1.5 grid h-7 w-7 shrink-0 place-items-center rounded text-mu hover:bg-s2 hover:text-tx focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
                     >
-                      {t.direction === "long" ? (
-                        <ArrowUpRight size={14} />
-                      ) : (
-                        <ArrowDownRight size={14} />
-                      )}
-                    </span>
-                    <div>
-                      <b className="text-tx font-bold block">{t.instrument}</b>
-                      <span className="text-[10px] text-mu">
-                        {new Date(t.closedAt || t.openedAt).toLocaleDateString(
-                          lang === "ru" ? "ru-RU" : "en-US",
-                          { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }
-                        )}
-                      </span>
-                    </div>
-                  </div>
-
-                  <b
-                    className={`font-mono ${
-                      isWin ? "text-emerald-400" : isLoss ? "text-rose-400" : "text-tx"
-                    }`}
-                  >
-                    {unit === "R"
-                      ? formatValue(t.rMultiple ?? null, "R")
-                      : formatValue(t.pnlMoney ?? null, "money")}
-                  </b>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+                      <HelpCircle size={14} aria-hidden="true" />
+                    </button>
+                  )}
+                </dt>
+                <dd className={cn("mt-0.5 text-lg font-semibold tabular-nums", m.tone ?? "text-tx")}>{m.value}</dd>
+                {m.sub && <dd className="text-xs text-mu">{m.sub}</dd>}
+              </div>
+            ))}
+          </dl>
+        </section>
       )}
 
-      {/* KPI Tooltip Modal */}
-      {activeTooltip && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setActiveTooltip(null);
-          }}
-        >
-          <div className="card w-full max-w-sm p-5 space-y-3 shadow-2xl border border-line">
-            <div className="flex justify-between items-center border-b border-line pb-2">
-              <b className="text-sm text-tx">
-                {(dict.journal.dashboard.kpi as any)[activeTooltip] || activeTooltip}
-              </b>
-              <button
-                onClick={() => setActiveTooltip(null)}
-                className="text-mu hover:text-tx p-1"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <p className="text-xs text-mu leading-relaxed">
-              {(dict.journal.dashboard.kpi.tooltips as any)[activeTooltip] ||
-                "Definition placeholder"}
-            </p>
+      {hasData && <EquityCurve points={equityPoints} unit={unit} currencySymbol={currencySymbol} dict={dict} />}
+
+      <section>
+        <CalendarTab trades={trades} accounts={accounts} unit={unit} onAddTradeForDate={onAddTradeForDate ?? (() => {})} dict={dict} lang={lang} />
+      </section>
+
+      {hasData && (
+        <section>
+          <SectionTitle>{a.breakdownTitle}</SectionTitle>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+            <SliceCard title={a.bySession} type="session" rows={slices.session} />
+            <SliceCard title={a.byStrategy} type="strategy" rows={slices.strategy} />
+            <SliceCard title={a.byMistake} type="mistake" rows={slices.mistake} />
           </div>
-        </div>
+        </section>
       )}
+
+      {hasData && <ProcessMatrix trades={filteredTrades} dict={dict} />}
+
+      <Modal
+        isOpen={activeTooltip !== null}
+        onClose={() => setActiveTooltip(null)}
+        title={activeTooltip ? dict.journal.dashboard.kpi[activeTooltip] : ""}
+        closeLabel={a.helpClose}
+        size="sm"
+      >
+        <p className="text-sm leading-relaxed text-mu">{activeTooltip ? dict.journal.dashboard.kpi.tooltips[activeTooltip] : ""}</p>
+      </Modal>
     </div>
   );
 };

@@ -133,7 +133,7 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
             {dict.journal.calendar.monthTotals.result}
           </span>
           <b
-            className={`block font-mono text-base font-bold ${
+            className={`block tabular-nums text-base font-bold ${
               monthStat.totalResultR > 0
                 ? "text-emerald-400"
                 : monthStat.totalResultR < 0
@@ -151,7 +151,7 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
           <span className="text-[11px] text-mu">
             {dict.journal.calendar.monthTotals.trades}
           </span>
-          <b className="block font-mono text-base font-bold text-tx">
+          <b className="block tabular-nums text-base font-bold text-tx">
             {monthStat.totalTradesCount}
           </b>
         </div>
@@ -160,7 +160,7 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
           <span className="text-[11px] text-mu">
             {dict.journal.calendar.monthTotals.winrate}
           </span>
-          <b className="block font-mono text-base font-bold text-tx">
+          <b className="block tabular-nums text-base font-bold text-tx">
             {(monthStat.winRate * 100).toFixed(1)}%
           </b>
         </div>
@@ -169,7 +169,7 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
           <span className="text-[11px] text-mu">
             {dict.journal.calendar.monthTotals.bestDay}
           </span>
-          <b className="block font-mono text-xs font-bold text-emerald-400 truncate">
+          <b className="block tabular-nums text-xs font-bold text-emerald-400 truncate">
             {monthStat.bestDayStr
               ? `${monthStat.bestDayStr.split("-")[2]}: ${formatValue(monthStat.bestDayR)}`
               : "—"}
@@ -227,7 +227,7 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
                 >
                   <div className="flex justify-between items-center w-full">
                     <span
-                      className={`text-xs font-mono font-semibold ${
+                      className={`text-xs tabular-nums font-semibold ${
                         isToday
                           ? "bg-vi text-white px-1.5 py-0.2 rounded-full text-[10px]"
                           : "text-tx"
@@ -236,14 +236,14 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
                       {dayStat.dayNumber}
                     </span>
                     {dayStat.tradesCount > 0 && (
-                      <span className="text-[9px] font-mono text-mu bg-black/40 px-1 py-0.2 rounded border border-line">
+                      <span className="text-[9px] tabular-nums text-mu bg-black/40 px-1 py-0.2 rounded border border-line">
                         {dayStat.tradesCount}t
                       </span>
                     )}
                   </div>
 
                   {dayStat.tradesCount > 0 && (
-                    <div className={`text-[10px] sm:text-xs font-mono ${textColor} truncate`}>
+                    <div className={`text-[10px] sm:text-xs tabular-nums ${textColor} truncate`}>
                       {unit === "R"
                         ? formatValue(dayStat.totalR)
                         : unit === "percent"
@@ -261,7 +261,7 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
         <div className="lg:col-span-3 space-y-2">
           <div className="card p-3 space-y-2">
             <h4 className="h4 text-xs font-serif font-bold text-tx">
-              {dict.journal.calendar.weekColumn.replace("{num}", "")} Summaries
+              {dict.journal.analytics.weekSummaries}
             </h4>
             <div className="space-y-2 text-xs">
               {monthStat.weeks.map((week) => (
@@ -281,7 +281,7 @@ export const CalendarTab: React.FC<CalendarTabProps> = ({
                     </span>
                   </div>
                   <b
-                    className={`font-mono font-bold ${
+                    className={`tabular-nums font-bold ${
                       week.totalR > 0
                         ? "text-emerald-400"
                         : week.totalR < 0
