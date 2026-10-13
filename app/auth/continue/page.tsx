@@ -8,7 +8,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { useGame } from "@/lib/game-context";
 import { resolvePostLoginRoute, readAccountGameState, safeNextAfterLogin } from "@/lib/auth/routing";
 import { isValidLatinNickname } from "@/lib/stats";
-import { authDebug, describeGameState } from "@/lib/auth/debug";
+import { authDebug, describeGameState, isAuthDebugEnabled } from "@/lib/auth/debug";
 import { AppStorage } from "@/lib/storage";
 import { NicknameConflictModal } from "@/components/NicknameConflictModal";
 
@@ -29,6 +29,7 @@ function ContinueRouter() {
     user,
     profile,
     profileStatus,
+    profileError,
     activeSpaceId,
     isSpaceReady,
     refreshProfile,
@@ -40,6 +41,7 @@ function ContinueRouter() {
   const decidedRef = useRef(false);
   const [retries, setRetries] = useState(0);
   const [conflictNickname, setConflictNickname] = useState<string | null>(null);
+  const [noRowAfterOnboarding, setNoRowAfterOnboarding] = useState(false);
 
   const accountSpaceReady = Boolean(user) && isSpaceReady && activeSpaceId === `account:${user?.id}` && isLoaded;
   const profileFailed = profileStatus === "error" && retries >= PROFILE_RETRY_DELAYS_MS.length;
@@ -55,7 +57,7 @@ function ContinueRouter() {
   }, [authState, profileStatus, retries, refreshProfile]);
 
   useEffect(() => {
-    if (decidedRef.current) return;
+    if (decidedRef.current || noRowAfterOnboarding) return;
     if (authState === "guest") {
       decidedRef.current = true;
       router.replace("/login");
@@ -68,8 +70,16 @@ function ContinueRouter() {
     }
     if (profileStatus !== "loaded" && profileStatus !== "missing") return;
 
-    decidedRef.current = true;
     const accountState = readAccountGameState(user.id);
+    // No profile row is normal for a new account (-> /awakening). After onboarding it means the server
+    // never created the row, and saving the nickname cannot work: say so instead of looping.
+    if (profileStatus === "missing" && accountState?.onboarding?.status === "done") {
+      authDebug("continue.decide", { profileStatus, reason: "no profile row after onboarding" });
+      setNoRowAfterOnboarding(true);
+      return;
+    }
+
+    decidedRef.current = true;
     authDebug("continue.decide", {
       activeSpace: AppStorage.getActiveSpaceId(),
       profileStatus,
@@ -99,6 +109,7 @@ function ContinueRouter() {
     profile,
     profileStatus,
     accountSpaceReady,
+    noRowAfterOnboarding,
     rawNext,
     router,
     refreshProfile,
@@ -116,17 +127,36 @@ function ContinueRouter() {
     );
   }
 
-  if (profileFailed) {
+  if (profileFailed || noRowAfterOnboarding) {
+    const details =
+      profileFailed && profileError
+        ? [profileError.status ? `HTTP ${profileError.status}` : null, profileError.code, profileError.message]
+            .filter(Boolean)
+            .join(" · ")
+        : "profiles: 0 rows";
     return (
       <div className="flex min-h-screen w-full items-center justify-center bg-ink px-4">
         <div role="alert" className="w-full max-w-sm space-y-4 rounded-2xl border border-line bg-s1 p-6 text-center">
           <AlertCircle className="mx-auto h-8 w-8 text-vi" aria-hidden="true" />
-          <h1 className="font-serif text-lg font-bold text-tx">{dict.auth.continueProfileErrorTitle}</h1>
-          <p className="text-sm text-mu">{dict.auth.continueProfileErrorText}</p>
+          <h1 className="font-serif text-lg font-bold text-tx">
+            {profileFailed ? dict.auth.continueProfileErrorTitle : dict.auth.continueNoRowTitle}
+          </h1>
+          <p className="text-sm text-mu">
+            {profileFailed ? dict.auth.continueProfileErrorText : dict.auth.continueNoRowText}
+          </p>
+          {isAuthDebugEnabled() && (
+            <details open className="rounded-lg border border-line bg-s2 p-2.5 text-left">
+              <summary className="cursor-pointer text-xs font-semibold text-mu">{dict.auth.continueErrorDetails}</summary>
+              <code data-testid="profile-error-details" className="mt-1.5 block break-all text-xs text-tx">
+                {details}
+              </code>
+            </details>
+          )}
           <button
             type="button"
             onClick={() => {
               setRetries(0);
+              setNoRowAfterOnboarding(false);
               refreshProfile();
             }}
             className="btn min-h-[44px] w-full justify-center"

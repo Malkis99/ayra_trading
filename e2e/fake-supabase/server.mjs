@@ -23,6 +23,8 @@ export function createFakeSupabase() {
   const lastLinkByEmail = new Map();
   const tokens = new Map(); // access/refresh token -> user id
   const takenNicknames = new Set(["taken_nick", "admin"]);
+  let createProfileRows = true; // false = handle_new_user trigger absent (new users get no profiles row)
+  let profilesTableMissing = false; // true = migration 0001 not applied (PostgREST 404 PGRST205)
   let profileFailuresLeft = 0; // next N profile reads fail with 500 (flaky network / cold database)
 
   function getOrCreateUser(email) {
@@ -41,7 +43,7 @@ export function createFakeSupabase() {
       usersByEmail.set(email, user);
       // Mirrors the handle_new_user trigger: an empty profile row without nickname.
       const now = new Date().toISOString();
-      profiles.set(user.id, {
+      if (createProfileRows) profiles.set(user.id, {
         id: user.id,
         nickname: null,
         locale: "ru",
@@ -107,6 +109,11 @@ export function createFakeSupabase() {
       const link = lastLinkByEmail.get(url.searchParams.get("email"));
       return link ? send(200, { link }) : send(404, { error: "no link" });
     }
+    if (path === "/__test/profiles-config") {
+      if (url.searchParams.has("rows")) createProfileRows = url.searchParams.get("rows") !== "0";
+      if (url.searchParams.has("table")) profilesTableMissing = url.searchParams.get("table") === "0";
+      return send(200, { createProfileRows, profilesTableMissing });
+    }
     if (path === "/__test/fail-profile-reads") {
       profileFailuresLeft = Number(url.searchParams.get("count") || 0);
       return send(200, { profileFailuresLeft });
@@ -158,6 +165,9 @@ export function createFakeSupabase() {
     if (path === "/auth/v1/logout") return send(204);
 
     // ---- PostgREST ----
+    if (path === "/rest/v1/profiles" && profilesTableMissing) {
+      return send(404, { code: "PGRST205", message: "Could not find the table 'public.profiles' in the schema cache" });
+    }
     if (path === "/rest/v1/profiles") {
       const user = userFromAuthHeader(req);
       const idFilter = (url.searchParams.get("id") || "").replace(/^eq\./, "");
@@ -172,7 +182,8 @@ export function createFakeSupabase() {
         return send(200, row ? [row] : []);
       }
       if (req.method === "PATCH") {
-        if (!row) return send(204);
+        const wantsRows = (req.headers.prefer || "").includes("return=representation");
+        if (!row) return wantsRows ? send(200, []) : send(204);
         const body = await readBody(req);
         if (body.nickname) {
           const lower = String(body.nickname).toLowerCase();
@@ -180,7 +191,7 @@ export function createFakeSupabase() {
           if (clash || takenNicknames.has(lower)) return send(409, { code: "23505", message: "duplicate key" });
         }
         Object.assign(row, body, { updated_at: new Date().toISOString() });
-        return send(204);
+        return wantsRows ? send(200, [row]) : send(204);
       }
     }
     if (path === "/rest/v1/rpc/is_nickname_available") {
