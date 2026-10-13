@@ -1,5 +1,6 @@
 // Captures every main page at 360px and 1440px for design reviews (before/after).
 // Usage: node scripts/screenshots.mjs <outDir> [baseUrl]   (needs a mock-auth build running, see docs/redesign-v1.md)
+// Options (env): SHOTS_PAGES=home,profile  — only these pages; SHOTS_CUSTOM_CHARACTER=1 — non-default appearance + gear.
 import { chromium } from "@playwright/test";
 import fs from "node:fs";
 
@@ -14,8 +15,13 @@ const GUEST = {
   coins: 120,
   onboarding: { status: "done", step: 5, answers: { nickname: "TraderDemo" } },
 };
+if (process.env.SHOTS_CUSTOM_CHARACTER) {
+  GUEST.profile = {
+    appearance: { skinTone: "skin_deep", hairstyle: "hair_dreads", hairColor: "hair_cyan", outfit: "outfit_crimson" },
+  };
+}
 
-const pages = [
+const ALL_PAGES = [
   ["home", "/"],
   ["journal", "/journal"],
   ["market", "/market"],
@@ -26,6 +32,8 @@ const pages = [
   ["settings", "/settings"],
   ["plans", "/plans"],
 ];
+const only = process.env.SHOTS_PAGES?.split(",");
+const pages = only ? ALL_PAGES.filter(([name]) => only.includes(name)) : ALL_PAGES;
 
 // The app scrolls inside <main>; unlock heights so a full-page shot shows the whole page.
 const UNLOCK_CSS = "html,body,.h-screen{height:auto!important;overflow:visible!important} main{overflow:visible!important;flex:none!important}";
@@ -55,6 +63,7 @@ for (const [w, h] of [[360, 800], [1440, 900]]) {
   }
   await ctx.close();
 
+  if (only) continue;
   // Public visitor: login and public home; fresh device: awakening
   const pub = await browser.newContext({ viewport: { width: w, height: h }, reducedMotion: "reduce" });
   await pub.addInitScript(() => { (window).__AYRA_E2E_AUTH_MOCK__ = true; });

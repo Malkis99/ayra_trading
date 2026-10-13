@@ -9,7 +9,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { Plus, CheckSquare, BarChart2, X, Sparkles, Compass, Shield } from "lucide-react";
 import { calculatePropMetrics, resolvePrimaryPropAccount } from "@/lib/journal/prop";
 import { formatString, getPlural, formatNumber } from "@/lib/i18n";
-import { Figure } from "@/components/Figure";
+import { Character } from "@/components/Character";
 import { GuestBanner } from "@/components/GuestBanner";
 import { xpForNextLevel, ChronicleEntry } from "@/lib/game";
 import { PublicHome } from "@/components/home/PublicHome";
@@ -629,12 +629,7 @@ export default function HomePage() {
                 style={{ borderColor: frameColor }}
               >
                 <div className="absolute inset-0 bg-radial-gradient from-vi/20 to-transparent pointer-events-none" />
-                <Figure
-                  equipment={gameState.equipment}
-                  appearance={gameState.profile.appearance}
-                  width={64}
-                  height={110}
-                />
+                <Character appearance={gameState.profile.appearance} equipment={gameState.equipment} size="card" />
                 {/* Pedestal Ring */}
                 <div className="absolute bottom-1 w-16 h-3 rounded-full border border-vi/60 bg-vi/20" />
               </div>
