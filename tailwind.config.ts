@@ -20,6 +20,10 @@ export default {
         go: token("go"),
         danger: token("danger"),
         success: token("success"),
+        field: token("field"),
+        edge: token("edge"),
+        long: token("long"),
+        short: token("short"),
       },
       borderRadius: {
         sm: "8px",

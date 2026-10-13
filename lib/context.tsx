@@ -160,6 +160,11 @@ export function AppProvider({
   );
 }
 
+/** Like useApp, but returns undefined outside AppProvider (shared UI components, unit tests). */
+export function useOptionalApp(): AppContextType | undefined {
+  return useContext(AppContext);
+}
+
 export function useApp() {
   const context = useContext(AppContext);
   if (!context) {
