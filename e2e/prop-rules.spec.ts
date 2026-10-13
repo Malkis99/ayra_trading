@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { pickOption, openTradeSection } from "./helpers/forms";
 
 test.describe("T6d Prop Rules Tracker E2E Flow", () => {
   test.beforeEach(async ({ page }) => {
@@ -77,7 +78,7 @@ test.describe("T6d Prop Rules Tracker E2E Flow", () => {
     // 5. Add a losing trade to trigger caution alert
     await page.click("button:has-text('Сделки')");
     await page.click("button:has-text('Добавить сделку')");
-    await page.selectOption("[data-testid='account-select']", { label: "My FTMO Account (USD)" });
+    await pickOption(page, "account-select", "My FTMO Account (USD)");
     await page.fill("input[placeholder='XAUUSD, EURUSD...']", "EURUSD");
     await page.fill("input[placeholder='150 / -50']", "-4000");
     await page.fill("input[placeholder='2.5 / -1']", "-1");
@@ -88,17 +89,17 @@ test.describe("T6d Prop Rules Tracker E2E Flow", () => {
 
     // 6. Test Pre-Trade check in Add Trade Modal
     await page.click("button:has-text('Добавить сделку')");
-    await page.selectOption("[data-testid='account-select']", { label: "My FTMO Account (USD)" });
+    await pickOption(page, "account-select", "My FTMO Account (USD)");
     await page.fill("input[placeholder='XAUUSD, EURUSD...']", "GBPUSD");
-    await page.click("button:has-text('Подробно')");
+    await openTradeSection(page, "Риск и размер");
     await page.fill("input[placeholder='100']", "2000");
 
     await expect(page.locator("text=Если эта сделка закроется по стопу:")).toBeVisible();
-    await page.click("button[aria-label='Close']");
+    await page.getByRole("button", { name: "Закрыть" }).first().click();
 
     // 7. Add winning trade to reach Profit Target
     await page.click("button:has-text('Добавить сделку')");
-    await page.selectOption("[data-testid='account-select']", { label: "My FTMO Account (USD)" });
+    await pickOption(page, "account-select", "My FTMO Account (USD)");
     await page.fill("input[placeholder='XAUUSD, EURUSD...']", "BTCUSD");
     await page.fill("input[placeholder='150 / -50']", "15000");
     await page.fill("input[placeholder='2.5 / -1']", "3");

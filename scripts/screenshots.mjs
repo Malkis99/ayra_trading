@@ -41,7 +41,7 @@ const DIALOGS = process.env.SHOTS_JOURNAL
       }],
       ["journal-add-detailed", "/journal", async (page) => {
         await page.getByRole("button", { name: "Добавить сделку" }).first().click();
-        await page.getByRole("button", { name: /Подробно/ }).first().click();
+        await page.getByRole("button", { name: /Развернуть всё|Подробно/ }).first().click();
       }],
     ]
   : [];

@@ -5,6 +5,7 @@ export { Chip } from "./Chip";
 export { Tabs } from "./Tabs";
 export type { TabItem } from "./Tabs";
 export { Modal } from "./Modal";
+export { Drawer, FormSection } from "./Drawer";
 export { EmptyState } from "./EmptyState";
 export { SectionHeader } from "./SectionHeader";
 export { cn } from "./cn";

@@ -1394,6 +1394,7 @@ export default function JournalPage() {
         <AddTradeModal
           isOpen={true}
           initialTrade={editingTrade || undefined}
+          initialOpenedAt={editingTrade ? undefined : addTradeInitialDate}
           onClose={() => {
             setEditingTrade(null);
             setAddTradeInitialDate(undefined);

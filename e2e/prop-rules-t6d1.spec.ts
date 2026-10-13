@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { pickOption, openTradeSection } from "./helpers/forms";
 
 test.describe("T6d.1 Prop Rules & Safe Deletion E2E Flow", () => {
   test.beforeEach(async ({ page }) => {
@@ -132,7 +133,7 @@ test.describe("T6d.1 Prop Rules & Safe Deletion E2E Flow", () => {
     // 8. Test Trade-blocking constraint on "FTMO Phase 1"
     await page.click("button:has-text('Сделки')");
     await page.click("button:has-text('Добавить сделку')");
-    await page.selectOption("[data-testid='account-select']", { label: "FTMO Phase 1 (USD)" });
+    await pickOption(page, "account-select", "FTMO Phase 1 (USD)");
     await page.fill("input[placeholder='XAUUSD, EURUSD...']", "EURUSD");
     await page.fill("input[placeholder='150 / -50']", "500");
     await page.click("button:has-text('Сохранить сделку')");

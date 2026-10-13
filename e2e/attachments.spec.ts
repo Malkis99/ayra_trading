@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { pickOption, openTradeSection } from "./helpers/forms";
 import path from "path";
 
 test.describe("T6c-2b Screenshot Attachments E2E Flow", () => {
@@ -61,8 +62,8 @@ test.describe("T6c-2b Screenshot Attachments E2E Flow", () => {
     await page.fill("input[placeholder='150 / -50']", "300");
     await page.fill("input[placeholder='2.5 / -1']", "3");
 
-    // Toggle detailed mode accordion
-    await page.locator("button:has-text('Подробно')").click();
+    // Open the screenshots section of the drawer
+    await openTradeSection(page, "Скриншоты");
     await expect(page.locator("text=Добавить скриншот")).toBeVisible();
 
     // 2. Attach valid PNG screenshot fixture
@@ -105,7 +106,7 @@ test.describe("T6c-2b Screenshot Attachments E2E Flow", () => {
 
     // 6. Test SVG / Disguised file rejection
     await page.click("button:has-text('Добавить сделку')");
-    await page.locator("button:has-text('Подробно')").click();
+    await openTradeSection(page, "Скриншоты");
 
     const svgPath = path.join(process.cwd(), "e2e/fixtures/invalid.svg");
     const fileInputModal = page.locator("input[type='file'][accept='image/*']");
