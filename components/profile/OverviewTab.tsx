@@ -139,7 +139,7 @@ export function OverviewTab({ onOpenAchievements, onEditProfile }: { onOpenAchie
   return (
     <div className="space-y-4">
       <OverviewHeader onEditProfile={onEditProfile} />
-    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 min-[1700px]:grid-cols-2">
       <Block icon={BookOpen} title={o.traderTitle} aside={<span className="text-xs text-mu">{o.traderPeriod}</span>} link={{ href: "/journal", label: o.openJournal }} testId="overview-trader">
         <dl className="grid grid-cols-2 gap-2">
           {tiles.map((t) => (

@@ -115,7 +115,7 @@ export default function ProfilePage() {
   const btn = "inline-flex min-h-[44px] items-center justify-center rounded-xl px-4 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi";
 
   return (
-    <div className="mx-auto grid w-full max-w-[1440px] grid-cols-1 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:gap-5">
+    <div className="mx-auto grid w-full max-w-[1440px] grid-cols-1 gap-4 lg:grid-cols-[minmax(0,11fr)_minmax(0,9fr)] lg:gap-5">
       <div className="order-2 min-w-0 lg:order-none lg:col-span-2">
         <Tabs idPrefix="profile" label={t.label} value={tab} onChange={go} items={PROFILE_TABS.map((id) => ({ id, label: t[id] }))} />
       </div>

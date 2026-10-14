@@ -25,7 +25,7 @@ export function AchievementsTab() {
           <div className="h-full rounded-full bg-gradient-to-r from-go/70 to-go" style={{ width: `${Math.round((done / total) * 100)}%` }} />
         </div>
       </div>
-      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 min-[1700px]:grid-cols-3">
         {sorted.map((id) => {
           const earned = !!gameState.achievements[id];
           return (

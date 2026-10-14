@@ -59,7 +59,7 @@ export function WardrobeTab() {
       {items.length === 0 ? (
         <p className="rounded-2xl border border-line bg-s1/60 p-6 text-center text-sm text-mu">{w2.empty}</p>
       ) : (
-        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 min-[1700px]:grid-cols-4">
           {items.map((it) => {
             const st = itemState(it, gameState);
             const rare = it.rarity > 0;
