@@ -93,7 +93,10 @@ export function mockSetNickname(nick: string): { ok: true } | { ok: false; reaso
   };
 
   const previous = updatedProfile.nickname;
-  if (previous && previous !== nick) {
+  // e2e can emulate the server before migration 0003 (no nickname_changed_at column, no 14-day trigger)
+  const before0003 = typeof window !== "undefined" && Boolean((window as unknown as { __AYRA_MOCK_BEFORE_0003__?: boolean }).__AYRA_MOCK_BEFORE_0003__);
+  if (before0003) delete updatedProfile.nickname_changed_at;
+  if (!before0003 && previous && previous !== nick) {
     if (nicknameDaysLeft(updatedProfile.nickname_changed_at ?? null) > 0) return { ok: false, reason: "cooldown" };
     updatedProfile.nickname_changed_at = new Date().toISOString();
   }

@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   SOCIAL_NETWORKS,
   countryOptions,
+  lastNicknameChange,
   nicknameDaysLeft,
   nicknameProblem,
   normalizeSocial,
@@ -94,7 +95,8 @@ export function EditProfileTab() {
 
   const set = <K extends keyof Form>(key: K, value: Form[K]) => setForm((f) => ({ ...f, [key]: value }));
 
-  const lastNickChange = (signedIn ? profile?.nickname_changed_at : null) ?? details.nicknameChangedAt ?? null;
+  // Works before migration 0003 (no server column) and after it
+  const lastNickChange = lastNicknameChange(signedIn ? profile?.nickname_changed_at : undefined, details.nicknameChangedAt);
   const daysLeft = nicknameDaysLeft(lastNickChange);
   const nickChanged = form.nick.trim() !== gameState.name;
   const problem = nickChanged ? nicknameProblem(form.nick) : null;

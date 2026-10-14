@@ -5,9 +5,8 @@ import Link from "next/link";
 import { ArrowRight, Award, BookOpen, Check, Pencil, Target, Swords, type LucideIcon } from "lucide-react";
 import { useAuth } from "@/lib/auth/auth-context";
 import { xpForNextLevel } from "@/lib/game";
-import { TITLES_CATALOG } from "@/lib/titles";
+import { TITLES_CATALOG, titleDisplayName } from "@/lib/titles";
 import { formatNumber } from "@/lib/i18n";
-import { titleName } from "./ProfileHero";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useJournal } from "@/lib/journal/context";
@@ -93,7 +92,7 @@ function OverviewHeader({ onEditProfile }: { onEditProfile: () => void }) {
           </div>
           <p className="mt-1 text-sm font-semibold text-vi">
             <span className="sr-only">{h.rank}: </span>
-            {titleName(dict, title.id)}
+            {titleDisplayName(dict, title.id)}
           </p>
           {gameState.bio && <p className="mt-2 max-w-prose whitespace-pre-line text-sm text-mu" data-testid="profile-bio">{gameState.bio}</p>}
         </div>

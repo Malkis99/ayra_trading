@@ -8,6 +8,7 @@ import {
   nicknameProblem,
   sameAppearance,
   nicknameDaysLeft,
+  lastNicknameChange,
   normalizeSocial,
   countryOptions,
   wardrobeSlots,
@@ -93,5 +94,17 @@ describe("profile helpers", () => {
     const ru = countryOptions("ru");
     expect(ru.find((c) => c.value === "GE")?.label).toBe("Грузия");
     expect(ru.length).toBeGreaterThan(240);
+  });
+
+  it("14-day rule works without the server column (before migration 0003) and with it", () => {
+    // before 0003: profiles has no nickname_changed_at -> undefined, the local date counts
+    expect(lastNicknameChange(undefined, "2026-10-10T00:00:00Z")).toBe("2026-10-10T00:00:00Z");
+    expect(lastNicknameChange(undefined, undefined)).toBeNull();
+    // after 0003: null = never changed on the server
+    expect(lastNicknameChange(null, null)).toBeNull();
+    expect(lastNicknameChange("2026-10-12T00:00:00Z", null)).toBe("2026-10-12T00:00:00Z");
+    // both known: the later one wins
+    expect(lastNicknameChange("2026-10-12T00:00:00Z", "2026-10-10T00:00:00Z")).toBe("2026-10-12T00:00:00Z");
+    expect(lastNicknameChange("2026-10-01T00:00:00Z", "2026-10-10T00:00:00Z")).toBe("2026-10-10T00:00:00Z");
   });
 });

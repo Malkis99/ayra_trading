@@ -233,4 +233,54 @@ test.describe("Profile", () => {
       expect(overflow, name).toBeLessThanOrEqual(0);
     }
   });
+
+  test("onboarding: going back and changing the nickname does not start the 14 days; the first change after it is free", async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as unknown as { __AYRA_E2E_AUTH_MOCK__: boolean }).__AYRA_E2E_AUTH_MOCK__ = true;
+    });
+    await page.goto("/login");
+    await page.fill("#email-input", "back_and_forth@example.com");
+    await page.click("input[type='checkbox']");
+    await page.click("button[type='submit']");
+    await page.fill("#otp-input", "123456");
+    await page.click("button[type='submit']");
+    await page.waitForURL((u) => u.pathname === "/awakening", { timeout: 10000 });
+    const nick = page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]');
+    await nick.fill("Draft_One");
+    await page.click('button:has-text("Продолжить")');
+    await page.getByRole("button", { name: "Назад" }).click();
+    await nick.fill("Draft_Two");
+    for (const s of ["Продолжить", "Продолжить", "Продолжить", "18–24 года", "Продолжить", "Пропустить шаг целиком", "1–2 года", "Продолжить", "Крипто", "Продолжить", "Дисциплина", "Продолжить", "Пропустить необязательные вопросы", "Пропустить шаг целиком"])
+      await page.click(`button:has-text("${s}")`);
+    await page.getByRole("button", { name: "Пропустить анимацию" }).click();
+    await page.getByRole("button", { name: "Начать" }).click();
+    await page.waitForURL((u) => u.pathname === "/");
+
+    const server = await page.evaluate(() => JSON.parse(localStorage.getItem("ayra_mock_auth_v1") || "{}").profile);
+    expect(server.nickname).toBe("Draft_Two");
+    expect(server.nickname_changed_at ?? null).toBeNull();
+
+    await page.goto("/profile?tab=edit");
+    const form = page.getByTestId("edit-profile");
+    await expect(form.getByTestId("edit-nickname")).toBeEnabled();
+    await expect(form.getByTestId("edit-nickname")).toHaveValue("Draft_Two");
+  });
+
+  test("before migration 0003 (no server column): the 14-day rule still holds from the local date", async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as unknown as { __AYRA_MOCK_BEFORE_0003__: boolean }).__AYRA_MOCK_BEFORE_0003__ = true;
+    });
+    await signInAndOnboard(page, "before_0003@example.com", "Old_Nick");
+    await page.goto("/profile?tab=edit");
+    const form = page.getByTestId("edit-profile");
+    await form.getByTestId("edit-nickname").fill("New_Nick");
+    await form.getByRole("button", { name: "Сохранить" }).click();
+    await expect(page.locator("aside").first()).toContainText("New_Nick");
+    const server = await page.evaluate(() => JSON.parse(localStorage.getItem("ayra_mock_auth_v1") || "{}").profile);
+    expect(server.nickname).toBe("New_Nick");
+    expect("nickname_changed_at" in server).toBe(false);
+    await page.reload();
+    await expect(form.getByTestId("edit-nickname")).toBeDisabled();
+    await expect(form).toContainText("Ник можно сменить через 14 дн.");
+  });
 });

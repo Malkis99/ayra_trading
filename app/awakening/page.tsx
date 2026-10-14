@@ -307,10 +307,8 @@ export default function AwakeningPage() {
       const nick = answers.nickname?.trim() || "";
       const ok = await validateNicknameUniqueness(nick);
       if (!ok) return;
-
-      if (user) {
-        await saveNickname(nick);
-      }
+      // The nickname goes to the server once, when onboarding is finished: going back and changing it here
+      // is not a "nickname change" and must not start the 14-day rule.
     }
 
     if (subStep < questionsForStep.length - 1) {
@@ -365,8 +363,16 @@ export default function AwakeningPage() {
     setIsNavigating(true);
 
     const nick = answers.nickname?.trim() || gameState.name || "";
-    if (user && nick) {
-      await saveNickname(nick);
+    if (user && nick && nick !== profile?.nickname) {
+      const res = await saveNickname(nick);
+      // Taken meanwhile, or (edit mode) changed again within 14 days: back to the nickname step with the reason
+      if (!res.success && (res.errorKey === "errorNicknameTaken" || res.errorKey === "nicknameCooldown")) {
+        setNicknameError(res.errorKey === "nicknameCooldown" ? dict.profile.edit.nicknameErrors.nicknameCooldown : dict.awakening.q.nickname.errorNicknameTaken);
+        setStep(1);
+        setSubStep(0);
+        setIsNavigating(false);
+        return;
+      }
     }
 
     const nowIso = new Date().toISOString();
