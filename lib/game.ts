@@ -1,3 +1,4 @@
+import type { ProfileDetails } from "./profile";
 import { GAME_CONFIG } from "./game-config";
 import { ITEMS } from "./items";
 import { TITLES_CATALOG } from "./titles";
@@ -105,6 +106,8 @@ export interface GameState {
   onboarding: OnboardingState;
   profile: ProfileState;
   aiConsent: boolean;
+  /** Optional profile fields (country, socials, …) kept locally until cloud sync. */
+  profileDetails?: ProfileDetails;
 }
 
 export function getIsoDateString(date: Date): string {

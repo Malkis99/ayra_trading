@@ -92,69 +92,92 @@ export function nicknameProblem(nick: string): NicknameProblem {
   return null;
 }
 
-/** Time zones offered in settings: the browser list when available, always including the current one. */
-export function timeZoneOptions(current: string): string[] {
-  let list: string[] = [];
-  try {
-    const intl = Intl as unknown as { supportedValuesOf?: (key: string) => string[] };
-    list = intl.supportedValuesOf ? intl.supportedValuesOf("timeZone") : [];
-  } catch {
-    list = [];
-  }
-  if (!list.includes("UTC")) list = ["UTC", ...list];
-  if (current && !list.includes(current)) list = [current, ...list];
-  return list;
-}
-
-/** UTC offset of a zone right now, e.g. "UTC+4", "UTC−3:30", "UTC+0". */
-export function timeZoneOffsetLabel(timeZone: string, date: Date = new Date()): string {
-  try {
-    const part = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "shortOffset" })
-      .formatToParts(date)
-      .find((p) => p.type === "timeZoneName")?.value;
-    const m = part?.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
-    if (!m) return "UTC+0";
-    return `UTC${m[1] === "-" ? "−" : "+"}${Number(m[2])}${m[3] && m[3] !== "00" ? `:${m[3]}` : ""}`;
-  } catch {
-    return "UTC";
-  }
-}
-
-/** Localised zone name ("Грузия, стандартное время" / "Central European Time") with its UTC offset. */
-export function timeZoneLabel(timeZone: string, lang: string, date: Date = new Date()): string {
-  const offset = timeZoneOffsetLabel(timeZone, date);
-  let name = "";
-  try {
-    name =
-      new Intl.DateTimeFormat(lang, { timeZone, timeZoneName: "longGeneric" }).formatToParts(date).find((p) => p.type === "timeZoneName")?.value ?? "";
-  } catch {
-    name = "";
-  }
-  // Without a localised name Intl falls back to "GMT+04:00": show the offset only
-  if (!name || /^(GMT|UTC)/.test(name)) return offset;
-  return `${name} · ${offset}`;
-}
-
-function offsetMinutes(label: string): number {
-  const m = label.match(/UTC([+−])(\d+)(?::(\d+))?/);
-  if (!m) return 0;
-  const v = Number(m[2]) * 60 + Number(m[3] ?? 0);
-  return m[1] === "−" ? -v : v;
-}
+/** PLACEHOLDER-free: the owner set the nickname change interval to 14 days. */
+export const NICKNAME_COOLDOWN_DAYS = 14;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Time zone choices with localised labels. The stored value stays the IANA id. Zones that would show the same
- * label (same region and offset, e.g. Berlin and Paris) are merged; the current zone is always kept.
+ * Days left until the nickname may be changed again (0 = allowed now). The first change after onboarding
+ * is allowed at once (no previous change recorded).
  */
-export function localizedTimeZoneOptions(current: string, lang: string, date: Date = new Date()): { value: string; label: string }[] {
-  const seen = new Map<string, string>();
-  const currentLabel = timeZoneLabel(current, lang, date);
-  seen.set(currentLabel, current);
-  for (const z of timeZoneOptions(current)) {
-    const label = timeZoneLabel(z, lang, date);
-    if (!seen.has(label)) seen.set(label, z);
+export function nicknameDaysLeft(lastChangedAt: string | null | undefined, now: Date = new Date()): number {
+  if (!lastChangedAt) return 0;
+  const t = new Date(lastChangedAt).getTime();
+  if (Number.isNaN(t)) return 0;
+  const left = t + NICKNAME_COOLDOWN_DAYS * DAY_MS - now.getTime();
+  return left > 0 ? Math.ceil(left / DAY_MS) : 0;
+}
+
+export type SocialNetwork = "telegram" | "x" | "instagram" | "youtube";
+export const SOCIAL_NETWORKS: SocialNetwork[] = ["telegram", "x", "instagram", "youtube"];
+export type ProfileVisibility = "public" | "hidden";
+
+/** Optional profile fields kept locally (AppStorage, in the game state) until cloud sync (T7b). */
+export interface ProfileDetails {
+  country?: string;
+  experience?: string;
+  markets?: string[];
+  styles?: string[];
+  socials?: Partial<Record<SocialNetwork, string>>;
+  visibility?: ProfileVisibility;
+  /** When the nickname was last changed after onboarding (ISO); used until the server column exists. */
+  nicknameChangedAt?: string | null;
+}
+
+const SOCIAL_RULES: Record<SocialNetwork, { handle: RegExp; hosts: string[] }> = {
+  telegram: { handle: /^[A-Za-z][A-Za-z0-9_]{4,31}$/, hosts: ["t.me", "telegram.me"] },
+  x: { handle: /^[A-Za-z0-9_]{1,15}$/, hosts: ["x.com", "twitter.com"] },
+  instagram: { handle: /^[A-Za-z0-9_.]{1,30}$/, hosts: ["instagram.com"] },
+  youtube: { handle: /^[A-Za-z0-9_.-]{3,30}$/, hosts: ["youtube.com", "youtu.be"] },
+};
+
+/**
+ * Normalises a social link: "@name", "name" or a profile URL of that network -> "@name" (YouTube channel URLs are
+ * kept as URLs). Returns null when the value does not look like a profile of that network. Empty stays empty.
+ */
+export function normalizeSocial(network: SocialNetwork, raw: string): string | null {
+  const v = raw.trim();
+  if (!v) return "";
+  const rule = SOCIAL_RULES[network];
+  const isUrl = /^https?:\/\//i.test(v);
+  if (isUrl || rule.hosts.some((h) => v.toLowerCase().startsWith(h) || v.toLowerCase().startsWith(`www.${h}`))) {
+    let url: URL;
+    try {
+      url = new URL(isUrl ? v : `https://${v}`);
+    } catch {
+      return null;
+    }
+    const host = url.hostname.replace(/^www\./, "").replace(/^m\./, "").toLowerCase();
+    if (!rule.hosts.includes(host)) return null;
+    const first = url.pathname.split("/").filter(Boolean)[0] ?? "";
+    if (network === "youtube") {
+      if (first.startsWith("@") && rule.handle.test(first.slice(1))) return `@${first.slice(1)}`;
+      if (["channel", "c", "user"].includes(first) || host === "youtu.be") return url.toString();
+      return null;
+    }
+    return rule.handle.test(first) ? `@${first}` : null;
   }
-  return Array.from(seen, ([label, value]) => ({ value, label })).sort(
-    (a, b) => offsetMinutes(a.label) - offsetMinutes(b.label) || a.label.localeCompare(b.label, lang)
-  );
+  const handle = v.replace(/^@/, "");
+  return rule.handle.test(handle) ? `@${handle}` : null;
+}
+
+/** ISO 3166-1 alpha-2 codes for the country picker (names come from Intl.DisplayNames). */
+export const COUNTRY_CODES = (
+  "AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ " +
+  "CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR " +
+  "GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO " +
+  "JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR " +
+  "MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO " +
+  "RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV " +
+  "TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW"
+).split(" ");
+
+export function countryOptions(lang: string): { value: string; label: string }[] {
+  let names: { of: (code: string) => string | undefined } | null = null;
+  try {
+    names = new Intl.DisplayNames([lang], { type: "region" });
+  } catch {
+    names = null;
+  }
+  return COUNTRY_CODES.map((code) => ({ value: code, label: names?.of(code) || code })).sort((a, b) => a.label.localeCompare(b.label, lang));
 }

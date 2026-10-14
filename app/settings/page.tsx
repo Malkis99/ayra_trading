@@ -10,10 +10,11 @@ import { defaultAttachmentRepository } from "@/lib/journal/attachments/indexeddb
 import { AttachmentStorageEstimate } from "@/lib/journal/attachments/types";
 import { OwnerDiagnosticsBlock } from "@/components/OwnerDiagnosticsBlock";
 import { DeviceDataCard } from "@/components/DeviceDataCard";
+import { TimezoneSelect } from "@/components/TimezoneSelect";
 
 export default function SettingsPage() {
   const { dict, lang, setLanguage } = useApp();
-  const { gameState, setAiConsent } = useGame();
+  const { gameState, setAiConsent, updateTimezone } = useGame();
   const { user, signOut, isGuest } = useAuth();
   const [storageEstimate, setStorageEstimate] = React.useState<AttachmentStorageEstimate | null>(null);
 
@@ -192,6 +193,11 @@ export default function SettingsPage() {
               {dict.settings.languageEn}
             </button>
           </div>
+        </div>
+
+        {/* Time zone: the shared picker (stores the IANA id) */}
+        <div className="rounded-xl border border-line bg-s2/40 p-3">
+          <TimezoneSelect label={dict.timezones.label} value={gameState.profile.timezone} onChange={updateTimezone} />
         </div>
 
         <div className="text-xs text-mu space-y-2 pt-2">

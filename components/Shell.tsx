@@ -73,7 +73,7 @@ function FocusPageLoader() {
 function ShellContent({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { isLoaded } = useGame();
+  const { isLoaded, syncCloudNickname } = useGame();
   const { dict, isAddTradeModalOpen, setAddTradeModalOpen, isNoteModalOpen, setNoteModalOpen, noteModalLinks } = useApp();
   const {
     authState,
@@ -156,6 +156,13 @@ function ShellContent({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     handleAuthAndLocalSync();
   }, [handleAuthAndLocalSync]);
+
+  // Accounts: the nickname in profiles is the source of truth (changed on another device, after a reload, …)
+  const cloudNickname = authState === "authenticated" && profileStatus === "loaded" ? profile?.nickname ?? null : null;
+  useEffect(() => {
+    if (!cloudNickname || !isLoaded || !isSpaceReady) return;
+    syncCloudNickname(cloudNickname);
+  }, [cloudNickname, isLoaded, isSpaceReady, syncCloudNickname]);
 
   const isFocusPage = isOnboardingPath || pathname === POST_LOGIN_ROUTER;
 

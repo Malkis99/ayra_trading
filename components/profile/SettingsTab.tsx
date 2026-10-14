@@ -8,7 +8,8 @@ import { useGame } from "@/lib/game-context";
 import { useAuth } from "@/lib/auth/auth-context";
 import { Input, Segmented, Select, Textarea, Toggle } from "@/components/ui/forms";
 import { exportProfileDataJSON } from "@/lib/stats";
-import { localizedTimeZoneOptions, nicknameProblem } from "@/lib/profile";
+import { nicknameProblem } from "@/lib/profile";
+import { timeZoneOptions } from "@/lib/timezones";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
@@ -36,7 +37,7 @@ export function SettingsTab() {
   const [saving, setSaving] = useState(false);
   const tz = gameState.profile.timezone || "UTC";
   // Localised names ("Грузия, стандартное время · UTC+4"); the stored value stays the IANA id
-  const zones = useMemo(() => localizedTimeZoneOptions(tz, lang), [tz, lang]);
+  const zones = useMemo(() => timeZoneOptions(tz, lang), [tz, lang]);
   const [deletingPost, setDeletingPost] = useState<number | null>(null);
   const changed = nick.trim() !== gameState.name || bio !== (gameState.bio || "");
 

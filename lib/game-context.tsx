@@ -28,6 +28,7 @@ import {
 } from "@/lib/game";
 import { ITEMS, FRAMES, TITLES, BACKGROUNDS } from "@/lib/items";
 import { AvatarAppearance, validateAvatarAppearance } from "@/lib/avatar";
+import type { ProfileDetails } from "@/lib/profile";
 import { OnboardingState, generateProgram } from "@/lib/awakening";
 import { AppStorage } from "@/lib/storage";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
@@ -101,6 +102,10 @@ interface GameContextType {
   updateAvatarAppearance: (appearance: AvatarAppearance) => void;
   updateMinorMode: (minorMode: boolean) => void;
   updateTimezone: (timezone: string) => void;
+  /** Saves the edit-profile form: nickname (already accepted by the server for accounts), bio and optional details. */
+  saveProfileEdits: (edits: { name: string; bio: string; details: ProfileDetails }) => void;
+  /** Accounts: the cloud nickname is the source of truth; copies it into the local state without a chronicle entry. */
+  syncCloudNickname: (nickname: string) => void;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -226,6 +231,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         newMinorMode = value === "16-17";
       }
 
+      // The onboarding answer is the profile time zone (IANA id)
+      const newTimezone = key === "timezone" && typeof value === "string" && value ? value : prev.profile.timezone;
+
       const newStartedAt =
         prev.onboarding.startedAt || new Date().toISOString();
 
@@ -236,6 +244,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           ...prev.profile,
           appearance: newAppearance,
           minorMode: newMinorMode,
+          timezone: newTimezone,
         },
         onboarding: {
           ...prev.onboarding,
@@ -322,6 +331,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         minorMode,
       },
     }));
+  }, []);
+
+  const saveProfileEdits = useCallback((edits: { name: string; bio: string; details: ProfileDetails }) => {
+    setGameState((prev) => ({ ...updateProfileInfoLogic(prev, edits.name, edits.bio), profileDetails: edits.details }));
+  }, []);
+
+  const syncCloudNickname = useCallback((nickname: string) => {
+    setGameState((prev) => (prev.name === nickname || !nickname ? prev : { ...prev, name: nickname }));
   }, []);
 
   const updateTimezone = useCallback((timezone: string) => {
@@ -677,6 +694,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         updateAvatarAppearance,
         updateMinorMode,
         updateTimezone,
+        saveProfileEdits,
+        syncCloudNickname,
       }}
     >
       {children}

@@ -24,6 +24,8 @@ interface CharacterProps {
   variant?: CharacterVariant;
   rotateSlowly?: boolean;
   className?: string;
+  /** A preview of an option (e.g. outfit swatch), not the player: drawn without the data-character marker. */
+  decorative?: boolean;
 }
 
 /** Stable text form of the equipped items (for tests and debugging): "slot:item,slot:item". */
@@ -36,7 +38,7 @@ export function equipmentKey(equipment: Record<string, number>): string {
 }
 
 /** The one character renderer used everywhere (sidebar, top bar, Home, Profile, Wardrobe, onboarding). */
-export function Character({ appearance, equipment, size = "card", variant = "front", rotateSlowly, className }: CharacterProps) {
+export function Character({ appearance, equipment, size = "card", variant = "front", rotateSlowly, className, decorative }: CharacterProps) {
   const { width, height } = SIZES[size];
   return (
     <Figure
@@ -47,8 +49,8 @@ export function Character({ appearance, equipment, size = "card", variant = "fro
       back={variant === "back"}
       rotateSlowly={rotateSlowly}
       className={className}
-      data-character={`${appearance.skinTone} ${appearance.hairstyle} ${appearance.hairColor} ${appearance.outfit}`}
-      data-equipment={equipmentKey(equipment)}
+      data-character={decorative ? undefined : `${appearance.skinTone} ${appearance.hairstyle} ${appearance.hairColor} ${appearance.outfit}`}
+      data-equipment={decorative ? undefined : equipmentKey(equipment)}
     />
   );
 }

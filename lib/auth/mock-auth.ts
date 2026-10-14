@@ -15,9 +15,12 @@ export interface MockProfile {
   consent_version: string | null;
   created_at: string;
   updated_at: string;
+  /** Set by the server (migration 0003) on every nickname change after the first one. */
+  nickname_changed_at?: string | null;
 }
 
 import { AppStorage } from "@/lib/storage";
+import { nicknameDaysLeft } from "@/lib/profile";
 
 const TAKEN_NICKNAMES = new Set(["taken_nick", "existing_trader", "admin", "ayra_official"]);
 const MOCK_STORAGE_KEY = "ayra_mock_auth_v1";
@@ -62,9 +65,10 @@ export function mockIsNicknameAvailable(nick: string): boolean {
   return true;
 }
 
-export function mockSetNickname(nick: string): boolean {
+/** Same rules as the server: unique, format, and (after the first nickname) one change per 14 days. */
+export function mockSetNickname(nick: string): { ok: true } | { ok: false; reason: "taken" | "cooldown" } {
   if (!mockIsNicknameAvailable(nick)) {
-    return false;
+    return { ok: false, reason: "taken" };
   }
   let { user, profile } = getMockState();
   if (!user) {
@@ -88,9 +92,14 @@ export function mockSetNickname(nick: string): boolean {
     updated_at: new Date().toISOString(),
   };
 
+  const previous = updatedProfile.nickname;
+  if (previous && previous !== nick) {
+    if (nicknameDaysLeft(updatedProfile.nickname_changed_at ?? null) > 0) return { ok: false, reason: "cooldown" };
+    updatedProfile.nickname_changed_at = new Date().toISOString();
+  }
   updatedProfile.nickname = nick;
   updatedProfile.updated_at = new Date().toISOString();
   setMockState(user, updatedProfile);
   TAKEN_NICKNAMES.add(nick.toLowerCase());
-  return true;
+  return { ok: true };
 }

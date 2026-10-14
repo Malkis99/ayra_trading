@@ -42,6 +42,7 @@ import { AwakeningHeader } from "@/components/awakening/AwakeningHeader";
 import { AwakeningStage } from "@/components/awakening/AwakeningStage";
 import { AwakeningFinale } from "@/components/awakening/AwakeningFinale";
 import { AnswerCard, optionIcon } from "@/components/awakening/AnswerCard";
+import { TimezoneSelect } from "@/components/TimezoneSelect";
 
 /** Set once the finale animation has played (per storage space), so a reload shows the final frame at once. */
 const FINALE_PLAYED_KEY = "ayra_awakening_finale_played";
@@ -196,6 +197,13 @@ export default function AwakeningPage() {
       updateMinorMode(value === "16-17");
     }
   };
+
+  // Stable callback: the picker fills in the browser zone once when the answer is still empty
+  const onTimezoneChange = useCallback((tz: string) => {
+    if (isReadOnly) return;
+    setAnswers((prev) => ({ ...prev, timezone: tz }));
+    saveOnboardingAnswer("timezone", tz);
+  }, [saveOnboardingAnswer, isReadOnly]);
 
   const handleNicknameChange = (val: string) => {
     if (isReadOnly) return;
@@ -548,19 +556,13 @@ export default function AwakeningPage() {
               ))}
             </div>
           </div>
-          <div className="space-y-2">
-            <label htmlFor="tz-input" className="block text-sm font-semibold text-mu">
-              {dict.awakening.q.language_timezone.timezoneLabel}
-            </label>
-            <input
-              id="tz-input"
-              type="text"
-              value={answers.timezone || ""}
-              disabled={isReadOnly}
-              onChange={(e) => handleAnswerChange("timezone", e.target.value)}
-              className="h-14 w-full rounded-xl border border-edge bg-field px-4 text-base text-tx focus:border-vi focus:outline-none focus:ring-2 focus:ring-vi/60 disabled:opacity-50"
-            />
-          </div>
+          <TimezoneSelect
+            id="tz-input"
+            label={dict.awakening.q.language_timezone.timezoneLabel}
+            value={answers.timezone}
+            disabled={isReadOnly}
+            onChange={onTimezoneChange}
+          />
         </div>
       );
     }
@@ -946,8 +948,12 @@ export default function AwakeningPage() {
   const skipBtn =
     "inline-flex h-12 shrink-0 items-center justify-center gap-1.5 rounded-xl px-3 text-sm font-semibold text-mu hover:bg-white/5 hover:text-tx focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi disabled:opacity-30";
 
+  // One grid for header, content and footer: --aw-pad is the side padding, --aw-col the question column width
   return (
-    <div className="relative z-0 flex h-[100dvh] w-full flex-col overflow-hidden bg-ink text-tx" onKeyDown={onRootKeyDown}>
+    <div
+      className="relative z-0 flex h-[100dvh] w-full flex-col overflow-hidden bg-ink text-tx [--aw-col:620px] [--aw-pad:16px] md:[--aw-pad:40px] lg:[--aw-pad:64px]"
+      onKeyDown={onRootKeyDown}
+    >
       <Starfield />
       {leaseBanner}
 
@@ -972,7 +978,7 @@ export default function AwakeningPage() {
       </p>
 
       <div className="relative z-10 flex min-h-0 flex-1 flex-col md:grid md:grid-cols-[45%_minmax(0,1fr)]">
-        <div className="shrink-0 px-3 pt-3 md:h-full md:p-0">
+        <div className="shrink-0 px-[var(--aw-pad)] pt-3 md:h-full md:p-0">
           <AwakeningStage
             appearance={gameState.profile.appearance}
             equipment={gameState.equipment}
@@ -983,8 +989,8 @@ export default function AwakeningPage() {
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col">
-          <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-5 [scrollbar-width:none] md:px-10 md:py-8 lg:px-16 [&::-webkit-scrollbar]:hidden">
-            <div key={`${step}-${subStep}`} className="mx-auto my-auto w-full max-w-[620px] motion-safe:animate-[ayraFade_300ms_ease-out]">
+          <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-[var(--aw-pad)] py-5 [scrollbar-width:none] md:py-8 [&::-webkit-scrollbar]:hidden">
+            <div key={`${step}-${subStep}`} data-testid="awakening-content" className="mx-auto my-auto w-full max-w-[var(--aw-col)] motion-safe:animate-[ayraFade_300ms_ease-out]">
               {step <= 4 && currentQuestion && (
                 <div className="mb-5 space-y-2 md:mb-7">
                   <h1 ref={titleRef} tabIndex={-1} className="font-serif text-[28px] font-bold leading-tight text-tx focus:outline-none md:text-[40px]">
@@ -998,8 +1004,8 @@ export default function AwakeningPage() {
           </main>
 
           {step <= 4 && (
-            <footer className="relative z-20 shrink-0 border-t border-line/40 bg-ink/90 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md md:px-10 lg:px-16">
-              <div className="mx-auto flex w-full max-w-[620px] items-center gap-2">
+            <footer className="relative z-20 shrink-0 border-t border-line/40 bg-ink/90 px-[var(--aw-pad)] py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-md">
+              <div className="mx-auto flex w-full max-w-[var(--aw-col)] items-center gap-2">
                 <button
                   type="button"
                   onClick={handlePrevSubStep}

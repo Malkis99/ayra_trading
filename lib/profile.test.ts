@@ -7,9 +7,9 @@ import {
   itemState,
   nicknameProblem,
   sameAppearance,
-  timeZoneOptions,
-  timeZoneLabel,
-  localizedTimeZoneOptions,
+  nicknameDaysLeft,
+  normalizeSocial,
+  countryOptions,
   wardrobeSlots,
 } from "./profile";
 import { ITEMS } from "./items";
@@ -60,22 +60,38 @@ describe("profile helpers", () => {
     expect(nicknameProblem("a".repeat(25))).toBe("length");
   });
 
-  it("appearance comparison and time zones", () => {
+  it("appearance comparison", () => {
     expect(sameAppearance(DEFAULT_AVATAR_APPEARANCE, { ...DEFAULT_AVATAR_APPEARANCE })).toBe(true);
     expect(sameAppearance(DEFAULT_AVATAR_APPEARANCE, { ...DEFAULT_AVATAR_APPEARANCE, outfit: "x" })).toBe(false);
-    const zones = timeZoneOptions("Mars/Base");
-    expect(zones[0]).toBe("Mars/Base");
-    expect(zones).toContain("UTC");
+    // the stage background is not part of the figure
+    expect(sameAppearance(DEFAULT_AVATAR_APPEARANCE, { ...DEFAULT_AVATAR_APPEARANCE, stageBackground: "graphite" })).toBe(true);
   });
 
-  it("time zones: localised labels with offset, the stored value stays the IANA id", () => {
-    const d = new Date("2026-01-15T12:00:00Z");
-    expect(timeZoneLabel("Asia/Tbilisi", "ru", d)).toMatch(/^Грузия.* · UTC\+4$/);
-    expect(timeZoneLabel("UTC", "ru", d)).toBe("UTC+0");
-    const opts = localizedTimeZoneOptions("Europe/Paris", "ru", d);
-    const paris = opts.find((o) => o.value === "Europe/Paris");
-    expect(paris?.label).toMatch(/UTC\+1$/);
-    expect(opts.filter((o) => o.label === paris?.label)).toHaveLength(1);
-    expect(opts.every((o) => !/[A-Za-z]{3,}/.test(o.label.replace("UTC", "")))).toBe(true);
+  it("nickname can be changed once per 14 days; the first change after onboarding is free", () => {
+    const now = new Date("2026-10-20T12:00:00Z");
+    expect(nicknameDaysLeft(null, now)).toBe(0);
+    expect(nicknameDaysLeft("2026-10-19T12:00:00Z", now)).toBe(13);
+    expect(nicknameDaysLeft("2026-10-06T12:00:00Z", now)).toBe(0);
+    expect(nicknameDaysLeft("2026-10-06T13:00:00Z", now)).toBe(1);
+  });
+
+  it("social links: handles and profile URLs are normalised, wrong ones rejected", () => {
+    expect(normalizeSocial("telegram", "@ayra_trader")).toBe("@ayra_trader");
+    expect(normalizeSocial("telegram", "https://t.me/ayra_trader")).toBe("@ayra_trader");
+    expect(normalizeSocial("telegram", "ab")).toBeNull();
+    expect(normalizeSocial("x", "x.com/ayra")).toBe("@ayra");
+    expect(normalizeSocial("x", "https://twitter.com/ayra")).toBe("@ayra");
+    expect(normalizeSocial("x", "https://instagram.com/ayra")).toBeNull();
+    expect(normalizeSocial("instagram", "ayra.trading")).toBe("@ayra.trading");
+    expect(normalizeSocial("youtube", "https://www.youtube.com/@AyraTrading")).toBe("@AyraTrading");
+    expect(normalizeSocial("youtube", "https://youtube.com/channel/UC123")).toBe("https://youtube.com/channel/UC123");
+    expect(normalizeSocial("youtube", "https://vimeo.com/x")).toBeNull();
+    expect(normalizeSocial("x", "")).toBe("");
+  });
+
+  it("countries have localised names", () => {
+    const ru = countryOptions("ru");
+    expect(ru.find((c) => c.value === "GE")?.label).toBe("Грузия");
+    expect(ru.length).toBeGreaterThan(240);
   });
 });

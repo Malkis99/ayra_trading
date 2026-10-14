@@ -32,12 +32,14 @@ export function AwakeningHeader({ step, subStep, questionsInStep, onGoToStep, em
 
   return (
     <header className="relative z-20 h-[92px] shrink-0 border-b border-line/50 bg-ink/85 backdrop-blur-md md:h-[96px]">
-      <div className="mx-auto grid h-full max-w-[1440px] grid-cols-[minmax(0,1fr)_auto] grid-rows-[40px_auto] content-center items-center gap-x-3 gap-y-1 px-4 md:grid-cols-[minmax(0,1fr)_minmax(0,600px)_minmax(0,1fr)] md:grid-rows-1 md:gap-6 md:px-8">
+      {/* Same grid as the page: logo at the left padding, account block on the right edge of the question column
+          (right column = 55% of the width, the question column is --aw-col wide and centred in it) */}
+      <div className="grid h-full grid-cols-[minmax(0,1fr)_auto] grid-rows-[40px_auto] content-center items-center gap-x-3 gap-y-1 pl-[var(--aw-pad,16px)] pr-[var(--aw-pad,16px)] md:grid-cols-[auto_minmax(0,1fr)_auto] md:grid-rows-1 md:gap-6 md:pr-[calc(var(--aw-pad)_+_max(0px,_(55%_-_2_*_var(--aw-pad)_-_var(--aw-col))_/_2))]">
         <Link href="/" className="col-start-1 row-start-1 justify-self-start font-serif text-lg font-bold tracking-[0.2em] text-tx hover:opacity-80 md:text-xl">
           AYRA
         </Link>
 
-        <nav aria-label={formatString(a.questionProgress, { step: step, subStep: subStep + 1, totalSubSteps: questionsInStep })} className="col-span-2 row-start-2 min-w-0 md:col-span-1 md:col-start-2 md:row-start-1">
+        <nav aria-label={formatString(a.questionProgress, { step: step, subStep: subStep + 1, totalSubSteps: questionsInStep })} className="col-span-2 row-start-2 mx-auto w-full min-w-0 max-w-[560px] md:col-span-1 md:col-start-2 md:row-start-1">
           <ol className="grid grid-cols-5 gap-1.5 md:gap-2.5">
             {[1, 2, 3, 4, 5].map((st) => {
               const past = st < step;
@@ -90,7 +92,7 @@ export function AwakeningHeader({ step, subStep, questionsInStep, onGoToStep, em
           )}
         </nav>
 
-        <div className="col-start-2 row-start-1 flex items-center justify-self-end gap-2 md:col-start-3">
+        <div data-testid="awakening-account" className="col-start-2 row-start-1 flex items-center justify-self-end gap-2 md:col-start-3">
           {email && (
             <div className="flex items-center gap-1 rounded-md border border-line bg-s2/70 py-1 pl-2.5 pr-1 text-xs">
               <span className="hidden max-w-[180px] truncate text-mu lg:inline" title={email}>

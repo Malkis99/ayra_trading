@@ -19,6 +19,13 @@
    - Проверка: `supabase/checks/0002_status.sql`. Тест (на тестовом проекте, всё откатывается): `supabase/tests/profile_defaults.sql`.
    - Локальная проверка без базы: `npm i --no-save @electric-sql/pglite@0.2.17 && node scripts/test-migrations.mjs`.
 
+4. Затем `supabase/migrations/0003_nickname_cooldown.sql` (после 0002). **Применяет владелец, только после подтверждения в PR.**
+   - Добавляет колонку `profiles.nickname_changed_at` и триггер: ник можно сменить раз в 14 дней. Первый ник (в знакомстве) и первая смена после знакомства — сразу.
+   - Дату пишет только сервер; клиент её изменить не может.
+   - При нарушении правила обновление падает с кодом `P0001` и текстом `nickname_change_cooldown` — приложение показывает понятное сообщение.
+   - Проверка: `supabase/checks/0003_status.sql` (обе колонки `true`). Тест на тестовом проекте (всё откатывается): `supabase/tests/nickname_cooldown.sql`.
+   - Откат: `supabase/migrations/0003_nickname_cooldown.down.sql` (удаляет только колонку с датами и триггер, ники остаются).
+
 ## Проверка: применена ли миграция 0001
 
 1. **Supabase Dashboard** → **SQL Editor** → **New query**.
