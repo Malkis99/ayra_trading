@@ -1170,7 +1170,6 @@ export const ru = {
       addNoTrade: "Не вошёл",
       addNote: "Заметка",
       showToday: "Сегодня",
-      more: "Ещё",
       filters: {
         account: "Счёт",
         instrument: "Инструмент",

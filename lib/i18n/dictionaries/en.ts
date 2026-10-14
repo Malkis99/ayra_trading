@@ -1172,7 +1172,6 @@ export const en: Dictionary = {
       addNoTrade: "No trade",
       addNote: "Note",
       showToday: "Today",
-      more: "More",
       filters: {
         account: "Account",
         instrument: "Instrument",
