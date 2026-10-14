@@ -29,6 +29,11 @@ body { @apply bg-ink text-tx antialiased; background-image: radial-gradient(900p
 * { scrollbar-width: thin; scrollbar-color: #3a3750 transparent; }
 :focus-visible { outline: 2px solid rgb(var(--c-vi)); outline-offset: 2px; }
 
+@keyframes ayraDrift { 0% { transform: translate3d(0, 12px, 0); opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { transform: translate3d(8px, -60px, 0); opacity: 0; } }
+@keyframes ayraPulse { from { opacity: 1; transform: scale(0.96); } to { opacity: 0; transform: scale(1.06); } }
+@keyframes ayraBreath { 0%, 100% { transform: scale(1); opacity: 0.85; } 50% { transform: scale(1.08); opacity: 1; } }
+@keyframes ayraRise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes ayraSlideLeft { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: none; } }
 @keyframes ayraFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes ayraSheetUp { from { transform: translateY(100%); } to { transform: none; } }
 @keyframes ayraSlideIn { from { transform: translateX(100%); } to { transform: none; } }

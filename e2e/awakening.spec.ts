@@ -47,9 +47,11 @@ test.describe("Awakening Onboarding E2E Tests", () => {
     // Step 4: Goals -> Skip step
     await page.click('button:has-text("Пропустить шаг целиком")');
 
-    // Step 5: Final Screen -> Click "Начать"
+    // Step 5: awakening finale -> skip the animation -> "Начать"
+    await expect(page.getByTestId("awakening-finale")).toBeVisible();
+    await page.getByRole("button", { name: "Пропустить анимацию" }).click();
     const startButton = page.locator('button:has-text("Начать")');
-    await expect(startButton).toBeVisible();
+    await expect(startButton).toBeVisible({ timeout: 2000 });
     await startButton.click();
 
     // Verify redirect to Home (/) within 3 seconds without whiteout or infinite logo
@@ -145,8 +147,11 @@ test.describe("Awakening Onboarding E2E Tests", () => {
 
     const header = page.locator("header");
     await expect(header.getByRole("button", { name: "Выйти" })).toBeInViewport();
+    await expect(header.getByRole("link", { name: "AYRA" })).toBeInViewport();
     const overflow = await header.evaluate((el) => el.scrollWidth - el.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
+    const pageOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(pageOverflow).toBeLessThanOrEqual(0);
 
     await page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]').fill("Mobile_42");
     await page.click('button:has-text("Продолжить")');
@@ -157,5 +162,56 @@ test.describe("Awakening Onboarding E2E Tests", () => {
     const titleTop = await title.evaluate((el) => el.getBoundingClientRect().top);
     const headerBottom = await header.evaluate((el) => el.getBoundingClientRect().bottom);
     expect(titleTop).toBeGreaterThanOrEqual(headerBottom);
+  });
+
+  test("Finale plays once (about 7 s) and after a reload shows the final frame at once", async ({ page }) => {
+    await page.goto("/awakening");
+    await page.evaluate(() => localStorage.clear());
+    await page.goto("/awakening");
+
+    await page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]').fill("Finale_Tester");
+    await page.click('button:has-text("Продолжить")');
+    await page.click('button:has-text("Продолжить")');
+    await page.click('button:has-text("Продолжить")');
+    await page.click('button:has-text("18–24 года")');
+    await page.click('button:has-text("Продолжить")');
+    await page.click('button:has-text("Пропустить шаг целиком")');
+    await page.click('button:has-text("1–2 года")');
+    await page.click('button:has-text("Продолжить")');
+    await page.click('button:has-text("Крипто")');
+    await page.click('button:has-text("Продолжить")');
+    await page.click('button:has-text("Дисциплина")');
+    await page.click('button:has-text("Продолжить")');
+    await page.click('button:has-text("Пропустить необязательные вопросы")');
+    await page.click('button:has-text("Пропустить шаг целиком")');
+
+    const finale = page.getByTestId("awakening-finale");
+    await expect(finale).toBeVisible();
+    // The start button appears only at the end of the animation
+    await expect(page.getByRole("button", { name: "Начать" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Начать" })).toBeVisible({ timeout: 12000 });
+    await expect(finale).toHaveAttribute("data-phase", "done");
+    await expect(page.getByTestId("finale-nickname")).toHaveText("Finale_Tester");
+    await expect(finale).toContainText("Уровень 1");
+    await expect(finale).toContainText("Дисциплина");
+
+    // Reload on the finale: the final frame is shown immediately, no replay
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Начать" })).toBeVisible({ timeout: 2000 });
+    await expect(page.getByRole("button", { name: "Пропустить анимацию" })).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Начать" }).click();
+    await page.waitForURL((url) => url.pathname === "/", { timeout: 5000 });
+  });
+
+  test("Keyboard: Esc goes back, Enter continues", async ({ page }) => {
+    await page.goto("/awakening");
+    await page.evaluate(() => localStorage.clear());
+    await page.goto("/awakening");
+    await page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]').fill("Keys_Tester");
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("heading", { level: 1, name: "Язык и часовой пояс" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]')).toHaveValue("Keys_Tester");
   });
 });
