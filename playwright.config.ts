@@ -22,6 +22,7 @@ export default defineConfig({
     command: "CI=true AYRA_E2E_AUTH_MOCK=1 npm run build && CI=true AYRA_E2E_AUTH_MOCK=1 npm run start",
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
+    // includes the production build (slower on CI machines)
+    timeout: 300 * 1000,
   },
 });

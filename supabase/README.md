@@ -17,7 +17,7 @@
    - Сбой создания профиля больше не отменяет регистрацию в `auth.users` (в логах будет WARNING).
    - Создаёт пустые строки профиля пользователям, у которых их нет. Можно запускать повторно.
    - Проверка: `supabase/checks/0002_status.sql`. Тест (на тестовом проекте, всё откатывается): `supabase/tests/profile_defaults.sql`.
-   - Локальная проверка без базы: `npm i --no-save @electric-sql/pglite@0.2.17 && node scripts/test-migrations.mjs`.
+   - Локальная проверка без базы: `node scripts/test-migrations.mjs` (PGlite уже в devDependencies; эта проверка идёт и в CI).
 
 4. Затем `supabase/migrations/0003_nickname_cooldown.sql` (после 0002). **Применяет владелец, только после подтверждения в PR.**
    - Добавляет колонку `profiles.nickname_changed_at` и триггер: ник можно сменить раз в 14 дней. Первый ник (в знакомстве) и первая смена после знакомства — сразу.
