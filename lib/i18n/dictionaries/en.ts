@@ -1842,6 +1842,8 @@ export const en: Dictionary = {
       hint: "Changes show on the character on the left at once. Press “Save” to apply them everywhere.",
     },
     edit: {
+      back: "Back",
+      close: "Close editor",
       nickname: "Nickname",
       nicknameHint: "Latin letters, digits and _ . -, 3 to 24 characters",
       nicknameLocked: "You can change the nickname in {days} d.",
@@ -1876,6 +1878,16 @@ export const en: Dictionary = {
       noChanges: "No changes",
       saved: "Profile saved",
       pencil: "Edit profile",
+    },
+    social: {
+      title: "Social",
+      followers: "Followers",
+      following: "Following",
+      likes: "Profile likes",
+      empty: "Coming with Community",
+      emptyHint: "The list will appear here once Community opens in AYRA.",
+      hiddenNote: "Your profile is hidden: only you see these numbers.",
+      close: "Close",
     },
     hero: {
       level: "Level {level}",

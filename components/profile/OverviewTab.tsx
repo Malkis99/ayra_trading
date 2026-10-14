@@ -6,6 +6,7 @@ import { ArrowRight, Award, BookOpen, Check, Pencil, Target, Swords, type Lucide
 import { useAuth } from "@/lib/auth/auth-context";
 import { xpForNextLevel } from "@/lib/game";
 import { TITLES_CATALOG, titleDisplayName } from "@/lib/titles";
+import { SocialStats } from "./SocialStats";
 import { formatNumber } from "@/lib/i18n";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
@@ -111,6 +112,7 @@ function OverviewHeader({ onEditProfile }: { onEditProfile: () => void }) {
           <div className="h-full rounded-full bg-gradient-to-r from-pri to-vi transition-[width] duration-500" style={{ width: `${pct}%` }} />
         </div>
       </div>
+      <SocialStats />
     </header>
   );
 }

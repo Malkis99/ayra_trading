@@ -1,11 +1,10 @@
 "use client";
 
 import React from "react";
-import { Check, RotateCcw, Save } from "lucide-react";
+import { RotateCcw, Save } from "lucide-react";
 import { useApp } from "@/lib/context";
-import { Character } from "@/components/Character";
 import { cn } from "@/components/ui/cn";
-import { HAIR_COLORS, HAIRSTYLES, OUTFITS, SKIN_TONES, type AvatarAppearance } from "@/lib/avatar";
+import { HAIR_COLORS, HAIRSTYLES, type AvatarAppearance } from "@/lib/avatar";
 
 type Props = {
   draft: AvatarAppearance;
@@ -16,9 +15,9 @@ type Props = {
 };
 
 /**
- * "Appearance" at the top of the Wardrobe tab: skin tone, hair colour, hairstyle, outfit style.
+ * "Appearance" at the top of the Wardrobe tab: hair colour and hairstyle only. Skin tone and outfit style chosen in
+ * onboarding stay in the data and are used, but are not changed here; clothes change only through equipment slots.
  * The draft shows on the stage at once; Save applies it everywhere, Reset returns the saved look.
- * Activity never changes the body (project rule) — only these choices do.
  */
 export function AppearanceSection({ draft, onChange, dirty, onSave, onReset }: Props) {
   const { dict } = useApp();
@@ -73,40 +72,21 @@ export function AppearanceSection({ draft, onChange, dirty, onSave, onReset }: P
         {dirty ? c.unsaved : c.noChanges}
       </p>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div>
-          <h3 className={h}>{dict.avatar.skinToneLabel}</h3>
-          <div className="flex flex-wrap gap-2.5">
-            {SKIN_TONES.map((st) => (
-              <button
-                key={st.id}
-                type="button"
-                aria-pressed={draft.skinTone === st.id}
-                aria-label={names[st.id] || st.id}
-                title={names[st.id] || st.id}
-                onClick={() => set({ skinTone: st.id })}
-                style={{ backgroundColor: st.hex }}
-                className={swatch(draft.skinTone === st.id)}
-              />
-            ))}
-          </div>
-        </div>
-        <div>
-          <h3 className={h}>{dict.avatar.hairColorLabel}</h3>
-          <div className="flex flex-wrap gap-2.5">
-            {HAIR_COLORS.map((hc) => (
-              <button
-                key={hc.id}
-                type="button"
-                aria-pressed={draft.hairColor === hc.id}
-                aria-label={names[hc.id] || hc.id}
-                title={names[hc.id] || hc.id}
-                onClick={() => set({ hairColor: hc.id })}
-                style={{ backgroundColor: hc.hex }}
-                className={swatch(draft.hairColor === hc.id)}
-              />
-            ))}
-          </div>
+      <div>
+        <h3 className={h}>{dict.avatar.hairColorLabel}</h3>
+        <div className="flex flex-wrap gap-2.5">
+          {HAIR_COLORS.map((hc) => (
+            <button
+              key={hc.id}
+              type="button"
+              aria-pressed={draft.hairColor === hc.id}
+              aria-label={names[hc.id] || hc.id}
+              title={names[hc.id] || hc.id}
+              onClick={() => set({ hairColor: hc.id })}
+              style={{ backgroundColor: hc.hex }}
+              className={swatch(draft.hairColor === hc.id)}
+            />
+          ))}
         </div>
       </div>
 
@@ -121,23 +101,6 @@ export function AppearanceSection({ draft, onChange, dirty, onSave, onReset }: P
         </div>
       </div>
 
-      <div>
-        <h3 className={h}>{dict.avatar.outfitLabel}</h3>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 min-[1700px]:grid-cols-3">
-          {OUTFITS.map((o) => {
-            const selected = draft.outfit === o.id;
-            return (
-              <button key={o.id} type="button" aria-pressed={selected} onClick={() => set({ outfit: o.id })} className={card(selected)}>
-                <span className="grid h-10 w-7 shrink-0 place-items-center overflow-hidden rounded bg-ink/60" aria-hidden="true">
-                  <Character appearance={{ ...draft, outfit: o.id }} equipment={{}} size="avatar" decorative />
-                </span>
-                <span className="min-w-0 flex-1 truncate">{names[o.id] || o.id}</span>
-                {selected && <Check size={14} className="shrink-0 text-vi" aria-hidden="true" />}
-              </button>
-            );
-          })}
-        </div>
-      </div>
     </section>
   );
 }

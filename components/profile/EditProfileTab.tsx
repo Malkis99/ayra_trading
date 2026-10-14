@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { Loader2, MessageSquare, RotateCcw, Save, Trash2 } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, Loader2, MessageSquare, RotateCcw, Save, Trash2, X } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -57,7 +57,15 @@ const sameList = (a: string[], b: string[]) => a.length === b.length && a.every(
  * Accounts: the nickname goes to profiles (server checks: unique, format, 14 days after migration 0003);
  * everything else is stored locally in the game state (AppStorage) until cloud sync (T7b).
  */
-export function EditProfileTab() {
+type Props = {
+  /** Leave the editor (back to the tab it was opened from). The page asks first when there are unsaved changes. */
+  onExit?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  /** Lets the page save from the "unsaved changes" dialog; resolves to true when everything was saved. */
+  saveRef?: React.MutableRefObject<(() => Promise<boolean>) | null>;
+};
+
+export function EditProfileTab({ onExit, onDirtyChange, saveRef }: Props = {}) {
   const { dict, lang, showToast } = useApp();
   const { gameState, saveProfileEdits, deletePost } = useGame();
   const { authState, profile, saveNickname } = useAuth();
@@ -122,9 +130,9 @@ export function EditProfileTab() {
   const marketLabels = dict.awakening.markets as Record<string, string>;
   const styleLabels = dict.awakening.style as Record<string, string>;
 
-  const save = async (ev: React.FormEvent) => {
-    ev.preventDefault();
-    if (!dirty || problem || hasSocialError || saving) return;
+  const doSave = async (): Promise<boolean> => {
+    if (!dirty) return true;
+    if (problem || hasSocialError || saving) return false;
     setSaving(true);
     setNickError(null);
     let finalName = gameState.name;
@@ -170,10 +178,46 @@ export function EditProfileTab() {
     });
     setSaving(false);
     if (!nickFailed) showToast(e.saved);
+    return !nickFailed;
   };
+  const save = (ev: React.FormEvent) => {
+    ev.preventDefault();
+    void doSave();
+  };
+
+  useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+  useEffect(() => {
+    if (!saveRef) return;
+    saveRef.current = doSave;
+    return () => {
+      saveRef.current = null;
+    };
+  });
 
   return (
     <form onSubmit={save} className="space-y-4" noValidate data-testid="edit-profile">
+      {onExit && (
+        <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={onExit}
+            className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl px-2.5 text-sm font-semibold text-tx transition hover:bg-s2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
+          >
+            <ArrowLeft size={16} aria-hidden="true" />
+            {e.back}
+          </button>
+          <button
+            type="button"
+            onClick={onExit}
+            aria-label={e.close}
+            title={e.close}
+            className="grid h-10 w-10 place-items-center rounded-xl text-mu transition hover:bg-s2 hover:text-tx focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
+          >
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+      )}
       <Card title={dict.profile.settingsV2.profileSection}>
         <Input
           label={e.nickname}

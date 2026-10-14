@@ -29,13 +29,20 @@ for (const [w, h] of [[360, 780], [1440, 900]]) {
     await page.waitForTimeout(600);
     if (w === 360) {
       // phones: show the tab content (scroll the app's main area to the tab panel)
-      await page.evaluate(() => document.querySelector('[role="tabpanel"]')?.scrollIntoView({ block: "start" }));
+      await page.evaluate(() => { document.querySelector('[role="tabpanel"]')?.scrollIntoView({ block: "start" }); document.querySelector("main")?.scrollBy(0, -64); });
       await page.waitForTimeout(300);
     }
     await page.screenshot({ path: `${outDir}/${id}-${w}.jpg`, type: "jpeg", quality: 72 });
     if (w === 360) await page.evaluate(() => document.querySelector("main")?.scrollTo(0, 0));
   }
   if (!old) {
+    // sticky tabs: Statistics scrolled down
+    await page.getByRole("tab", { name: "Статистика", exact: true }).click();
+    await page.waitForTimeout(400);
+    await page.evaluate(() => document.querySelector("main")?.scrollTo(0, 900));
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${outDir}/sticky-${w}.jpg`, type: "jpeg", quality: 72 });
+    await page.evaluate(() => document.querySelector("main")?.scrollTo(0, 0));
     await page.getByRole("tab", { name: "Обзор", exact: true }).click();
     await page.evaluate(() => document.querySelector("main")?.scrollTo(0, 0));
     // background picker: choose another open background
