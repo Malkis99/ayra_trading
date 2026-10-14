@@ -10,6 +10,10 @@ export const ALLOWED_LATIN_WORDS = [
   "ID",
   // time zone offsets (UTC+4)
   "UTC",
+  // social network names in the profile editor
+  "Telegram",
+  "Instagram",
+  "YouTube",
   "Excel",
   "Google",
   // keyboard key names in shortcut hints

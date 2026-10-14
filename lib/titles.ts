@@ -1,3 +1,5 @@
+import type { Dictionary } from "@/lib/i18n/types";
+
 export type TitleRarity = "common" | "rare" | "epic" | "legendary";
 export type TitleSource = "level" | "achievement" | "case" | "season" | "guild" | "event";
 
@@ -83,3 +85,9 @@ export const TITLES_CATALOG: TitleCatalogItem[] = [
     isPlaceholder: true,
   },
 ];
+
+/** Display name of a title in the current language (dict.titles.byId), falling back to the starting title. */
+export function titleDisplayName(dict: Pick<Dictionary, "titles">, titleId: string): string {
+  const byId = dict.titles.byId as Record<string, string>;
+  return byId[titleId] || byId.novice;
+}

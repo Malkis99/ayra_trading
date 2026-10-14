@@ -54,3 +54,16 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   const p = (await db.query(`SELECT minor_mode FROM public.profiles WHERE id='00000000-0000-0000-0000-000000000002'`)).rows[0];
   (n0 === 0 && p && p.minor_mode === false) ? ok("C: backfill created the missing row with minor_mode=false") : fail(`C: backfill n0=${n0} row=${JSON.stringify(p)}`);
 }
+// D. 0003: nickname once per 14 days (first one free), applied twice (idempotent); rollback works
+{
+  const db = await fresh(); await db.exec(read("supabase/migrations/0001_init.sql"));
+  await db.exec(read("supabase/migrations/0002_profile_defaults.sql"));
+  await db.exec(read("supabase/migrations/0003_nickname_cooldown.sql"));
+  await db.exec(read("supabase/migrations/0003_nickname_cooldown.sql")); ok("D: 0003 applied twice");
+  try { await db.exec(read("supabase/tests/nickname_cooldown.sql")); ok("D: tests/nickname_cooldown.sql passed"); } catch (e) { fail(`D: test script: ${e.message}`); }
+  const chk = (await db.query(read("supabase/checks/0003_status.sql"))).rows[0];
+  (chk.nickname_changed_at_column && chk.cooldown_trigger) ? ok("D: check query") : fail(`D: check ${JSON.stringify(chk)}`);
+  await db.exec(read("supabase/migrations/0003_nickname_cooldown.down.sql"));
+  const after = (await db.query(read("supabase/checks/0003_status.sql"))).rows[0];
+  (!after.nickname_changed_at_column && !after.cooldown_trigger) ? ok("D: rollback removes column and trigger") : fail(`D: rollback ${JSON.stringify(after)}`);
+}

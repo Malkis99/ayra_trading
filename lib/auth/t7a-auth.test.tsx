@@ -66,7 +66,7 @@ describe("T7a Auth: Nickname Uniqueness & Validation Mock", () => {
 
   it("reserves nickname upon setting", () => {
     const success = mockSetNickname("New_Unique_Nick");
-    expect(success).toBe(true);
+    expect(success).toEqual({ ok: true });
     expect(mockIsNicknameAvailable("New_Unique_Nick")).toBe(true); // own nickname
   });
 });

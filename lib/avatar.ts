@@ -1,3 +1,4 @@
+import { isStageBackgroundId, type StageBackgroundId } from "./stage-backgrounds";
 export interface SkinTonePreset {
   id: string;
   nameKey: string;
@@ -30,6 +31,8 @@ export interface AvatarAppearance {
   hairstyle: string;
   hairColor: string;
   outfit: string;
+  /** Profile stage background id (lib/stage-backgrounds); not part of the figure itself. */
+  stageBackground?: StageBackgroundId;
 }
 
 export const SKIN_TONES: SkinTonePreset[] = [
@@ -132,5 +135,6 @@ export function validateAvatarAppearance(app?: Partial<AvatarAppearance> | null)
     hairstyle: HAIRSTYLES.some((h) => h.id === app.hairstyle) ? (app.hairstyle as string) : DEFAULT_AVATAR_APPEARANCE.hairstyle,
     hairColor: HAIR_COLORS.some((c) => c.id === app.hairColor) ? (app.hairColor as string) : DEFAULT_AVATAR_APPEARANCE.hairColor,
     outfit: OUTFITS.some((o) => o.id === app.outfit) ? (app.outfit as string) : DEFAULT_AVATAR_APPEARANCE.outfit,
+    ...(isStageBackgroundId(app.stageBackground) ? { stageBackground: app.stageBackground } : {}),
   };
 }

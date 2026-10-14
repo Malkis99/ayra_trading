@@ -2,7 +2,11 @@
 
 import React, { useMemo } from "react";
 import Link from "next/link";
-import { ArrowRight, Award, BookOpen, Check, Target, Swords, type LucideIcon } from "lucide-react";
+import { ArrowRight, Award, BookOpen, Check, Pencil, Target, Swords, type LucideIcon } from "lucide-react";
+import { useAuth } from "@/lib/auth/auth-context";
+import { xpForNextLevel } from "@/lib/game";
+import { TITLES_CATALOG, titleDisplayName } from "@/lib/titles";
+import { formatNumber } from "@/lib/i18n";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useJournal } from "@/lib/journal/context";
@@ -57,7 +61,61 @@ function Block({
 }
 
 /** Four compact blocks: trader stats from the Journal, active goals, recent achievements, today's quests. */
-export function OverviewTab({ onOpenAchievements }: { onOpenAchievements: () => void }) {
+/** Top of the right panel: nickname (serif) with the edit pencil, rank, level with XP to the next level, plan chip. */
+function OverviewHeader({ onEditProfile }: { onEditProfile: () => void }) {
+  const { dict, lang } = useApp();
+  const { gameState } = useGame();
+  const { authState } = useAuth();
+  const h = dict.profile.hero;
+  const signedIn = authState === "authenticated";
+  const next = xpForNextLevel(gameState.level);
+  const pct = Math.min(100, Math.round((gameState.xp / next) * 100));
+  const title = TITLES_CATALOG.find((t) => t.id === gameState.selectedTitle) || TITLES_CATALOG[0];
+  return (
+    <header className="space-y-3 rounded-2xl border border-line bg-s1/70 p-4 sm:p-5" data-testid="overview-header">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="min-w-0 break-all font-serif text-3xl font-bold leading-tight text-tx sm:text-4xl" data-testid="profile-nickname">
+              {gameState.name}
+            </h1>
+            <button
+              type="button"
+              onClick={onEditProfile}
+              aria-label={dict.profile.edit.pencil}
+              title={dict.profile.edit.pencil}
+              className="grid h-9 w-9 place-items-center rounded-lg text-mu transition hover:bg-s2 hover:text-tx focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
+            >
+              <Pencil size={16} aria-hidden="true" />
+            </button>
+            {!signedIn && <span className="rounded-md bg-vi/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-vi">{h.guest}</span>}
+          </div>
+          <p className="mt-1 text-sm font-semibold text-vi">
+            <span className="sr-only">{h.rank}: </span>
+            {titleDisplayName(dict, title.id)}
+          </p>
+          {gameState.bio && <p className="mt-2 max-w-prose whitespace-pre-line text-sm text-mu" data-testid="profile-bio">{gameState.bio}</p>}
+        </div>
+        {signedIn && (
+          <Link href="/plans" className="inline-flex min-h-[32px] items-center rounded-lg border border-vi/50 bg-vi/10 px-2.5 text-xs font-semibold text-tx transition hover:bg-vi/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi">
+            ★ {gameState.plan}
+          </Link>
+        )}
+      </div>
+      <div className="space-y-1.5">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+          <span className="font-serif text-lg font-semibold text-tx">{formatString(h.level, { level: gameState.level })}</span>
+          <span className="text-xs tabular-nums text-mu">{formatString(h.xp, { xp: formatNumber(lang, gameState.xp), next: formatNumber(lang, next), nextLevel: gameState.level + 1 })}</span>
+        </div>
+        <div className="h-2.5 w-full overflow-hidden rounded-full bg-s2" role="progressbar" aria-valuemin={0} aria-valuemax={next} aria-valuenow={gameState.xp} aria-label={formatString(h.level, { level: gameState.level })}>
+          <div className="h-full rounded-full bg-gradient-to-r from-pri to-vi transition-[width] duration-500" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+    </header>
+  );
+}
+
+export function OverviewTab({ onOpenAchievements, onEditProfile }: { onOpenAchievements: () => void; onEditProfile: () => void }) {
   const { dict, lang } = useApp();
   const { gameState } = useGame();
   const { trades, accounts } = useJournal();
@@ -79,7 +137,9 @@ export function OverviewTab({ onOpenAchievements }: { onOpenAchievements: () => 
   ];
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+    <div className="space-y-4">
+      <OverviewHeader onEditProfile={onEditProfile} />
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
       <Block icon={BookOpen} title={o.traderTitle} aside={<span className="text-xs text-mu">{o.traderPeriod}</span>} link={{ href: "/journal", label: o.openJournal }} testId="overview-trader">
         <dl className="grid grid-cols-2 gap-2">
           {tiles.map((t) => (
@@ -151,6 +211,7 @@ export function OverviewTab({ onOpenAchievements }: { onOpenAchievements: () => 
           })}
         </ul>
       </Block>
+    </div>
     </div>
   );
 }

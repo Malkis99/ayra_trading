@@ -56,7 +56,12 @@ test.describe("T7a.3 Multi-Tab Login & Awakening Lease (E2E)", () => {
 
     await pageA.waitForURL("**/awakening**", { timeout: 5000 });
     await pageA.fill("input[placeholder='A-Z a-z 0-9 _ . -']", "ExistingNick");
-    await pageA.click("button:has-text('Продолжить')");
+    // The nickname reaches the server when onboarding is finished, so the account becomes "existing" only then
+    for (const s of ["Продолжить", "Продолжить", "Продолжить", "18–24 года", "Продолжить", "Пропустить шаг целиком", "1–2 года", "Продолжить", "Крипто", "Продолжить", "Дисциплина", "Продолжить", "Пропустить необязательные вопросы", "Пропустить шаг целиком"])
+      await pageA.click(`button:has-text("${s}")`);
+    await pageA.getByRole("button", { name: "Пропустить анимацию" }).click();
+    await pageA.getByRole("button", { name: "Начать" }).click();
+    await pageA.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
 
     // Existing account lands on Home
     await pageA.goto("/login");

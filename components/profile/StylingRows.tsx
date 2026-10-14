@@ -6,9 +6,8 @@ import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { cn } from "@/components/ui/cn";
 import { FRAMES } from "@/lib/items";
-import { TITLES_CATALOG } from "@/lib/titles";
+import { TITLES_CATALOG, titleDisplayName } from "@/lib/titles";
 import { formatString } from "@/lib/i18n";
-import { titleName } from "./ProfileHero";
 
 const chip = (selected: boolean) =>
   cn(
@@ -40,7 +39,7 @@ export function StylingRows() {
     <section className="space-y-3 rounded-2xl border border-line bg-s1/70 p-4" data-testid="wardrobe-styling">
       <Row title={w2.titleRow}>
         {TITLES_CATALOG.filter((t) => !t.isPlaceholder).map((t) => {
-          const name = titleName(dict, t.id);
+          const name = titleDisplayName(dict, t.id);
           if (!gameState.unlockedTitles.includes(t.id)) {
             const how = t.reqLevel
               ? formatString(w2.lockedLevel, { level: t.reqLevel })

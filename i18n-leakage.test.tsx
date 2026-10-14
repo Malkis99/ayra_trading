@@ -50,7 +50,7 @@ describe("i18n Leakage rendered page tests", () => {
       "Bias",
     ]);
 
-    const tabs = ["overview", "character", "wardrobe", "achievements", "settings"];
+    const tabs = ["overview", "stats", "wardrobe", "achievements", "edit"];
 
     tabs.forEach((tab) => {
       mockSearch = `tab=${tab}`;
@@ -72,7 +72,7 @@ describe("i18n Leakage rendered page tests", () => {
   });
 
   it("renders ProfilePage in EN (all tabs) without Cyrillic characters", () => {
-    for (const tab of ["overview", "character", "wardrobe", "achievements", "settings"]) {
+    for (const tab of ["overview", "stats", "wardrobe", "achievements", "edit"]) {
       mockSearch = `tab=${tab}`;
       const { container, unmount } = renderWithProviders(<ProfilePage />, "en");
       const text = container.textContent || "";

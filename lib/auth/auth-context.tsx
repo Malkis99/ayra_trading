@@ -40,6 +40,8 @@ export interface UserProfile {
   consent_version: string | null;
   created_at: string;
   updated_at: string;
+  /** Last nickname change after onboarding; present once migration 0003 is applied. */
+  nickname_changed_at?: string | null;
 }
 
 export interface AuthUser {
@@ -85,6 +87,14 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+/** Server errors of a nickname update -> dictionary keys (unique, format check, 14-day rule from migration 0003). */
+export function nicknameErrorKey(code: string | null | undefined, message: string | null | undefined): string {
+  if (code === "23505") return "errorNicknameTaken";
+  if (code === "23514") return "errorLatin";
+  if (/nickname_change_cooldown/.test(message ?? "")) return "nicknameCooldown";
+  return "genericError";
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authState, setAuthState] = useState<AuthState>("loading");
@@ -561,8 +571,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (mockMode) {
-      const ok = mockSetNickname(clean);
-      if (!ok) return { success: false, errorKey: "errorNicknameTaken" };
+      const res = mockSetNickname(clean);
+      if (!res.ok) return { success: false, errorKey: res.reason === "cooldown" ? "nicknameCooldown" : "errorNicknameTaken" };
       const { profile: mProfile } = getMockState();
       setProfile(mProfile);
       return { success: true };
@@ -585,7 +595,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .select("id");
 
     if (error) {
-      return { success: false, errorKey: "errorNicknameTaken" };
+      authDebug("saveNickname", { ok: false, code: error.code, message: error.message });
+      return { success: false, errorKey: nicknameErrorKey(error.code, error.message) };
     }
     // No profile row on the server: the nickname was not stored anywhere.
     if (!updated || updated.length === 0) {
