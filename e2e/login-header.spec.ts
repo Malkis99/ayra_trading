@@ -67,7 +67,7 @@ test("guest top bar: no bell, plan chip or coins; language switch and sign-in in
   await expect(page.locator("header").getByRole("link", { name: "Войти" })).toBeVisible();
 });
 
-test("signed-in top bar: coins, then plan chip, then the bell at the far right", async ({ page }) => {
+test("signed-in top bar: coins, then the bell, then the plan chip; avatar last on phones", async ({ page }) => {
   await mockAuth(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/login");
@@ -104,14 +104,19 @@ test("signed-in top bar: coins, then plan chip, then the bell at the far right",
   await expect(coins).toBeVisible();
   await expect(plan).toBeVisible();
   await expect(bell).toBeVisible();
-  const [cx, px, bx] = await Promise.all([coins, plan, bell].map(async (l) => (await l.boundingBox())!.x));
-  expect(cx).toBeLessThan(px);
-  expect(px).toBeLessThan(bx);
+  const [cx, bx, px] = await Promise.all([coins, bell, plan].map(async (l) => (await l.boundingBox())!.x));
+  expect(cx).toBeLessThan(bx);
+  expect(bx).toBeLessThan(px);
   await expect(header.getByRole("group", { name: "Язык интерфейса" })).toHaveCount(0);
 
   // 360px: everything fits, nothing is cut off
   await page.setViewportSize({ width: 360, height: 740 });
-  await expect(bell).toBeInViewport();
+  await expect(plan).toBeInViewport();
+  const avatar = header.getByRole("button", { name: "Профиль" });
+  await expect(avatar).toBeInViewport();
+  const [bx2, px2, ax] = await Promise.all([bell, plan, avatar].map(async (l) => (await l.boundingBox())!.x));
+  expect(bx2).toBeLessThan(px2);
+  expect(px2).toBeLessThan(ax);
   const overflow = await header.evaluate((el) => el.scrollWidth - el.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
   await expectNoHorizontalScroll(page);

@@ -78,14 +78,6 @@ export function Topbar() {
         <>
           <CoinsChip value={gameState.coins} />
 
-          {/* Plan chip, then the notification bell at the far right */}
-          <Link
-            href="/plans"
-            className="rounded-xl border border-go bg-go/10 px-3 py-1 text-xs font-semibold text-go transition-colors hover:bg-go/20 flex-none"
-          >
-            ★ {gameState.plan}
-          </Link>
-
           <button
             onClick={() => showToast(dict.topbar.notificationsToast)}
             className="rounded-xl border border-line bg-s1 p-2 text-mu transition-colors hover:border-vi hover:text-tx"
@@ -93,6 +85,14 @@ export function Topbar() {
           >
             <Bell size={16} />
           </button>
+
+          {/* Plan chip after the bell; on phones the avatar stays last */}
+          <Link
+            href="/plans"
+            className="rounded-xl border border-go bg-go/10 px-3 py-1 text-xs font-semibold text-go transition-colors hover:bg-go/20 flex-none"
+          >
+            ★ {gameState.plan}
+          </Link>
         </>
       ) : (
         <>
