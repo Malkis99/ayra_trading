@@ -10,6 +10,7 @@ import { resolvePostLoginRoute, readAccountGameState, safeNextAfterLogin } from 
 import { isValidLatinNickname } from "@/lib/stats";
 import { authDebug, describeGameState, isAuthDebugEnabled } from "@/lib/auth/debug";
 import { AppStorage } from "@/lib/storage";
+import { UniverseCard, UniverseLoader, UniverseScreen } from "@/components/universe/UniverseBackdrop";
 import { NicknameConflictModal } from "@/components/NicknameConflictModal";
 
 const PROFILE_RETRY_DELAYS_MS = [400, 800, 1600];
@@ -135,8 +136,9 @@ function ContinueRouter() {
             .join(" · ")
         : "profiles: 0 rows";
     return (
-      <div className="flex min-h-screen w-full items-center justify-center bg-ink px-4">
-        <div role="alert" className="w-full max-w-sm space-y-4 rounded-2xl border border-line bg-s1 p-6 text-center">
+      <UniverseScreen>
+        <UniverseCard className="space-y-4 text-center">
+        <div role="alert" className="space-y-4">
           <AlertCircle className="mx-auto h-8 w-8 text-vi" aria-hidden="true" />
           <h1 className="font-serif text-lg font-bold text-tx">
             {profileFailed ? dict.auth.continueProfileErrorTitle : dict.auth.continueNoRowTitle}
@@ -164,7 +166,8 @@ function ContinueRouter() {
             {dict.auth.continueRetryBtn}
           </button>
         </div>
-      </div>
+        </UniverseCard>
+      </UniverseScreen>
     );
   }
 
@@ -172,12 +175,7 @@ function ContinueRouter() {
 }
 
 function ContinueLoader({ label }: { label?: string }) {
-  return (
-    <div className="flex min-h-screen w-full flex-col items-center justify-center gap-3 bg-ink" role="status" aria-live="polite">
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-vi/30 border-t-vi motion-reduce:animate-none" aria-hidden="true" />
-      {label && <span className="text-sm text-mu">{label}</span>}
-    </div>
-  );
+  return <UniverseLoader label={label} />;
 }
 
 export default function AuthContinuePage() {

@@ -129,10 +129,10 @@ describe("T7a Security: Client Bundle & Source Secret Protection", () => {
 describe("T7a i18n & UI Rendering", () => {
   it("renders /login in RU and EN without Cyrillic leakage in EN", () => {
     const { container: ruContainer } = renderWithProviders(<LoginPage />, "ru");
-    expect(ruContainer.textContent).toContain("Вход в AYRA");
+    expect(ruContainer.textContent).toContain("Войди во вселенную");
 
     const { container: enContainer } = renderWithProviders(<LoginPage />, "en");
-    expect(enContainer.textContent).toContain("Sign in to AYRA");
+    expect(enContainer.textContent).toContain("Enter the AYRA universe");
     expect(enContainer.textContent).not.toMatch(/[а-яА-ЯёЁ]/);
   });
 

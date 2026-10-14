@@ -34,6 +34,8 @@ body { @apply bg-ink text-tx antialiased; background-image: radial-gradient(900p
 @keyframes ayraBreath { 0%, 100% { transform: scale(1); opacity: 0.85; } 50% { transform: scale(1.08); opacity: 1; } }
 @keyframes ayraRise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 @keyframes ayraSlideLeft { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: none; } }
+@keyframes ayraTwinkle { 0%, 100% { opacity: 0.25; transform: translateY(0); } 50% { opacity: 0.9; transform: translateY(-6px); } }
+@keyframes ayraStarDrift { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(0, -18px, 0); } }
 @keyframes ayraFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes ayraSheetUp { from { transform: translateY(100%); } to { transform: none; } }
 @keyframes ayraSlideIn { from { transform: translateX(100%); } to { transform: none; } }
