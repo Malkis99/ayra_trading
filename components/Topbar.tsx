@@ -18,10 +18,14 @@ export function Topbar() {
     setAddModalOpen,
     setSearchOpen,
     showToast,
+    lang,
+    setLanguage,
   } = useApp();
 
   const { gameState } = useGame();
-  const { isPublicVisitor } = useAuth();
+  const { isPublicVisitor, authState, isConfigured } = useAuth();
+  // Personal badges (coins, plan, notifications) exist only for a signed-in account.
+  const isSignedIn = authState === "authenticated";
   const [isProfileMenuOpen, setProfileMenuOpen] = useState(false);
 
   const frameColor = FRAMES[gameState.frame]?.color || "#a38ad1";
@@ -41,10 +45,11 @@ export function Topbar() {
       {/* Add Button ("Добавить" / "Add") */}
       <button
         onClick={() => setAddModalOpen(true)}
-        className="btn flex items-center gap-1 text-xs py-1.5 px-3"
+        aria-label={dict.topbar.add}
+      className="btn flex flex-none items-center gap-1 text-xs py-1.5 px-2.5 sm:px-3"
       >
-        <Plus size={16} />
-        <span>{dict.topbar.add}</span>
+        <Plus size={16} aria-hidden="true" />
+        <span className="hidden sm:inline">{dict.topbar.add}</span>
       </button>
 
       {/* Focus / Game Mode Switch */}
@@ -69,35 +74,55 @@ export function Topbar() {
 
       <div className="flex-1" />
 
-      {/* Coins Chip (personal; hidden for public visitors) */}
-      {!isPublicVisitor && <CoinsChip value={gameState.coins} />}
+      {isSignedIn ? (
+        <>
+          <CoinsChip value={gameState.coins} />
 
-      {/* Plan Chip */}
-      <Link
-        href="/plans"
-        className="rounded-xl border border-go bg-go/10 px-3 py-1 text-xs font-semibold text-go transition-colors hover:bg-go/20 flex-none"
-      >
-        ★ {isPublicVisitor ? "Free" : gameState.plan}
-      </Link>
+          {/* Plan chip, then the notification bell at the far right */}
+          <Link
+            href="/plans"
+            className="rounded-xl border border-go bg-go/10 px-3 py-1 text-xs font-semibold text-go transition-colors hover:bg-go/20 flex-none"
+          >
+            ★ {gameState.plan}
+          </Link>
 
-      {/* Notification Bell */}
-      <button
-        onClick={() => showToast(dict.topbar.notificationsToast)}
-        className="rounded-xl border border-line bg-s1 p-2 text-mu transition-colors hover:border-vi hover:text-tx"
-        aria-label={dict.topbar.notifications}
-      >
-        <Bell size={16} />
-      </button>
-
-      {/* Public visitors: sign-in entry instead of the personal avatar menu (mobile) */}
-      {isPublicVisitor && (
-        <Link
-          href="/login"
-          aria-label={dict.publicHome.signInBtn}
-          className="grid h-9 w-9 place-items-center rounded-full border border-vi/40 bg-pri/20 text-tx md:hidden"
-        >
-          <LogIn size={16} aria-hidden="true" />
-        </Link>
+          <button
+            onClick={() => showToast(dict.topbar.notificationsToast)}
+            className="rounded-xl border border-line bg-s1 p-2 text-mu transition-colors hover:border-vi hover:text-tx"
+            aria-label={dict.topbar.notifications}
+          >
+            <Bell size={16} />
+          </button>
+        </>
+      ) : (
+        <>
+          {/* Guests: only the language switch and the sign-in entry */}
+          <div className="flex flex-none items-center rounded-xl border border-line bg-s1 p-0.5" role="group" aria-label={dict.settings.languageLabel}>
+            {(["ru", "en"] as const).map((l) => (
+              <button
+                key={l}
+                type="button"
+                aria-pressed={lang === l}
+                onClick={() => setLanguage(l)}
+                className={`h-7 min-w-[32px] rounded-lg px-1.5 text-[11px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi ${
+                  lang === l ? "bg-pri text-white" : "text-mu hover:text-tx"
+                }`}
+              >
+                {l.toUpperCase()}
+              </button>
+            ))}
+          </div>
+          {isConfigured && (
+            <Link
+              href="/login"
+              aria-label={dict.publicHome.signInBtn}
+              className="flex h-9 flex-none items-center gap-1.5 rounded-xl border border-vi/50 bg-pri/25 px-2.5 text-xs font-semibold text-tx transition-colors hover:bg-pri/40 sm:px-3"
+            >
+              <LogIn size={15} aria-hidden="true" />
+              <span className="hidden sm:inline">{dict.publicHome.signInBtn}</span>
+            </Link>
+          )}
+        </>
       )}
 
       {/* Avatar (Mobile Topbar) */}

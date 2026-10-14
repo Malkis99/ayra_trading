@@ -23,6 +23,7 @@ import { authDebug } from "@/lib/auth/debug";
 import { SpaceChangeBanner } from "./SpaceChangeBanner";
 import { OwnerDiagnosticsBlock } from "@/components/OwnerDiagnosticsBlock";
 import { UserCheck } from "lucide-react";
+import { UniverseLoader } from "@/components/universe/UniverseBackdrop";
 
 function ShellSkeleton() {
   return (
@@ -46,10 +47,6 @@ function ShellSkeleton() {
         {/* Topbar Skeleton */}
         <header className="flex h-14 items-center justify-between border-b border-line bg-[#16151d] px-4 md:px-6 animate-pulse">
           <div className="h-6 w-24 rounded bg-s2/50" />
-          <div className="flex items-center gap-2">
-            <div className="h-7 w-16 rounded-lg bg-s2/50" />
-            <div className="h-7 w-16 rounded-lg bg-s2/50" />
-          </div>
         </header>
 
         {/* Content Skeleton */}
@@ -101,6 +98,8 @@ function ShellContent({ children }: { children: React.ReactNode }) {
   // A signed-in account whose cloud profile is not loaded yet or has no nickname (onboarding not finished)
   // must not see app pages such as Home: the post-login router decides where it goes.
   const isOnboardingPath = pathname === "/awakening" || pathname === "/profile-select";
+  // Sign-in screens live in the "universe": no sidebar, top bar or bottom navigation, never the app skeleton.
+  const isAuthScreen = pathname === "/login" || Boolean(pathname?.startsWith("/auth/"));
   const mustUsePostLoginRouter =
     authState === "authenticated" &&
     Boolean(user) &&
@@ -160,11 +159,11 @@ function ShellContent({ children }: { children: React.ReactNode }) {
 
   const isFocusPage = isOnboardingPath || pathname === POST_LOGIN_ROUTER;
 
-  if (mustUsePostLoginRouter) return <FocusPageLoader />;
+  if (mustUsePostLoginRouter) return <UniverseLoader label={dict.auth.continueLoading} />;
 
   // Focus pages read the game state on mount, so they must not render before the space is ready.
   if (isFocusPage && !loadingTimedOut) {
-    if (!isLoaded || !isSpaceReady) return <FocusPageLoader />;
+    if (!isLoaded || !isSpaceReady) return isAuthScreen ? <UniverseLoader label={dict.auth.continueLoading} /> : <FocusPageLoader />;
     return <>{children}</>;
   }
 
@@ -195,7 +194,17 @@ function ShellContent({ children }: { children: React.ReactNode }) {
         </div>
       );
     }
-    return <ShellSkeleton />;
+    return isAuthScreen ? <UniverseLoader /> : <ShellSkeleton />;
+  }
+
+  if (isAuthScreen) {
+    return (
+      <>
+        <SpaceChangeBanner />
+        {children}
+        <Toast />
+      </>
+    );
   }
 
   return (

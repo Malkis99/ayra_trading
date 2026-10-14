@@ -10,7 +10,7 @@ test.describe("T7a.1 Auth & Screen Routing (Mock Mode)", () => {
 
   test("1. Clean device -> /login -> 'Продолжить без входа' -> guest mode navigation to /awakening", async ({ page }) => {
     await page.goto("/login");
-    await expect(page.locator("h1")).toContainText("Вход в AYRA");
+    await expect(page.locator("h1")).toContainText("вселенную AYRA");
 
     // Click "Продолжить без входа"
     await page.click("button:has-text('Продолжить без входа')");
@@ -78,7 +78,7 @@ test.describe("T7a.1 Auth & Screen Routing (Mock Mode)", () => {
     // Unauthenticated user trying to access /settings should be redirected to /login
     await page.goto("/settings");
     await page.waitForURL("**/login**", { timeout: 5000 });
-    await expect(page.locator("h1")).toContainText("Вход в AYRA");
+    await expect(page.locator("h1")).toContainText("вселенную AYRA");
   });
 
   test("3. Repeated sign-in of existing profile -> Home without onboarding", async ({ page }) => {

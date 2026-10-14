@@ -106,7 +106,7 @@ test.describe("T7a.3 Multi-Tab Login & Awakening Lease (E2E)", () => {
     });
 
     await pageA.goto("/login");
-    await expect(pageA.locator("h1")).toContainText("Вход в AYRA");
+    await expect(pageA.locator("h1")).toContainText("вселенную AYRA");
 
     // Set mock user in storage and trigger storage event directly
     await pageA.evaluate(() => {
