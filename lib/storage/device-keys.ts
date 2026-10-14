@@ -13,7 +13,6 @@ export const DEVICE_KEYS = [
   "ayra_space_event",
   "ayra_had_session",
   "ayra_mock_auth_v1",
-  "ayra_auth_debug",
 ] as const;
 
 export type DeviceKey = (typeof DEVICE_KEYS)[number];

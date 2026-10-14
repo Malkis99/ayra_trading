@@ -7,7 +7,6 @@ import { mapSupabaseError, type SanitizedErrorInfo } from "./error-sanitizer";
 import { authTabChannel } from "./tab-channel";
 import { spaceTabChannel } from "./space-channel";
 import { AppStorage, GUEST_SPACE_ID } from "@/lib/storage";
-import { authDebug, describeGameState } from "./debug";
 import {
   getMockState,
   setMockState,
@@ -145,7 +144,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const oldSpaceId = AppStorage.getActiveSpaceId();
     const newSpaceId = targetState === "authenticated" && targetUserId ? `account:${targetUserId}` : GUEST_SPACE_ID;
 
-    authDebug("switchSpace", { targetState, from: oldSpaceId, to: newSpaceId });
     if (oldSpaceId !== newSpaceId) {
       await AppStorage.flushSpace(oldSpaceId);
       AppStorage.setUserId(targetState === "authenticated" ? targetUserId : null);
@@ -180,7 +178,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       const fail = (err: ProfileLoadError) => {
-        authDebug("profile.load", { ok: false, ...err });
         setProfileError(err);
         setProfileStatus((s) => (s === "loaded" ? s : "error"));
         return null;
@@ -196,7 +193,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (error) return fail({ status: status ?? null, code: error.code ?? null, message: error.message ?? "" });
         setProfileError(null);
         if (!data) {
-          authDebug("profile.load", { ok: true, row: false });
           setProfile(null);
           setProfileStatus("missing");
           return null;
@@ -226,14 +222,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const updateToAuthenticated = async (u: AuthUser, initialSessionOrChange = false) => {
       setUser(u);
       const loadedProfile = await loadProfile(u.id);
-      authDebug("authenticated", {
-        prevAuthState: prevAuthStateRef.current,
-        activeSpace: AppStorage.getActiveSpaceId(),
-        profileLoaded: !!loadedProfile,
-        profileHasNickname: !!loadedProfile?.nickname,
-        accountState: describeGameState(AppStorage.getItem("ayra_demo_v1", u.id)),
-        guestState: describeGameState(AppStorage.getItem("ayra_demo_v1", null)),
-      });
 
       if (!isMounted) return;
 
@@ -252,7 +240,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     const updateToGuest = () => {
-      authDebug("guest", { prevAuthState: prevAuthStateRef.current });
       setUser(null);
       setProfile(null);
       setProfileStatus("idle");
@@ -277,7 +264,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         // 1. Initial session check (getInitialSession)
         supabase.auth.getSession().then(({ data: { session } }) => {
-          authDebug("getSession", { hasSession: !!session?.user });
           if (!isMounted) return;
           if (session?.user) {
             const u = { id: session.user.id, email: session.user.email || "", created_at: session.user.created_at };
@@ -291,7 +277,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const {
           data: { subscription },
         } = supabase.auth.onAuthStateChange((_event, session) => {
-          authDebug("onAuthStateChange", { event: _event, hasSession: !!session?.user });
           if (!isMounted) return;
           if (session?.user) {
             const u = { id: session.user.id, email: session.user.email || "", created_at: session.user.created_at };
@@ -595,12 +580,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .select("id");
 
     if (error) {
-      authDebug("saveNickname", { ok: false, code: error.code, message: error.message });
       return { success: false, errorKey: nicknameErrorKey(error.code, error.message) };
     }
     // No profile row on the server: the nickname was not stored anywhere.
     if (!updated || updated.length === 0) {
-      authDebug("saveNickname", { ok: false, reason: "no profile row" });
       return { success: false, errorKey: "profileMissing" };
     }
 

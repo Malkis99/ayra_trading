@@ -12,7 +12,6 @@ const env = {
   NEXT_PUBLIC_SUPABASE_ANON_KEY: "fake-anon-key",
   NEXT_PUBLIC_SITE_URL: `http://localhost:${APP_PORT}`,
   AYRA_NEXT_DIST_DIR: ".next-e2e-supabase",
-  NEXT_PUBLIC_AYRA_AUTH_DEBUG: "1",
 };
 delete env.AYRA_E2E_AUTH_MOCK;
 delete env.NEXT_PUBLIC_AYRA_E2E_AUTH_MOCK;

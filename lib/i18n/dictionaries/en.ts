@@ -2327,7 +2327,6 @@ export const en: Dictionary = {
     continueRetryBtn: "Try again",
     continueNoRowTitle: "Profile not found on the server",
     continueNoRowText: "Onboarding is done, but the server did not save your profile. Please try again a bit later.",
-    continueErrorDetails: "Technical details",
     continueAsGuestBtn: "Continue without login",
     showDiagnostics: "Show diagnostics",
     diagnosticsTitle: "Diagnostics",
