@@ -66,8 +66,8 @@ test.describe("One character everywhere", () => {
     await page.goto("/profile");
     await expect(page.locator("main [data-character]").first()).toBeVisible();
     const profile = await allCharacters(page);
-    // sidebar + top bar + stage front and back
-    expect(profile.length).toBeGreaterThanOrEqual(4);
+    // sidebar + top bar + the profile hero
+    expect(profile.length).toBeGreaterThanOrEqual(3);
     for (const c of profile) expect(c.look, c.where).toBe(CUSTOM);
 
     // Wardrobe: equip an item -> the same gear everywhere immediately, look unchanged

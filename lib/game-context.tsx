@@ -100,6 +100,7 @@ interface GameContextType {
   setAiConsent: (consent: boolean) => void;
   updateAvatarAppearance: (appearance: AvatarAppearance) => void;
   updateMinorMode: (minorMode: boolean) => void;
+  updateTimezone: (timezone: string) => void;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -319,6 +320,16 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       profile: {
         ...prev.profile,
         minorMode,
+      },
+    }));
+  }, []);
+
+  const updateTimezone = useCallback((timezone: string) => {
+    setGameState((prev) => ({
+      ...prev,
+      profile: {
+        ...prev.profile,
+        timezone,
       },
     }));
   }, []);
@@ -665,6 +676,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         setAiConsent,
         updateAvatarAppearance,
         updateMinorMode,
+        updateTimezone,
       }}
     >
       {children}

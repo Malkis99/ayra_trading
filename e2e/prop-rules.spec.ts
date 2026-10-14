@@ -121,7 +121,7 @@ test.describe("T6d Prop Rules Tracker E2E Flow", () => {
 
     // 10. Verify Export JSON contains propRules
     await page.goto("/profile");
-    await page.click("button:has-text('Статистика')");
+    await page.getByRole("tab", { name: "Настройки" }).click();
     const downloadPromise = page.waitForEvent("download");
     await page.click("button:has-text('Экспортировать мои данные (JSON)')");
     const download = await downloadPromise;
