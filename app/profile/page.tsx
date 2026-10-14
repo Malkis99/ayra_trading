@@ -20,18 +20,30 @@ import type { SlotName } from "@/lib/items";
 const PROFILE_TABS = ["overview", "stats", "wardrobe", "achievements", "edit"] as const;
 type ProfileTab = (typeof PROFILE_TABS)[number];
 
+function isTab(v: string | null): v is ProfileTab {
+  return !!v && (PROFILE_TABS as readonly string[]).includes(v);
+}
+
 /** ?tab= value -> tab; links from before this layout still work (settings -> edit, character -> wardrobe). */
 function tabFromParam(v: string | null): ProfileTab {
   if (v === "settings") return "edit";
   if (v === "character") return "wardrobe";
-  return v && (PROFILE_TABS as readonly string[]).includes(v) ? (v as ProfileTab) : "overview";
+  return isTab(v) ? v : "overview";
+}
+
+/** URL of a tab; the editor remembers where it was opened from (?from=), so "Back" returns there. */
+function tabUrl(pathname: string, tab: ProfileTab, from?: ProfileTab): string {
+  if (tab === "overview") return pathname;
+  if (tab === "edit" && from && from !== "edit" && from !== "overview") return `${pathname}?tab=edit&from=${from}`;
+  return `${pathname}?tab=${tab}`;
 }
 
 type Pending = { kind: "tab"; tab: ProfileTab } | { kind: "href"; href: string };
 
 /**
- * Profile: tabs on top; below, the character stage on the left (sticky, visible on every tab, so there is no second
- * character anywhere) and one wide panel with the active tab on the right. On phones: stage, tabs, panel.
+ * Profile: sticky tabs on top; below, the character stage on the left (sticky, visible on every tab, so there is
+ * no second character anywhere) and one wide panel with the active tab on the right. On phones: stage, tabs, panel.
+ * Every tab change is a history entry (?tab=), so the browser Back button and reload work.
  */
 export default function ProfilePage() {
   const { dict, showToast } = useApp();
@@ -40,13 +52,15 @@ export default function ProfilePage() {
   const pathname = usePathname();
   const params = useSearchParams();
   const tab = tabFromParam(params.get("tab"));
+  const fromParam = params.get("from");
+  const editFrom: ProfileTab = isTab(fromParam) && fromParam !== "edit" ? fromParam : "overview";
   const t = dict.profile.tabsV3;
   const c = dict.profile.characterV2;
 
   // Appearance draft: shown on the stage at once, saved with "Save"
   const saved = gameState.profile.appearance;
   const [draft, setDraft] = useState<AvatarAppearance>(saved);
-  const dirty = !sameAppearance(draft, saved);
+  const appearanceDirty = !sameAppearance(draft, saved);
   const savedKey = `${saved.skinTone}|${saved.hairstyle}|${saved.hairColor}|${saved.outfit}`;
   const lastSavedKey = useRef(savedKey);
   useEffect(() => {
@@ -62,28 +76,50 @@ export default function ProfilePage() {
     showToast(c.saved);
   }, [draft, saved.stageBackground, updateAvatarAppearance, showToast, c.saved]);
 
+  // Edit profile form: unsaved changes are reported here so leaving asks first
+  const [editDirty, setEditDirty] = useState(false);
+  const saveEditRef = useRef<(() => Promise<boolean>) | null>(null);
+
   const [slot, setSlot] = useState<SlotName | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
 
+  /** What would be lost by leaving the current tab. */
+  const leavingDirty = (tab === "wardrobe" && appearanceDirty) || (tab === "edit" && editDirty);
+
   const switchTab = useCallback(
-    (next: ProfileTab) => router.replace(next === "overview" ? pathname : `${pathname}?tab=${next}`, { scroll: false }),
-    [router, pathname]
+    (next: ProfileTab) => router.push(tabUrl(pathname, next, tab), { scroll: false }),
+    [router, pathname, tab]
   );
   const go = useCallback(
     (next: ProfileTab) => {
       if (next === tab) return;
-      if (tab === "wardrobe" && dirty) {
+      if (leavingDirty) {
         setPending({ kind: "tab", tab: next });
         return;
       }
       switchTab(next);
     },
-    [tab, dirty, switchTab]
+    [tab, leavingDirty, switchTab]
   );
+  const exitEditor = useCallback(() => go(editFrom), [go, editFrom]);
 
-  // Unsaved appearance: app links (sidebar, top bar) ask first; closing or reloading the page gets the browser prompt
+  // Esc closes the editor (unless a dialog or an open list handles it first)
   useEffect(() => {
-    if (!dirty) return;
+    if (tab !== "edit") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (document.querySelector('[role="dialog"], [role="listbox"]')) return;
+      e.preventDefault();
+      exitEditor();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tab, exitEditor]);
+
+  // Unsaved changes: app links (sidebar, top bar) ask first; closing or reloading the page gets the browser prompt
+  const anyDirty = appearanceDirty || editDirty;
+  useEffect(() => {
+    if (!anyDirty) return;
     const onClick = (e: MouseEvent) => {
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       const a = (e.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
@@ -104,23 +140,41 @@ export default function ProfilePage() {
       document.removeEventListener("click", onClick, true);
       window.removeEventListener("beforeunload", onBeforeUnload);
     };
-  }, [dirty, pathname]);
+  }, [anyDirty, pathname]);
 
   const proceed = (p: Pending) => {
     setPending(null);
     if (p.kind === "tab") switchTab(p.tab);
     else router.push(p.href);
   };
+  const discardAndProceed = (p: Pending) => {
+    setDraft({ ...saved });
+    setEditDirty(false);
+    proceed(p);
+  };
+  const saveAndProceed = async (p: Pending) => {
+    if (appearanceDirty) saveDraft();
+    if (editDirty && saveEditRef.current) {
+      const ok = await saveEditRef.current();
+      if (!ok) {
+        // e.g. nickname refused: stay in the editor, the reason is shown under the field
+        setPending(null);
+        return;
+      }
+    }
+    proceed(p);
+  };
 
   const btn = "inline-flex min-h-[44px] items-center justify-center rounded-xl px-4 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi";
 
   return (
     <div className="mx-auto grid w-full max-w-[1440px] grid-cols-1 gap-4 lg:grid-cols-[minmax(0,11fr)_minmax(0,9fr)] lg:gap-5">
-      <div className="order-2 min-w-0 lg:order-none lg:col-span-2">
+      {/* Sticky tabs right under the site top bar: graphite, light blur, thin bottom line */}
+      <div className="sticky -top-4 z-20 order-2 -mx-4 min-w-0 bg-ink/85 px-4 backdrop-blur-md md:-top-6 md:-mx-6 md:px-6 lg:order-none lg:col-span-2" data-testid="profile-tabs">
         <Tabs idPrefix="profile" label={t.label} value={tab} onChange={go} items={PROFILE_TABS.map((id) => ({ id, label: t[id] }))} />
       </div>
 
-      <aside className="order-1 min-w-0 lg:sticky lg:top-4 lg:order-none lg:self-start">
+      <aside className="order-1 min-w-0 lg:sticky lg:top-[64px] lg:order-none lg:self-start">
         <CharacterStage appearance={draft} onSlotClick={setSlot} selectedSlot={slot} />
       </aside>
 
@@ -135,12 +189,12 @@ export default function ProfilePage() {
         {tab === "stats" && <StatsTab />}
         {tab === "wardrobe" && (
           <div className="space-y-4">
-            <AppearanceSection draft={draft} onChange={setDraft} dirty={dirty} onSave={saveDraft} onReset={() => setDraft({ ...saved })} />
+            <AppearanceSection draft={draft} onChange={setDraft} dirty={appearanceDirty} onSave={saveDraft} onReset={() => setDraft({ ...saved })} />
             <WardrobeTab />
           </div>
         )}
         {tab === "achievements" && <AchievementsTab />}
-        {tab === "edit" && <EditProfileTab />}
+        {tab === "edit" && <EditProfileTab onExit={exitEditor} onDirtyChange={setEditDirty} saveRef={saveEditRef} />}
       </section>
 
       <SlotPicker slot={slot} onClose={() => setSlot(null)} />
@@ -157,30 +211,16 @@ export default function ProfilePage() {
             <button type="button" onClick={() => setPending(null)} className={`${btn} text-mu hover:bg-s2 hover:text-tx`}>
               {c.stay}
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setDraft({ ...saved });
-                if (pending) proceed(pending);
-              }}
-              className={`${btn} border border-edge text-tx hover:border-short/60 hover:text-short`}
-            >
+            <button type="button" onClick={() => pending && discardAndProceed(pending)} className={`${btn} border border-edge text-tx hover:border-short/60 hover:text-short`}>
               {c.discard}
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                saveDraft();
-                if (pending) proceed(pending);
-              }}
-              className={`${btn} bg-pri text-white hover:brightness-110`}
-            >
+            <button type="button" onClick={() => pending && void saveAndProceed(pending)} className={`${btn} bg-pri text-white hover:brightness-110`}>
               {c.save}
             </button>
           </div>
         }
       >
-        <p className="text-sm text-mu">{c.unsavedText}</p>
+        <p className="text-sm text-mu">{tab === "edit" ? dict.profile.edit.changed : c.unsavedText}</p>
       </Modal>
     </div>
   );

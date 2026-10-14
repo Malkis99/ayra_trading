@@ -283,4 +283,99 @@ test.describe("Profile", () => {
     await expect(form.getByTestId("edit-nickname")).toBeDisabled();
     await expect(form).toContainText("Ник можно сменить через 14 дн.");
   });
+
+  test("editor exit: Back returns to the tab it was opened from, Close and Esc too; browser Back works; unsaved changes ask", async ({ page }) => {
+    await freshProfile(page);
+    // pencil in the overview -> editor -> Back -> overview
+    await page.getByTestId("overview-header").getByRole("button", { name: "Редактировать профиль" }).click();
+    await expect(page).toHaveURL(/tab=edit/);
+    await page.getByTestId("edit-profile").getByRole("button", { name: "Назад" }).click();
+    await expect(page.getByRole("tab", { name: "Обзор" })).toHaveAttribute("aria-selected", "true");
+
+    // from Statistics: Close (X) returns to Statistics
+    await page.getByRole("tab", { name: "Статистика" }).click();
+    await page.getByRole("tab", { name: "Редактировать профиль" }).click();
+    await expect(page).toHaveURL(/tab=edit&from=stats/);
+    await page.getByRole("button", { name: "Закрыть редактор" }).click();
+    await expect(page.getByRole("tab", { name: "Статистика" })).toHaveAttribute("aria-selected", "true");
+
+    // Esc
+    await page.getByRole("tab", { name: "Редактировать профиль" }).click();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("tab", { name: "Статистика" })).toHaveAttribute("aria-selected", "true");
+
+    // browser Back and reload
+    await page.getByRole("tab", { name: "Редактировать профиль" }).click();
+    await page.goBack();
+    await expect(page.getByRole("tab", { name: "Статистика" })).toHaveAttribute("aria-selected", "true");
+    await page.goForward();
+    await expect(page.getByRole("tab", { name: "Редактировать профиль" })).toHaveAttribute("aria-selected", "true");
+    await page.reload();
+    await expect(page.getByRole("tab", { name: "Редактировать профиль" })).toHaveAttribute("aria-selected", "true");
+
+    // unsaved changes: Stay keeps the editor, Discard leaves
+    const form = page.getByTestId("edit-profile");
+    await form.getByLabel("О себе").fill("Черновик");
+    await form.getByRole("button", { name: "Назад" }).click();
+    const dialog = page.getByTestId("unsaved-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Остаться" }).last().click();
+    await expect(form.getByLabel("О себе")).toHaveValue("Черновик");
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Отбросить" }).click();
+    await expect(page.getByRole("tab", { name: "Статистика" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("editor: Save in the unsaved dialog saves and leaves", async ({ page }) => {
+    await freshProfile(page, "/profile?tab=edit");
+    const form = page.getByTestId("edit-profile");
+    await form.getByLabel("О себе").fill("Сохранено из диалога");
+    await page.getByRole("tab", { name: "Обзор" }).click();
+    await page.getByTestId("unsaved-dialog").getByRole("button", { name: "Сохранить" }).click();
+    await expect(page.getByTestId("profile-bio")).toHaveText("Сохранено из диалога");
+  });
+
+  for (const [w, h] of [
+    [1440, 900],
+    [360, 740],
+  ] as const) {
+    test(`sticky tabs at ${w}px: stay right under the top bar while scrolling`, async ({ page }) => {
+      await page.setViewportSize({ width: w, height: h });
+      await freshProfile(page, "/profile?tab=stats");
+      const topbarBottom = await page.locator("header").first().evaluate((el) => el.getBoundingClientRect().bottom);
+      await page.evaluate(() => document.querySelector("main")!.scrollBy(0, 900));
+      await page.waitForTimeout(200);
+      const tabs = await page.getByTestId("profile-tabs").boundingBox();
+      expect(Math.abs(tabs!.y - topbarBottom)).toBeLessThanOrEqual(1);
+      await expect(page.getByRole("tab", { name: "Статистика" })).toBeInViewport();
+      if (w === 1440) {
+        // the sticky stage is not covered by the tabs
+        const stage = await page.getByTestId("profile-stage").boundingBox();
+        expect(stage!.y).toBeGreaterThanOrEqual(tabs!.y + tabs!.height - 1);
+      }
+    });
+  }
+
+  test("wardrobe appearance: only hair colour and hairstyle (no skin tone, no outfit style)", async ({ page }) => {
+    await freshProfile(page, "/profile?tab=wardrobe");
+    const section = page.getByTestId("appearance-section");
+    await expect(section.getByText("Цвет волос", { exact: false })).toBeVisible();
+    await expect(section.getByText("Причёска", { exact: false })).toBeVisible();
+    await expect(section.getByText("Тон кожи", { exact: false })).toHaveCount(0);
+    await expect(section.getByText("Стиль одежды", { exact: false })).toHaveCount(0);
+    await expect(section.getByRole("button", { name: "Глубокий тёмный" })).toHaveCount(0);
+    await expect(section.getByRole("button", { name: /Багровый рассвет/ })).toHaveCount(0);
+  });
+
+  test("overview social block: followers, following and profile likes are real zeros; lists show the empty state", async ({ page }) => {
+    await freshProfile(page);
+    const social = page.getByTestId("social-stats");
+    await expect(social).toContainText("Подписчики");
+    await expect(social).toContainText("Подписки");
+    await expect(social).toContainText("Лайки профиля");
+    for (const k of ["followers", "following", "likes"]) await expect(page.getByTestId(`social-${k}`)).toHaveText("0");
+    await social.getByRole("button", { name: /Подписчики/ }).click();
+    await expect(page.getByTestId("social-list")).toContainText("Появится вместе с Сообществом");
+  });
 });
