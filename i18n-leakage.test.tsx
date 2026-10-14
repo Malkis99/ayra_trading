@@ -57,7 +57,7 @@ describe("i18n Leakage rendered page tests", () => {
 
       const { container } = renderWithProviders(<ProfilePage />, "ru");
       const clone = container.cloneNode(true) as HTMLElement;
-      clone.querySelectorAll("style, script, [data-i18n-ignore]").forEach((el) => el.remove());
+      clone.querySelectorAll("style, script").forEach((el) => el.remove());
       const text = clone.textContent || "";
 
       let cleaned = text;

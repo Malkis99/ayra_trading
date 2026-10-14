@@ -106,4 +106,71 @@ test.describe("Profile", () => {
       expect(overflow, name).toBeLessThanOrEqual(0);
     }
   });
+
+  test("wardrobe: title and frame are chosen in two simple rows", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await freshProfile(page);
+    await page.getByRole("tab", { name: "Гардероб" }).click();
+    const styling = page.getByTestId("wardrobe-styling");
+    const frames = styling.getByRole("radiogroup", { name: "Рамка" });
+    await frames.getByRole("radio", { name: "Фиолетовая" }).click();
+    await expect(frames.getByRole("radio", { name: "Фиолетовая" })).toHaveAttribute("aria-checked", "true");
+    await expect(styling.getByRole("radiogroup", { name: "Титул" }).getByRole("radio", { name: /Новичок пути/ })).toHaveAttribute("aria-checked", "true");
+    // locked titles are shown, but cannot be chosen
+    await expect(styling.getByText("Легенда")).toBeVisible();
+    await expect(styling.getByRole("radio", { name: "Легенда" })).toHaveCount(0);
+  });
+
+  test("settings: my posts can be deleted after confirmation; time zone is shown in Russian", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await freshProfile(page);
+    await page.evaluate(() => {
+      const st = JSON.parse(localStorage.getItem("ayra_demo_v1") || "{}");
+      st.posts = ["Первый разбор недели", "Второй пост"];
+      localStorage.setItem("ayra_demo_v1", JSON.stringify(st));
+    });
+    await page.goto("/profile?tab=settings");
+    const list = page.getByTestId("my-posts");
+    await expect(list.getByRole("listitem")).toHaveCount(2);
+    await list.getByRole("listitem").first().getByRole("button", { name: "Удалить" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Отмена" }).last().click();
+    await expect(list.getByRole("listitem")).toHaveCount(2);
+    await list.getByRole("listitem").first().getByRole("button", { name: "Удалить" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Удалить" }).click();
+    await expect(list.getByRole("listitem")).toHaveCount(1);
+    await expect(list).toContainText("Второй пост");
+
+    const tz = page.getByLabel("Часовой пояс");
+    await expect(tz).toContainText("UTC");
+    await expect(tz).not.toContainText("/");
+  });
+
+  test("unsaved character changes: Stay, Discard and Save in the dialog (tabs and app links)", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await freshProfile(page);
+    const before = await look(page);
+    await page.getByRole("tab", { name: "Персонаж" }).click();
+    await page.getByRole("button", { name: "Дреды" }).click();
+
+    // Stay
+    await page.getByRole("tab", { name: "Гардероб" }).click();
+    const dialog = page.getByTestId("unsaved-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Остаться" }).last().click();
+    await expect(page.getByRole("tab", { name: "Персонаж" })).toHaveAttribute("aria-selected", "true");
+
+    // Discard
+    await page.getByRole("tab", { name: "Гардероб" }).click();
+    await dialog.getByRole("button", { name: "Отбросить" }).click();
+    await expect(page.getByRole("tab", { name: "Гардероб" })).toHaveAttribute("aria-selected", "true");
+    expect(await look(page)).toBe(before);
+
+    // Save, leaving through a sidebar link
+    await page.getByRole("tab", { name: "Персонаж" }).click();
+    await page.getByRole("button", { name: "Дреды" }).click();
+    await page.locator("aside").getByRole("link", { name: "Журнал" }).click();
+    await dialog.getByRole("button", { name: "Сохранить" }).click();
+    await page.waitForURL((u) => u.pathname === "/journal");
+    await expect(page.locator("aside [data-character]").first()).toHaveAttribute("data-character", /hair_dreads/);
+  });
 });

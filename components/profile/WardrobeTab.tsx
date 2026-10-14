@@ -8,6 +8,7 @@ import { cn } from "@/components/ui/cn";
 import { ITEMS, SLOT_KEY_MAP, type SlotName } from "@/lib/items";
 import { filterWardrobe, itemState, wardrobeSlots, type WardrobeStatus } from "@/lib/profile";
 import { formatString } from "@/lib/i18n";
+import { StylingRows } from "./StylingRows";
 
 const STATUSES: WardrobeStatus[] = ["all", "equipped", "available", "locked"];
 
@@ -33,6 +34,8 @@ export function WardrobeTab() {
 
   return (
     <div className="space-y-4">
+      <StylingRows />
+
       <div className="space-y-2">
         <div role="group" aria-label={w2.typeLabel} className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <button type="button" aria-pressed={slot === "all"} onClick={() => setSlot("all")} className={chip(slot === "all")}>

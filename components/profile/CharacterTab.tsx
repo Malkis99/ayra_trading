@@ -23,7 +23,14 @@ function Section({ title, children }: { title: string; children: React.ReactNode
  * Simple appearance editor: big preview on the left, categories on the right. Changes show in the preview at once
  * and are applied to the character everywhere only on "Save". Activity never changes the body (project rule).
  */
-export function CharacterTab({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => void }) {
+export function CharacterTab({
+  onDirtyChange,
+  saveRef,
+}: {
+  onDirtyChange?: (dirty: boolean) => void;
+  /** Lets the page save the draft from the "unsaved changes" dialog. */
+  saveRef?: React.MutableRefObject<(() => void) | null>;
+}) {
   const { dict, showToast } = useApp();
   const { gameState, updateAvatarAppearance } = useGame();
   const c = dict.profile.characterV2;
@@ -39,6 +46,15 @@ export function CharacterTab({ onDirtyChange }: { onDirtyChange?: (dirty: boolea
     updateAvatarAppearance(draft);
     showToast(c.saved);
   };
+  useEffect(() => {
+    if (!saveRef) return;
+    saveRef.current = save;
+    return () => {
+      saveRef.current = null;
+    };
+  });
+  // Leaving the tab with an unsaved draft: the page asks; here we only report "clean" on unmount
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   const swatch = (selected: boolean) =>
     cn(

@@ -8,6 +8,8 @@ import {
   nicknameProblem,
   sameAppearance,
   timeZoneOptions,
+  timeZoneLabel,
+  localizedTimeZoneOptions,
   wardrobeSlots,
 } from "./profile";
 import { ITEMS } from "./items";
@@ -64,5 +66,16 @@ describe("profile helpers", () => {
     const zones = timeZoneOptions("Mars/Base");
     expect(zones[0]).toBe("Mars/Base");
     expect(zones).toContain("UTC");
+  });
+
+  it("time zones: localised labels with offset, the stored value stays the IANA id", () => {
+    const d = new Date("2026-01-15T12:00:00Z");
+    expect(timeZoneLabel("Asia/Tbilisi", "ru", d)).toMatch(/^Грузия.* · UTC\+4$/);
+    expect(timeZoneLabel("UTC", "ru", d)).toBe("UTC+0");
+    const opts = localizedTimeZoneOptions("Europe/Paris", "ru", d);
+    const paris = opts.find((o) => o.value === "Europe/Paris");
+    expect(paris?.label).toMatch(/UTC\+1$/);
+    expect(opts.filter((o) => o.label === paris?.label)).toHaveLength(1);
+    expect(opts.every((o) => !/[A-Za-z]{3,}/.test(o.label.replace("UTC", "")))).toBe(true);
   });
 });

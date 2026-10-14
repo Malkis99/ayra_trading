@@ -31,11 +31,8 @@ export function CosmicStage({ children, className }: { children: React.ReactNode
 }
 
 export function titleName(dict: ReturnType<typeof useApp>["dict"], titleId: string): string {
-  const t = dict.titles as unknown as Record<string, string>;
-  if (titleId === "novice") return t.titleNovice;
-  if (titleId === "disciplined") return t.titleDisciplined;
-  if (titleId === "strategist") return t.titleStrategist;
-  return titleId;
+  const byId = dict.titles.byId as Record<string, string>;
+  return byId[titleId] || byId.novice;
 }
 
 type Props = { onEditCharacter: () => void; onOpenWardrobe: () => void };

@@ -105,3 +105,56 @@ export function timeZoneOptions(current: string): string[] {
   if (current && !list.includes(current)) list = [current, ...list];
   return list;
 }
+
+/** UTC offset of a zone right now, e.g. "UTC+4", "UTC−3:30", "UTC+0". */
+export function timeZoneOffsetLabel(timeZone: string, date: Date = new Date()): string {
+  try {
+    const part = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "shortOffset" })
+      .formatToParts(date)
+      .find((p) => p.type === "timeZoneName")?.value;
+    const m = part?.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
+    if (!m) return "UTC+0";
+    return `UTC${m[1] === "-" ? "−" : "+"}${Number(m[2])}${m[3] && m[3] !== "00" ? `:${m[3]}` : ""}`;
+  } catch {
+    return "UTC";
+  }
+}
+
+/** Localised zone name ("Грузия, стандартное время" / "Central European Time") with its UTC offset. */
+export function timeZoneLabel(timeZone: string, lang: string, date: Date = new Date()): string {
+  const offset = timeZoneOffsetLabel(timeZone, date);
+  let name = "";
+  try {
+    name =
+      new Intl.DateTimeFormat(lang, { timeZone, timeZoneName: "longGeneric" }).formatToParts(date).find((p) => p.type === "timeZoneName")?.value ?? "";
+  } catch {
+    name = "";
+  }
+  // Without a localised name Intl falls back to "GMT+04:00": show the offset only
+  if (!name || /^(GMT|UTC)/.test(name)) return offset;
+  return `${name} · ${offset}`;
+}
+
+function offsetMinutes(label: string): number {
+  const m = label.match(/UTC([+−])(\d+)(?::(\d+))?/);
+  if (!m) return 0;
+  const v = Number(m[2]) * 60 + Number(m[3] ?? 0);
+  return m[1] === "−" ? -v : v;
+}
+
+/**
+ * Time zone choices with localised labels. The stored value stays the IANA id. Zones that would show the same
+ * label (same region and offset, e.g. Berlin and Paris) are merged; the current zone is always kept.
+ */
+export function localizedTimeZoneOptions(current: string, lang: string, date: Date = new Date()): { value: string; label: string }[] {
+  const seen = new Map<string, string>();
+  const currentLabel = timeZoneLabel(current, lang, date);
+  seen.set(currentLabel, current);
+  for (const z of timeZoneOptions(current)) {
+    const label = timeZoneLabel(z, lang, date);
+    if (!seen.has(label)) seen.set(label, z);
+  }
+  return Array.from(seen, ([label, value]) => ({ value, label })).sort(
+    (a, b) => offsetMinutes(a.label) - offsetMinutes(b.label) || a.label.localeCompare(b.label, lang)
+  );
+}

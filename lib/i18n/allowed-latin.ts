@@ -8,6 +8,8 @@ export const ALLOWED_LATIN_WORDS = [
   "HTML",
   "UTF",
   "ID",
+  // time zone offsets (UTC+4)
+  "UTC",
   "Excel",
   "Google",
   // keyboard key names in shortcut hints

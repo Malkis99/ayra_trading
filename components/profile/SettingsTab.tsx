@@ -2,13 +2,14 @@
 
 import React, { useMemo, useState } from "react";
 import Link from "next/link";
-import { Download, LogIn, LogOut, Settings2, Shield, Trash2, Loader2 } from "lucide-react";
+import { Download, LogIn, LogOut, MessageSquare, Settings2, Shield, Trash2, Loader2 } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useAuth } from "@/lib/auth/auth-context";
 import { Input, Segmented, Select, Textarea, Toggle } from "@/components/ui/forms";
 import { exportProfileDataJSON } from "@/lib/stats";
-import { nicknameProblem, timeZoneOptions } from "@/lib/profile";
+import { localizedTimeZoneOptions, nicknameProblem } from "@/lib/profile";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -24,7 +25,7 @@ const BIO_MAX = 160;
 /** Profile settings: nickname and bio, language, time zone, 16–17 mode (info), notifications, export, account. */
 export function SettingsTab() {
   const { dict, lang, setLanguage, showToast } = useApp();
-  const { gameState, updateProfile, updateTimezone } = useGame();
+  const { gameState, updateProfile, updateTimezone, deletePost } = useGame();
   const { user, authState, signOut, checkNicknameAvailable, saveNickname } = useAuth();
   const s = dict.profile.settingsV2;
   const isSignedIn = authState === "authenticated";
@@ -34,7 +35,9 @@ export function SettingsTab() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const tz = gameState.profile.timezone || "UTC";
-  const zones = useMemo(() => timeZoneOptions(tz).map((z) => ({ value: z, label: z.replace(/_/g, " ") })), [tz]);
+  // Localised names ("Грузия, стандартное время · UTC+4"); the stored value stays the IANA id
+  const zones = useMemo(() => localizedTimeZoneOptions(tz, lang), [tz, lang]);
+  const [deletingPost, setDeletingPost] = useState<number | null>(null);
   const changed = nick.trim() !== gameState.name || bio !== (gameState.bio || "");
 
   const problem = nicknameProblem(nick);
@@ -116,10 +119,7 @@ export function SettingsTab() {
           value={lang}
           onChange={(v) => setLanguage(v)}
         />
-        {/* IANA time zone ids (Asia/Tbilisi) are technical names: excluded from the i18n leakage test */}
-        <div data-i18n-ignore>
-          <Select label={s.timezone} options={zones} value={tz} onChange={(v) => updateTimezone(v)} searchable />
-        </div>
+        <Select label={s.timezone} options={zones} value={tz} onChange={(v) => updateTimezone(v)} searchable />
         <div className="rounded-xl border border-line/70 bg-s2/30 p-3">
           <p className="flex items-center gap-2 text-sm font-semibold text-tx">
             <Shield size={15} className="text-vi" aria-hidden="true" />
@@ -138,6 +138,46 @@ export function SettingsTab() {
           checked={false}
           disabled
           onChange={() => {}}
+        />
+      </Card>
+
+      {/* Temporary home of "My posts" until Community has its own section */}
+      <Card title={s.postsSection}>
+        <p className="-mt-2 text-xs text-mu">{s.postsNote}</p>
+        {gameState.posts.length === 0 ? (
+          <p className="text-sm text-mu">{s.postsEmpty}</p>
+        ) : (
+          <ul className="space-y-2" data-testid="my-posts">
+            {gameState.posts.map((post, idx) => (
+              <li key={idx} className="flex items-start gap-3 rounded-xl border border-line/70 bg-s2/30 p-3">
+                <MessageSquare size={16} className="mt-0.5 shrink-0 text-vi" aria-hidden="true" />
+                <p className="min-w-0 flex-1 whitespace-pre-line break-words text-sm text-tx line-clamp-3">{post}</p>
+                <button
+                  type="button"
+                  onClick={() => setDeletingPost(idx)}
+                  aria-label={dict.profile.posts.deleteBtn}
+                  title={dict.profile.posts.deleteBtn}
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-mu transition hover:bg-short/10 hover:text-short focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
+                >
+                  <Trash2 size={16} aria-hidden="true" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <ConfirmDialog
+          isOpen={deletingPost !== null}
+          title={s.deletePostTitle}
+          description={s.deletePostText}
+          confirmLabel={dict.profile.posts.deleteBtn}
+          cancelLabel={dict.profile.wardrobe.cancelAction}
+          isDanger
+          onConfirm={() => {
+            if (deletingPost !== null) deletePost(deletingPost);
+            setDeletingPost(null);
+            showToast(dict.profile.posts.deletedToast);
+          }}
+          onCancel={() => setDeletingPost(null)}
         />
       </Card>
 
