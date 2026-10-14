@@ -27,7 +27,7 @@ for (const [w, h] of [
     await mockAuth(page);
     await page.setViewportSize({ width: w, height: h });
     await page.goto("/login");
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("вселенную AYRA");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Войди во вселенную");
 
     await expect(page.locator("aside")).toHaveCount(0);
     await expect(page.locator("nav")).toHaveCount(0);
@@ -121,3 +121,41 @@ test("signed-in top bar: coins, then the bell, then the plan chip; avatar last o
   expect(overflow).toBeLessThanOrEqual(0);
   await expectNoHorizontalScroll(page);
 });
+
+async function lineCount(page: Page, testIdOrRole: { testId?: string; heading?: boolean }) {
+  const loc = testIdOrRole.heading ? page.getByRole("heading", { level: 1 }) : page.getByTestId(testIdOrRole.testId!);
+  return loc.evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    // rects of one visual line can differ by a pixel or two (links, fonts): group them with a small tolerance
+    const tops = Array.from(range.getClientRects()).filter((r) => r.width > 0).map((r) => r.top).sort((a, b) => a - b);
+    let lines = 0;
+    let last = -Infinity;
+    for (const t of tops) {
+      if (t - last > 6) lines++;
+      last = t;
+    }
+    return lines;
+  });
+}
+
+for (const lang of ["ru", "en"] as const) {
+  test(`login texts fit in one line (${lang}): title, subtitle, consent and age note at 1440 and 768; all but the age note at 360`, async ({ page }) => {
+    await mockAuth(page);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto("/login");
+    if (lang === "en") await page.getByRole("button", { name: "EN", exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(lang === "ru" ? "Войди во вселенную" : "Enter the AYRA universe");
+    for (const [w, h] of [
+      [1440, 900],
+      [768, 1024],
+      [360, 740],
+    ] as const) {
+      await page.setViewportSize({ width: w, height: h });
+      expect(await lineCount(page, { heading: true }), `title ${w}`).toBe(1);
+      expect(await lineCount(page, { testId: "login-subtitle" }), `subtitle ${w}`).toBe(1);
+      expect(await lineCount(page, { testId: "login-consent" }), `consent ${w}`).toBe(1);
+      if (w > 360) expect(await lineCount(page, { testId: "login-age-note" }), `age note ${w}`).toBe(1);
+    }
+  });
+}

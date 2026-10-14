@@ -311,15 +311,15 @@ Message: ${errorDetails.sanitizedMessage}${
         <div className="mb-6 text-center">
           {step === "email" ? (
             <>
-              <h1 className="font-serif text-[26px] font-bold leading-tight text-tx sm:text-[28px]">{auth.loginTitle}</h1>
-              <p className="mt-2 text-sm text-mu">{auth.loginSubtitle}</p>
+              <h1 className="font-serif text-[22px] font-bold leading-tight text-tx sm:text-[28px]">{auth.loginTitle}</h1>
+              <p data-testid="login-subtitle" className="mt-2 text-sm text-mu">{auth.loginSubtitle}</p>
             </>
           ) : (
             <>
               <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl border border-vi/40 bg-vi/15 text-vi motion-safe:animate-[ayraPop_300ms_ease-out]">
                 <MailCheck className="h-6 w-6" aria-hidden="true" />
               </div>
-              <h1 className="font-serif text-[26px] font-bold leading-tight text-tx">{auth.checkMailTitle}</h1>
+              <h1 className="font-serif text-[22px] font-bold leading-tight text-tx sm:text-[28px]">{auth.checkMailTitle}</h1>
               <p className="mt-2 break-words text-sm text-mu">{formatString(auth.enterOtpSubtitle, { email })}</p>
             </>
           )}
@@ -408,7 +408,7 @@ Message: ${errorDetails.sanitizedMessage}${
               onChange={setConsentAccepted}
               className="text-left"
               label={
-                <span className="text-xs text-mu">
+                <span data-testid="login-consent" className="text-xs text-mu">
                   {auth.consentCheckbox}{" "}
                   <Link href="/legal/terms" target="_blank" className="text-vi underline hover:text-tx">
                     {auth.termsLink}
@@ -432,7 +432,7 @@ Message: ${errorDetails.sanitizedMessage}${
               )}
             </button>
 
-            <p className="text-center text-[11px] leading-snug text-mu/80">{auth.ageNote}</p>
+            <p data-testid="login-age-note" className="text-center text-[11px] leading-snug text-mu/80">{auth.ageNote}</p>
           </form>
         ) : (
           <form onSubmit={handleVerifyOtp} className="space-y-4">

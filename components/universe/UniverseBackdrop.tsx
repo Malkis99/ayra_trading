@@ -26,23 +26,20 @@ export function UniverseBackdrop({ className }: { className?: string }) {
       Array.from({ length: UNIVERSE_STARS_DESKTOP }, (_, i) => ({
         left: seeded(i, 1) * 100,
         top: seeded(i, 2) * 100,
-        size: 1 + seeded(i, 3) * 2,
-        delay: -seeded(i, 4) * 9,
-        dur: 6 + seeded(i, 5) * 8,
+        size: 1 + seeded(i, 3) * 0.8,
+        delay: -seeded(i, 4) * 60,
+        dur: 40 + seeded(i, 5) * 40,
         mobile: i < UNIVERSE_STARS_MOBILE,
       })),
     []
   );
 
   return (
-    <div aria-hidden="true" className={cn("pointer-events-none fixed inset-0 -z-0 overflow-hidden bg-[#0b0a10]", className)}>
-      {/* nebula */}
+    <div aria-hidden="true" className={cn("pointer-events-none fixed inset-0 -z-0 overflow-hidden bg-[#0c0b11]", className)}>
+      {/* one wide, barely visible violet tone behind the card (max ~8% opacity), no visible edges */}
       <div
         className="absolute inset-0"
-        style={{
-          background:
-            "radial-gradient(60% 45% at 50% 45%, rgba(80,52,143,0.38), transparent 70%), radial-gradient(40% 35% at 18% 20%, rgba(163,138,209,0.14), transparent 70%), radial-gradient(45% 40% at 85% 85%, rgba(80,52,143,0.28), transparent 70%), linear-gradient(180deg, #0b0a10 0%, #100d1a 55%, #0b0a10 100%)",
-        }}
+        style={{ background: "radial-gradient(ellipse 70vmax 55vmax at 50% 50%, rgba(80,52,143,0.08) 0%, rgba(80,52,143,0.04) 45%, rgba(80,52,143,0) 100%)" }}
       />
       {/* stars */}
       {!reduced && (
@@ -50,15 +47,14 @@ export function UniverseBackdrop({ className }: { className?: string }) {
           {stars.map((s, i) => (
             <span
               key={i}
-              className={cn("absolute rounded-full bg-[#d9cdf3] motion-safe:animate-[ayraTwinkle_var(--dur)_ease-in-out_infinite]", !s.mobile && "hidden md:block")}
+              className={cn("absolute rounded-full bg-[#d9cdf3] motion-safe:animate-[ayraStarDrift_var(--dur)_linear_infinite_alternate]", !s.mobile && "hidden md:block")}
               style={
                 {
                   left: `${s.left}%`,
                   top: `${s.top}%`,
                   width: s.size,
                   height: s.size,
-                  opacity: 0.5,
-                  boxShadow: "0 0 6px rgba(190,168,235,0.8)",
+                  opacity: 0.25 + seeded(i, 6) * 0.25,
                   animationDelay: `${s.delay}s`,
                   "--dur": `${s.dur}s`,
                 } as React.CSSProperties
@@ -67,8 +63,16 @@ export function UniverseBackdrop({ className }: { className?: string }) {
           ))}
         </div>
       )}
-      {/* vignette */}
-      <div className="absolute inset-0 bg-[radial-gradient(120%_90%_at_50%_50%,transparent_55%,rgba(0,0,0,0.55))]" />
+      {/* very faint grain: dithers the dark gradients so no rings/bands show on large screens */}
+      <div
+        className="absolute inset-0 opacity-[0.035] mix-blend-overlay"
+        style={{
+          backgroundImage:
+            "url(\"data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 width=%27160%27 height=%27160%27><filter id=%27n%27><feTurbulence type=%27fractalNoise%27 baseFrequency=%270.9%27 numOctaves=%272%27 stitchTiles=%27stitch%27/></filter><rect width=%27100%25%27 height=%27100%25%27 filter=%27url(%23n)%27/></svg>\")",
+        }}
+      />
+      {/* soft vignette towards the edges */}
+      <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 85vmax 70vmax at 50% 50%, rgba(0,0,0,0) 40%, rgba(0,0,0,0.45) 100%)" }} />
     </div>
   );
 }
@@ -83,12 +87,11 @@ export function UniverseScreen({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** Glass card used on the sign-in pages: blur, thin violet border, soft glow behind, gentle rise on appear. */
+/** Glass card used on the sign-in pages: blur, thin violet border, very soft shadow, gentle rise on appear. */
 export function UniverseCard({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className="relative w-full max-w-[420px] motion-safe:animate-[ayraRise_500ms_ease-out]">
-      <div aria-hidden="true" className="absolute -inset-6 rounded-[32px] bg-pri/25 blur-3xl" />
-      <div className={cn("relative rounded-2xl border border-vi/30 bg-[#15131d]/70 p-6 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.8)] backdrop-blur-xl sm:p-8", className)}>
+    <div className="relative w-full max-w-[440px] motion-safe:animate-[ayraRise_500ms_ease-out]">
+      <div className={cn("relative rounded-2xl border border-vi/25 bg-[#15131d]/75 p-5 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.9),0_0_0_1px_rgba(163,138,209,0.04)] backdrop-blur-xl sm:p-8", className)}>
         {children}
       </div>
     </div>
