@@ -12,11 +12,12 @@ import PlansPage from "./app/plans/page";
 import { AddModal } from "./components/AddModal";
 import { ALLOWED_LATIN_WORDS } from "./lib/i18n/allowed-latin";
 
-// Mock next/navigation
+// Mock next/navigation (the search string can be set per test to open a profile tab)
+let mockSearch = "";
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   usePathname: () => "/",
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(mockSearch),
 }));
 
 function renderWithProviders(ui: React.ReactNode, lang: "ru" | "en" = "ru") {
@@ -37,20 +38,22 @@ function renderWithProviders(ui: React.ReactNode, lang: "ru" | "en" = "ru") {
 describe("i18n Leakage rendered page tests", () => {
   beforeEach(() => {
     localStorage.clear();
+    mockSearch = "";
   });
 
   it("renders ProfilePage in RU (all tabs) without disallowed English words in visible text", () => {
     const allowed = new Set([
       ...ALLOWED_LATIN_WORDS,
       "TraderOne", // Default Latin user nickname
+      // Quest name from lib/quests.ts (trading term, also shown on Home)
+      "Daily",
+      "Bias",
     ]);
 
-    const tabNames = ["Overview", "Wardrobe", "Achievements", "Chronicle", "Posts", "Stats"];
+    const tabs = ["overview", "character", "wardrobe", "achievements", "settings"];
 
-    tabNames.forEach((_, tabIdx) => {
-      // Mock window search param for tab switching
-      delete (window as any).location;
-      (window as any).location = new URL(`http://localhost/profile?tab=${["overview", "wardrobe", "achievements", "chronicle", "posts", "stats"][tabIdx]}`);
+    tabs.forEach((tab) => {
+      mockSearch = `tab=${tab}`;
 
       const { container } = renderWithProviders(<ProfilePage />, "ru");
       const clone = container.cloneNode(true) as HTMLElement;
@@ -64,15 +67,19 @@ describe("i18n Leakage rendered page tests", () => {
       });
 
       const latinMatches = cleaned.match(/\b[A-Za-z]{2,}\b/g) || [];
-      expect(latinMatches).toEqual([]);
+      expect(latinMatches, tab).toEqual([]);
     });
   });
 
-  it("renders ProfilePage in EN without Cyrillic characters", () => {
-    const { container } = renderWithProviders(<ProfilePage />, "en");
-    const text = container.textContent || "";
-    const cyrillicMatches = text.match(/[а-яА-ЯёЁ]/g) || [];
-    expect(cyrillicMatches).toEqual([]);
+  it("renders ProfilePage in EN (all tabs) without Cyrillic characters", () => {
+    for (const tab of ["overview", "character", "wardrobe", "achievements", "settings"]) {
+      mockSearch = `tab=${tab}`;
+      const { container, unmount } = renderWithProviders(<ProfilePage />, "en");
+      const text = container.textContent || "";
+      const cyrillicMatches = text.match(/[а-яА-ЯёЁ]/g) || [];
+      expect(cyrillicMatches, tab).toEqual([]);
+      unmount();
+    }
   });
 
   it("renders HomePage, QuestsPage, PlansPage and AddModal in EN without Cyrillic", () => {
