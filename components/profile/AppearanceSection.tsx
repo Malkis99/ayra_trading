@@ -123,7 +123,7 @@ export function AppearanceSection({ draft, onChange, dirty, onSave, onReset }: P
 
       <div>
         <h3 className={h}>{dict.avatar.outfitLabel}</h3>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 min-[1700px]:grid-cols-3">
           {OUTFITS.map((o) => {
             const selected = draft.outfit === o.id;
             return (

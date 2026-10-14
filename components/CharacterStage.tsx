@@ -49,6 +49,23 @@ export const SLOT_ICONS: Record<string, LucideIcon> = {
 
 const TURN_STEP = 45;
 
+/** Cut-corner (octagon) shape of the equipment cells, as in the reference. */
+const CELL_SHAPE = "[clip-path:polygon(14px_0,calc(100%-14px)_0,100%_14px,100%_calc(100%-14px),calc(100%-14px)_100%,14px_100%,0_calc(100%-14px),0_14px)]";
+
+type CellTone = "empty" | "item" | "rare" | "selected";
+const CELL_BORDER: Record<CellTone, string> = {
+  empty: "bg-gradient-to-b from-vi/35 to-pri/25",
+  item: "bg-gradient-to-b from-[#7fa8ff] to-vi",
+  rare: "bg-gradient-to-b from-go to-[#8a6a2a]",
+  selected: "bg-gradient-to-b from-tx to-vi",
+};
+const CELL_GLOW: Record<CellTone, string> = {
+  empty: "",
+  item: "drop-shadow-[0_0_10px_rgba(127,168,255,0.35)]",
+  rare: "drop-shadow-[0_0_10px_rgba(214,169,74,0.45)]",
+  selected: "drop-shadow-[0_0_12px_rgba(163,138,209,0.7)]",
+};
+
 interface CharacterStageProps {
   /** What to draw: the saved appearance or the unsaved draft from the appearance editor. */
   appearance: AvatarAppearance;
@@ -57,9 +74,10 @@ interface CharacterStageProps {
 }
 
 /**
- * Profile stage: the one <Character/> large in the centre on the chosen background, turned by dragging or the
- * left/right buttons (front and back drawings with a CSS 3D turn — the figure is flat 2D art), 5 + 5 equipment
- * slots linked to the stage (a scrollable row on phones) and the background picker.
+ * Profile stage (layout after the owner's reference): one framed scene with the chosen background, a glowing
+ * hexagon and a pedestal behind the one <Character/>, tall cut-corner equipment cells (5 + 5) along the sides
+ * joined to the scene by thin lines (a scrollable row on phones), turning by drag / buttons / arrow keys
+ * (front and back drawings with a CSS 3D turn — the figure is flat 2D art) and the background picker below.
  */
 export function CharacterStage({ appearance, onSlotClick, selectedSlot }: CharacterStageProps) {
   const { gameState, effectiveEquipment, updateAvatarAppearance } = useGame();
@@ -75,7 +93,7 @@ export function CharacterStage({ appearance, onSlotClick, selectedSlot }: Charac
   const [dragging, setDragging] = useState(false);
   const startX = useRef(0);
 
-  const frameColor = FRAMES[gameState.frame]?.color || "#2a2a35";
+  const frameColor = FRAMES[gameState.frame]?.color || "#a38ad1";
   const saved = gameState.profile.appearance;
   const bgId = saved.stageBackground ?? DEFAULT_STAGE_BACKGROUND;
 
@@ -131,10 +149,11 @@ export function CharacterStage({ appearance, onSlotClick, selectedSlot }: Charac
     const itemLabel = item ? itemNames[item.nameKey.replace("items.", "")] || item.nameKey : "";
     const Icon = SLOT_ICONS[key] || Shirt;
     const selected = selectedSlot === slot;
-    const rare = !!item && item.rarity > 0;
+    const tone: CellTone = selected ? "selected" : !item ? "empty" : item.rarity > 0 ? "rare" : "item";
     const label = item ? formatString(st.slotFilled, { slot: slotLabel, item: itemLabel }) : formatString(st.slotEmpty, { slot: slotLabel });
+    const row = side === "row";
     return (
-      <li key={slot} className={cn("relative shrink-0", side !== "row" && "flex items-center", side === "right" && "flex-row-reverse")}>
+      <li key={slot} className={cn("relative shrink-0", !row && "flex items-center", side === "right" && "flex-row-reverse")}>
         <button
           type="button"
           data-testid="stage-slot"
@@ -145,94 +164,126 @@ export function CharacterStage({ appearance, onSlotClick, selectedSlot }: Charac
           title={label}
           aria-haspopup="dialog"
           className={cn(
-            "relative grid h-12 w-12 place-items-center rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi focus-visible:ring-offset-2 focus-visible:ring-offset-ink",
-            "[clip-path:polygon(8px_0,100%_0,100%_calc(100%-8px),calc(100%-8px)_100%,0_100%,0_8px)]",
-            item ? (rare ? "border-go/70 bg-go/10" : "border-vi/50 bg-s2") : "border-dashed border-line bg-s1/70 text-mu hover:border-vi/60 hover:text-tx",
-            selected && "border-vi bg-vi/20"
+            "group relative block rounded-[14px] transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi focus-visible:ring-offset-2 focus-visible:ring-offset-ink motion-safe:hover:-translate-y-0.5",
+            CELL_GLOW[tone]
           )}
         >
-          {item ? (
-            <span className="grid h-7 w-7 place-items-center rounded-md shadow-inner" style={{ backgroundColor: item.color }} aria-hidden="true">
-              <Icon size={15} className="text-white drop-shadow" />
+          {/* 1.5px gradient border made of two cut-corner layers */}
+          <span className={cn("block p-[1.5px]", CELL_SHAPE, CELL_BORDER[tone], row ? "h-[78px] w-[64px]" : "h-[92px] w-[76px] xl:h-[104px] xl:w-[84px]")}>
+            <span className={cn("flex h-full w-full flex-col items-center justify-center gap-1.5 bg-[#120f1d]/95", CELL_SHAPE)}>
+              {item ? (
+                <span className="grid h-9 w-9 place-items-center rounded-lg shadow-inner xl:h-10 xl:w-10" style={{ backgroundColor: item.color }} aria-hidden="true">
+                  <Icon size={18} className="text-white drop-shadow" />
+                </span>
+              ) : (
+                <Icon size={22} aria-hidden="true" className="text-mu/70 transition-colors group-hover:text-tx" />
+              )}
+              <span className={cn("max-w-full truncate px-1 text-[10px] font-semibold leading-tight xl:text-[11px]", tone === "rare" ? "text-go" : item ? "text-tx" : "text-mu")}>
+                {slotLabel}
+              </span>
             </span>
-          ) : (
-            <Icon size={18} aria-hidden="true" className="opacity-70" />
-          )}
+          </span>
         </button>
-        {side !== "row" && <span aria-hidden="true" className="h-px w-3 bg-gradient-to-r from-vi/50 to-vi/10" />}
+        {/* connector towards the scene */}
+        {!row && (
+          <span
+            aria-hidden="true"
+            className={cn("h-px w-5 xl:w-8", side === "left" ? "bg-gradient-to-r from-vi/60 to-vi/0" : "bg-gradient-to-l from-vi/60 to-vi/0")}
+          />
+        )}
       </li>
     );
   };
 
   return (
-    <section aria-label={st.label} className="rounded-2xl border bg-s1/80 p-3 shadow-[0_0_40px_-18px_rgba(163,138,209,0.7)] lg:p-4" style={{ borderColor: `${frameColor}99` }}>
-      <div className="lg:grid lg:grid-cols-[60px_minmax(0,1fr)_60px] lg:items-center">
-        <ul aria-label={st.slotsLabel} className="hidden flex-col gap-3 lg:flex">
-          {LEFT_SLOTS.map((s) => renderSlot(s, "left"))}
-        </ul>
+    <section aria-label={st.label} className="space-y-3">
+      {/* Frame: thin border in the frame colour, soft glow */}
+      <div
+        className="relative isolate overflow-hidden rounded-[22px] border shadow-[0_0_50px_-20px_rgba(163,138,209,0.75),inset_0_0_60px_-30px_rgba(163,138,209,0.6)]"
+        style={{ borderColor: `${frameColor}66` }}
+        data-testid="profile-stage"
+        data-background={bgId}
+      >
+        <StageBackdrop id={bgId} />
 
-        {/* Scene */}
-        <div
-          className="relative h-[45dvh] min-h-[300px] overflow-hidden rounded-xl border border-white/5 lg:h-[min(70vh,640px)] lg:min-h-[560px]"
-          data-testid="profile-stage"
-          data-background={bgId}
-        >
-          <StageBackdrop id={bgId} />
-          <div
-            tabIndex={0}
-            role="group"
-            aria-label={st.dragHint}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={endDrag}
-            onPointerCancel={endDrag}
-            onLostPointerCapture={() => setDragging(false)}
-            onKeyDown={onKeyDown}
-            className="absolute inset-0 flex cursor-grab touch-pan-y select-none items-end justify-center pb-[7%] pt-[5%] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-vi active:cursor-grabbing"
-          >
-            <div className="relative h-full" style={{ aspectRatio: "100 / 230", perspective: "1200px" }}>
-              <div
-                className={cn("relative h-full w-full", !dragging && !reduced && "transition-transform duration-300 ease-out")}
-                style={{ transformStyle: "preserve-3d", transform: `rotateY(${ry}deg)` }}
-              >
-                <div className="absolute inset-0" style={{ backfaceVisibility: "hidden" }}>
-                  <Character appearance={appearance} equipment={effectiveEquipment} size="fill" className="h-full w-full" />
+        <div className="relative h-[45dvh] min-h-[300px] lg:grid lg:h-[min(80vh,700px)] lg:min-h-[600px] lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-stretch lg:px-4">
+          <ul aria-label={st.slotsLabel} className="hidden flex-col justify-evenly py-4 lg:flex">
+            {LEFT_SLOTS.map((s) => renderSlot(s, "left"))}
+          </ul>
+
+          {/* Scene: hexagon + pedestal behind the character */}
+          <div className="relative h-full min-w-0">
+            <svg aria-hidden="true" viewBox="0 0 200 230" preserveAspectRatio="xMidYMid meet" className="pointer-events-none absolute inset-x-[8%] top-[14%] h-[66%] w-[84%]">
+              <polygon
+                points="100,6 192,58 192,172 100,224 8,172 8,58"
+                fill="rgba(80,52,143,0.10)"
+                stroke="rgba(163,138,209,0.65)"
+                strokeWidth="1.6"
+                style={{ filter: "drop-shadow(0 0 6px rgba(163,138,209,0.55))" }}
+              />
+            </svg>
+            {/* pedestal */}
+            <div aria-hidden="true" className="pointer-events-none absolute bottom-[5%] left-1/2 h-[9%] w-[62%] -translate-x-1/2">
+              <div className="absolute inset-0 rounded-[50%] border border-vi/60 bg-pri/25 shadow-[0_0_24px_rgba(163,138,209,0.6)]" />
+              <div className="absolute inset-x-[12%] inset-y-[22%] rounded-[50%] border border-vi/40 bg-vi/10" />
+            </div>
+
+            <div
+              tabIndex={0}
+              role="group"
+              aria-label={st.dragHint}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
+              onLostPointerCapture={() => setDragging(false)}
+              onKeyDown={onKeyDown}
+              className="absolute inset-0 flex cursor-grab touch-pan-y select-none items-end justify-center pb-[9%] pt-[6%] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-vi active:cursor-grabbing"
+            >
+              <div className="relative h-full" style={{ aspectRatio: "100 / 230", perspective: "1200px" }}>
+                <div
+                  className={cn("relative h-full w-full", !dragging && !reduced && "transition-transform duration-300 ease-out")}
+                  style={{ transformStyle: "preserve-3d", transform: `rotateY(${ry}deg)` }}
+                >
+                  <div className="absolute inset-0" style={{ backfaceVisibility: "hidden" }}>
+                    <Character appearance={appearance} equipment={effectiveEquipment} size="fill" className="h-full w-full" />
+                  </div>
+                  <div className="absolute inset-0" style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}>
+                    <Character appearance={appearance} equipment={effectiveEquipment} size="fill" variant="back" className="h-full w-full" />
+                  </div>
                 </div>
-                <div className="absolute inset-0" style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}>
-                  <Character appearance={appearance} equipment={effectiveEquipment} size="fill" variant="back" className="h-full w-full" />
-                </div>
+              </div>
+            </div>
+
+            {/* Turn controls */}
+            <div className="absolute inset-x-0 bottom-2 flex justify-center">
+              <div className="flex items-center gap-1 rounded-full border border-white/10 bg-black/55 p-1 backdrop-blur-md">
+                <button type="button" onClick={() => turn(-TURN_STEP)} aria-label={st.rotateLeft} title={st.rotateLeft} className="grid h-9 w-9 place-items-center rounded-full text-tx transition hover:bg-pri/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi">
+                  <ChevronLeft size={18} aria-hidden="true" />
+                </button>
+                <button type="button" onClick={() => setRy(0)} aria-label={st.resetView} title={st.resetView} className="grid h-9 w-9 place-items-center rounded-full text-tx transition hover:bg-pri/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi">
+                  <RotateCcw size={15} aria-hidden="true" />
+                </button>
+                <button type="button" onClick={() => turn(TURN_STEP)} aria-label={st.rotateRight} title={st.rotateRight} className="grid h-9 w-9 place-items-center rounded-full text-tx transition hover:bg-pri/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi">
+                  <ChevronRight size={18} aria-hidden="true" />
+                </button>
               </div>
             </div>
           </div>
 
-          {/* Turn controls */}
-          <div className="absolute inset-x-0 bottom-3 flex justify-center">
-            <div className="flex items-center gap-1 rounded-full border border-white/10 bg-black/55 p-1 backdrop-blur-md">
-              <button type="button" onClick={() => turn(-TURN_STEP)} aria-label={st.rotateLeft} title={st.rotateLeft} className="grid h-9 w-9 place-items-center rounded-full text-tx transition hover:bg-pri/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi">
-                <ChevronLeft size={18} aria-hidden="true" />
-              </button>
-              <button type="button" onClick={() => setRy(0)} aria-label={st.resetView} title={st.resetView} className="grid h-9 w-9 place-items-center rounded-full text-tx transition hover:bg-pri/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi">
-                <RotateCcw size={15} aria-hidden="true" />
-              </button>
-              <button type="button" onClick={() => turn(TURN_STEP)} aria-label={st.rotateRight} title={st.rotateRight} className="grid h-9 w-9 place-items-center rounded-full text-tx transition hover:bg-pri/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi">
-                <ChevronRight size={18} aria-hidden="true" />
-              </button>
-            </div>
-          </div>
+          <ul aria-label={st.slotsLabel} className="hidden flex-col items-end justify-evenly py-4 lg:flex">
+            {RIGHT_SLOTS.map((s) => renderSlot(s, "right"))}
+          </ul>
         </div>
-
-        <ul aria-label={st.slotsLabel} className="hidden flex-col items-end gap-3 lg:flex">
-          {RIGHT_SLOTS.map((s) => renderSlot(s, "right"))}
-        </ul>
       </div>
 
-      {/* Phones and tablets: all slots in one scrollable row */}
-      <ul aria-label={st.slotsLabel} className="-mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] lg:hidden [&::-webkit-scrollbar]:hidden">
+      {/* Phones and tablets: all slots in one scrollable row under the scene */}
+      <ul aria-label={st.slotsLabel} className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] lg:hidden [&::-webkit-scrollbar]:hidden">
         {[...LEFT_SLOTS, ...RIGHT_SLOTS].map((s) => renderSlot(s, "row"))}
       </ul>
 
       {/* Background picker */}
-      <div className="mt-3">
+      <div>
         <p id="stage-bg-label" className="mb-1.5 text-xs font-semibold text-mu">
           {st.backgrounds}
         </p>
