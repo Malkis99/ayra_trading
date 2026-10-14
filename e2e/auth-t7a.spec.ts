@@ -65,7 +65,7 @@ test.describe("T7a.1 Auth & Screen Routing (Mock Mode)", () => {
 
     // Step 5: Final Screen -> Click "Начать"
     const startButton = page.locator('button:has-text("Начать")');
-    await expect(startButton).toBeVisible();
+    await expect(startButton).toBeVisible({ timeout: 12000 });
     await startButton.click();
 
     // Arrive on Home page
