@@ -3,7 +3,9 @@ on:
   pull_request:
   push:
     branches: [main]
+
 jobs:
+  # Fast checks: types, lint, unit tests, migrations (PGlite, in memory), production build
   check:
     runs-on: ubuntu-latest
     steps:
@@ -12,4 +14,30 @@ jobs:
         with: { node-version: 20, cache: npm }
       - run: npm ci
       - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npx vitest run
+      - run: node scripts/test-migrations.mjs
       - run: npm run build
+
+  # Browser tests (slower): mock auth suite and the sign-in suite against a fake Supabase server.
+  # No secrets are needed: both use local stand-ins.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: e2e (mock auth)
+        run: npx playwright test
+      - name: e2e (fake Supabase)
+        run: npx playwright test -c playwright.supabase.config.ts
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: test-results/
+          retention-days: 7

@@ -1,6 +1,6 @@
 // Runs supabase/migrations against an in-memory Postgres (PGlite) with a minimal Supabase auth stub,
-// then supabase/tests/profile_defaults.sql. PGlite is not a project dependency; run with:
-//   npm i --no-save @electric-sql/pglite@0.2.17 && node scripts/test-migrations.mjs
+// then the SQL tests in supabase/tests. PGlite is a dev dependency (runs in CI too):
+//   node scripts/test-migrations.mjs
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 const repo = fileURLToPath(new URL("..", import.meta.url));
@@ -8,7 +8,7 @@ let PGlite;
 try {
   ({ PGlite } = await import("@electric-sql/pglite"));
 } catch {
-  console.error("PGlite not installed. Run: npm i --no-save @electric-sql/pglite@0.2.17");
+  console.error("PGlite not installed. Run: npm ci");
   process.exit(2);
 }
 const read = (p) => readFileSync(`${repo}${p}`, "utf8").replace(/CREATE EXTENSION IF NOT EXISTS "uuid-ossp";/, "");
