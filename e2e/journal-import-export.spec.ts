@@ -119,6 +119,32 @@ test.describe("Import", () => {
     expect(saved).toHaveLength(0);
   });
 
+  test("documented-only platforms are marked beta; import says it gives no XP and really gives none", async ({ page }) => {
+    await seed(page);
+    await page.goto("/journal");
+    const xpBefore = await page.evaluate(() => JSON.parse(localStorage.getItem("ayra_demo_v1") || "{}").xp ?? 0);
+    await page.getByTestId("journal-import").click();
+    const wizard = page.getByTestId("import-wizard");
+    await expect(wizard.getByTestId("import-no-xp")).toContainText("Импортированные сделки не дают XP и монет");
+    const card = (name: string) => wizard.getByRole("radio", { name: new RegExp(`^${name}`) });
+    await expect(card("MetaTrader 4").getByTestId("import-beta")).toHaveText(/бета/);
+    await expect(card("Binance").getByTestId("import-beta")).toBeVisible();
+    await expect(card("CSV / XLSX").getByTestId("import-beta")).toHaveCount(0);
+    await expect(card("AYRA JSON").getByTestId("import-beta")).toHaveCount(0);
+    await page.keyboard.press("Escape");
+
+    const w = await importFile(page, "mt4.html");
+    await expect(w).toContainText("Формат: MetaTrader 4 (бета)");
+    await w.getByTestId("import-next").click();
+    await w.getByTestId("import-next").click();
+    await w.getByTestId("import-next").click();
+    await expect(w).toContainText("Импортированные сделки не дают XP и монет");
+    await w.getByTestId("import-confirm").click();
+    await expect(w).toContainText("Добавлено сделок: 2");
+    const xpAfter = await page.evaluate(() => JSON.parse(localStorage.getItem("ayra_demo_v1") || "{}").xp ?? 0);
+    expect(xpAfter).toBe(xpBefore);
+  });
+
   test("MetaTrader 4 HTML report is detected automatically; undo right after import", async ({ page }) => {
     await seed(page);
     await page.goto("/journal");

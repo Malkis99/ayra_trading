@@ -108,6 +108,23 @@ describe("T6a Journal Formulas & Anti-farm", () => {
       expect(res.newlyUnlocked).toContain("firstTrade");
     });
 
+    it("Imported trades never give XP (rewards only for actions inside AYRA)", () => {
+      const now = new Date();
+      const trade = {
+        id: "tr_imp",
+        accountId: "acc_1",
+        instrument: "XAUUSD",
+        direction: "long",
+        openedAt: now.toISOString(),
+        verification: "imported",
+      };
+      const res = recordLoggedTrade(INITIAL_GAME_STATE, trade, [], now);
+      expect(res.xpAwarded).toBe(0);
+      expect(res.state.xp).toBe(INITIAL_GAME_STATE.xp);
+      expect(res.questClosed).toBe(false);
+      expect(res.newlyUnlocked).toEqual([]);
+    });
+
     it("Rejects XP for duplicate trades within 1 minute", () => {
       const now = new Date();
       const trade1 = {

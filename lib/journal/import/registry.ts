@@ -89,6 +89,16 @@ export const PLATFORM_NAMES: Record<ImportFormatId, string> = {
   ayra: "AYRA JSON",
 };
 
+/**
+ * Formats checked on real files. Every other parser was written from the platform documentation only and is shown
+ * as "beta" until the owner provides real exports. Our own formats (universal mapping, AYRA JSON) are not beta.
+ */
+export const VERIFIED_FORMATS: ReadonlySet<ImportFormatId> = new Set<ImportFormatId>(["universal", "ayra"]);
+
+export function isBetaFormat(id: ImportFormatId): boolean {
+  return !VERIFIED_FORMATS.has(id);
+}
+
 export function getParser(id: ImportFormatId): ImportParser {
   return IMPORT_PARSERS.find((p) => p.id === id) ?? universalParser;
 }

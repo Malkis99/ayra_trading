@@ -15,7 +15,7 @@ export const GAME_CONFIG = {
   JOURNAL_MIN_SAMPLE_SIZE: 20,
   VERIFICATION_XP_MULTIPLIER: {
     unverified: 1.0,
-    imported: 1.2,
+    imported: 0, // import files never give XP (owner decision 2026-10-14)
     connected: 1.5,
     verified: 1.5,
   } as Record<string, number>,

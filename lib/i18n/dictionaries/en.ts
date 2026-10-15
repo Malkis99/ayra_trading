@@ -959,6 +959,9 @@ export const en: Dictionary = {
       back: "Back",
       next: "Next",
       close: "Close",
+      beta: "beta",
+      betaHint: "Built from the platform documentation and not yet checked on real files.",
+      noXp: "Imported trades do not give XP or coins: rewards are only for actions inside AYRA.",
       source: {
         title: "Where are the trades from?",
         hint: "Pick a platform or keep auto-detect — the format is recognised from the file content.",

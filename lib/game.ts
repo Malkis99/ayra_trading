@@ -1654,6 +1654,12 @@ export function recordLoggedTrade(
   let newState = checkAndApplyDateResets(state, currentDate);
   const todayStr = getIsoDateString(currentDate);
 
+  // Trades from an import file never give rewards (no XP, no quest, no achievement): rewards are only for actions
+  // inside AYRA, otherwise a level could be farmed by uploading a file (owner decision 2026-10-14).
+  if (trade.verification === "imported") {
+    return { state: newState, xpAwarded: 0, questClosed: false, leveledUp: false, newlyUnlocked: [] };
+  }
+
   // 1. Anti-farm validation
   let isPlausible = true;
 
