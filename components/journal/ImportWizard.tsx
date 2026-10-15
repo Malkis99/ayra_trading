@@ -5,7 +5,7 @@ import { Check, FileUp, History, Loader2, Sparkles, Undo2 } from "lucide-react";
 import type { Account, AccountCurrency, AccountType, Trade } from "@/lib/journal/types";
 import type { ColumnMapping, ImportField, ImportFormatId, ImportPlatformGroup, RawTable, RowError } from "@/lib/journal/import/types";
 import { readImportFile, type ReadError } from "@/lib/journal/import/read";
-import { IMPORT_PARSERS, PLATFORM_NAMES, detectFormat, getParser, tableFor } from "@/lib/journal/import/registry";
+import { IMPORT_PARSERS, PLATFORM_NAMES, detectFormat, getParser, isBetaFormat, tableFor } from "@/lib/journal/import/registry";
 import { buildPreview, type RMode } from "@/lib/journal/import/normalize";
 import { MAPPABLE_FIELDS, REQUIRED_FIELDS, guessHeaderRow, suggestMapping } from "@/lib/journal/import/parsers/universal";
 import { addImportBatch, listImportBatches, markImportBatchUndone, newBatchId, type ImportBatch } from "@/lib/journal/import/batches";
@@ -302,7 +302,15 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
         )}
       >
         <span className="flex w-full items-center justify-between gap-2 text-sm font-semibold text-tx">
-          {name}
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate">{name}</span>
+            {id !== "auto" && isBetaFormat(id) && (
+              <span title={t.betaHint} data-testid="import-beta" className="shrink-0 rounded border border-vi/40 bg-vi/10 px-1 py-px text-[10px] font-semibold uppercase leading-none tracking-wide text-vi">
+                {t.beta}
+                <span className="sr-only">. {t.betaHint}</span>
+              </span>
+            )}
+          </span>
           {active && <Check size={16} strokeWidth={3} className="shrink-0 text-vi" aria-hidden="true" />}
         </span>
         <span className="text-xs text-mu">{hint || kinds}</span>
@@ -318,6 +326,10 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
         return (
           <div className="space-y-5">
             <p className="text-sm text-mu">{t.source.hint}</p>
+            <p className="flex items-center gap-1.5 text-xs text-mu" data-testid="import-no-xp">
+              <Sparkles size={14} className="shrink-0 text-vi" aria-hidden="true" />
+              {t.noXp}
+            </p>
             <div role="radiogroup" aria-label={t.source.title} className="space-y-4">
               <div className="grid grid-cols-1">{platformCard("auto", t.source.auto, t.source.autoHint)}</div>
               {GROUPS.map((g) => {
@@ -430,9 +442,9 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
                   <div className="text-sm text-tx">
                     {format === "auto"
                       ? detectedId
-                        ? formatString(t.file.detected, { platform: PLATFORM_NAMES[detectedId] })
+                        ? formatString(t.file.detected, { platform: PLATFORM_NAMES[detectedId] + (isBetaFormat(detectedId) ? ` (${t.beta})` : "") })
                         : t.file.notDetected
-                      : formatString(t.file.detected, { platform: PLATFORM_NAMES[format] })}
+                      : formatString(t.file.detected, { platform: PLATFORM_NAMES[format] + (isBetaFormat(format) ? ` (${t.beta})` : "") })}
                   </div>
                   {format !== "auto" && detectedId && detectedId !== format && (
                     <div className="flex flex-wrap items-center gap-2 text-sm text-amber-200">
@@ -593,6 +605,7 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
         const shown = preview.slice(0, IMPORT_PREVIEW_ROWS);
         return (
           <div className="space-y-4">
+            <p className="text-xs text-mu">{t.noXp}</p>
             <dl className="grid grid-cols-3 gap-2" data-testid="import-counters">
               {[
                 { key: "new", label: t.preview.new, value: newRows.length, tone: "text-long" },

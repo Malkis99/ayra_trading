@@ -1,6 +1,6 @@
 /**
  * Import limits. PLACEHOLDER values chosen to keep the browser responsive — not business numbers;
- * the owner can change them (listed in the PR).
+ * the owner can change them. Documented in docs/ayra-spec-v1.6-journal.md, section 12.
  */
 export const IMPORT_MAX_FILE_MB = 20; // PLACEHOLDER
 export const IMPORT_MAX_FILE_BYTES = IMPORT_MAX_FILE_MB * 1024 * 1024;
