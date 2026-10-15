@@ -10,7 +10,6 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   SOCIAL_NETWORKS,
   countryOptions,
-  lastNicknameChange,
   nicknameDaysLeft,
   nicknameProblem,
   normalizeSocial,
@@ -103,8 +102,8 @@ export function EditProfileTab({ onExit, onDirtyChange, saveRef }: Props = {}) {
 
   const set = <K extends keyof Form>(key: K, value: Form[K]) => setForm((f) => ({ ...f, [key]: value }));
 
-  // Works before migration 0003 (no server column) and after it
-  const lastNickChange = lastNicknameChange(signedIn ? profile?.nickname_changed_at : undefined, details.nicknameChangedAt);
+  // Accounts: the server date (migration 0003, the server also enforces the rule). Guests: the local date.
+  const lastNickChange = signedIn ? profile?.nickname_changed_at ?? null : details.nicknameChangedAt ?? null;
   const daysLeft = nicknameDaysLeft(lastNickChange);
   const nickChanged = form.nick.trim() !== gameState.name;
   const problem = nickChanged ? nicknameProblem(form.nick) : null;
@@ -148,7 +147,8 @@ export function EditProfileTab({ onExit, onDirtyChange, saveRef }: Props = {}) {
           const res = signedIn ? await saveNickname(nick) : { success: true as const };
           if (res.success) {
             finalName = nick;
-            changedAt = new Date().toISOString();
+            // accounts: the server stores the date itself (trigger from migration 0003)
+            if (!signedIn) changedAt = new Date().toISOString();
           } else {
             const key = (res.errorKey || "genericError") as keyof typeof e.nicknameErrors;
             setNickError(e.nicknameErrors[key] || e.nicknameErrors.genericError);

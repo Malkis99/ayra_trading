@@ -266,23 +266,6 @@ test.describe("Profile", () => {
     await expect(form.getByTestId("edit-nickname")).toHaveValue("Draft_Two");
   });
 
-  test("before migration 0003 (no server column): the 14-day rule still holds from the local date", async ({ page }) => {
-    await page.addInitScript(() => {
-      (window as unknown as { __AYRA_MOCK_BEFORE_0003__: boolean }).__AYRA_MOCK_BEFORE_0003__ = true;
-    });
-    await signInAndOnboard(page, "before_0003@example.com", "Old_Nick");
-    await page.goto("/profile?tab=edit");
-    const form = page.getByTestId("edit-profile");
-    await form.getByTestId("edit-nickname").fill("New_Nick");
-    await form.getByRole("button", { name: "Сохранить" }).click();
-    await expect(page.locator("aside").first()).toContainText("New_Nick");
-    const server = await page.evaluate(() => JSON.parse(localStorage.getItem("ayra_mock_auth_v1") || "{}").profile);
-    expect(server.nickname).toBe("New_Nick");
-    expect("nickname_changed_at" in server).toBe(false);
-    await page.reload();
-    await expect(form.getByTestId("edit-nickname")).toBeDisabled();
-    await expect(form).toContainText("Ник можно сменить через 14 дн.");
-  });
 
   test("editor exit: Back returns to the tab it was opened from, Close and Esc too; browser Back works; unsaved changes ask", async ({ page }) => {
     await freshProfile(page);
