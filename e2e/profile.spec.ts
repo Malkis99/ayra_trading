@@ -277,6 +277,8 @@ test.describe("Profile", () => {
 
     // from Statistics: Close (X) returns to Statistics
     await page.getByRole("tab", { name: "Статистика" }).click();
+    // wait until Statistics is open, otherwise the editor cannot know where it was opened from
+    await expect(page.getByRole("tab", { name: "Статистика" })).toHaveAttribute("aria-selected", "true");
     await page.getByRole("tab", { name: "Редактировать профиль" }).click();
     await expect(page).toHaveURL(/tab=edit&from=stats/);
     await page.getByRole("button", { name: "Закрыть редактор" }).click();
