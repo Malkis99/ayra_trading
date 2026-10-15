@@ -108,20 +108,6 @@ export function nicknameDaysLeft(lastChangedAt: string | null | undefined, now: 
   return left > 0 ? Math.ceil(left / DAY_MS) : 0;
 }
 
-/**
- * Date of the last nickname change to check the 14-day rule against.
- * Before migration 0003 the server has no column (undefined): the local date is used. After it, the server date
- * (null = never changed) is combined with the local one: the later of the two wins.
- */
-export function lastNicknameChange(server: string | null | undefined, local: string | null | undefined): string | null {
-  const s = server ? new Date(server).getTime() : NaN;
-  const l = local ? new Date(local).getTime() : NaN;
-  if (Number.isNaN(s) && Number.isNaN(l)) return null;
-  if (Number.isNaN(s)) return local ?? null;
-  if (Number.isNaN(l)) return server ?? null;
-  return s >= l ? server ?? null : local ?? null;
-}
-
 export type SocialNetwork = "telegram" | "x" | "instagram" | "youtube";
 export const SOCIAL_NETWORKS: SocialNetwork[] = ["telegram", "x", "instagram", "youtube"];
 export type ProfileVisibility = "public" | "hidden";
