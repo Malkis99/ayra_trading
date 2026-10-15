@@ -54,15 +54,18 @@ test.describe("Cloud profile row", () => {
     await page.waitForURL("**/awakening**", { timeout: 8000 });
     await completeOnboarding(page, `NoRow${Date.now() % 100000}`);
     await expect(errorScreen(page)).toContainText("Профиль не найден на сервере", { timeout: 10000 });
-    await expect(page.getByTestId("profile-error-details")).toHaveText("profiles: 0 rows");
+    // a clear message for the user, no technical details on screen
+    await expect(page.getByTestId("profile-error-details")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Повторить" })).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/auth/continue");
   });
 
-  test("profiles table missing (migration not applied): error screen shows HTTP status and code", async ({ page, request }) => {
+  test("profiles table missing (migration not applied): clear error screen with a retry button", async ({ page, request }) => {
     const link = await requestMagicLink(page, `notable_${Date.now()}@example.com`);
     await request.get(`${FAKE_SUPABASE}/__test/profiles-config?table=0`);
     await page.goto(link);
     await expect(errorScreen(page)).toContainText("Не удалось загрузить профиль", { timeout: 15000 });
-    await expect(page.getByTestId("profile-error-details")).toContainText("HTTP 404 · PGRST205");
+    await expect(page.getByTestId("profile-error-details")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Повторить" })).toBeVisible();
   });
 });

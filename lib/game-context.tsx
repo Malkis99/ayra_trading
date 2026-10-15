@@ -32,7 +32,6 @@ import type { ProfileDetails } from "@/lib/profile";
 import { OnboardingState, generateProgram } from "@/lib/awakening";
 import { AppStorage } from "@/lib/storage";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
-import { authDebug, describeGameState } from "@/lib/auth/debug";
 
 const STORAGE_KEY = "ayra_demo_v1";
 
@@ -133,7 +132,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     try {
       loadedSpaceRef.current = AppStorage.getActiveSpaceId();
       const saved = AppStorage.getItem(STORAGE_KEY);
-      authDebug("game.reload", { activeSpace: AppStorage.getActiveSpaceId(), ...describeGameState(saved) });
       if (saved) {
         const parsed = JSON.parse(saved);
         const resetted = checkAndApplyDateResets(parsed, new Date());
@@ -155,7 +153,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const unregister = AppStorage.registerFlushHandler((targetSpaceId) => {
       if (targetSpaceId !== loadedSpaceRef.current) {
-        authDebug("game.flushSkipped", { targetSpaceId, loadedSpace: loadedSpaceRef.current });
         return;
       }
       if (gameStateRef.current && isLoadedRef.current) {
@@ -194,7 +191,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     try {
       const activeSpaceId = AppStorage.getActiveSpaceId();
       if (activeSpaceId !== loadedSpaceRef.current) {
-        authDebug("game.saveSkipped", { activeSpaceId, loadedSpace: loadedSpaceRef.current });
         return;
       }
       AppStorage.guardedSetItem(

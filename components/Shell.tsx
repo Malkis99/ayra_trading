@@ -17,9 +17,7 @@ import { Language } from "@/lib/i18n/types";
 import { JournalProvider } from "@/lib/journal/context";
 import { AuthProvider, useAuth } from "@/lib/auth/auth-context";
 import { useApp } from "@/lib/context";
-import { AppStorage } from "@/lib/storage";
 import { hasCloudNickname, postLoginRouterUrl, POST_LOGIN_ROUTER } from "@/lib/auth/routing";
-import { authDebug } from "@/lib/auth/debug";
 import { SpaceChangeBanner } from "./SpaceChangeBanner";
 import { OwnerDiagnosticsBlock } from "@/components/OwnerDiagnosticsBlock";
 import { UserCheck } from "lucide-react";
@@ -128,7 +126,6 @@ function ShellContent({ children }: { children: React.ReactNode }) {
 
     // 3. Signed in, but onboarding not finished or profile not loaded: hand over to the post-login router.
     if (mustUsePostLoginRouter) {
-      authDebug("shell.toRouter", { pathname, profileStatus, activeSpace: AppStorage.getActiveSpaceId() });
       router.replace(postLoginRouterUrl(pathname));
       return;
     }
@@ -147,7 +144,6 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     pathname,
     user,
     profile,
-    profileStatus,
     mustUsePostLoginRouter,
     router,
     isSpaceReady,

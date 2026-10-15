@@ -2325,7 +2325,6 @@ export const ru = {
     continueRetryBtn: "Повторить",
     continueNoRowTitle: "Профиль не найден на сервере",
     continueNoRowText: "Знакомство пройдено, но сервер не сохранил профиль. Попробуй ещё раз чуть позже.",
-    continueErrorDetails: "Технические детали",
     continueAsGuestBtn: "Продолжить без входа",
     showDiagnostics: "Показать диагностику",
     diagnosticsTitle: "Диагностика",

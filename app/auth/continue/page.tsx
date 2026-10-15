@@ -8,8 +8,6 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { useGame } from "@/lib/game-context";
 import { resolvePostLoginRoute, readAccountGameState, safeNextAfterLogin } from "@/lib/auth/routing";
 import { isValidLatinNickname } from "@/lib/stats";
-import { authDebug, describeGameState, isAuthDebugEnabled } from "@/lib/auth/debug";
-import { AppStorage } from "@/lib/storage";
 import { UniverseCard, UniverseLoader, UniverseScreen } from "@/components/universe/UniverseBackdrop";
 import { NicknameConflictModal } from "@/components/NicknameConflictModal";
 
@@ -30,7 +28,6 @@ function ContinueRouter() {
     user,
     profile,
     profileStatus,
-    profileError,
     activeSpaceId,
     isSpaceReady,
     refreshProfile,
@@ -75,18 +72,11 @@ function ContinueRouter() {
     // No profile row is normal for a new account (-> /awakening). After onboarding it means the server
     // never created the row, and saving the nickname cannot work: say so instead of looping.
     if (profileStatus === "missing" && accountState?.onboarding?.status === "done") {
-      authDebug("continue.decide", { profileStatus, reason: "no profile row after onboarding" });
       setNoRowAfterOnboarding(true);
       return;
     }
 
     decidedRef.current = true;
-    authDebug("continue.decide", {
-      activeSpace: AppStorage.getActiveSpaceId(),
-      profileStatus,
-      profileHasNickname: Boolean(profile?.nickname),
-      accountState: describeGameState(accountState ? JSON.stringify(accountState) : null),
-    });
 
     resolvePostLoginRoute({
       user,
@@ -96,7 +86,6 @@ function ContinueRouter() {
       checkNicknameAvailable,
       saveNickname,
     }).then((res) => {
-      authDebug("resolvePostLoginRoute", { destination: res.destination, source: res.source, navigated: true });
       reportRouteReason(res.source);
       if (res.nicknameConflict && res.candidateNickname && isValidLatinNickname(res.candidateNickname)) {
         setConflictNickname(res.candidateNickname);
@@ -129,12 +118,6 @@ function ContinueRouter() {
   }
 
   if (profileFailed || noRowAfterOnboarding) {
-    const details =
-      profileFailed && profileError
-        ? [profileError.status ? `HTTP ${profileError.status}` : null, profileError.code, profileError.message]
-            .filter(Boolean)
-            .join(" · ")
-        : "profiles: 0 rows";
     return (
       <UniverseScreen>
         <UniverseCard className="space-y-4 text-center">
@@ -146,14 +129,6 @@ function ContinueRouter() {
           <p className="text-sm text-mu">
             {profileFailed ? dict.auth.continueProfileErrorText : dict.auth.continueNoRowText}
           </p>
-          {isAuthDebugEnabled() && (
-            <details open className="rounded-lg border border-line bg-s2 p-2.5 text-left">
-              <summary className="cursor-pointer text-xs font-semibold text-mu">{dict.auth.continueErrorDetails}</summary>
-              <code data-testid="profile-error-details" className="mt-1.5 block break-all text-xs text-tx">
-                {details}
-              </code>
-            </details>
-          )}
           <button
             type="button"
             onClick={() => {
