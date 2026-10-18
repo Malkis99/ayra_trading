@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { resolvePrimaryPropAccount } from "./prop";
-import { LocalStorageJournalRepository } from "./repository";
+import { LocalStorageJournalRepository, CURRENT_JOURNAL_SCHEMA_VERSION } from "./repository";
 import { Account, Trade } from "./types";
 import { ru } from "../i18n/dictionaries/ru";
 import { en } from "../i18n/dictionaries/en";
@@ -117,7 +117,7 @@ describe("T6d.1 - Primary Prop Selection, Soft Delete & Deletion Constraints", (
       expect(repo.getPrimaryPropAccountId()).toBe("prop_2");
       repo.setPrimaryPropAccountId("prop_2"); // Triggers saveData
       const raw = JSON.parse(localStorage.getItem("ayra_journal_v1") || "{}");
-      expect(raw.schemaVersion).toBe(5);
+      expect(raw.schemaVersion).toBe(CURRENT_JOURNAL_SCHEMA_VERSION);
     });
 
     it("persists primaryPropAccountId updates correctly", () => {

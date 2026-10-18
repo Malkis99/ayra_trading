@@ -367,7 +367,7 @@ describe("export", () => {
     expect(Number(tables[0].rows[1][10])).toBe(192);
   });
 
-  it("JSON v1.2 round trip: export → import gives the same trades", async () => {
+  it("JSON v1.3 round trip: export → import gives the same trades", async () => {
     const original: Trade = {
       ...buildTrade(nt(), settings(), 0),
       id: "tr_orig",
@@ -385,7 +385,7 @@ describe("export", () => {
       attachmentIds: ["att1"],
     };
     const json = tradesToJson([original], { accounts: ctx.accounts, strategies: [], notes: [] }, true);
-    expect(JSON.parse(json)).toMatchObject({ app: "ayra", kind: "trades", exportVersion: "1.2" });
+    expect(JSON.parse(json)).toMatchObject({ app: "ayra", kind: "trades", exportVersion: "1.3" });
     const { tables } = await readImportFile("t.json", new TextEncoder().encode(json), MAX);
     const det = detectFormat(tables)!;
     expect(det.parser.id).toBe("ayra");

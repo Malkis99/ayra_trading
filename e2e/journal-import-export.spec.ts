@@ -25,7 +25,11 @@ async function seed(page: Page, trades: unknown[] = []) {
   }, trades);
 }
 
-const journalTrades = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem("ayra_journal_v1")!).trades as Array<Record<string, unknown>>);
+/** Live trades (soft-deleted tombstones from T7b-1 stay in storage but are not part of the journal). */
+const journalTrades = (page: Page) =>
+  page.evaluate(() => (JSON.parse(localStorage.getItem("ayra_journal_v1")!).trades as Array<Record<string, unknown>>).filter((t) => !t.deletedAt));
+const journalTombstones = (page: Page) =>
+  page.evaluate(() => (JSON.parse(localStorage.getItem("ayra_journal_v1")!).trades as Array<Record<string, unknown>>).filter((t) => t.deletedAt));
 
 async function importFile(page: Page, file: string) {
   await page.getByTestId("journal-import").click();
@@ -162,6 +166,8 @@ test.describe("Import", () => {
     await page.getByRole("button", { name: "Удалить сделки импорта" }).click();
     await expect(wizard).toBeHidden();
     expect(await journalTrades(page)).toHaveLength(0);
+    // undo keeps tombstones for future sync
+    expect(await journalTombstones(page)).toHaveLength(2);
   });
 
   test("too large / empty files show a clear error", async ({ page }) => {
@@ -230,7 +236,7 @@ test.describe("Export", () => {
     await dialog.getByRole("radio", { name: "JSON AYRA" }).click();
     const [download] = await Promise.all([page.waitForEvent("download"), dialog.getByTestId("export-download").click()]);
     const file = (await download.path())!;
-    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toMatchObject({ app: "ayra", kind: "trades", exportVersion: "1.2" });
+    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toMatchObject({ app: "ayra", kind: "trades", exportVersion: "1.3" });
 
     await page.getByTestId("journal-import").click();
     const wizard = page.getByTestId("import-wizard");

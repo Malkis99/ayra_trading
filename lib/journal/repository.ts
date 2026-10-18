@@ -8,38 +8,102 @@ import {
   Note,
   StorageUsage,
   JournalRepository,
+  JournalSnapshot,
+  SyncMeta,
 } from "./types";
-import { defaultAttachmentRepository, IndexedDBAttachmentRepository } from "./attachments/indexeddb-repository";
-import { AppStorage, parseKey } from "@/lib/storage";
+import { IndexedDBAttachmentRepository } from "./attachments/indexeddb-repository";
+import { AppStorage } from "@/lib/storage";
 
 const JOURNAL_STORAGE_KEY = "ayra_journal_v1";
-const CURRENT_JOURNAL_SCHEMA_VERSION = 5;
-const STORAGE_WARN_THRESHOLD = 0.8; // 80%
+/**
+ * v5: primaryPropAccountId stored explicitly.
+ * v6 (T7b-1): every record has updatedAt and deletedAt (soft delete / tombstone); settingsUpdatedAt.
+ */
+export const CURRENT_JOURNAL_SCHEMA_VERSION = 6;
 
-export interface JournalStorageData {
-  schemaVersion: number;
-  primaryPropAccountId?: string | null;
-  accounts: Account[];
-  trades: Trade[];
-  strategies: Strategy[];
-  noTrades: NoTradeEntry[];
-  plans: TradingPlan[];
-  weekPlans: WeekPlan[];
-  notes: Note[];
+export type JournalStorageData = JournalSnapshot;
+
+function emptyJournal(): JournalStorageData {
+  return {
+    schemaVersion: CURRENT_JOURNAL_SCHEMA_VERSION,
+    primaryPropAccountId: undefined,
+    accounts: [],
+    trades: [],
+    strategies: [],
+    noTrades: [],
+    plans: [],
+    weekPlans: [],
+    notes: [],
+  };
 }
 
-export const INITIAL_JOURNAL_DATA: JournalStorageData = {
-  schemaVersion: CURRENT_JOURNAL_SCHEMA_VERSION,
-  primaryPropAccountId: undefined,
-  accounts: [],
-  trades: [],
-  strategies: [],
-  noTrades: [],
-  plans: [],
-  weekPlans: [],
-  notes: [],
-};
+/** Kept for compatibility (a fresh empty journal); do not mutate. */
+export const INITIAL_JOURNAL_DATA: JournalStorageData = emptyJournal();
 
+const isLive = <T extends SyncMeta>(r: T): boolean => !r.deletedAt;
+const live = <T extends SyncMeta>(list: T[]): T[] => list.filter(isLive);
+
+/** Adds sync metadata to a record from an older version: updatedAt falls back to createdAt; nothing is lost. */
+function withMeta<T extends SyncMeta & { createdAt?: string }>(r: T, fallbackTime: string): T {
+  return {
+    ...r,
+    updatedAt: typeof r.updatedAt === "string" && r.updatedAt ? r.updatedAt : typeof r.createdAt === "string" && r.createdAt ? r.createdAt : fallbackTime,
+    deletedAt: typeof r.deletedAt === "string" && r.deletedAt ? r.deletedAt : null,
+  };
+}
+
+/** Migrates any stored journal (v1…v6) to the current format. Pure: exported for tests. */
+export function migrateJournalData(raw: Record<string, unknown>, now: Date = new Date()): JournalStorageData {
+  const nowIso = now.toISOString();
+  const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+  let rawAccounts = arr<Account>(raw.accounts);
+  const rawTrades = arr<Trade>(raw.trades);
+
+  // v5: primaryPropAccountId — if not stored explicitly, use the legacy isPrimaryProp flag
+  let primaryPropAccountId = raw.primaryPropAccountId as string | null | undefined;
+  rawAccounts = rawAccounts.map((acc) => ({
+    ...acc,
+    propRules: acc.type === "prop" ? acc.propRules || null : null,
+  }));
+  if (primaryPropAccountId === undefined) {
+    const legacyPrimary = rawAccounts.find((a) => a.isPrimaryProp && a.type === "prop" && !a.archivedAt && !a.deletedAt);
+    if (legacyPrimary) primaryPropAccountId = legacyPrimary.id;
+  }
+
+  const trades: Trade[] = rawTrades.map((t) =>
+    withMeta(
+      {
+        ...t,
+        strategyId: t.strategyId ?? null,
+        strategyVersion: t.strategyVersion ?? null,
+        ruleChecks: t.ruleChecks ?? {},
+        processScore: typeof t.processScore === "number" ? t.processScore : null,
+        processScoreSnapshot: t.processScoreSnapshot ?? null,
+        attachmentIds: Array.isArray(t.attachmentIds) ? t.attachmentIds : [],
+        schemaVersion: CURRENT_JOURNAL_SCHEMA_VERSION,
+      },
+      nowIso
+    )
+  );
+
+  return {
+    schemaVersion: CURRENT_JOURNAL_SCHEMA_VERSION,
+    primaryPropAccountId,
+    settingsUpdatedAt: typeof raw.settingsUpdatedAt === "string" ? raw.settingsUpdatedAt : undefined,
+    accounts: rawAccounts.map((a) => withMeta(a, nowIso)),
+    trades,
+    strategies: arr<Strategy>(raw.strategies).map((s) => withMeta(s, nowIso)),
+    noTrades: arr<NoTradeEntry>(raw.noTrades).map((e) => withMeta(e, nowIso)),
+    plans: arr<TradingPlan>(raw.plans).map((p) => withMeta(p, nowIso)),
+    weekPlans: arr<WeekPlan>(raw.weekPlans).map((p) => withMeta(p, nowIso)),
+    notes: arr<Note>(raw.notes).map((n) => withMeta(n, nowIso)),
+  };
+}
+
+/**
+ * Journal in AppStorage (the current space). Reads return live records only; deletes are soft (tombstones with
+ * deletedAt) so a future sync can tell "deleted" from "never existed". Every write stamps updatedAt.
+ */
 export class LocalStorageJournalRepository implements JournalRepository {
   private key: string;
   private userId?: string | null;
@@ -50,27 +114,21 @@ export class LocalStorageJournalRepository implements JournalRepository {
   }
 
   private loadData(): JournalStorageData {
-    if (typeof window === "undefined") {
-      return INITIAL_JOURNAL_DATA;
-    }
-
+    if (typeof window === "undefined") return emptyJournal();
     try {
       const raw = AppStorage.getItem(this.key, this.userId);
-      if (!raw) return INITIAL_JOURNAL_DATA;
-
+      if (!raw) return emptyJournal();
       const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object") return INITIAL_JOURNAL_DATA;
-
-      return this.migrate(parsed);
+      if (!parsed || typeof parsed !== "object") return emptyJournal();
+      return migrateJournalData(parsed);
     } catch (e) {
       console.error("Failed to load journal data from storage, falling back to initial", e);
-      return INITIAL_JOURNAL_DATA;
+      return emptyJournal();
     }
   }
 
   private saveData(data: JournalStorageData): void {
     if (typeof window === "undefined") return;
-
     try {
       AppStorage.setItem(this.key, JSON.stringify(data), this.userId);
     } catch (e) {
@@ -78,58 +136,31 @@ export class LocalStorageJournalRepository implements JournalRepository {
     }
   }
 
-  private migrate(raw: any): JournalStorageData {
-    let rawAccounts: Account[] = Array.isArray(raw.accounts) ? raw.accounts : [];
-    const rawTrades: any[] = Array.isArray(raw.trades) ? raw.trades : [];
-    const rawStrategies: Strategy[] = Array.isArray(raw.strategies) ? raw.strategies : [];
-    const rawNoTrades: NoTradeEntry[] = Array.isArray(raw.noTrades) ? raw.noTrades : [];
-    const rawPlans: TradingPlan[] = Array.isArray(raw.plans) ? raw.plans : [];
-    const rawWeekPlans: WeekPlan[] = Array.isArray(raw.weekPlans) ? raw.weekPlans : [];
-    const rawNotes: Note[] = Array.isArray(raw.notes) ? raw.notes : [];
+  private now(): string {
+    return new Date().toISOString();
+  }
 
-    // Migration v5: Migrate primaryPropAccountId
-    let primaryPropAccountId: string | null | undefined = raw.primaryPropAccountId;
+  /** Inserts or replaces by key (a tombstone with the same key is brought back to life). */
+  private upsert<T extends SyncMeta>(list: T[], item: T, same: (a: T) => boolean): T {
+    const stamped = { ...item, updatedAt: this.now(), deletedAt: null };
+    const index = list.findIndex(same);
+    if (index >= 0) list[index] = stamped;
+    else list.push(stamped);
+    return stamped;
+  }
 
-    rawAccounts = rawAccounts.map((acc) => {
-      const isProp = acc.type === "prop";
-      return {
-        ...acc,
-        propRules: isProp && acc.propRules ? acc.propRules : (acc.type === "prop" ? acc.propRules || null : null),
-      };
-    });
+  /** Marks the live record as deleted. Returns false when there was nothing live to delete. */
+  private softDelete<T extends SyncMeta>(list: T[], same: (a: T) => boolean): boolean {
+    const item = list.find((r) => same(r) && isLive(r));
+    if (!item) return false;
+    const at = this.now();
+    item.deletedAt = at;
+    item.updatedAt = at;
+    return true;
+  }
 
-    // If primaryPropAccountId was not stored explicitly (undefined), check legacy isPrimaryProp flag
-    if (primaryPropAccountId === undefined) {
-      const legacyPrimary = rawAccounts.find(
-        (a) => a.isPrimaryProp && a.type === "prop" && !a.archivedAt
-      );
-      if (legacyPrimary) {
-        primaryPropAccountId = legacyPrimary.id;
-      }
-    }
-
-    const trades: Trade[] = rawTrades.map((t) => ({
-      ...t,
-      strategyId: t.strategyId ?? null,
-      strategyVersion: t.strategyVersion ?? null,
-      ruleChecks: t.ruleChecks ?? {},
-      processScore: typeof t.processScore === "number" ? t.processScore : null,
-      processScoreSnapshot: t.processScoreSnapshot ?? null,
-      attachmentIds: Array.isArray(t.attachmentIds) ? t.attachmentIds : [],
-      schemaVersion: CURRENT_JOURNAL_SCHEMA_VERSION,
-    }));
-
-    return {
-      schemaVersion: CURRENT_JOURNAL_SCHEMA_VERSION,
-      primaryPropAccountId,
-      accounts: rawAccounts,
-      trades,
-      strategies: rawStrategies,
-      noTrades: rawNoTrades,
-      plans: rawPlans,
-      weekPlans: rawWeekPlans,
-      notes: rawNotes,
-    };
+  getAllRecords(): JournalSnapshot {
+    return this.loadData();
   }
 
   getPrimaryPropAccountId(): string | null | undefined {
@@ -139,226 +170,183 @@ export class LocalStorageJournalRepository implements JournalRepository {
   setPrimaryPropAccountId(id: string | null | undefined): void {
     const data = this.loadData();
     data.primaryPropAccountId = id;
+    data.settingsUpdatedAt = this.now();
     this.saveData(data);
   }
 
   getAccounts(): Account[] {
-    return this.loadData().accounts;
+    return live(this.loadData().accounts);
   }
 
   getAccount(id: string): Account | null {
-    const accounts = this.getAccounts();
-    return accounts.find((a) => a.id === id) || null;
+    return this.getAccounts().find((a) => a.id === id) || null;
   }
 
   saveAccount(account: Account): Account {
     const data = this.loadData();
-    const index = data.accounts.findIndex((a) => a.id === account.id);
-
-    if (index >= 0) {
-      data.accounts[index] = account;
-    } else {
-      data.accounts.push(account);
-    }
-
+    const saved = this.upsert(data.accounts, account, (a) => a.id === account.id);
     this.saveData(data);
-    return account;
+    return saved;
   }
 
   archiveAccount(id: string): Account {
     const data = this.loadData();
-    const account = data.accounts.find((a) => a.id === id);
+    const account = data.accounts.find((a) => a.id === id && isLive(a));
     if (!account) throw new Error(`Account not found: ${id}`);
-
-    account.archivedAt = new Date().toISOString();
+    account.archivedAt = this.now();
+    account.updatedAt = account.archivedAt;
     this.saveData(data);
     return account;
   }
 
   deleteAccount(id: string): boolean {
     const data = this.loadData();
-    // Cannot delete if there are trades
-    const hasTrades = data.trades.some((t) => t.accountId === id);
-    if (hasTrades) {
+    // Cannot delete if there are (live) trades
+    if (data.trades.some((t) => t.accountId === id && isLive(t))) {
       throw new Error("Cannot delete account with trades. Archive it instead.");
     }
-
-    const filtered = data.accounts.filter((a) => a.id !== id);
-    if (filtered.length === data.accounts.length) return false;
-
-    data.accounts = filtered;
+    if (!this.softDelete(data.accounts, (a) => a.id === id)) return false;
     this.saveData(data);
     return true;
   }
 
   getTradingPlans(): TradingPlan[] {
-    return this.loadData().plans || [];
+    return live(this.loadData().plans || []);
   }
 
   getTradingPlan(date: string): TradingPlan | null {
-    const plans = this.getTradingPlans();
-    return plans.find((p) => p.date === date) || null;
+    return this.getTradingPlans().find((p) => p.date === date) || null;
   }
 
   saveTradingPlan(plan: TradingPlan): TradingPlan {
     const data = this.loadData();
-    const index = data.plans.findIndex((p) => p.date === plan.date);
-
-    if (index >= 0) {
-      data.plans[index] = plan;
-    } else {
-      data.plans.push(plan);
-    }
-
+    const saved = this.upsert(data.plans, plan, (p) => p.date === plan.date);
     this.saveData(data);
-    return plan;
+    return saved;
   }
 
   deleteTradingPlan(date: string): boolean {
     const data = this.loadData();
-    const filtered = data.plans.filter((p) => p.date !== date);
-    if (filtered.length === data.plans.length) return false;
-
-    data.plans = filtered;
+    if (!this.softDelete(data.plans, (p) => p.date === date)) return false;
     this.saveData(data);
     return true;
   }
 
   getWeekPlans(): WeekPlan[] {
-    return this.loadData().weekPlans || [];
+    return live(this.loadData().weekPlans || []);
   }
 
   getWeekPlan(weekStartDate: string): WeekPlan | null {
-    const weekPlans = this.getWeekPlans();
-    return weekPlans.find((p) => p.weekStartDate === weekStartDate) || null;
+    return this.getWeekPlans().find((p) => p.weekStartDate === weekStartDate) || null;
   }
 
   saveWeekPlan(plan: WeekPlan): WeekPlan {
     const data = this.loadData();
-    const index = data.weekPlans.findIndex((p) => p.weekStartDate === plan.weekStartDate);
-
-    if (index >= 0) {
-      data.weekPlans[index] = plan;
-    } else {
-      data.weekPlans.push(plan);
-    }
-
+    const saved = this.upsert(data.weekPlans, plan, (p) => p.weekStartDate === plan.weekStartDate);
     this.saveData(data);
-    return plan;
+    return saved;
   }
 
   deleteWeekPlan(weekStartDate: string): boolean {
     const data = this.loadData();
-    const filtered = data.weekPlans.filter((p) => p.weekStartDate !== weekStartDate);
-    if (filtered.length === data.weekPlans.length) return false;
-
-    data.weekPlans = filtered;
+    if (!this.softDelete(data.weekPlans, (p) => p.weekStartDate === weekStartDate)) return false;
     this.saveData(data);
     return true;
   }
 
   getNotes(): Note[] {
-    return this.loadData().notes || [];
+    return live(this.loadData().notes || []);
   }
 
   getNote(id: string): Note | null {
-    const notes = this.getNotes();
-    return notes.find((n) => n.id === id) || null;
+    return this.getNotes().find((n) => n.id === id) || null;
   }
 
   saveNote(note: Note): Note {
     const data = this.loadData();
-    const index = data.notes.findIndex((n) => n.id === note.id);
-
-    if (index >= 0) {
-      data.notes[index] = note;
-    } else {
-      data.notes.push(note);
-    }
-
+    const saved = this.upsert(data.notes, note, (n) => n.id === note.id);
     this.saveData(data);
-    return note;
+    return saved;
   }
 
   archiveNote(id: string): Note {
     const data = this.loadData();
-    const note = data.notes.find((n) => n.id === id);
+    const note = data.notes.find((n) => n.id === id && isLive(n));
     if (!note) throw new Error(`Note not found: ${id}`);
-
-    note.archivedAt = new Date().toISOString();
-    note.updatedAt = new Date().toISOString();
+    note.archivedAt = this.now();
+    note.updatedAt = note.archivedAt;
     this.saveData(data);
     return note;
   }
 
   deleteNote(id: string): boolean {
     const data = this.loadData();
-    const filtered = data.notes.filter((n) => n.id !== id);
-    if (filtered.length === data.notes.length) return false;
-
-    data.notes = filtered;
+    if (!this.softDelete(data.notes, (n) => n.id === id)) return false;
     this.saveData(data);
     return true;
   }
 
   getTrades(): Trade[] {
-    return this.loadData().trades;
+    return live(this.loadData().trades);
   }
 
   getTrade(id: string): Trade | null {
-    const trades = this.getTrades();
-    return trades.find((t) => t.id === id) || null;
+    return this.getTrades().find((t) => t.id === id) || null;
   }
 
   saveTrade(trade: Trade): Trade {
     const data = this.loadData();
-    const index = data.trades.findIndex((t) => t.id === trade.id);
-
-    if (index >= 0) {
-      data.trades[index] = trade;
-    } else {
-      data.trades.push(trade);
-    }
-
+    const saved = this.upsert(data.trades, trade, (t) => t.id === trade.id);
     this.saveData(data);
-    return trade;
+    return saved;
   }
 
   deleteTrade(id: string): boolean {
     const data = this.loadData();
-    const filtered = data.trades.filter((t) => t.id !== id);
-    if (filtered.length === data.trades.length) return false;
-
-    data.trades = filtered;
+    if (!this.softDelete(data.trades, (t) => t.id === id)) return false;
     this.saveData(data);
-
-    // Asynchronously delete attachments for this trade in background
+    // Screenshot files of a deleted trade are not needed any more; the trade itself stays as a tombstone
     if (typeof window !== "undefined") {
       const attRepo = new IndexedDBAttachmentRepository(this.userId);
       attRepo.deleteAttachmentsByTradeId(id).catch((err) => {
         console.error(`Failed to delete attachments for deleted trade ${id}:`, err);
       });
     }
-
     return true;
   }
 
-  /** Adds many trades in one write (import). Trades whose id already exists are skipped. Returns how many were added. */
+  /**
+   * Adds many trades in one write (import). Trades whose id is already live are skipped; a tombstone with the same
+   * id (e.g. an undone import of the same file) is replaced. Returns how many were added.
+   */
   importTrades(trades: Trade[]): number {
     const data = this.loadData();
-    const ids = new Set(data.trades.map((t) => t.id));
-    const fresh = trades.filter((t) => !ids.has(t.id));
-    data.trades.push(...fresh);
+    const liveIds = new Set(data.trades.filter(isLive).map((t) => t.id));
+    const at = this.now();
+    let added = 0;
+    for (const t of trades) {
+      if (liveIds.has(t.id)) continue;
+      const fresh = { ...t, updatedAt: at, deletedAt: null };
+      const index = data.trades.findIndex((x) => x.id === t.id);
+      if (index >= 0) data.trades[index] = fresh;
+      else data.trades.push(fresh);
+      liveIds.add(t.id);
+      added++;
+    }
     this.saveData(data);
-    return fresh.length;
+    return added;
   }
 
   /** Deletes every trade of one import batch (undo import), including their screenshots. Returns the number deleted. */
   deleteTradesByBatch(batchId: string): number {
     const data = this.loadData();
-    const removed = data.trades.filter((t) => t.importBatchId === batchId);
+    const removed = data.trades.filter((t) => t.importBatchId === batchId && isLive(t));
     if (removed.length === 0) return 0;
-    data.trades = data.trades.filter((t) => t.importBatchId !== batchId);
+    const at = this.now();
+    removed.forEach((t) => {
+      t.deletedAt = at;
+      t.updatedAt = at;
+    });
     this.saveData(data);
     if (typeof window !== "undefined") {
       const attRepo = new IndexedDBAttachmentRepository(this.userId);
@@ -372,82 +360,58 @@ export class LocalStorageJournalRepository implements JournalRepository {
   }
 
   getStrategies(): Strategy[] {
-    return this.loadData().strategies || [];
+    return live(this.loadData().strategies || []);
   }
 
   getStrategy(id: string): Strategy | null {
-    const strategies = this.getStrategies();
-    return strategies.find((s) => s.id === id) || null;
+    return this.getStrategies().find((s) => s.id === id) || null;
   }
 
   saveStrategy(strategy: Strategy): Strategy {
     const data = this.loadData();
-    const index = data.strategies.findIndex((s) => s.id === strategy.id);
-
-    if (index >= 0) {
-      data.strategies[index] = strategy;
-    } else {
-      data.strategies.push(strategy);
-    }
-
+    const saved = this.upsert(data.strategies, strategy, (s) => s.id === strategy.id);
     this.saveData(data);
-    return strategy;
+    return saved;
   }
 
   archiveStrategy(id: string): Strategy {
     const data = this.loadData();
-    const strategy = data.strategies.find((s) => s.id === id);
+    const strategy = data.strategies.find((s) => s.id === id && isLive(s));
     if (!strategy) throw new Error(`Strategy not found: ${id}`);
-
-    strategy.archivedAt = new Date().toISOString();
+    strategy.archivedAt = this.now();
+    strategy.updatedAt = strategy.archivedAt;
     this.saveData(data);
     return strategy;
   }
 
   deleteStrategy(id: string): boolean {
     const data = this.loadData();
-    const hasTrades = data.trades.some((t) => t.strategyId === id);
-    if (hasTrades) {
+    if (data.trades.some((t) => t.strategyId === id && isLive(t))) {
       throw new Error("Cannot delete strategy with trades. Archive it instead.");
     }
-
-    const filtered = data.strategies.filter((s) => s.id !== id);
-    if (filtered.length === data.strategies.length) return false;
-
-    data.strategies = filtered;
+    if (!this.softDelete(data.strategies, (s) => s.id === id)) return false;
     this.saveData(data);
     return true;
   }
 
   getNoTrades(): NoTradeEntry[] {
-    return this.loadData().noTrades || [];
+    return live(this.loadData().noTrades || []);
   }
 
   getNoTrade(id: string): NoTradeEntry | null {
-    const entries = this.getNoTrades();
-    return entries.find((e) => e.id === id) || null;
+    return this.getNoTrades().find((e) => e.id === id) || null;
   }
 
   saveNoTrade(entry: NoTradeEntry): NoTradeEntry {
     const data = this.loadData();
-    const index = data.noTrades.findIndex((e) => e.id === entry.id);
-
-    if (index >= 0) {
-      data.noTrades[index] = entry;
-    } else {
-      data.noTrades.push(entry);
-    }
-
+    const saved = this.upsert(data.noTrades, entry, (e) => e.id === entry.id);
     this.saveData(data);
-    return entry;
+    return saved;
   }
 
   deleteNoTrade(id: string): boolean {
     const data = this.loadData();
-    const filtered = data.noTrades.filter((e) => e.id !== id);
-    if (filtered.length === data.noTrades.length) return false;
-
-    data.noTrades = filtered;
+    if (!this.softDelete(data.noTrades, (e) => e.id === id)) return false;
     this.saveData(data);
     return true;
   }

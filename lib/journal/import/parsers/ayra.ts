@@ -2,7 +2,7 @@ import type { Trade } from "../../types";
 import type { ImportParser, NormalizedTrade, RowError } from "../types";
 
 /** Highest AYRA trades export version this importer understands. */
-export const AYRA_TRADES_MAX_VERSION = "1.2";
+export const AYRA_TRADES_MAX_VERSION = "1.3";
 
 function versionAtMost(v: unknown, max: string): boolean {
   const a = String(v ?? "0").split(".").map(Number);
@@ -13,17 +13,20 @@ function versionAtMost(v: unknown, max: string): boolean {
   return true;
 }
 
-/** Trades from an AYRA JSON file: the trades export (kind "trades", ≤ 1.2) or a full profile export (journal.trades). */
+/**
+ * Trades from an AYRA JSON file: the trades export (kind "trades", ≤ 1.3) or a full profile export (journal.trades).
+ * Soft-deleted records (deletedAt) are skipped, whatever the version.
+ */
 export function ayraTradesFrom(json: unknown): Trade[] | null {
   if (!json || typeof json !== "object") return null;
   const o = json as Record<string, unknown>;
   if (o.app !== "ayra") return null;
   if (o.kind === "trades") {
     if (!versionAtMost(o.exportVersion, AYRA_TRADES_MAX_VERSION)) return null;
-    return Array.isArray(o.trades) ? (o.trades as Trade[]) : null;
+    return Array.isArray(o.trades) ? (o.trades as Trade[]).filter((t) => !t?.deletedAt) : null;
   }
   const journal = o.journal as Record<string, unknown> | undefined;
-  return journal && Array.isArray(journal.trades) ? (journal.trades as Trade[]) : null;
+  return journal && Array.isArray(journal.trades) ? (journal.trades as Trade[]).filter((t) => !t?.deletedAt) : null;
 }
 
 export const ayraParser: ImportParser = {

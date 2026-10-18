@@ -95,7 +95,16 @@ export interface PropToastLogEntry {
 
 export type PropToastLog = Record<string, PropToastLogEntry>; // accountId -> entry
 
-export interface Account {
+/**
+ * Sync metadata of every journal record (T7b). updatedAt: last local change (ISO); deletedAt: soft delete —
+ * the record stays as a tombstone for sync but is never shown, counted or exported.
+ */
+export interface SyncMeta {
+  updatedAt?: string;
+  deletedAt?: string | null;
+}
+
+export interface Account extends SyncMeta {
   id: string;
   name: string | null; // null for default name ("Основной счёт" / "Main account")
   type: AccountType;
@@ -115,7 +124,7 @@ export type TradeSession = "asia" | "london" | "newyork" | "overlap" | "other";
 export type TradeVerification = "unverified" | "imported" | "connected" | "verified";
 export type TradeSource = "manual" | "import";
 
-export interface Trade {
+export interface Trade extends SyncMeta {
   id: string;
   accountId: string;
   instrument: string; // Normalized to UPPERCASE without spaces
@@ -174,7 +183,7 @@ export interface RiskLimit {
   value: number;
 }
 
-export interface Strategy {
+export interface Strategy extends SyncMeta {
   id: string;
   name: string | null; // null for default strategy ("Моя стратегия" / "My strategy")
   description?: string | null; // Max 500 chars
@@ -214,7 +223,7 @@ export type NoTradeReason =
   | "plan_not_matching"
   | "other";
 
-export interface NoTradeEntry {
+export interface NoTradeEntry extends SyncMeta {
   id: string;
   date: string; // ISO String or YYYY-MM-DD
   accountId?: string | null;
@@ -334,7 +343,7 @@ export interface DayReview {
   completedAt?: string; // ISO String
 }
 
-export interface TradingPlan {
+export interface TradingPlan extends SyncMeta {
   date: string; // YYYY-MM-DD
   bias: PlanBiasItem[]; // Max 8
   levels: PlanLevelItem[]; // Max 12
@@ -347,7 +356,7 @@ export interface TradingPlan {
   updatedAt: string; // ISO String
 }
 
-export interface WeekPlan {
+export interface WeekPlan extends SyncMeta {
   weekStartDate: string; // YYYY-MM-DD (Monday)
   goals: string[]; // Max 3, each max 120 chars
   focus?: string; // Strategy ID or custom text
@@ -369,7 +378,7 @@ export interface NoteLinks {
   strategyId?: string;
 }
 
-export interface Note {
+export interface Note extends SyncMeta {
   id: string;
   title?: string; // Max 80 chars
   body: string; // Max 5000 chars
@@ -426,4 +435,22 @@ export interface JournalRepository {
   deleteNote(id: string): boolean;
 
   getStorageUsage(): StorageUsage;
+
+  /** Everything stored, including tombstones (deletedAt set) — for sync (T7b) and tests; never for the UI. */
+  getAllRecords(): JournalSnapshot;
+}
+
+/** Full journal contents including soft-deleted records. */
+export interface JournalSnapshot {
+  schemaVersion: number;
+  primaryPropAccountId?: string | null;
+  /** When primaryPropAccountId last changed (sync). */
+  settingsUpdatedAt?: string;
+  accounts: Account[];
+  trades: Trade[];
+  strategies: Strategy[];
+  noTrades: NoTradeEntry[];
+  plans: TradingPlan[];
+  weekPlans: WeekPlan[];
+  notes: Note[];
 }
