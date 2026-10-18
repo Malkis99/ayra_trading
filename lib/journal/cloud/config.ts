@@ -33,3 +33,24 @@ export const JOURNAL_CLOUD_PULL_OVERLAP_MS = 60 * 1000;
 
 /** Page size when reading changes from the server. */
 export const JOURNAL_CLOUD_PAGE_SIZE = 500;
+
+// ---- Sync engine (T7b-4, docs/t7b-4-sync-engine-plan.md section 8; PLACEHOLDERS approved by the owner 2026-10-18) ----
+
+/** Pauses between retries of a failed send: 1 s, 5 s, 30 s, 2 min, then every 5 min. */
+export const SYNC_RETRY_DELAYS_MS = [1000, 5000, 30_000, 120_000, 300_000] as const;
+
+/** Random spread of every retry pause (±20%), so many devices do not retry at the same moment. */
+export const SYNC_RETRY_JITTER = 0.2;
+
+/** Wait after the last change before sending (several quick edits = one request). */
+export const SYNC_DEBOUNCE_MS = 1000;
+
+/** Records per request when sending (and, in 4d, uploading). */
+export const SYNC_BATCH_SIZE = 100;
+
+/** How long sign-out / account switch waits for the queue to be sent. */
+export const SYNC_FLUSH_ON_SIGN_OUT_MS = 3000;
+
+/** Only one tab of an account sends: lease TTL and renewal (same as the onboarding lease). */
+export const SYNC_LEASE_TTL_MS = 15_000;
+export const SYNC_LEASE_HEARTBEAT_MS = 5000;

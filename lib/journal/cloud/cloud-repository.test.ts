@@ -7,6 +7,9 @@ import { CloudJournalRepository } from "./cloud-repository";
 import type { JournalCloudRemote } from "./remote";
 import type { JournalCloudReadRow, JournalCloudTable, JournalCloudWriteRow } from "./records";
 import { JOURNAL_CLOUD_MAX_RECORD_BYTES } from "./config";
+import { markInitialSyncDone } from "./sync-state";
+import { SyncOutbox } from "./outbox";
+import { spaceTabChannel } from "@/lib/auth/space-channel";
 
 const USER = "00000000-0000-0000-0000-0000000000a1";
 const OTHER = "00000000-0000-0000-0000-0000000000b1";
@@ -76,6 +79,12 @@ function trade(id: string, extra: Partial<Trade> = {}): Trade {
   };
 }
 
+/** Sends what is queued now (no waiting for the 1 s debounce) and waits for every request. */
+const settle = async () => {
+  await repo.syncNow();
+  await repo.whenIdle();
+};
+
 let remote: FakeRemote;
 let local: LocalStorageJournalRepository;
 let repo: CloudJournalRepository;
@@ -85,9 +94,11 @@ beforeEach(() => {
   AppStorage.setUserId(USER);
   remote = new FakeRemote();
   local = new LocalStorageJournalRepository();
-  repo = new CloudJournalRepository(local, remote);
+  repo = new CloudJournalRepository(local, remote, undefined, "tab_a");
+  markInitialSyncDone(USER);
 });
 afterEach(() => {
+  repo.dispose();
   AppStorage.setUserId(null);
   vi.restoreAllMocks();
 });
@@ -101,7 +112,7 @@ describe("T7b-3 cloud journal repository", () => {
 
   it("flag on: a saved trade goes to the cloud as id + data + device_id only, schemaVersion inside", async () => {
     repo.saveTrade(trade("tr_1"));
-    await repo.whenIdle();
+    await settle();
     const [row] = remote.sent("journal_trades");
     expect(Object.keys(row).sort()).toEqual(["data", "device_id", "id"]);
     expect(row.id).toBe("tr_1");
@@ -115,7 +126,7 @@ describe("T7b-3 cloud journal repository", () => {
     repo.saveNote({ id: "n_1", body: "hi", tags: [], pinned: false, createdAt: "2026-10-17T09:00:00Z", updatedAt: "2026-10-17T09:00:00Z" });
     repo.saveTradingPlan({ date: "2026-10-17", bias: [], levels: [], events: [], checklist: [], createdAt: "x", updatedAt: "x" });
     repo.setPrimaryPropAccountId("acc_1");
-    await repo.whenIdle();
+    await settle();
     expect(remote.sent("journal_notes")[0].data.schemaVersion).toBe(6);
     expect(remote.sent("journal_day_plans")[0].id).toBe("2026-10-17");
     expect(remote.sent("journal_settings")[0]).toMatchObject({ id: "journal", data: { primaryPropAccountId: "acc_1" } });
@@ -123,15 +134,16 @@ describe("T7b-3 cloud journal repository", () => {
 
   it("XP, coins, achievements and quests never go into a cloud record", async () => {
     repo.saveTrade({ ...trade("tr_1"), xp: 500, coins: 10, achievements: ["a"], quests: ["q"] } as unknown as Trade);
-    await repo.whenIdle();
+    await settle();
     const data = remote.sent("journal_trades")[0].data;
     for (const k of ["xp", "coins", "achievements", "quests"]) expect(data).not.toHaveProperty(k);
   });
 
   it("soft delete: a tombstone with deletedAt is sent, nothing is hard-deleted", async () => {
     repo.saveTrade(trade("tr_1"));
+    await settle();
     repo.deleteTrade("tr_1");
-    await repo.whenIdle();
+    await settle();
     const rows = remote.sent("journal_trades");
     expect(rows).toHaveLength(2);
     expect(rows[1].data.deletedAt).toBeTruthy();
@@ -142,19 +154,19 @@ describe("T7b-3 cloud journal repository", () => {
   it("only changed records are sent", async () => {
     repo.saveTrade(trade("tr_1"));
     repo.saveTrade(trade("tr_2"));
-    await repo.whenIdle();
+    await settle();
     remote.upserts = [];
     repo.saveTrade(trade("tr_2", { notes: "edited" }));
-    await repo.whenIdle();
+    await settle();
     expect(remote.sent("journal_trades").map((r) => r.id)).toEqual(["tr_2"]);
   });
 
   it("flag off: nothing is sent or read, the answer is cached, the journal works as before", async () => {
     remote.enabled = false;
     repo.saveTrade(trade("tr_1"));
-    await repo.whenIdle();
+    await settle();
     repo.saveTrade(trade("tr_2"));
-    await repo.whenIdle();
+    await settle();
     expect(await repo.pullFromCloud()).toEqual({ ok: false, applied: 0 });
     expect(remote.upserts).toEqual([]);
     expect(remote.flagCalls).toBe(1);
@@ -165,67 +177,95 @@ describe("T7b-3 cloud journal repository", () => {
   it("guest, or a session of another user: the cloud is not touched", async () => {
     AppStorage.setUserId(null);
     repo.saveTrade(trade("tr_guest"));
-    await repo.whenIdle();
+    await settle();
     AppStorage.setUserId(USER);
     remote.session = OTHER;
     repo.saveTrade(trade("tr_1"));
-    await repo.whenIdle();
+    await settle();
     expect(remote.upserts).toEqual([]);
     expect(remote.flagCalls).toBe(0);
   });
 
-  it("network down: no exception, local data kept, status error; the flag is asked again later", async () => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("network down: no exception, local data kept, status offline; the queued record is retried when the network is back", async () => {
+    repo.saveTrade(trade("tr_0"));
+    await settle(); // flag known to be on
     remote.down = true;
     expect(() => repo.saveTrade(trade("tr_1"))).not.toThrow();
-    await repo.whenIdle();
+    await settle();
     expect(repo.getTrade("tr_1")).not.toBeNull();
-    expect(repo.getCloudStatus().state).toBe("error");
-    expect(await repo.pullFromCloud()).toEqual({ ok: false, applied: 0 });
+    expect(repo.getCloudStatus()).toMatchObject({ state: "offline", pending: 1 });
 
     remote.down = false;
-    repo.saveTrade(trade("tr_2"));
-    await repo.whenIdle();
-    expect(remote.sent("journal_trades").map((r) => r.id)).toEqual(["tr_2"]);
-    expect(repo.getCloudStatus().state).toBe("synced");
+    await settle();
+    expect(remote.sent("journal_trades").map((r) => r.id)).toEqual(["tr_0", "tr_1"]);
+    expect(repo.getCloudStatus()).toMatchObject({ state: "synced", pending: 0 });
   });
 
-  it("server error on upsert: local data kept, nothing thrown", async () => {
+  it("flag check not reachable: nothing sent, the record waits in the queue", async () => {
+    remote.down = true;
+    repo.saveTrade(trade("tr_1"));
+    await settle();
+    expect(remote.upserts).toEqual([]);
+    expect(new SyncOutbox(USER).size()).toBe(1);
+    remote.down = false;
+    await settle();
+    expect(remote.sent("journal_trades").map((r) => r.id)).toEqual(["tr_1"]);
+  });
+
+  it("server error on upsert: local data kept, nothing thrown, record stays queued", async () => {
+    repo.saveTrade(trade("tr_0"));
+    await settle();
     remote.upsert = async () => {
-      throw new Error("permission denied");
+      throw new Error("internal error");
     };
     repo.saveTrade(trade("tr_1"));
-    await repo.whenIdle();
+    await settle();
     expect(repo.getTrade("tr_1")).not.toBeNull();
-    expect(repo.getCloudStatus()).toMatchObject({ state: "error", lastError: "permission denied" });
+    expect(repo.getCloudStatus()).toMatchObject({ state: "error", lastError: "internal error", pending: 1 });
+  });
+
+  it("server refuses because sync was turned off (RLS 42501): sending stops, queue kept, journal stays local", async () => {
+    repo.saveTrade(trade("tr_0"));
+    await settle();
+    remote.upsert = async () => {
+      throw Object.assign(new Error("new row violates row-level security policy"), { code: "42501" });
+    };
+    repo.saveTrade(trade("tr_1"));
+    await settle();
+    expect(repo.getCloudStatus().state).toBe("local");
+    expect(new SyncOutbox(USER).size()).toBe(1);
+    repo.saveTrade(trade("tr_2")); // flag known off: not even queued
+    expect(new SyncOutbox(USER).size()).toBe(1);
   });
 
   it("a record over the size limit stays local and is reported, the rest is sent", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     repo.saveTrade(trade("tr_big", { notes: "x".repeat(JOURNAL_CLOUD_MAX_RECORD_BYTES) }));
     repo.saveTrade(trade("tr_ok"));
-    await repo.whenIdle();
+    await settle();
     expect(remote.sent("journal_trades").map((r) => r.id)).toEqual(["tr_ok"]);
     expect(repo.getTrade("tr_big")).not.toBeNull();
-    const all = repo.getCloudStatus();
-    expect(all.state).toBe("synced");
+    expect(repo.getCloudStatus().state).toBe("synced");
   });
 
   it("the size check uses the record that is sent", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     repo.saveTrade(trade("tr_big", { notes: "x".repeat(JOURNAL_CLOUD_MAX_RECORD_BYTES) }));
-    await repo.whenIdle();
-    expect(repo.getCloudStatus().skipped).toEqual([{ table: "journal_trades", id: "tr_big", reason: "tooLarge" }]);
+    await settle();
+    expect(repo.getCloudStatus().blocked).toEqual([{ table: "journal_trades", id: "tr_big", blocked: "tooLarge" }]);
+    // not retried while unchanged
+    await settle();
+    expect(remote.upserts).toEqual([]);
   });
 
   describe("pull and version conflicts (last-write-wins)", () => {
     it("a newer cloud version replaces the local one and the screen is told", async () => {
       repo.saveTrade(trade("tr_1", { notes: "old" }));
-      await repo.whenIdle();
+      await settle();
       remote.put("journal_trades", "tr_1", { ...trade("tr_1", { notes: "from phone" }), updatedAt: "2099-01-01T00:00:00.000Z" });
       const listener = vi.fn();
       const unsubscribe = repo.subscribe(listener);
-      await repo.whenIdle();
+      await settle();
       expect(repo.getTrade("tr_1")?.notes).toBe("from phone");
       expect(listener).toHaveBeenCalledTimes(1);
       unsubscribe();
@@ -241,7 +281,7 @@ describe("T7b-3 cloud journal repository", () => {
     it("the server keeps the newer version when an older one is pushed", async () => {
       remote.put("journal_trades", "tr_1", { ...trade("tr_1", { notes: "phone" }), updatedAt: "2099-01-01T00:00:00.000Z" });
       repo.saveTrade(trade("tr_1", { notes: "laptop" }));
-      await repo.whenIdle();
+      await settle();
       expect(remote.rows.get("journal_trades:tr_1")?.data.notes).toBe("phone");
     });
 
@@ -256,7 +296,7 @@ describe("T7b-3 cloud journal repository", () => {
       expect(repo.getAllRecords().trades.find((t) => t.id === "tr_gone")?.deletedAt).toBeTruthy();
       expect(repo.getNote("n_1")).not.toHaveProperty("schemaVersion");
       // a merged record is not sent back
-      await repo.whenIdle();
+      await settle();
       expect(remote.upserts).toEqual([]);
     });
 
@@ -286,13 +326,156 @@ describe("T7b-3 cloud journal repository", () => {
 
   it("import history is mirrored too (undo = tombstone)", async () => {
     const unsubscribe = repo.subscribe(() => {});
-    await repo.whenIdle();
+    await settle();
     addImportBatch({ id: "imp_1", createdAt: "2026-10-18T09:00:00.000Z", formatId: "ayra", fileName: "f.json", accountId: "acc_1", tradeCount: 1 });
+    await settle();
     markImportBatchUndone("imp_1", "2026-10-18T09:05:00.000Z");
-    await repo.whenIdle();
+    await settle();
     const rows = remote.sent("journal_import_batches");
     expect(rows.map((r) => r.data.undoneAt ?? null)).toEqual([null, "2026-10-18T09:05:00.000Z"]);
     expect(listImportBatches()).toHaveLength(1);
     unsubscribe();
+  });
+
+  describe("T7b-4a outbox", () => {
+    it("before the first sync nothing is sent: changes wait in the queue, then go out", async () => {
+      localStorage.removeItem(`ayra:${USER}:ayra_sync_state`);
+      repo.saveTrade(trade("tr_1"));
+      repo.saveNote({ id: "n_1", body: "x", tags: [], pinned: false, createdAt: "x", updatedAt: "x" });
+      await settle();
+      expect(remote.upserts).toEqual([]);
+      expect(repo.getCloudStatus()).toMatchObject({ state: "waitingInitialSync", pending: 2 });
+      expect(await repo.pullFromCloud()).toEqual({ ok: false, applied: 0 });
+
+      markInitialSyncDone(USER);
+      await settle();
+      expect(remote.sent("journal_trades").map((r) => r.id)).toEqual(["tr_1"]);
+      expect(remote.sent("journal_notes").map((r) => r.id)).toEqual(["n_1"]);
+      expect(repo.getCloudStatus().pending).toBe(0);
+    });
+
+    it("several edits of one record = one queue entry and one row with the newest version", async () => {
+      repo.saveTrade(trade("tr_1", { notes: "a" }));
+      repo.saveTrade(trade("tr_1", { notes: "b" }));
+      repo.saveTrade(trade("tr_1", { notes: "c" }));
+      expect(new SyncOutbox(USER).size()).toBe(1);
+      await settle();
+      const rows = remote.sent("journal_trades");
+      expect(rows).toHaveLength(1);
+      expect(rows[0].data.notes).toBe("c");
+    });
+
+    it("sends after the debounce pause on its own (no manual sync)", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        repo.saveTrade(trade("tr_1"));
+        expect(remote.upserts).toEqual([]);
+        await vi.advanceTimersByTimeAsync(1500);
+        await repo.whenIdle();
+        expect(remote.sent("journal_trades").map((r) => r.id)).toEqual(["tr_1"]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("the queue survives a reload (new repository, same device)", async () => {
+      remote.down = true;
+      repo.saveTrade(trade("tr_1"));
+      await settle();
+      repo.dispose();
+      remote.down = false;
+      repo = new CloudJournalRepository(new LocalStorageJournalRepository(), remote, undefined, "tab_b");
+      await settle();
+      expect(remote.sent("journal_trades").map((r) => r.id)).toEqual(["tr_1"]);
+    });
+
+    it("only the leader tab sends; when it is gone, another tab takes over", async () => {
+      const repo2 = new CloudJournalRepository(new LocalStorageJournalRepository(), remote, undefined, "tab_2");
+      try {
+        repo.saveTrade(trade("tr_1"));
+        await settle(); // tab_a becomes leader and sends
+        repo2.saveTrade(trade("tr_2")); // written by the second tab into the same queue
+        await repo2.syncNow();
+        await repo2.whenIdle();
+        expect(remote.sent("journal_trades").map((r) => r.id)).toEqual(["tr_1"]);
+        repo.dispose(); // leader tab closed: lease released
+        await repo2.syncNow();
+        await repo2.whenIdle();
+        expect(remote.sent("journal_trades").map((r) => r.id)).toEqual(["tr_1", "tr_2"]);
+      } finally {
+        repo2.dispose();
+      }
+    });
+
+    it("sign-out: the queue gets sent by the space flush, then the engine stops", async () => {
+      repo.saveTrade(trade("tr_1"));
+      await repo.whenIdle();
+      expect(remote.upserts).toEqual([]); // still in the debounce pause
+      await AppStorage.flushSpace(`account:${USER}`);
+      expect(remote.sent("journal_trades").map((r) => r.id)).toEqual(["tr_1"]);
+    });
+  });
+
+  describe("account isolation", () => {
+    it("records of account A are never sent while account B is open; A's queue waits for A", async () => {
+      remote.down = true;
+      repo.saveTrade(trade("tr_a"));
+      await settle();
+      expect(new SyncOutbox(USER).size()).toBe(1);
+
+      // B signs in on this device
+      remote.down = false;
+      AppStorage.setUserId(OTHER);
+      remote.session = OTHER;
+      markInitialSyncDone(OTHER);
+      repo.saveTrade(trade("tr_b"));
+      await settle();
+      expect(remote.sent("journal_trades").map((r) => r.id)).toEqual(["tr_b"]);
+      expect(new SyncOutbox(USER).size()).toBe(1); // A's change kept for A
+      expect(new SyncOutbox(OTHER).size()).toBe(0);
+
+      // A comes back: only now A's record goes out
+      AppStorage.setUserId(USER);
+      remote.session = USER;
+      await settle();
+      expect(remote.sent("journal_trades").map((r) => r.id)).toEqual(["tr_b", "tr_a"]);
+    });
+
+    it("account switched while a send was being prepared: nothing is sent", async () => {
+      repo.saveTrade(trade("tr_a"));
+      remote.isSyncEnabled = async () => {
+        AppStorage.setUserId(OTHER); // another tab / sign-in switched the account meanwhile
+        return true;
+      };
+      await settle();
+      expect(remote.upserts).toEqual([]);
+      AppStorage.setUserId(USER);
+      expect(new SyncOutbox(USER).size()).toBe(1);
+    });
+
+    it("signing in to an account starts its engine: the queue of its last session goes out", async () => {
+      remote.down = true;
+      repo.saveTrade(trade("tr_a"));
+      await settle();
+      const unsubscribe = repo.subscribe(() => {});
+      AppStorage.setUserId(null); // signed out
+      remote.down = false;
+      AppStorage.setUserId(USER); // signed in again
+      spaceTabChannel.notifyLocal("guest", `account:${USER}`);
+      await repo.whenIdle();
+      await new Promise((r) => setTimeout(r, 1200)); // send pause
+      await repo.whenIdle();
+      expect(remote.sent("journal_trades").map((r) => r.id)).toEqual(["tr_a"]);
+      unsubscribe();
+    });
+
+    it("the engine reads only its own account's journal", async () => {
+      AppStorage.setUserId(OTHER);
+      new LocalStorageJournalRepository().saveTrade(trade("tr_other_space"));
+      AppStorage.setUserId(USER);
+      repo.saveTrade(trade("tr_a"));
+      await settle();
+      expect(remote.sent("journal_trades").map((r) => r.id)).toEqual(["tr_a"]);
+    });
   });
 });

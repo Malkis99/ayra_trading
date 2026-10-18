@@ -10,92 +10,163 @@ import type {
   TradingPlan,
   WeekPlan,
 } from "../types";
-import type { LocalStorageJournalRepository } from "../repository";
+import { LocalStorageJournalRepository } from "../repository";
 import { listImportBatches, replaceImportBatches, subscribeImportBatches } from "../import/batches";
 import { AppStorage } from "@/lib/storage";
-import { JOURNAL_CLOUD_FLAG_TTL_MS, JOURNAL_CLOUD_PULL_OVERLAP_MS } from "./config";
+import { spaceTabChannel } from "@/lib/auth/space-channel";
+import { JOURNAL_CLOUD_FLAG_TTL_MS, JOURNAL_CLOUD_PULL_OVERLAP_MS, SYNC_FLUSH_ON_SIGN_OUT_MS } from "./config";
 import type { JournalCloudRemote } from "./remote";
 import {
   JOURNAL_CLOUD_TABLES,
   changedEntries,
   decodeRow,
-  encodeEntry,
   importBatchEntries,
   mergeEntries,
   snapshotEntries,
   versionMap,
   type CloudEntry,
-  type EncodeSkipReason,
   type JournalCloudTable,
-  type JournalCloudWriteRow,
 } from "./records";
+import { JournalSyncEngine, type CloudReadiness, type SyncEngineState } from "./sync-engine";
+import type { OutboxEntry } from "./outbox";
+import { isInitialSyncDone } from "./sync-state";
 
 const CURSOR_KEY = "ayra_journal_cloud_cursor";
-const DEVICE_ID_KEY = "ayra_sync_device_id";
 
 /**
- * - local: cloud not used (guest, flag off, not configured, server not reachable)
- * - synced: last exchange with the cloud succeeded
- * - error: the last exchange failed; the local journal is intact
+ * - local: cloud not used (guest, flag off, not configured)
+ * - waitingInitialSync: flag on, first upload not done yet — changes wait in the queue (4d adds the button)
+ * - syncing / synced / offline / error: state of the queue and of the last pull
  */
-export type JournalCloudState = "local" | "synced" | "error";
+export type JournalCloudState = "local" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error";
 
 export interface JournalCloudStatus {
   state: JournalCloudState;
-  /** Records the client refused to send (the server would reject them), last push. */
-  skipped: { table: JournalCloudTable; id: string; reason: EncodeSkipReason }[];
+  /** Changes waiting in the queue of the current account. */
+  pending: number;
+  /** Records the server would reject (too large / time from the future): kept locally, not retried until changed. */
+  blocked: Pick<OutboxEntry, "table" | "id" | "blocked">[];
   lastError?: string;
 }
 
 export interface PullResult {
-  /** false when the cloud was not used (see JournalCloudState "local") or the pull failed. */
+  /** false when the cloud was not used or the pull failed. */
   ok: boolean;
   applied: number;
 }
 
+const ENGINE_TO_CLOUD_STATE: Record<SyncEngineState, JournalCloudState> = {
+  idle: "synced",
+  waitingInitialSync: "waitingInitialSync",
+  syncing: "syncing",
+  synced: "synced",
+  offline: "offline",
+  error: "error",
+  off: "local",
+};
+
+let tabCounter = 0;
+
 /**
- * Cloud journal behind the same JournalRepository interface (T7b-3).
+ * Cloud journal behind the same JournalRepository interface (T7b-3; outbox and retries since T7b-4a).
  *
  * The local repository stays the working copy: every read is local and synchronous, every write goes to the
- * local journal first. Then — only when the account has cloud sync enabled (user_features.cloud_sync) — the changed
- * records are sent to the 9 cloud tables in the background. Flag off, signed out, no network or a server error:
- * the journal behaves exactly as before; nothing local is lost or blocked.
+ * local journal first. Changed records of an account go into that account's outbox on this device; a sync engine
+ * per account sends them (only when cloud sync is enabled and the first sync is done) with retries.
+ * Flag off, signed out, no network or a server error: the journal behaves exactly as before; nothing local is lost.
  *
- * Not here yet (T7b-4): an outbox with retries, the conflict dialog, the first upload of existing local data.
+ * Isolation: one engine per user, reading only that user's space; on account switch / sign-out the old engine gets
+ * up to 3 s to send and is stopped. Its queue stays on the device for the next session of that account.
  */
 export class CloudJournalRepository implements JournalRepository {
   private flagCache = new Map<string, { enabled: boolean; at: number }>();
   private listeners = new Set<() => void>();
+  private statusListeners = new Set<() => void>();
   private inflight = new Set<Promise<unknown>>();
-  private status: JournalCloudStatus = { state: "local", skipped: [] };
+  private engines = new Map<string, JournalSyncEngine>();
+  private pullState: { state?: JournalCloudState; error?: string } = {};
   private batchVersions: Map<string, string> | null = null;
   private unsubscribeBatches: (() => void) | null = null;
+  private unregisterFlush: (() => void) | null = null;
+  private unsubscribeSpace: (() => void) | null = null;
+  private readonly tabId: string;
 
   constructor(
     private readonly local: LocalStorageJournalRepository,
     private readonly remote: JournalCloudRemote | null,
-    private readonly now: () => Date = () => new Date()
-  ) {}
+    private readonly now: () => Date = () => new Date(),
+    tabId?: string
+  ) {
+    this.tabId = tabId ?? `tab_${Math.random().toString(36).slice(2, 10)}_${++tabCounter}`;
+    if (typeof window !== "undefined" && remote) {
+      // Sign-out / account switch: give the old account's queue a short chance, then stop its engine
+      this.unregisterFlush = AppStorage.registerFlushHandler(async (spaceId) => {
+        const userId = spaceId.startsWith("account:") ? spaceId.slice("account:".length) : null;
+        const engine = userId ? this.engines.get(userId) : undefined;
+        if (!engine) return;
+        await engine.flushWithin(SYNC_FLUSH_ON_SIGN_OUT_MS);
+        engine.stop();
+        this.engines.delete(userId!);
+      });
+    }
+  }
+
+  /** Stops every engine and handler (tests; the app keeps one repository for the page lifetime). */
+  dispose(): void {
+    this.engines.forEach((e) => e.stop());
+    this.engines.clear();
+    this.unregisterFlush?.();
+    this.unsubscribeBatches?.();
+    this.unsubscribeSpace?.();
+    this.unregisterFlush = this.unsubscribeBatches = this.unsubscribeSpace = null;
+  }
 
   // ---- cloud plumbing ----
 
   getCloudStatus(): JournalCloudStatus {
-    return { ...this.status, skipped: [...this.status.skipped] };
+    const userId = AppStorage.getUserId();
+    const cached = userId ? this.flagCache.get(userId) : undefined;
+    if (!userId || !this.remote || !cached?.enabled) return { state: "local", pending: 0, blocked: [] };
+    const s = this.engines.get(userId)?.status();
+    const engineState = s ? ENGINE_TO_CLOUD_STATE[s.state] : undefined;
+    const pullFailed = this.pullState.state === "error" || this.pullState.state === "offline";
+    return {
+      state: (pullFailed ? this.pullState.state : engineState ?? this.pullState.state) ?? "synced",
+      pending: s?.pending ?? 0,
+      blocked: (s?.blocked ?? []).map(({ table, id, blocked }) => ({ table, id, blocked })),
+      lastError: s?.lastError ?? this.pullState.error,
+    };
   }
 
-  /** Resolves when every background request started so far has finished (tests, flush before sign-out). */
+  /** Status changes (for the sync badge in 4e). */
+  subscribeStatus(listener: () => void): () => void {
+    this.statusListeners.add(listener);
+    return () => {
+      this.statusListeners.delete(listener);
+    };
+  }
+
+  private notifyStatus = () => this.statusListeners.forEach((l) => l());
+
+  /** Resolves when every background request started so far has finished (tests). */
   async whenIdle(): Promise<void> {
-    while (this.inflight.size) await Promise.allSettled([...this.inflight]);
+    for (let i = 0; i < 100; i++) {
+      const engines = [...this.engines.values()];
+      await Promise.allSettled([...this.inflight, ...engines.map((e) => e.idle())]);
+      if (!this.inflight.size && engines.every((e) => !e.isRunning())) return;
+    }
+  }
+
+  /** Sends everything queued for the current account now ("Retry now"). Never throws. */
+  syncNow(): Promise<void> {
+    const userId = this.mayUseCloud();
+    return userId ? this.track(this.engineFor(userId).flush(true)) : Promise.resolve();
   }
 
   private track<T>(p: Promise<T>): Promise<T> {
     this.inflight.add(p);
     p.finally(() => this.inflight.delete(p)).catch(() => {});
     return p;
-  }
-
-  private fail(e: unknown): void {
-    this.status = { ...this.status, state: "error", lastError: e instanceof Error ? e.message : String(e) };
   }
 
   /** Cheap synchronous check: is it worth looking at changes for the cloud at all? */
@@ -108,31 +179,47 @@ export class CloudJournalRepository implements JournalRepository {
     return userId;
   }
 
-  /** True only when the server says sync is on for this user and the session belongs to the same user. */
-  private async cloudReady(userId: string): Promise<boolean> {
-    if (!this.remote) return false;
+  /** "on" only when the server says sync is on for this user and the session belongs to the same user. */
+  private cloudReady = async (userId: string): Promise<CloudReadiness> => {
+    if (!this.remote) return "off";
     try {
-      if ((await this.remote.currentUserId()) !== userId) return false;
+      if ((await this.remote.currentUserId()) !== userId) return "otherSession";
       const cached = this.flagCache.get(userId);
-      if (cached && this.now().getTime() - cached.at < JOURNAL_CLOUD_FLAG_TTL_MS) return cached.enabled;
+      if (cached && this.now().getTime() - cached.at < JOURNAL_CLOUD_FLAG_TTL_MS) return cached.enabled ? "on" : "off";
       const enabled = await this.remote.isSyncEnabled(userId);
       this.flagCache.set(userId, { enabled, at: this.now().getTime() });
-      if (!enabled) this.status = { ...this.status, state: "local" };
-      return enabled;
-    } catch (e) {
-      // Not reachable: behave as if sync were off, ask again next time (the answer is not cached)
-      this.fail(e);
-      return false;
+      this.notifyStatus();
+      return enabled ? "on" : "off";
+    } catch {
+      // Not reachable: ask again next time (the answer is not cached)
+      return "unreachable";
     }
-  }
+  };
 
-  private deviceId(userId: string): string {
-    let id = AppStorage.getItem(DEVICE_ID_KEY, userId);
-    if (!id) {
-      id = `dev_${this.now().getTime().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-      AppStorage.setItem(DEVICE_ID_KEY, id, userId);
+  /** Engine of this user; engines of other users are stopped (their queues stay on the device). */
+  private engineFor(userId: string): JournalSyncEngine {
+    for (const [id, e] of this.engines) {
+      if (id !== userId || e.isStopped()) {
+        e.stop();
+        this.engines.delete(id);
+      }
     }
-    return id;
+    let engine = this.engines.get(userId);
+    if (!engine) {
+      engine = new JournalSyncEngine(userId, {
+        remote: this.remote!,
+        // Always the engine's own account, never "the current space"
+        readEntries: (uid) => snapshotEntries(new LocalStorageJournalRepository(undefined, uid).getAllRecords(), listImportBatches(uid)),
+        cloudReady: this.cloudReady,
+        onFlagOff: (uid) => this.flagCache.set(uid, { enabled: false, at: this.now().getTime() }),
+        tabId: this.tabId,
+        now: () => this.now().getTime(),
+        onChange: this.notifyStatus,
+      });
+      this.engines.set(userId, engine);
+      engine.start();
+    }
+    return engine;
   }
 
   private batchEntries(): CloudEntry[] {
@@ -143,37 +230,15 @@ export class CloudJournalRepository implements JournalRepository {
     return snapshotEntries(this.local.getAllRecords(), listImportBatches());
   }
 
-  /** Runs a local write; the records it changed are then sent to the cloud in the background. */
+  /** Runs a local write; the records it changed go into the account's outbox. */
   private write<T>(fn: () => T): T {
     const userId = this.mayUseCloud();
     if (!userId) return fn();
     const before = versionMap(this.allEntries());
     const result = fn();
     const changed = changedEntries(before, this.allEntries());
-    if (changed.length) void this.track(this.push(userId, changed));
+    if (changed.length && AppStorage.getUserId() === userId) this.engineFor(userId).enqueue(changed);
     return result;
-  }
-
-  private async push(userId: string, entries: CloudEntry[]): Promise<void> {
-    try {
-      if (!(await this.cloudReady(userId))) return;
-      const deviceId = this.deviceId(userId);
-      const byTable = new Map<JournalCloudTable, JournalCloudWriteRow[]>();
-      const skipped: JournalCloudStatus["skipped"] = [];
-      for (const e of entries) {
-        const res = encodeEntry(e, deviceId, this.now());
-        if (!res.ok) {
-          skipped.push({ table: e.table, id: e.id, reason: res.reason });
-          continue;
-        }
-        byTable.set(e.table, [...(byTable.get(e.table) || []), res.row]);
-      }
-      if (skipped.length) console.warn("[AYRA] Journal records not sent to the cloud:", skipped);
-      for (const [table, rows] of byTable) await this.remote!.upsert(table, rows);
-      this.status = { state: "synced", skipped };
-    } catch (e) {
-      this.fail(e);
-    }
   }
 
   private readCursor(userId: string): Partial<Record<JournalCloudTable, string>> {
@@ -188,7 +253,8 @@ export class CloudJournalRepository implements JournalRepository {
 
   /**
    * Takes records changed in the cloud since the last pull (last-write-wins: only strictly newer ones replace local
-   * records). Never throws. Does nothing when the cloud is not used for this account.
+   * records). Never throws. Does nothing when the cloud is not used for this account, or before the first sync
+   * (plan 3.1: cloud changes are applied only after the first upload/download).
    */
   pullFromCloud(): Promise<PullResult> {
     return this.track(this.doPull());
@@ -196,7 +262,15 @@ export class CloudJournalRepository implements JournalRepository {
 
   private async doPull(): Promise<PullResult> {
     const userId = this.mayUseCloud();
-    if (!userId || !(await this.cloudReady(userId))) return { ok: false, applied: 0 };
+    if (!userId) return { ok: false, applied: 0 };
+    const ready = await this.cloudReady(userId);
+    if (ready !== "on") {
+      if (ready === "unreachable") this.pullState = { state: "offline" };
+      return { ok: false, applied: 0 };
+    }
+    if (AppStorage.getUserId() !== userId) return { ok: false, applied: 0 };
+    void this.engineFor(userId).flush(); // what waited in the queue (e.g. from the last session) goes out
+    if (!isInitialSyncDone(userId)) return { ok: false, applied: 0 };
     try {
       const cursor = this.readCursor(userId);
       const nextCursor = { ...cursor };
@@ -218,11 +292,11 @@ export class CloudJournalRepository implements JournalRepository {
         this.batchVersions = versionMap(this.batchEntries());
       }
       AppStorage.setItem(CURSOR_KEY, JSON.stringify(nextCursor), userId);
-      this.status = { ...this.status, state: "synced" };
+      this.pullState = { state: "synced" };
       if (merged.applied) this.listeners.forEach((l) => l());
       return { ok: true, applied: merged.applied };
     } catch (e) {
-      this.fail(e);
+      this.pullState = { state: "error", error: e instanceof Error ? e.message : String(e) };
       return { ok: false, applied: 0 };
     }
   }
@@ -235,7 +309,7 @@ export class CloudJournalRepository implements JournalRepository {
     this.batchVersions = versionMap(batches);
     if (!userId) return;
     const changed = before ? changedEntries(before, batches) : batches;
-    if (changed.length) void this.track(this.push(userId, changed));
+    if (changed.length) this.engineFor(userId).enqueue(changed);
   };
 
   subscribe(listener: () => void): () => void {
@@ -243,13 +317,16 @@ export class CloudJournalRepository implements JournalRepository {
     if (!this.unsubscribeBatches) {
       this.batchVersions = versionMap(this.batchEntries());
       this.unsubscribeBatches = subscribeImportBatches(this.onImportBatchesChanged);
+      // An account became active (sign-in, reload, other tab): start its engine — the queue of the last session goes out
+      this.unsubscribeSpace = spaceTabChannel.subscribe(() => void this.pullFromCloud());
     }
     void this.pullFromCloud();
     return () => {
       this.listeners.delete(listener);
       if (!this.listeners.size && this.unsubscribeBatches) {
         this.unsubscribeBatches();
-        this.unsubscribeBatches = null;
+        this.unsubscribeSpace?.();
+        this.unsubscribeBatches = this.unsubscribeSpace = null;
       }
     };
   }
@@ -308,7 +385,7 @@ export class CloudJournalRepository implements JournalRepository {
     return this.local.getStorageUsage();
   }
 
-  // ---- JournalRepository: writes are local first, then mirrored ----
+  // ---- JournalRepository: writes are local first, then queued ----
 
   setPrimaryPropAccountId(id: string | null | undefined): void {
     this.write(() => this.local.setPrimaryPropAccountId(id));
