@@ -12,7 +12,7 @@ import {
   StorageUsage,
   JournalRepository,
 } from "./types";
-import { defaultJournalRepository } from "./repository";
+import { journalRepository } from "./cloud";
 import { defaultAttachmentRepository } from "./attachments/indexeddb-repository";
 import { AppStorage } from "@/lib/storage";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
@@ -65,7 +65,7 @@ const LAST_INSTRUMENT_KEY = "ayra_journal_last_instrument";
 
 export function JournalProvider({
   children,
-  repository = defaultJournalRepository,
+  repository = journalRepository,
 }: {
   children: React.ReactNode;
   repository?: JournalRepository;
@@ -127,6 +127,9 @@ export function JournalProvider({
     });
     return () => unsubscribe();
   }, [refresh]);
+
+  // Records that arrive from the cloud (accounts with cloud sync only) refresh the screen
+  useEffect(() => repository.subscribe?.(refresh), [repository, refresh]);
 
   useEffect(() => {
     refresh();

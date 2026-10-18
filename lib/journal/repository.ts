@@ -40,7 +40,9 @@ function emptyJournal(): JournalStorageData {
 /** Kept for compatibility (a fresh empty journal); do not mutate. */
 export const INITIAL_JOURNAL_DATA: JournalStorageData = emptyJournal();
 
-const isLive = <T extends SyncMeta>(r: T): boolean => !r.deletedAt;
+let lastStamp = 0;
+
+const isLive =<T extends SyncMeta>(r: T): boolean => !r.deletedAt;
 const live = <T extends SyncMeta>(list: T[]): T[] => list.filter(isLive);
 
 /** Adds sync metadata to a record from an older version: updatedAt falls back to createdAt; nothing is lost. */
@@ -136,8 +138,10 @@ export class LocalStorageJournalRepository implements JournalRepository {
     }
   }
 
+  /** Strictly increasing within this tab: two changes in the same millisecond still get different updatedAt (sync). */
   private now(): string {
-    return new Date().toISOString();
+    lastStamp = Math.max(Date.now(), lastStamp + 1);
+    return new Date(lastStamp).toISOString();
   }
 
   /** Inserts or replaces by key (a tombstone with the same key is brought back to life). */
@@ -161,6 +165,11 @@ export class LocalStorageJournalRepository implements JournalRepository {
 
   getAllRecords(): JournalSnapshot {
     return this.loadData();
+  }
+
+  /** Stores a whole snapshot as is (records merged from the cloud keep their own updatedAt). Not for the UI. */
+  replaceAllRecords(snapshot: JournalSnapshot): void {
+    this.saveData(migrateJournalData(snapshot as unknown as Record<string, unknown>));
   }
 
   getPrimaryPropAccountId(): string | null | undefined {
