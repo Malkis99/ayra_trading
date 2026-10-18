@@ -132,8 +132,11 @@ test.describe("Cloud journal outbox (flag on in the fake server)", () => {
     await addTrade(page, "gbpusd", true);
     await expect.poll(async () => (await outbox(page, a.userId)).map((e) => e.id).length).toBeGreaterThan(0);
     await page.goto("/settings");
+    const signOutStarted = Date.now();
     await page.getByRole("button", { name: "Выйти", exact: true }).click();
-    await expect(page.getByRole("link", { name: /Войти/ }).first()).toBeVisible();
+    // sign-out may wait up to 3 s for the queue (plan 1.4)
+    await expect(page.getByRole("link", { name: /Войти/ }).first()).toBeVisible({ timeout: 10000 });
+    console.log(`[e2e] sign-out took ${Date.now() - signOutStarted} ms`);
 
     await request.get(`${FAKE_SUPABASE}/__test/fail-journal-writes?count=0`);
     const b = await newAccount(page, request, "AccB");
