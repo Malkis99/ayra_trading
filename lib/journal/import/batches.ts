@@ -17,9 +17,10 @@ export interface ImportBatch {
 const KEY = "ayra_import_batches";
 const MAX_BATCHES = 50;
 
-export function listImportBatches(): ImportBatch[] {
+/** Import history of the current space, or of the given account (sync reads an explicit account). */
+export function listImportBatches(userId?: string): ImportBatch[] {
   try {
-    const raw = AppStorage.getItem(KEY);
+    const raw = AppStorage.getItem(KEY, userId);
     const list = raw ? (JSON.parse(raw) as ImportBatch[]) : [];
     return Array.isArray(list) ? list : [];
   } catch {

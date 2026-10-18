@@ -27,6 +27,12 @@ export function createFakeSupabase() {
   let profilesTableMissing = false; // true = migration 0001 not applied (PostgREST 404 PGRST205)
   let profileFailuresLeft = 0; // next N profile reads fail with 500 (flaky network / cold database)
   const cloudRequests = { userFeatures: 0, journal: 0 }; // T7b-3: the cloud journal must stay silent while the flag is off
+  // Migration 0004 stand-in: cloud_sync flag per user and the journal tables (same rules as the server)
+  const cloudFlags = new Map(); // user id -> boolean
+  const journalRows = new Map(); // `${userId}:${table}:${id}` -> { user_id, table, id, data, updated_at }
+  let journalWriteFailuresLeft = 0; // next N journal writes fail with 500 (server trouble)
+  let journalClock = Date.now();
+  const JOURNAL_ID_KEY = { journal_day_plans: "date", journal_week_plans: "weekStartDate" };
 
   function getOrCreateUser(email) {
     let user = usersByEmail.get(email);
@@ -123,6 +129,21 @@ export function createFakeSupabase() {
       if (url.searchParams.has("reset")) Object.assign(cloudRequests, { userFeatures: 0, journal: 0 });
       return send(200, cloudRequests);
     }
+    if (path === "/__test/cloud-flag") {
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      if (!user) return send(404, { error: "no user" });
+      cloudFlags.set(user.id, url.searchParams.get("on") === "1");
+      return send(200, { userId: user.id, cloud_sync: cloudFlags.get(user.id) });
+    }
+    if (path === "/__test/fail-journal-writes") {
+      journalWriteFailuresLeft = Number(url.searchParams.get("count") || 0);
+      return send(200, { journalWriteFailuresLeft });
+    }
+    if (path === "/__test/cloud-rows") {
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      const rows = user ? [...journalRows.values()].filter((r) => r.user_id === user.id) : [];
+      return send(200, rows.map(({ table, id, data, updated_at }) => ({ table, id, data, updated_at })));
+    }
     if (path === "/__test/profile") {
       const user = usersByEmail.get(url.searchParams.get("email"));
       return send(200, user ? profiles.get(user.id) : null);
@@ -199,15 +220,61 @@ export function createFakeSupabase() {
         return wantsRows ? send(200, [row]) : send(204);
       }
     }
-    // Migration 0004: no user_features row = cloud sync off (as for every account today)
+    // Migration 0004: no user_features row = cloud sync off (as for every account today); RLS = own row only
     if (path === "/rest/v1/user_features") {
       cloudRequests.userFeatures++;
+      const user = userFromAuthHeader(req);
+      const idFilter = (url.searchParams.get("user_id") || "").replace(/^eq\./, "");
+      const rows = user && idFilter === user.id && cloudFlags.has(user.id) ? [{ cloud_sync: cloudFlags.get(user.id) }] : [];
       const wantsObject = (req.headers.accept || "").includes("vnd.pgrst.object");
-      return wantsObject ? send(406, { code: "PGRST116", message: "0 rows" }) : send(200, []);
+      if (wantsObject) return rows.length ? send(200, rows[0]) : send(406, { code: "PGRST116", message: "0 rows" });
+      return send(200, rows);
     }
     if (path.startsWith("/rest/v1/journal_")) {
       cloudRequests.journal++;
-      return send(403, { code: "42501", message: "fake-supabase: cloud sync is off" });
+      const table = path.slice("/rest/v1/".length);
+      const user = userFromAuthHeader(req);
+      if (!user) return send(401, { code: "PGRST301", message: "JWT required" });
+      if (req.method === "GET") {
+        const since = (url.searchParams.get("updated_at") || "").replace(/^gt\./, "");
+        const offset = Number(url.searchParams.get("offset") || 0);
+        const limit = Number(url.searchParams.get("limit") || 1000);
+        const rows = [...journalRows.values()]
+          .filter((r) => r.user_id === user.id && r.table === table && (!since || r.updated_at > since))
+          .sort((a, b) => a.updated_at.localeCompare(b.updated_at) || a.id.localeCompare(b.id))
+          .slice(offset, offset + limit)
+          .map(({ id, data, updated_at }) => ({ id, data, updated_at }));
+        return send(200, rows);
+      }
+      if (req.method === "POST") {
+        if (!cloudFlags.get(user.id)) return send(403, { code: "42501", message: "new row violates row-level security policy" });
+        if (journalWriteFailuresLeft > 0) {
+          journalWriteFailuresLeft--;
+          return send(500, { code: "XX000", message: "fake transient failure" });
+        }
+        const body = await readBody(req);
+        const rows = Array.isArray(body) ? body : [body];
+        for (const r of rows) {
+          const data = r.data || {};
+          if (Object.keys(r).some((k) => !["id", "data", "device_id"].includes(k))) return send(403, { code: "42501", message: "permission denied for column" });
+          if (data[JOURNAL_ID_KEY[table] || "id"] !== r.id) return send(400, { code: "P0001", message: "journal_row_id_mismatch" });
+          const changedAt = Date.parse(data.updatedAt || data.createdAt || "");
+          if (Number.isNaN(changedAt)) return send(400, { code: "P0001", message: "journal_row_missing_updated_at" });
+          if (changedAt > Date.now() + 5 * 60 * 1000) return send(400, { code: "P0001", message: "journal_row_from_future" });
+          if (JSON.stringify(data).length > 256 * 1024) return send(400, { code: "23514", message: "data check" });
+          if (["xp", "coins", "xpAwarded", "coinsAwarded", "reward", "rewards"].some((k) => k in data)) return send(400, { code: "23514", message: "data check" });
+        }
+        for (const r of rows) {
+          const key = `${user.id}:${table}:${r.id}`;
+          const old = journalRows.get(key);
+          const changedAt = Date.parse(r.data.updatedAt || r.data.createdAt);
+          if (old && changedAt < Date.parse(old.data.updatedAt || old.data.createdAt)) continue; // last-write-wins
+          journalClock = Math.max(journalClock + 1, Date.now());
+          journalRows.set(key, { user_id: user.id, table, id: r.id, data: r.data, updated_at: new Date(journalClock).toISOString() });
+        }
+        return send(201);
+      }
+      return send(403, { code: "42501", message: "permission denied" });
     }
     if (path === "/rest/v1/rpc/is_nickname_available") {
       const body = await readBody(req);
