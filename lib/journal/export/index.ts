@@ -277,15 +277,26 @@ export function tableToXlsx(table: Cell[][], sheetName = "Trades"): Uint8Array {
 
 /* ================================================================== JSON */
 
-export const AYRA_TRADES_EXPORT_VERSION = "1.2";
+/**
+ * v1.3 (T7b-1): records carry updatedAt; soft-deleted records are never exported (deletedAt is not written).
+ * Older files (≤1.2) stay importable.
+ */
+export const AYRA_TRADES_EXPORT_VERSION = "1.3";
 
-/** AYRA trades export (kind "trades", v1.2). Screenshots are never included; notes/checklists only on request. */
+const notDeleted = <T extends { deletedAt?: string | null }>(r: T) => !r.deletedAt;
+function stripDeleted<T extends { deletedAt?: string | null }>(r: T): Omit<T, "deletedAt"> {
+  const { deletedAt: _d, ...rest } = r;
+  return rest;
+}
+
+/** AYRA trades export (kind "trades", v1.3). Screenshots are never included; notes/checklists only on request. */
 export function tradesToJson(
   trades: Trade[],
   data: { accounts: Account[]; strategies: Strategy[]; notes: Note[] },
   includeNotes: boolean,
   now: Date = new Date()
 ): string {
+  trades = trades.filter(notDeleted);
   const accountIds = new Set(trades.map((t) => t.accountId));
   const strategyIds = new Set(trades.map((t) => t.strategyId).filter(Boolean));
   const tradeIds = new Set(trades.map((t) => t.id));
@@ -294,15 +305,15 @@ export function tradesToJson(
     kind: "trades",
     exportVersion: AYRA_TRADES_EXPORT_VERSION,
     exportedAt: now.toISOString(),
-    accounts: data.accounts.filter((a) => accountIds.has(a.id)).map(({ propRules: _p, ...a }) => a),
-    strategies: data.strategies.filter((s) => strategyIds.has(s.id)),
+    accounts: data.accounts.filter((a) => notDeleted(a) && accountIds.has(a.id)).map(({ propRules: _p, deletedAt: _d, ...a }) => a),
+    strategies: data.strategies.filter((s) => notDeleted(s) && strategyIds.has(s.id)).map(stripDeleted),
     trades: trades.map((t) => {
-      const { attachmentIds: _a, ...rest } = t;
+      const { attachmentIds: _a, deletedAt: _d, ...rest } = t;
       if (includeNotes) return rest;
       const { notes: _n, entryReason: _e, ruleChecks: _r, ...lean } = rest;
       return lean;
     }),
-    notes: includeNotes ? data.notes.filter((n) => n.links?.tradeId && tradeIds.has(n.links.tradeId)) : [],
+    notes: includeNotes ? data.notes.filter((n) => notDeleted(n) && n.links?.tradeId && tradeIds.has(n.links.tradeId)).map(stripDeleted) : [],
   };
   return JSON.stringify(payload, null, 2);
 }

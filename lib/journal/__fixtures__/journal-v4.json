@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 4,
+  "accounts": [
+    { "id": "acc_main", "name": null, "type": "personal", "currency": "USD", "platform": "manual", "createdAt": "2026-03-01T09:00:00.000Z" },
+    { "id": "acc_prop", "name": "FTMO 100k", "type": "prop", "currency": "USD", "platform": "manual", "isPrimaryProp": true, "createdAt": "2026-03-02T09:00:00.000Z" }
+  ],
+  "trades": [
+    {
+      "id": "tr_old_1",
+      "accountId": "acc_main",
+      "instrument": "XAUUSD",
+      "direction": "long",
+      "status": "closed",
+      "openedAt": "2026-03-03T10:00:00.000Z",
+      "closedAt": "2026-03-03T11:00:00.000Z",
+      "pnlMoney": 120,
+      "rMultiple": 1.2,
+      "result": "win",
+      "emotions": ["calm"],
+      "mistakes": [],
+      "verification": "unverified",
+      "source": "manual",
+      "createdAt": "2026-03-03T11:00:00.000Z",
+      "updatedAt": "2026-03-03T11:05:00.000Z"
+    },
+    {
+      "id": "tr_old_2",
+      "accountId": "acc_prop",
+      "instrument": "NAS100",
+      "direction": "short",
+      "status": "closed",
+      "openedAt": "2026-03-04T14:00:00.000Z",
+      "closedAt": "2026-03-04T15:00:00.000Z",
+      "pnlMoney": -80,
+      "rMultiple": -1,
+      "result": "loss",
+      "emotions": [],
+      "mistakes": ["early_entry"],
+      "verification": "unverified",
+      "source": "manual",
+      "createdAt": "2026-03-04T15:00:00.000Z",
+      "updatedAt": "2026-03-04T15:00:00.000Z"
+    }
+  ],
+  "strategies": [
+    { "id": "st_1", "name": null, "color": "#a38ad1", "rules": [], "tags": ["breakout"], "version": 1, "createdAt": "2026-03-01T09:30:00.000Z" }
+  ],
+  "noTrades": [
+    { "id": "nt_1", "date": "2026-03-05", "reason": "news", "note": "CPI", "createdAt": "2026-03-05T08:00:00.000Z" }
+  ]
+}

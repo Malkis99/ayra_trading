@@ -10,6 +10,8 @@ export interface ImportBatch {
   accountId: string;
   tradeCount: number;
   undoneAt?: string;
+  /** Last change (sync, T7b). */
+  updatedAt?: string;
 }
 
 const KEY = "ayra_import_batches";
@@ -32,11 +34,11 @@ function save(list: ImportBatch[]) {
 }
 
 export function addImportBatch(batch: ImportBatch): void {
-  save([...listImportBatches().filter((b) => b.id !== batch.id), batch]);
+  save([...listImportBatches().filter((b) => b.id !== batch.id), { ...batch, updatedAt: batch.updatedAt ?? batch.createdAt }]);
 }
 
 export function markImportBatchUndone(id: string, at: string): void {
-  save(listImportBatches().map((b) => (b.id === id ? { ...b, undoneAt: at } : b)));
+  save(listImportBatches().map((b) => (b.id === id ? { ...b, undoneAt: at, updatedAt: at } : b)));
 }
 
 export function newBatchId(now: Date = new Date()): string {

@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 5,
+  "primaryPropAccountId": null,
+  "accounts": [
+    { "id": "acc_main", "name": null, "type": "personal", "currency": "USD", "platform": "manual", "createdAt": "2026-04-01T09:00:00.000Z" },
+    { "id": "acc_old", "name": "Archived", "type": "personal", "currency": "EUR", "platform": "manual", "archivedAt": "2026-04-10T09:00:00.000Z", "createdAt": "2026-04-01T09:10:00.000Z" }
+  ],
+  "trades": [
+    {
+      "id": "tr_v5_1",
+      "accountId": "acc_main",
+      "instrument": "EURUSD",
+      "direction": "long",
+      "status": "closed",
+      "openedAt": "2026-04-02T10:00:00.000Z",
+      "closedAt": "2026-04-02T12:00:00.000Z",
+      "pnlMoney": 50,
+      "rMultiple": 0.5,
+      "result": "win",
+      "emotions": [],
+      "mistakes": [],
+      "verification": "imported",
+      "source": "import",
+      "importBatchId": "imp_test",
+      "strategyId": "st_v5",
+      "strategyVersion": 1,
+      "ruleChecks": { "r1": "passed" },
+      "processScore": 80,
+      "attachmentIds": ["att_1"],
+      "createdAt": "2026-04-02T12:00:00.000Z",
+      "updatedAt": "2026-04-03T09:00:00.000Z",
+      "schemaVersion": 5
+    }
+  ],
+  "strategies": [
+    { "id": "st_v5", "name": "Breakout", "color": "#50348f", "rules": [{ "id": "r1", "text": "Wait for close" }], "tags": [], "version": 1, "createdAt": "2026-04-01T09:30:00.000Z" }
+  ],
+  "noTrades": [],
+  "plans": [
+    { "date": "2026-04-02", "bias": [], "levels": [], "events": [], "checklist": [], "note": "London only", "createdAt": "2026-04-02T07:00:00.000Z", "updatedAt": "2026-04-02T07:30:00.000Z" }
+  ],
+  "weekPlans": [
+    { "weekStartDate": "2026-03-30", "goals": ["3 clean days"], "createdAt": "2026-03-30T07:00:00.000Z", "updatedAt": "2026-03-30T07:00:00.000Z" }
+  ],
+  "notes": [
+    { "id": "n_1", "body": "Stop moving the stop", "tags": [], "pinned": true, "createdAt": "2026-04-03T08:00:00.000Z", "updatedAt": "2026-04-03T08:10:00.000Z" }
+  ]
+}

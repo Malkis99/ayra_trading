@@ -58,7 +58,11 @@ describe("i18n Leakage rendered page tests", () => {
       const { container } = renderWithProviders(<ProfilePage />, "ru");
       const clone = container.cloneNode(true) as HTMLElement;
       clone.querySelectorAll("style, script").forEach((el) => el.remove());
-      const text = clone.textContent || "";
+      // join text nodes with spaces, so neighbouring elements ("+40 XP" and a quest title) do not glue into one word
+      const parts: string[] = [];
+      const walker = document.createTreeWalker(clone, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) parts.push(walker.currentNode.textContent || "");
+      const text = parts.join(" ");
 
       let cleaned = text;
       allowed.forEach((word) => {

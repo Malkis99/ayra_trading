@@ -36,6 +36,12 @@ function readJson(key: string, userId: string | null): any {
  * Summarizes the game/journal data stored in a space (null = guest).
  * A space "has data" only if it differs from what a fresh app writes on first load.
  */
+/** Live journal records of one kind (soft-deleted tombstones do not count as data). */
+function liveCount(journal: Record<string, unknown> | null, key: string): number {
+  const list = journal?.[key];
+  return Array.isArray(list) ? list.filter((r) => !(r && typeof r === "object" && (r as { deletedAt?: unknown }).deletedAt)).length : 0;
+}
+
 export function summarizeSpace(userId: string | null): SpaceSummary {
   const game = readJson(GAME_KEY, userId);
   const journal = readJson(JOURNAL_KEY, userId);
@@ -43,11 +49,8 @@ export function summarizeSpace(userId: string | null): SpaceSummary {
   const onboardingStatus: string = game?.onboarding?.status || "none";
   const level = typeof game?.level === "number" ? game.level : 1;
   const name = typeof game?.name === "string" ? game.name.trim() : "";
-  const tradesCount = Array.isArray(journal?.trades) ? journal.trades.length : 0;
-  const journalItems =
-    tradesCount +
-    (Array.isArray(journal?.accounts) ? journal.accounts.length : 0) +
-    (Array.isArray(journal?.notes) ? journal.notes.length : 0);
+  const tradesCount = liveCount(journal, "trades");
+  const journalItems = tradesCount + liveCount(journal, "accounts") + liveCount(journal, "notes");
 
   const gameHasData =
     !!game &&
@@ -84,10 +87,7 @@ export function setProfileChoice(userId: string, choice: ProfileChoice): void {
 export function accountHasProgress(userId: string): boolean {
   const game = readJson(GAME_KEY, userId);
   const journal = readJson(JOURNAL_KEY, userId);
-  const journalItems = ["trades", "accounts", "notes"].reduce(
-    (sum, k) => sum + (Array.isArray(journal?.[k]) ? journal[k].length : 0),
-    0
-  );
+  const journalItems = ["trades", "accounts", "notes"].reduce((sum, k) => sum + liveCount(journal, k), 0);
   const level = typeof game?.level === "number" ? game.level : 1;
   return journalItems > 0 || level > 1 || (game?.xp ?? 0) > 0 || (game?.coins ?? 0) > 0;
 }
