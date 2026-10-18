@@ -27,10 +27,27 @@ export function listImportBatches(): ImportBatch[] {
   }
 }
 
-function save(list: ImportBatch[]) {
+type Listener = () => void;
+const listeners = new Set<Listener>();
+
+/** Called after every change of the import history (the cloud journal mirrors it). */
+export function subscribeImportBatches(listener: Listener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function save(list: ImportBatch[], notify = true) {
   try {
     AppStorage.setItem(KEY, JSON.stringify(list.slice(-MAX_BATCHES)));
   } catch {}
+  if (notify) listeners.forEach((l) => l());
+}
+
+/** Replaces the whole history (records merged from the cloud); does not notify — nothing new to send. */
+export function replaceImportBatches(list: ImportBatch[]): void {
+  save(list, false);
 }
 
 export function addImportBatch(batch: ImportBatch): void {

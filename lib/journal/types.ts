@@ -438,6 +438,9 @@ export interface JournalRepository {
 
   /** Everything stored, including tombstones (deletedAt set) — for sync (T7b) and tests; never for the UI. */
   getAllRecords(): JournalSnapshot;
+
+  /** Optional: notifies when records changed outside the UI (e.g. arrived from the cloud). Returns unsubscribe. */
+  subscribe?(listener: () => void): () => void;
 }
 
 /** Full journal contents including soft-deleted records. */

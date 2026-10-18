@@ -26,6 +26,7 @@ export function createFakeSupabase() {
   let createProfileRows = true; // false = handle_new_user trigger absent (new users get no profiles row)
   let profilesTableMissing = false; // true = migration 0001 not applied (PostgREST 404 PGRST205)
   let profileFailuresLeft = 0; // next N profile reads fail with 500 (flaky network / cold database)
+  const cloudRequests = { userFeatures: 0, journal: 0 }; // T7b-3: the cloud journal must stay silent while the flag is off
 
   function getOrCreateUser(email) {
     let user = usersByEmail.get(email);
@@ -118,6 +119,10 @@ export function createFakeSupabase() {
       profileFailuresLeft = Number(url.searchParams.get("count") || 0);
       return send(200, { profileFailuresLeft });
     }
+    if (path === "/__test/cloud-requests") {
+      if (url.searchParams.has("reset")) Object.assign(cloudRequests, { userFeatures: 0, journal: 0 });
+      return send(200, cloudRequests);
+    }
     if (path === "/__test/profile") {
       const user = usersByEmail.get(url.searchParams.get("email"));
       return send(200, user ? profiles.get(user.id) : null);
@@ -193,6 +198,16 @@ export function createFakeSupabase() {
         Object.assign(row, body, { updated_at: new Date().toISOString() });
         return wantsRows ? send(200, [row]) : send(204);
       }
+    }
+    // Migration 0004: no user_features row = cloud sync off (as for every account today)
+    if (path === "/rest/v1/user_features") {
+      cloudRequests.userFeatures++;
+      const wantsObject = (req.headers.accept || "").includes("vnd.pgrst.object");
+      return wantsObject ? send(406, { code: "PGRST116", message: "0 rows" }) : send(200, []);
+    }
+    if (path.startsWith("/rest/v1/journal_")) {
+      cloudRequests.journal++;
+      return send(403, { code: "42501", message: "fake-supabase: cloud sync is off" });
     }
     if (path === "/rest/v1/rpc/is_nickname_available") {
       const body = await readBody(req);
