@@ -16,7 +16,10 @@ const STUB = `
   CREATE ROLE anon; CREATE ROLE authenticated;
   CREATE SCHEMA auth;
   CREATE TABLE auth.users (id uuid PRIMARY KEY, email text);
-  CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT NULL::uuid $$;`;
+  -- same as Supabase: the user id comes from the JWT claim set for the request (NULL when signed out)
+  CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$
+    SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+  GRANT USAGE ON SCHEMA auth TO anon, authenticated;`;
 async function fresh() { const db = new PGlite(); await db.exec(STUB); return db; }
 const ok = (m) => console.log("PASS", m);
 const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
@@ -66,4 +69,23 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   await db.exec(read("supabase/migrations/0003_nickname_cooldown.down.sql"));
   const after = (await db.query(read("supabase/checks/0003_status.sql"))).rows[0];
   (!after.nickname_changed_at_column && !after.cooldown_trigger) ? ok("D: rollback removes column and trigger") : fail(`D: rollback ${JSON.stringify(after)}`);
+}
+// E. 0004: journal tables + RLS + sync flag, applied twice (idempotent); test passes; rollback removes everything
+{
+  const db = await fresh();
+  for (const f of ["0001_init", "0002_profile_defaults", "0003_nickname_cooldown"]) await db.exec(read(`supabase/migrations/${f}.sql`));
+  await db.exec(read("supabase/migrations/0004_journal_sync.sql"));
+  await db.exec(read("supabase/migrations/0004_journal_sync.sql")); ok("E: 0004 applied twice");
+  try { await db.exec(read("supabase/tests/journal_sync_rls.sql")); ok("E: tests/journal_sync_rls.sql passed"); } catch (e) { fail(`E: test script: ${e.message}`); }
+  const left = (await db.query(`SELECT count(*)::int n FROM public.journal_trades`)).rows[0].n;
+  left === 0 ? ok("E: test rolled back (no rows left)") : fail("E: rows left after test");
+  const chk = (await db.query(read("supabase/checks/0004_status.sql"))).rows[0];
+  console.log("   check:", JSON.stringify(chk));
+  (chk.journal_tables === 9 && chk.rls_enabled === 9 && chk.client_delete_grants === 0 && chk.write_trigger_function && chk.user_features_table && chk.cloud_sync_function)
+    ? ok("E: check query") : fail("E: check query");
+  await db.exec(read("supabase/migrations/0004_journal_sync.down.sql"));
+  const after = (await db.query(read("supabase/checks/0004_status.sql"))).rows[0];
+  (after.journal_tables === 0 && !after.user_features_table && !after.cloud_sync_function) ? ok("E: rollback removes tables, flag and functions") : fail(`E: rollback ${JSON.stringify(after)}`);
+  const prof = (await db.query(read("supabase/checks/0003_status.sql"))).rows[0];
+  prof.cooldown_trigger ? ok("E: rollback keeps 0001–0003") : fail("E: rollback touched earlier migrations");
 }
