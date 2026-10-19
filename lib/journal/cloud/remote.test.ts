@@ -12,7 +12,7 @@ function mockClient(responses: { data?: unknown; error?: { code?: string; messag
     const chain: Call[] = [];
     calls.push(chain);
     const proxy: Record<string, unknown> = {};
-    for (const m of ["from", "select", "eq", "gt", "order", "range", "upsert", "maybeSingle"]) {
+    for (const m of ["from", "select", "eq", "gt", "in", "order", "range", "upsert", "maybeSingle"]) {
       proxy[m] = (...args: unknown[]) => {
         chain.push({ method: m, args });
         return proxy;
@@ -66,6 +66,7 @@ describe("T7b-3 Supabase journal remote", () => {
     expect(calls[0]).toEqual([
       { method: "from", args: ["journal_trades"] },
       { method: "upsert", args: [rows, { onConflict: "user_id,id" }] },
+      { method: "select", args: ["id"] },
     ]);
   });
 
@@ -78,6 +79,15 @@ describe("T7b-3 Supabase journal remote", () => {
     expect(calls[0]).toContainEqual({ method: "gt", args: ["updated_at", "2026-10-18T10:00:00Z"] });
     expect(calls[0]).toContainEqual({ method: "order", args: ["updated_at", { ascending: true }] });
     expect(calls[1]).toContainEqual({ method: "range", args: [JOURNAL_CLOUD_PAGE_SIZE, 2 * JOURNAL_CLOUD_PAGE_SIZE - 1] });
+  });
+
+  it("upsert reports which rows the server took; fetchByIds reads current rows", async () => {
+    const { client, calls } = mockClient([{ data: [{ id: "tr_1" }] }, { data: [{ id: "tr_2", data: {}, updated_at: "t" }] }]);
+    const remote = new SupabaseJournalRemote(() => client);
+    const rows = ["tr_1", "tr_2"].map((id) => ({ id, data: { id }, device_id: null }));
+    expect(await remote.upsert("journal_trades", rows)).toEqual({ written: ["tr_1"] });
+    expect(await remote.fetchByIds("journal_trades", ["tr_2"])).toEqual([{ id: "tr_2", data: {}, updated_at: "t" }]);
+    expect(calls[1]).toContainEqual({ method: "in", args: ["id", ["tr_2"]] });
   });
 
   it("fetchSince without a cursor reads everything", async () => {

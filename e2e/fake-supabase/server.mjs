@@ -239,8 +239,11 @@ export function createFakeSupabase() {
         const since = (url.searchParams.get("updated_at") || "").replace(/^gt\./, "");
         const offset = Number(url.searchParams.get("offset") || 0);
         const limit = Number(url.searchParams.get("limit") || 1000);
+        // id=in.(a,b) or in.("a","b") — rows read by id after a refused send
+        const inIds = /^in\.\((.*)\)$/.exec(url.searchParams.get("id") || "");
+        const ids = inIds ? new Set(inIds[1].split(",").map((x) => x.replace(/^"|"$/g, ""))) : null;
         const rows = [...journalRows.values()]
-          .filter((r) => r.user_id === user.id && r.table === table && (!since || r.updated_at > since))
+          .filter((r) => r.user_id === user.id && r.table === table && (!since || r.updated_at > since) && (!ids || ids.has(r.id)))
           .sort((a, b) => a.updated_at.localeCompare(b.updated_at) || a.id.localeCompare(b.id))
           .slice(offset, offset + limit)
           .map(({ id, data, updated_at }) => ({ id, data, updated_at }));
@@ -264,15 +267,17 @@ export function createFakeSupabase() {
           if (JSON.stringify(data).length > 256 * 1024) return send(400, { code: "23514", message: "data check" });
           if (["xp", "coins", "xpAwarded", "coinsAwarded", "reward", "rewards"].some((k) => k in data)) return send(400, { code: "23514", message: "data check" });
         }
+        const written = [];
         for (const r of rows) {
           const key = `${user.id}:${table}:${r.id}`;
           const old = journalRows.get(key);
           const changedAt = Date.parse(r.data.updatedAt || r.data.createdAt);
-          if (old && changedAt < Date.parse(old.data.updatedAt || old.data.createdAt)) continue; // last-write-wins
+          if (old && changedAt < Date.parse(old.data.updatedAt || old.data.createdAt)) continue; // last-write-wins: not returned
           journalClock = Math.max(journalClock + 1, Date.now());
           journalRows.set(key, { user_id: user.id, table, id: r.id, data: r.data, updated_at: new Date(journalClock).toISOString() });
+          written.push({ id: r.id });
         }
-        return send(201);
+        return (req.headers.prefer || "").includes("return=representation") ? send(201, written) : send(201);
       }
       return send(403, { code: "42501", message: "permission denied" });
     }

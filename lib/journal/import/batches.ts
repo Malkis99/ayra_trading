@@ -39,16 +39,19 @@ export function subscribeImportBatches(listener: Listener): () => void {
   };
 }
 
-function save(list: ImportBatch[], notify = true) {
+function save(list: ImportBatch[], notify = true, userId?: string) {
   try {
-    AppStorage.setItem(KEY, JSON.stringify(list.slice(-MAX_BATCHES)));
+    AppStorage.setItem(KEY, JSON.stringify(list.slice(-MAX_BATCHES)), userId);
   } catch {}
   if (notify) listeners.forEach((l) => l());
 }
 
-/** Replaces the whole history (records merged from the cloud); does not notify — nothing new to send. */
-export function replaceImportBatches(list: ImportBatch[]): void {
-  save(list, false);
+/**
+ * Replaces the whole history (records merged from the cloud) of the current space or of the given account;
+ * does not notify — nothing new to send.
+ */
+export function replaceImportBatches(list: ImportBatch[], userId?: string): void {
+  save(list, false, userId);
 }
 
 export function addImportBatch(batch: ImportBatch): void {

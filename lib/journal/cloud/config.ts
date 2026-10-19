@@ -54,3 +54,6 @@ export const SYNC_FLUSH_ON_SIGN_OUT_MS = 3000;
 /** Only one tab of an account sends: lease TTL and renewal (same as the onboarding lease). */
 export const SYNC_LEASE_TTL_MS = 15_000;
 export const SYNC_LEASE_HEARTBEAT_MS = 5000;
+
+/** Background pull of changes made on other devices (plan section 8: every 5 min, PLACEHOLDER approved 2026-10-18). */
+export const SYNC_PULL_INTERVAL_MS = 5 * 60 * 1000;
