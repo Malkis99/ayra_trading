@@ -8,8 +8,13 @@ export interface JournalCloudRemote {
   currentUserId(): Promise<string | null>;
   /** user_features.cloud_sync for this user (0004). No row = off. */
   isSyncEnabled(userId: string): Promise<boolean>;
-  /** Insert or update by (user_id, id); the server keeps the newer version (last-write-wins). */
-  upsert(table: JournalCloudTable, rows: JournalCloudWriteRow[]): Promise<void>;
+  /**
+   * Insert or update by (user_id, id). The server keeps the newer version: rows it did not take (an older version
+   * than the one already stored) are missing from the returned ids.
+   */
+  upsert(table: JournalCloudTable, rows: JournalCloudWriteRow[]): Promise<{ written: string[] }>;
+  /** Current cloud rows by id (to see what the server kept instead of a refused version). */
+  fetchByIds(table: JournalCloudTable, ids: string[]): Promise<JournalCloudReadRow[]>;
   /** Rows changed after `since` (server time), oldest first; all rows when `since` is null. */
   fetchSince(table: JournalCloudTable, since: string | null): Promise<JournalCloudReadRow[]>;
 }
@@ -58,11 +63,20 @@ export class SupabaseJournalRemote implements JournalCloudRemote {
     return (data as { cloud_sync?: boolean } | null)?.cloud_sync === true;
   }
 
-  async upsert(table: JournalCloudTable, rows: JournalCloudWriteRow[]): Promise<void> {
-    if (rows.length === 0) return;
-    // Only id, data and device_id: user_id comes from the session (auth.uid()), the rest is filled by the server
-    const { error } = await this.client().from(table).upsert(rows, { onConflict: "user_id,id" });
+  async upsert(table: JournalCloudTable, rows: JournalCloudWriteRow[]): Promise<{ written: string[] }> {
+    if (rows.length === 0) return { written: [] };
+    // Only id, data and device_id: user_id comes from the session (auth.uid()), the rest is filled by the server.
+    // Rows skipped by the server's last-write-wins trigger are not returned.
+    const { data, error } = await this.client().from(table).upsert(rows, { onConflict: "user_id,id" }).select("id");
     check(`upsert:${table}`, error);
+    return { written: ((data || []) as { id: string }[]).map((r) => r.id) };
+  }
+
+  async fetchByIds(table: JournalCloudTable, ids: string[]): Promise<JournalCloudReadRow[]> {
+    if (ids.length === 0) return [];
+    const { data, error } = await this.client().from(table).select("id, data, updated_at").in("id", ids);
+    check(`fetchByIds:${table}`, error);
+    return (data || []) as JournalCloudReadRow[];
   }
 
   async fetchSince(table: JournalCloudTable, since: string | null): Promise<JournalCloudReadRow[]> {

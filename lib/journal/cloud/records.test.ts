@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { PGlite } from "@electric-sql/pglite";
-import { encodeEntry, jsonbTextLength, decodeRow, mergeEntries, snapshotEntries } from "./records";
+import { encodeEntry, jsonbTextLength, decodeRow, snapshotEntries } from "./records";
 import { JOURNAL_CLOUD_MAX_CLOCK_SKEW_MS, JOURNAL_CLOUD_MAX_RECORD_BYTES } from "./config";
 import type { JournalSnapshot } from "../types";
 
@@ -53,10 +53,4 @@ describe("T7b-3 cloud record format", () => {
     expect(decodeRow("journal_trades", { id: "tr_1", data: null as never, updated_at: "t" })).toEqual({ ok: false, reason: "invalid" });
   });
 
-  it("merge: equal time keeps the local record (nothing to take)", () => {
-    const local = { ...empty(), notes: [{ id: "n_1", body: "local", tags: [], pinned: false, createdAt: "x", updatedAt: "2026-10-18T10:00:00.000Z" }] };
-    const res = mergeEntries(local, [], [{ table: "journal_notes", id: "n_1", record: { id: "n_1", body: "cloud", updatedAt: "2026-10-18T10:00:00.000Z" } }]);
-    expect(res.applied).toBe(0);
-    expect(res.snapshot.notes[0].body).toBe("local");
-  });
 });

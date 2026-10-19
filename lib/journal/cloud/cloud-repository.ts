@@ -14,29 +14,17 @@ import { LocalStorageJournalRepository } from "../repository";
 import { listImportBatches, replaceImportBatches, subscribeImportBatches } from "../import/batches";
 import { AppStorage } from "@/lib/storage";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
-import { JOURNAL_CLOUD_FLAG_TTL_MS, JOURNAL_CLOUD_PULL_OVERLAP_MS, SYNC_FLUSH_ON_SIGN_OUT_MS } from "./config";
+import { JOURNAL_CLOUD_FLAG_TTL_MS, SYNC_FLUSH_ON_SIGN_OUT_MS } from "./config";
 import type { JournalCloudRemote } from "./remote";
-import {
-  JOURNAL_CLOUD_TABLES,
-  changedEntries,
-  decodeRow,
-  importBatchEntries,
-  mergeEntries,
-  snapshotEntries,
-  versionMap,
-  type CloudEntry,
-  type JournalCloudTable,
-} from "./records";
-import { JournalSyncEngine, type CloudReadiness, type SyncEngineState } from "./sync-engine";
+import { changedEntries, importBatchEntries, snapshotEntries, versionMap, type CloudEntry, type JournalCloudTable } from "./records";
+import { JournalSyncEngine, type CloudReadiness, type ConflictChoice, type LocalJournal, type SyncEngineState } from "./sync-engine";
+import type { StoredConflict } from "./sync-merge";
 import type { OutboxEntry } from "./outbox";
-import { isInitialSyncDone } from "./sync-state";
-
-const CURSOR_KEY = "ayra_journal_cloud_cursor";
 
 /**
  * - local: cloud not used (guest, flag off, not configured)
- * - waitingInitialSync: flag on, first upload not done yet — changes wait in the queue (4d adds the button)
- * - syncing / synced / offline / error: state of the queue and of the last pull
+ * - waitingInitialSync: flag on, first upload not done yet — nothing is exchanged (4d adds the button)
+ * - syncing / synced / offline / error: state of the last exchange
  */
 export type JournalCloudState = "local" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error";
 
@@ -46,12 +34,15 @@ export interface JournalCloudStatus {
   pending: number;
   /** Records the server would reject (too large / time from the future): kept locally, not retried until changed. */
   blocked: Pick<OutboxEntry, "table" | "id" | "blocked">[];
+  /** Records changed both here and in the cloud, waiting for the user's choice (dialog in 4c). */
+  conflicts: number;
   lastError?: string;
 }
 
 export interface PullResult {
-  /** false when the cloud was not used or the pull failed. */
+  /** false when the cloud was not used or the exchange failed. */
   ok: boolean;
+  /** Cloud records taken into the local journal. */
   applied: number;
 }
 
@@ -68,15 +59,15 @@ const ENGINE_TO_CLOUD_STATE: Record<SyncEngineState, JournalCloudState> = {
 let tabCounter = 0;
 
 /**
- * Cloud journal behind the same JournalRepository interface (T7b-3; outbox and retries since T7b-4a).
+ * Cloud journal behind the same JournalRepository interface (T7b-3; queue in T7b-4a; pull and conflicts in T7b-4b).
  *
- * The local repository stays the working copy: every read is local and synchronous, every write goes to the
- * local journal first. Changed records of an account go into that account's outbox on this device; a sync engine
- * per account sends them (only when cloud sync is enabled and the first sync is done) with retries.
+ * The local repository stays the working copy: every read is local and synchronous, every write goes to the local
+ * journal first. Changed records of an account go into that account's outbox on this device; a sync engine per account
+ * first pulls cloud changes (merged by base version, conflicts kept aside) and then sends the queue.
  * Flag off, signed out, no network or a server error: the journal behaves exactly as before; nothing local is lost.
  *
- * Isolation: one engine per user, reading only that user's space; on account switch / sign-out the old engine gets
- * up to 3 s to send and is stopped. Its queue stays on the device for the next session of that account.
+ * Isolation: one engine per user, reading and writing only that user's space; on account switch / sign-out the old
+ * engine gets up to 3 s to send and is stopped. Its queue stays on the device for the next session of that account.
  */
 export class CloudJournalRepository implements JournalRepository {
   private flagCache = new Map<string, { enabled: boolean; at: number }>();
@@ -84,7 +75,6 @@ export class CloudJournalRepository implements JournalRepository {
   private statusListeners = new Set<() => void>();
   private inflight = new Set<Promise<unknown>>();
   private engines = new Map<string, JournalSyncEngine>();
-  private pullState: { state?: JournalCloudState; error?: string } = {};
   private batchVersions: Map<string, string> | null = null;
   private unsubscribeBatches: (() => void) | null = null;
   private unregisterFlush: (() => void) | null = null;
@@ -126,15 +116,14 @@ export class CloudJournalRepository implements JournalRepository {
   getCloudStatus(): JournalCloudStatus {
     const userId = AppStorage.getUserId();
     const cached = userId ? this.flagCache.get(userId) : undefined;
-    if (!userId || !this.remote || !cached?.enabled) return { state: "local", pending: 0, blocked: [] };
+    if (!userId || !this.remote || !cached?.enabled) return { state: "local", pending: 0, blocked: [], conflicts: 0 };
     const s = this.engines.get(userId)?.status();
-    const engineState = s ? ENGINE_TO_CLOUD_STATE[s.state] : undefined;
-    const pullFailed = this.pullState.state === "error" || this.pullState.state === "offline";
     return {
-      state: (pullFailed ? this.pullState.state : engineState ?? this.pullState.state) ?? "synced",
+      state: s ? ENGINE_TO_CLOUD_STATE[s.state] : "synced",
       pending: s?.pending ?? 0,
       blocked: (s?.blocked ?? []).map(({ table, id, blocked }) => ({ table, id, blocked })),
-      lastError: s?.lastError ?? this.pullState.error,
+      conflicts: s?.conflicts ?? 0,
+      lastError: s?.lastError,
     };
   }
 
@@ -147,6 +136,7 @@ export class CloudJournalRepository implements JournalRepository {
   }
 
   private notifyStatus = () => this.statusListeners.forEach((l) => l());
+  private notifyData = () => this.listeners.forEach((l) => l());
 
   /** Resolves when every background request started so far has finished (tests). */
   async whenIdle(): Promise<void> {
@@ -157,7 +147,7 @@ export class CloudJournalRepository implements JournalRepository {
     }
   }
 
-  /** Sends everything queued for the current account now ("Retry now"). Never throws. */
+  /** Pulls and sends everything queued for the current account now ("Retry now"). Never throws. */
   syncNow(): Promise<void> {
     const userId = this.mayUseCloud();
     return userId ? this.track(this.engineFor(userId).flush(true)) : Promise.resolve();
@@ -196,6 +186,18 @@ export class CloudJournalRepository implements JournalRepository {
     }
   };
 
+  /** Journal of an explicit account (never "the current space"). */
+  private readJournal = (uid: string): LocalJournal => ({
+    snapshot: new LocalStorageJournalRepository(undefined, uid).getAllRecords(),
+    batches: listImportBatches(uid),
+  });
+
+  private writeJournal = (uid: string, journal: LocalJournal): void => {
+    new LocalStorageJournalRepository(undefined, uid).replaceAllRecords(journal.snapshot);
+    replaceImportBatches(journal.batches, uid);
+    if (uid === AppStorage.getUserId()) this.batchVersions = versionMap(this.batchEntries());
+  };
+
   /** Engine of this user; engines of other users are stopped (their queues stay on the device). */
   private engineFor(userId: string): JournalSyncEngine {
     for (const [id, e] of this.engines) {
@@ -208,10 +210,11 @@ export class CloudJournalRepository implements JournalRepository {
     if (!engine) {
       engine = new JournalSyncEngine(userId, {
         remote: this.remote!,
-        // Always the engine's own account, never "the current space"
-        readEntries: (uid) => snapshotEntries(new LocalStorageJournalRepository(undefined, uid).getAllRecords(), listImportBatches(uid)),
+        readJournal: this.readJournal,
+        writeJournal: this.writeJournal,
         cloudReady: this.cloudReady,
         onFlagOff: (uid) => this.flagCache.set(uid, { enabled: false, at: this.now().getTime() }),
+        onRemoteApplied: this.notifyData,
         tabId: this.tabId,
         now: () => this.now().getTime(),
         onChange: this.notifyStatus,
@@ -241,64 +244,36 @@ export class CloudJournalRepository implements JournalRepository {
     return result;
   }
 
-  private readCursor(userId: string): Partial<Record<JournalCloudTable, string>> {
-    try {
-      const raw = AppStorage.getItem(CURSOR_KEY, userId);
-      const parsed = raw ? JSON.parse(raw) : {};
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch {
-      return {};
-    }
-  }
-
   /**
-   * Takes records changed in the cloud since the last pull (last-write-wins: only strictly newer ones replace local
-   * records). Never throws. Does nothing when the cloud is not used for this account, or before the first sync
-   * (plan 3.1: cloud changes are applied only after the first upload/download).
+   * Exchanges with the cloud now: pulls changes made elsewhere (merged by base version) and sends the queue.
+   * Never throws. Does nothing when the cloud is not used for this account or before the first sync.
    */
   pullFromCloud(): Promise<PullResult> {
-    return this.track(this.doPull());
+    const userId = this.mayUseCloud();
+    if (!userId) return Promise.resolve({ ok: false, applied: 0 });
+    const engine = this.engineFor(userId);
+    return this.track(
+      engine.flush().then(() => {
+        const r = engine.lastRunResult();
+        return { ok: r.pulled, applied: r.applied };
+      })
+    );
   }
 
-  private async doPull(): Promise<PullResult> {
+  /** Records changed both here and in the cloud (for the dialog in 4c). */
+  listConflicts(): StoredConflict[] {
     const userId = this.mayUseCloud();
-    if (!userId) return { ok: false, applied: 0 };
-    const ready = await this.cloudReady(userId);
-    if (ready !== "on") {
-      if (ready === "unreachable") this.pullState = { state: "offline" };
-      return { ok: false, applied: 0 };
-    }
-    if (AppStorage.getUserId() !== userId) return { ok: false, applied: 0 };
-    void this.engineFor(userId).flush(); // what waited in the queue (e.g. from the last session) goes out
-    if (!isInitialSyncDone(userId)) return { ok: false, applied: 0 };
-    try {
-      const cursor = this.readCursor(userId);
-      const nextCursor = { ...cursor };
-      const remote: CloudEntry[] = [];
-      for (const table of JOURNAL_CLOUD_TABLES) {
-        const since = cursor[table] ? new Date(Date.parse(cursor[table]!) - JOURNAL_CLOUD_PULL_OVERLAP_MS).toISOString() : null;
-        for (const row of await this.remote!.fetchSince(table, since)) {
-          const res = decodeRow(table, row);
-          if (res.ok) remote.push(res.entry);
-          if (!nextCursor[table] || row.updated_at > nextCursor[table]!) nextCursor[table] = row.updated_at;
-        }
-      }
-      // The user may have switched account while we were waiting: never write into another space
-      if (AppStorage.getUserId() !== userId) return { ok: false, applied: 0 };
-      const merged = mergeEntries(this.local.getAllRecords(), listImportBatches(), remote);
-      if (merged.applied) {
-        this.local.replaceAllRecords(merged.snapshot);
-        replaceImportBatches(merged.batches);
-        this.batchVersions = versionMap(this.batchEntries());
-      }
-      AppStorage.setItem(CURSOR_KEY, JSON.stringify(nextCursor), userId);
-      this.pullState = { state: "synced" };
-      if (merged.applied) this.listeners.forEach((l) => l());
-      return { ok: true, applied: merged.applied };
-    } catch (e) {
-      this.pullState = { state: "error", error: e instanceof Error ? e.message : String(e) };
-      return { ok: false, applied: 0 };
-    }
+    return userId ? this.engineFor(userId).listConflicts() : [];
+  }
+
+  /** "Keep this device" or "Take from cloud" for one conflicting record. */
+  resolveConflict(table: JournalCloudTable, id: string, choice: ConflictChoice): boolean {
+    const userId = this.mayUseCloud();
+    if (!userId) return false;
+    const engine = this.engineFor(userId);
+    const done = engine.resolveConflict(table, id, choice);
+    if (done) void this.track(engine.flush(true));
+    return done;
   }
 
   /** The import history lives outside the repository; mirror its changes as well. */

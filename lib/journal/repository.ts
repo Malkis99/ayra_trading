@@ -42,6 +42,11 @@ export const INITIAL_JOURNAL_DATA: JournalStorageData = emptyJournal();
 
 let lastStamp = 0;
 
+/** Tests only: forget the last issued time, so a test can simulate a device whose clock is behind. */
+export function resetStampClockForTests(): void {
+  lastStamp = 0;
+}
+
 const isLive =<T extends SyncMeta>(r: T): boolean => !r.deletedAt;
 const live = <T extends SyncMeta>(list: T[]): T[] => list.filter(isLive);
 
@@ -144,10 +149,20 @@ export class LocalStorageJournalRepository implements JournalRepository {
     return new Date(lastStamp).toISOString();
   }
 
+  /**
+   * Time of a new version of a record: now, but always later than its previous version (T7b-4b). A device whose clock
+   * is behind still produces a version newer than the one it got from the cloud, so its edit is not lost.
+   */
+  private stampAfter(previous?: string | null): string {
+    const prev = previous ? Date.parse(previous) : NaN;
+    const now = Date.parse(this.now());
+    return new Date(Number.isNaN(prev) ? now : Math.max(now, prev + 1)).toISOString();
+  }
+
   /** Inserts or replaces by key (a tombstone with the same key is brought back to life). */
   private upsert<T extends SyncMeta>(list: T[], item: T, same: (a: T) => boolean): T {
-    const stamped = { ...item, updatedAt: this.now(), deletedAt: null };
     const index = list.findIndex(same);
+    const stamped = { ...item, updatedAt: this.stampAfter(index >= 0 ? list[index].updatedAt : undefined), deletedAt: null };
     if (index >= 0) list[index] = stamped;
     else list.push(stamped);
     return stamped;
@@ -157,7 +172,7 @@ export class LocalStorageJournalRepository implements JournalRepository {
   private softDelete<T extends SyncMeta>(list: T[], same: (a: T) => boolean): boolean {
     const item = list.find((r) => same(r) && isLive(r));
     if (!item) return false;
-    const at = this.now();
+    const at = this.stampAfter(item.updatedAt);
     item.deletedAt = at;
     item.updatedAt = at;
     return true;
@@ -179,7 +194,7 @@ export class LocalStorageJournalRepository implements JournalRepository {
   setPrimaryPropAccountId(id: string | null | undefined): void {
     const data = this.loadData();
     data.primaryPropAccountId = id;
-    data.settingsUpdatedAt = this.now();
+    data.settingsUpdatedAt = this.stampAfter(data.settingsUpdatedAt);
     this.saveData(data);
   }
 
@@ -203,7 +218,7 @@ export class LocalStorageJournalRepository implements JournalRepository {
     const account = data.accounts.find((a) => a.id === id && isLive(a));
     if (!account) throw new Error(`Account not found: ${id}`);
     account.archivedAt = this.now();
-    account.updatedAt = account.archivedAt;
+    account.updatedAt = this.stampAfter(account.updatedAt);
     this.saveData(data);
     return account;
   }
@@ -283,7 +298,7 @@ export class LocalStorageJournalRepository implements JournalRepository {
     const note = data.notes.find((n) => n.id === id && isLive(n));
     if (!note) throw new Error(`Note not found: ${id}`);
     note.archivedAt = this.now();
-    note.updatedAt = note.archivedAt;
+    note.updatedAt = this.stampAfter(note.updatedAt);
     this.saveData(data);
     return note;
   }
@@ -331,12 +346,11 @@ export class LocalStorageJournalRepository implements JournalRepository {
   importTrades(trades: Trade[]): number {
     const data = this.loadData();
     const liveIds = new Set(data.trades.filter(isLive).map((t) => t.id));
-    const at = this.now();
     let added = 0;
     for (const t of trades) {
       if (liveIds.has(t.id)) continue;
-      const fresh = { ...t, updatedAt: at, deletedAt: null };
       const index = data.trades.findIndex((x) => x.id === t.id);
+      const fresh = { ...t, updatedAt: this.stampAfter(index >= 0 ? data.trades[index].updatedAt : undefined), deletedAt: null };
       if (index >= 0) data.trades[index] = fresh;
       else data.trades.push(fresh);
       liveIds.add(t.id);
@@ -351,8 +365,8 @@ export class LocalStorageJournalRepository implements JournalRepository {
     const data = this.loadData();
     const removed = data.trades.filter((t) => t.importBatchId === batchId && isLive(t));
     if (removed.length === 0) return 0;
-    const at = this.now();
     removed.forEach((t) => {
+      const at = this.stampAfter(t.updatedAt);
       t.deletedAt = at;
       t.updatedAt = at;
     });
@@ -388,7 +402,7 @@ export class LocalStorageJournalRepository implements JournalRepository {
     const strategy = data.strategies.find((s) => s.id === id && isLive(s));
     if (!strategy) throw new Error(`Strategy not found: ${id}`);
     strategy.archivedAt = this.now();
-    strategy.updatedAt = strategy.archivedAt;
+    strategy.updatedAt = this.stampAfter(strategy.updatedAt);
     this.saveData(data);
     return strategy;
   }

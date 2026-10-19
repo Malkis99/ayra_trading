@@ -4,8 +4,7 @@ import { LocalStorageJournalRepository } from "../repository";
 import { addImportBatch, listImportBatches, markImportBatchUndone } from "../import/batches";
 import type { Trade } from "../types";
 import { CloudJournalRepository } from "./cloud-repository";
-import type { JournalCloudRemote } from "./remote";
-import type { JournalCloudReadRow, JournalCloudTable, JournalCloudWriteRow } from "./records";
+import { FakeRemote, trade } from "./testing/fake-remote";
 import { JOURNAL_CLOUD_MAX_RECORD_BYTES } from "./config";
 import { markInitialSyncDone } from "./sync-state";
 import { SyncOutbox } from "./outbox";
@@ -13,71 +12,6 @@ import { spaceTabChannel } from "@/lib/auth/space-channel";
 
 const USER = "00000000-0000-0000-0000-0000000000a1";
 const OTHER = "00000000-0000-0000-0000-0000000000b1";
-
-/** In-memory stand-in for the 0004 tables: same rules as the server (own rows, last-write-wins, server updated_at). */
-class FakeRemote implements JournalCloudRemote {
-  session: string | null = USER;
-  enabled = true;
-  down = false;
-  flagCalls = 0;
-  upserts: { table: JournalCloudTable; rows: JournalCloudWriteRow[] }[] = [];
-  rows = new Map<string, JournalCloudReadRow & { table: JournalCloudTable }>();
-  private clock = Date.parse("2026-10-18T12:00:00Z");
-
-  private net() {
-    if (this.down) throw new Error("Failed to fetch");
-  }
-  async currentUserId() {
-    return this.session;
-  }
-  async isSyncEnabled() {
-    this.flagCalls++;
-    this.net();
-    return this.enabled;
-  }
-  async upsert(table: JournalCloudTable, rows: JournalCloudWriteRow[]) {
-    this.net();
-    this.upserts.push({ table, rows });
-    for (const r of rows) this.put(table, r.id, r.data);
-  }
-  /** Server-side write (another device): newer client time wins, server stamps updated_at. */
-  put(table: JournalCloudTable, id: string, data: Record<string, unknown>) {
-    const key = `${table}:${id}`;
-    const old = this.rows.get(key);
-    if (old && Date.parse(String(old.data.updatedAt)) > Date.parse(String(data.updatedAt))) return;
-    this.clock += 1000;
-    this.rows.set(key, { table, id, data: structuredClone(data), updated_at: new Date(this.clock).toISOString() });
-  }
-  async fetchSince(table: JournalCloudTable, since: string | null) {
-    this.net();
-    return [...this.rows.values()]
-      .filter((r) => r.table === table && (!since || r.updated_at > since))
-      .sort((a, b) => a.updated_at.localeCompare(b.updated_at));
-  }
-  sent(table: JournalCloudTable) {
-    return this.upserts.filter((u) => u.table === table).flatMap((u) => u.rows);
-  }
-}
-
-function trade(id: string, extra: Partial<Trade> = {}): Trade {
-  return {
-    id,
-    accountId: "acc_1",
-    instrument: "EURUSD",
-    direction: "long",
-    status: "closed",
-    openedAt: "2026-10-17T09:00:00.000Z",
-    result: "win",
-    emotions: [],
-    mistakes: [],
-    verification: "unverified",
-    source: "manual",
-    createdAt: "2026-10-17T09:00:00.000Z",
-    updatedAt: "2026-10-17T09:00:00.000Z",
-    schemaVersion: 6,
-    ...extra,
-  };
-}
 
 /** Sends what is queued now (no waiting for the 1 s debounce) and waits for every request. */
 const settle = async () => {
@@ -92,7 +26,7 @@ let repo: CloudJournalRepository;
 beforeEach(() => {
   localStorage.clear();
   AppStorage.setUserId(USER);
-  remote = new FakeRemote();
+  remote = new FakeRemote(USER);
   local = new LocalStorageJournalRepository();
   repo = new CloudJournalRepository(local, remote, undefined, "tab_a");
   markInitialSyncDone(USER);
@@ -148,7 +82,7 @@ describe("T7b-3 cloud journal repository", () => {
     expect(rows).toHaveLength(2);
     expect(rows[1].data.deletedAt).toBeTruthy();
     expect(repo.getTrades()).toEqual([]);
-    expect(remote.rows.get("journal_trades:tr_1")?.data.deletedAt).toBeTruthy();
+    expect(remote.get("journal_trades", "tr_1")?.data.deletedAt).toBeTruthy();
   });
 
   it("only changed records are sent", async () => {
@@ -271,18 +205,24 @@ describe("T7b-3 cloud journal repository", () => {
       unsubscribe();
     });
 
-    it("an older cloud version does not overwrite a newer local change", async () => {
-      remote.put("journal_trades", "tr_1", { ...trade("tr_1", { notes: "cloud, old" }), updatedAt: "2026-01-01T00:00:00.000Z" });
-      local.saveTrade(trade("tr_1", { notes: "local, newer" })); // stamped now
+    it("changed here and in the cloud: a conflict, decided by the base version, not by the clock — nothing is lost", async () => {
+      // The cloud copy is even OLDER by its clock: a clock comparison would silently drop it
+      remote.put("journal_trades", "tr_1", { ...trade("tr_1", { notes: "cloud" }), updatedAt: "2026-01-01T00:00:00.000Z" });
+      repo.saveTrade(trade("tr_1", { notes: "this device" }));
       expect(await repo.pullFromCloud()).toEqual({ ok: true, applied: 0 });
-      expect(repo.getTrade("tr_1")?.notes).toBe("local, newer");
+      expect(repo.getTrade("tr_1")?.notes).toBe("this device");
+      expect(repo.listConflicts()).toMatchObject([{ table: "journal_trades", id: "tr_1", cloud: { notes: "cloud" } }]);
+      expect(remote.sent("journal_trades")).toEqual([]); // not sent until the user decides
+      expect(repo.getCloudStatus().conflicts).toBe(1);
     });
 
     it("the server keeps the newer version when an older one is pushed", async () => {
       remote.put("journal_trades", "tr_1", { ...trade("tr_1", { notes: "phone" }), updatedAt: "2099-01-01T00:00:00.000Z" });
       repo.saveTrade(trade("tr_1", { notes: "laptop" }));
       await settle();
-      expect(remote.rows.get("journal_trades:tr_1")?.data.notes).toBe("phone");
+      expect(remote.get("journal_trades", "tr_1")?.data.notes).toBe("phone");
+      expect(repo.getTrade("tr_1")?.notes).toBe("laptop");
+      expect(repo.listConflicts().map((c) => c.cloud.notes)).toEqual(["phone"]);
     });
 
     it("records arriving from the cloud: new ones added, tombstones hidden, written by a newer app version skipped", async () => {
