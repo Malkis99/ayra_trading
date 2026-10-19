@@ -11,6 +11,9 @@ import {
   Note,
   StorageUsage,
   JournalRepository,
+  SyncConflict,
+  SyncConflictChoice,
+  JournalSnapshot,
 } from "./types";
 import { journalRepository } from "./cloud";
 import { defaultAttachmentRepository } from "./attachments/indexeddb-repository";
@@ -54,6 +57,13 @@ interface JournalContextType {
   archiveNote: (id: string) => Note;
   deleteNote: (id: string) => boolean;
   refresh: () => void;
+  /** Cloud sync is used for the signed-in account (flag on). Guests and flag off: false. */
+  cloudActive: boolean;
+  /** Records changed here and in the cloud, waiting for a choice (empty unless cloudActive). */
+  syncConflicts: SyncConflict[];
+  resolveSyncConflict: (table: string, id: string, choice: SyncConflictChoice) => boolean;
+  /** Everything stored, tombstones included (the conflict dialog shows a record deleted here). */
+  getAllRecords: () => JournalSnapshot;
   setLastSelectedAccountId: (id: string) => void;
   setLastSelectedInstrument: (inst: string) => void;
 }
@@ -130,6 +140,33 @@ export function JournalProvider({
 
   // Records that arrive from the cloud (accounts with cloud sync only) refresh the screen
   useEffect(() => repository.subscribe?.(refresh), [repository, refresh]);
+
+  // Cloud sync status and conflicts (T7b-4c): only for a signed-in account with the flag on
+  const [cloudActive, setCloudActive] = useState(false);
+  const [syncConflicts, setSyncConflicts] = useState<SyncConflict[]>([]);
+  const refreshSync = useCallback(() => {
+    const active = repository.isCloudActive?.() ?? false;
+    setCloudActive(active);
+    setSyncConflicts(active ? repository.listConflicts?.() ?? [] : []);
+  }, [repository]);
+  useEffect(() => {
+    refreshSync();
+    const unsubscribe = repository.subscribeStatus?.(refreshSync);
+    const unsubscribeSpace = spaceTabChannel.subscribe(refreshSync);
+    return () => {
+      unsubscribe?.();
+      unsubscribeSpace();
+    };
+  }, [repository, refreshSync]);
+  const resolveSyncConflict = useCallback(
+    (table: string, id: string, choice: SyncConflictChoice) => {
+      const done = repository.resolveConflict?.(table, id, choice) ?? false;
+      refresh();
+      refreshSync();
+      return done;
+    },
+    [repository, refresh, refreshSync]
+  );
 
   useEffect(() => {
     refresh();
@@ -426,6 +463,10 @@ export function JournalProvider({
   return (
     <JournalContext.Provider
       value={{
+        getAllRecords: () => repository.getAllRecords(),
+        cloudActive,
+        syncConflicts,
+        resolveSyncConflict,
         accounts,
         trades,
         strategies,

@@ -1,7 +1,7 @@
 import { AppStorage } from "@/lib/storage";
 import type { JournalSnapshot } from "../types";
 import type { ImportBatch } from "../import/batches";
-import { JOURNAL_CLOUD_PULL_OVERLAP_MS, SYNC_BATCH_SIZE, SYNC_DEBOUNCE_MS, SYNC_LEASE_HEARTBEAT_MS, SYNC_PULL_INTERVAL_MS } from "./config";
+import { JOURNAL_CLOUD_MAX_CLOCK_SKEW_MS, JOURNAL_CLOUD_PULL_OVERLAP_MS, SYNC_BATCH_SIZE, SYNC_DEBOUNCE_MS, SYNC_LEASE_HEARTBEAT_MS, SYNC_PULL_INTERVAL_MS } from "./config";
 import { SyncOutbox, outboxKey, type OutboxEntry } from "./outbox";
 import { SyncLease } from "./lease";
 import { isInitialSyncDone, writeSyncState } from "./sync-state";
@@ -76,6 +76,9 @@ const isNetworkError = (e: unknown) => {
   return /fetch|network|offline|timed? ?out|abort/i.test(msg);
 };
 const isFlagOffError = (e: unknown) => (e as { code?: string })?.code === "42501";
+/** lastError when the server refused a time from the future (0004): this device's clock is ahead. */
+export const DEVICE_CLOCK_AHEAD = "deviceClockAhead";
+const isFromFutureError = (e: unknown) => /journal_row_from_future/.test(e instanceof Error ? e.message : String(e));
 
 class Aborted extends Error {}
 
@@ -279,6 +282,8 @@ export class JournalSyncEngine {
         this.deps.onFlagOff?.(this.userId);
         return this.park("off", message);
       }
+      // Records stay queued and are retried with growing pauses; once the clock is right they get a sane time
+      if (isFromFutureError(e)) return this.setState("error", DEVICE_CLOCK_AHEAD);
       return this.setState(isNetworkError(e) ? "offline" : "error", message);
     }
     if (!this.stillActive()) return;
@@ -353,8 +358,9 @@ export class JournalSyncEngine {
     const base = readBase(this.userId);
     const byTable = new Map<JournalCloudTable, { entry: CloudEntry; version: string; row: JournalCloudWriteRow }[]>();
     const gone: OutboxEntry[] = [];
+    const restamped: CloudEntry[] = [];
     for (const item of due) {
-      const entry = records.get(outboxKey(item));
+      let entry = records.get(outboxKey(item));
       if (!entry) {
         gone.push(item); // the record no longer exists on this device (data cleared): nothing to send
         continue;
@@ -363,6 +369,15 @@ export class JournalSyncEngine {
       // version on a device whose clock is behind is stamped after that version — not a wrong clock ahead.
       const baseTime = Date.parse((base[entryKey(entry)] ?? "").split("|")[0]);
       const reference = Number.isNaN(baseTime) ? this.now() : Math.max(this.now(), baseTime);
+      // A time further ahead than any known time was written while this device's clock was ahead (now corrected).
+      // The server never stored it (0004 refuses it); give the record a sane time so it can be sent and later
+      // updated by other devices, instead of blocking it.
+      const changedAt = Date.parse(String(entry.record.updatedAt ?? ""));
+      if (!Number.isNaN(changedAt) && changedAt > reference + JOURNAL_CLOUD_MAX_CLOCK_SKEW_MS) {
+        const stamp = new Date(Math.max(this.now(), Number.isNaN(baseTime) ? 0 : baseTime + 1)).toISOString();
+        entry = { ...entry, record: { ...entry.record, updatedAt: stamp, ...(entry.record.deletedAt ? { deletedAt: stamp } : {}) } };
+        restamped.push(entry);
+      }
       const res = encodeEntry(entry, deviceId, new Date(reference));
       if (!res.ok) {
         this.outbox.markBlocked(item, res.reason);
@@ -371,6 +386,12 @@ export class JournalSyncEngine {
       byTable.set(entry.table, [...(byTable.get(entry.table) || []), { entry, version: entryVersion(entry), row: res.row }]);
     }
     this.outbox.markSent(gone);
+    if (restamped.length) {
+      this.deps.writeJournal(this.userId, applyEntries(journal.snapshot, journal.batches, restamped));
+      this.outbox.enqueue(restamped.map((e) => ({ table: e.table, id: e.id, version: entryVersion(e) })), this.now(), 0);
+      const fixed = new Map(restamped.map((e) => [entryKey(e), entryVersion(e)]));
+      for (const items of byTable.values()) for (const c of items) if (fixed.has(entryKey(c.entry))) c.version = fixed.get(entryKey(c.entry))!;
+    }
 
     for (const [table, items] of byTable) {
       for (let i = 0; i < items.length; i += SYNC_BATCH_SIZE) {

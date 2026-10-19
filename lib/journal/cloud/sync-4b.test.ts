@@ -210,6 +210,53 @@ describe("T7b-4b two devices of one account", () => {
     expect(devB.listConflicts()).toEqual([]);
   });
 
+  it("clock of B a day AHEAD: the server refuses B's time (record not created), other devices keep updating it; once B's clock is right its edit gets a sane time and goes", async () => {
+    const SERVER = Date.parse("2026-10-18T12:00:00.000Z");
+    let serverNow = SERVER;
+    cloud.serverClock = () => serverNow;
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: new Date(SERVER) });
+    devA.saveTrade(trade("t1", { notes: "v1" }));
+    await sync(devA);
+    onDevice("B");
+    await sync(devB);
+
+    resetStampClockForTests();
+    vi.setSystemTime(new Date(SERVER + 24 * 3600 * 1000)); // B's clock: tomorrow
+    devB.saveTrade(trade("tB", { notes: "B new trade, clock ahead" }));
+    await sync(devB);
+    expect(cloud.get("journal_trades", "tB")).toBeUndefined(); // never stored with a time from the future
+    expect(devB.getCloudStatus()).toMatchObject({ state: "error", lastError: "deviceClockAhead", pending: 1 });
+    expect(devB.getTrade("tB")).not.toBeNull(); // nothing lost on the device
+
+    // A (right clock) keeps updating the shared record
+    onDevice("A");
+    vi.setSystemTime(new Date(SERVER + 60_000));
+    serverNow = SERVER + 60_000;
+    devA.saveTrade({ ...devA.getTrade("t1")!, notes: "v2 from A" });
+    await sync(devA);
+    expect(cloud.get("journal_trades", "t1")?.data.notes).toBe("v2 from A");
+
+    // B's clock is corrected: its edit is sent with a sane time
+    onDevice("B");
+    resetStampClockForTests();
+    vi.setSystemTime(new Date(SERVER + 120_000));
+    serverNow = SERVER + 120_000;
+    await sync(devB);
+    const stored = cloud.get("journal_trades", "tB")!;
+    expect(stored.data.notes).toBe("B new trade, clock ahead");
+    expect(Date.parse(String(stored.data.updatedAt))).toBeLessThanOrEqual(serverNow + 5 * 60 * 1000);
+    expect(devB.getCloudStatus().state).toBe("synced");
+
+    // and A can update B's record afterwards (not blocked by a time from the future)
+    onDevice("A");
+    await sync(devA);
+    vi.setSystemTime(new Date(SERVER + 180_000));
+    serverNow = SERVER + 180_000;
+    devA.saveTrade({ ...devA.getTrade("tB")!, notes: "A edits B's trade" });
+    await sync(devA);
+    expect(cloud.get("journal_trades", "tB")?.data.notes).toBe("A edits B's trade");
+  });
+
   it("a version the server refuses is re-stamped and sent again when the cloud still holds the version we started from", async () => {
     devA.saveTrade(trade("t1", { notes: "v1" }));
     await sync(devA);

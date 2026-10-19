@@ -32,8 +32,16 @@ export class FakeRemote implements JournalCloudRemote {
     this.net();
     return this.enabled;
   }
+  /** Server clock, independent of the device clocks the test moves. When set, times > server + 5 min are refused (0004). */
+  serverClock: (() => number) | null = null;
+
   async upsert(table: JournalCloudTable, rows: JournalCloudWriteRow[]) {
     this.net();
+    if (this.serverClock) {
+      const limit = this.serverClock() + 5 * 60 * 1000;
+      // Like the 0004 trigger: one row from the future fails the whole request
+      if (rows.some((r) => Date.parse(String(r.data.updatedAt)) > limit)) throw Object.assign(new Error("journal_row_from_future"), { code: "P0001" });
+    }
     this.upserts.push({ table, rows });
     const written: string[] = [];
     for (const r of rows) if (this.put(table, r.id, r.data)) written.push(r.id);

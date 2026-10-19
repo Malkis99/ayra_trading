@@ -446,6 +446,27 @@ export interface JournalRepository {
 
   /** Optional: notifies when records changed outside the UI (e.g. arrived from the cloud). Returns unsubscribe. */
   subscribe?(listener: () => void): () => void;
+
+  /** Optional (cloud journal): is the cloud used for this account now (flag on, signed in)? */
+  isCloudActive?(): boolean;
+  /** Optional (cloud journal): records changed both here and in the cloud, waiting for the user's choice. */
+  listConflicts?(): SyncConflict[];
+  /** Optional (cloud journal): "keep this device" / "take from cloud" for one record. */
+  resolveConflict?(table: string, id: string, choice: SyncConflictChoice): boolean;
+  /** Optional (cloud journal): notifies when the sync status (incl. conflicts) changes. */
+  subscribeStatus?(listener: () => void): () => void;
+}
+
+export type SyncConflictChoice = "device" | "cloud";
+
+/** A record changed on this device and in the cloud differently (T7b-4b). The device version is the one in the journal. */
+export interface SyncConflict {
+  /** Cloud table: journal_trades, journal_notes, ... */
+  table: string;
+  id: string;
+  /** The cloud version of the record. */
+  cloud: Record<string, unknown>;
+  detectedAt: string;
 }
 
 /** Full journal contents including soft-deleted records. */
