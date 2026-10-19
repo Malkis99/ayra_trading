@@ -15,7 +15,8 @@ import { SearchModal } from "@/components/SearchModal";
 import { Toast } from "@/components/Toast";
 import { Language } from "@/lib/i18n/types";
 import { JournalProvider } from "@/lib/journal/context";
-import { CloudDownloadNotice } from "@/components/journal/InitialSyncDialog";
+import { CloudDownloadNotice, GlobalInitialSyncDialog } from "@/components/journal/InitialSyncDialog";
+import { SyncConflictDialog } from "@/components/journal/SyncConflictDialog";
 import { AuthProvider, useAuth } from "@/lib/auth/auth-context";
 import { useApp } from "@/lib/context";
 import { hasCloudNickname, postLoginRouterUrl, POST_LOGIN_ROUTER } from "@/lib/auth/routing";
@@ -280,6 +281,9 @@ export function Shell({
           <JournalProvider>
             <CloudDownloadNotice />
             <ShellContent>{children}</ShellContent>
+            {/* Cloud sync windows (signed-in account with sync on only): opened by the Journal or the header badge */}
+            <SyncConflictDialog />
+            <GlobalInitialSyncDialog />
           </JournalProvider>
         </GameProvider>
       </AuthProvider>

@@ -5,6 +5,8 @@ import { Smartphone, Download, Copy, Trash2, LogOut } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useAuth } from "@/lib/auth/auth-context";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { UnsyncedSignOutWarning } from "@/components/UnsyncedSignOutWarning";
+import { useJournal } from "@/lib/journal/context";
 import { formatNumber, formatString } from "@/lib/i18n";
 import {
   accountHasProgress,
@@ -17,7 +19,7 @@ import {
   type SpaceSummary,
 } from "@/lib/storage/profile-transfer";
 
-type Dialog = null | "deleteGuest" | "signOutDelete";
+type Dialog = null | "deleteGuest" | "signOutDelete" | "unsynced";
 type Status = { kind: "ok" | "error"; text: string } | null;
 
 function downloadJson(fileName: string, payload: unknown) {
@@ -36,6 +38,12 @@ export function DeviceDataCard() {
   const { dict, lang } = useApp();
   const t = dict.deviceData;
   const { user, profile, signOut } = useAuth();
+  const { readUnsynced } = useJournal();
+  // Sign out and delete: first warn when changes are not in the cloud yet or conflicts wait (sync on only)
+  const startSignOutDelete = () => {
+    const u = readUnsynced();
+    setDialog(u.pending > 0 || u.conflicts > 0 ? "unsynced" : "signOutDelete");
+  };
 
   const [guest, setGuest] = useState<SpaceSummary | null>(null);
   const [accountHasData, setAccountHasData] = useState(true);
@@ -180,7 +188,7 @@ export function DeviceDataCard() {
         <div className="border-t border-line/60 pt-3">
           <button
             type="button"
-            onClick={() => setDialog("signOutDelete")}
+            onClick={startSignOutDelete}
             disabled={busy}
             className={`btn-danger text-left ${btnBase}`}
           >
@@ -218,6 +226,7 @@ export function DeviceDataCard() {
         onConfirm={handleDeleteGuest}
         onCancel={() => setDialog(null)}
       />
+      <UnsyncedSignOutWarning isOpen={dialog === "unsynced"} onCancel={() => setDialog(null)} onProceed={() => setDialog("signOutDelete")} />
       <ConfirmDialog
         isOpen={dialog === "signOutDelete"}
         title={t.signOutDeleteTitle}

@@ -7,6 +7,7 @@ import { describeConflict } from "@/lib/journal/cloud/conflict-view";
 
 // The dialog reads the journal and app contexts; both are replaced by controlled values here.
 const journal = {
+  conflictDialogRequest: 0,
   cloudActive: true,
   syncConflicts: [] as SyncConflict[],
   resolveSyncConflict: vi.fn(() => true),
@@ -16,6 +17,7 @@ const journal = {
 const toast = vi.fn();
 let snapshot: JournalSnapshot;
 vi.mock("@/lib/journal/context", () => ({ useJournal: () => journal }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/journal" }));
 vi.mock("@/lib/context", () => {
   const app = () => ({ dict: getDictionary("ru"), lang: "ru", showToast: toast });
   return { useApp: app, useOptionalApp: app };

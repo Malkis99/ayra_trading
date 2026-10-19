@@ -675,6 +675,30 @@ export const en: Dictionary = {
       cancel: "Cancel",
       empty: "—",
     },
+    syncBadge: {
+      labels: {
+        synced: "Saved to cloud",
+        syncing: "Syncing…",
+        offline: "Offline — changes are saved on this device",
+        error: "Sync failed",
+        conflict: "Choice needed: {count}",
+        waitingInitial: "Journal not in the cloud yet",
+      },
+      descriptions: {
+        synced: "All journal changes are in the cloud.",
+        syncing: "Changes are being sent to the cloud.",
+        offline: "As soon as the network is back, changes go out by themselves. Nothing is lost on this device.",
+        error: "The cloud answered with an error. Changes wait on this device and go out with the next try.",
+        clockAhead: "This device's clock is ahead — check the date and time. Then changes go out by themselves.",
+        conflict: "Some entries were changed here and on another device. Choose which version to keep.",
+        waitingInitial: "This device's journal is not uploaded to the cloud yet.",
+      },
+      lastSync: "Last sync: {time}",
+      never: "Not synced yet",
+      pending: "Waiting to be sent: {count}",
+      blocked: "Not sent (too large or with a wrong time): {count}",
+      actions: { resolve: "Resolve conflict", upload: "Upload to the cloud", retry: "Retry" },
+    },
     initialSync: {
       button: "Upload to the cloud",
       buttonContinue: "Continue upload",
@@ -2339,6 +2363,12 @@ export const en: Dictionary = {
     },
   },
   plurals: {
+    changes: {
+      one: "change",
+      few: "changes",
+      many: "changes",
+      other: "changes",
+    },
     entries: {
       one: "entry",
       few: "entries",
@@ -2555,6 +2585,18 @@ export const en: Dictionary = {
     attachmentsWarning: "Some screenshots were not copied ({count}). They remain in the guest profile.",
   },
   deviceData: {
+    unsynced: {
+      title: "Not everything is in the cloud",
+      body: "If you delete the account data from this device now, this will be lost:",
+      pending: "{count} {changes} not in the cloud yet",
+      conflicts: "{count} {entries} waiting for a choice",
+      conflictsHint: "Entries in conflict go to the cloud only after you choose a version — waiting will not send them.",
+      wait: "Wait for sending (up to 30 s)",
+      waiting: "Sending… left: {count}",
+      notAll: "Not everything got out. Check the network or resolve the conflicts — or delete anyway.",
+      proceed: "Sign out and delete",
+      cancel: "Cancel",
+    },
     title: "Data on this device",
     subtitle: "The guest profile is stored only in this browser.",
     guestProfileLabel: "Guest profile",

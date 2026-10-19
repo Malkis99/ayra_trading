@@ -21,6 +21,17 @@ import { defaultAttachmentRepository } from "./attachments/indexeddb-repository"
 import { AppStorage } from "@/lib/storage";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
 
+export interface CloudStatusView {
+  state: "local" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error";
+  pending: number;
+  blocked: number;
+  conflicts: number;
+  lastError?: string;
+  lastSyncAt?: string;
+}
+
+const LOCAL_STATUS: CloudStatusView = { state: "local", pending: 0, blocked: 0, conflicts: 0 };
+
 interface JournalContextType {
   primaryPropAccountId: string | null | undefined;
   setPrimaryPropAccountId: (id: string | null | undefined) => void;
@@ -72,6 +83,21 @@ interface JournalContextType {
   /** Records an empty device downloaded from the cloud by itself; shown once, then cleared. */
   cloudDownloadNotice: number | null;
   clearCloudDownloadNotice: () => void;
+  /** Exchange with the cloud (the header badge, T7b-4e). */
+  cloudStatus: CloudStatusView;
+  /** navigator.onLine, kept up to date. */
+  online: boolean;
+  /** Exchange with the cloud now ("Retry"). Never throws. */
+  syncNow: () => Promise<void>;
+  /** What is still not in the cloud right now (read live, for "Sign out and delete"): changes to send and conflicts. */
+  readUnsynced: () => { pending: number; conflicts: number };
+  /** The first-upload window (one for the whole app: the Journal button and the header badge open it). */
+  initialSyncOpen: boolean;
+  openInitialSync: () => void;
+  closeInitialSync: () => void;
+  /** Bumped when the user asks to resolve conflicts (the header badge): the conflict dialog opens anywhere. */
+  conflictDialogRequest: number;
+  requestConflictDialog: () => void;
   setLastSelectedAccountId: (id: string) => void;
   setLastSelectedInstrument: (inst: string) => void;
 }
@@ -154,7 +180,13 @@ export function JournalProvider({
   const [syncConflicts, setSyncConflicts] = useState<SyncConflict[]>([]);
   const [initialSync, setInitialSync] = useState<{ needed: boolean; started: boolean }>({ needed: false, started: false });
   const [cloudDownloadNotice, setCloudDownloadNotice] = useState<number | null>(null);
+  const [cloudStatus, setCloudStatus] = useState<CloudStatusView>(LOCAL_STATUS);
+  const [online, setOnline] = useState(true);
+  const [initialSyncOpen, setInitialSyncOpen] = useState(false);
+  const [conflictDialogRequest, setConflictDialogRequest] = useState(0);
   const refreshSync = useCallback(() => {
+    const status = repository.getCloudStatus?.();
+    setCloudStatus(status ? { ...status, blocked: status.blocked.length } : LOCAL_STATUS);
     const active = repository.isCloudActive?.() ?? false;
     setCloudActive(active);
     setSyncConflicts(active ? repository.listConflicts?.() ?? [] : []);
@@ -180,6 +212,35 @@ export function JournalProvider({
     [repository, refresh, refreshSync]
   );
   const clearCloudDownloadNotice = useCallback(() => setCloudDownloadNotice(null), []);
+  const syncNow = useCallback(async () => {
+    try {
+      await repository.syncNow?.();
+    } catch {}
+    refreshSync();
+  }, [repository, refreshSync]);
+  const readUnsynced = useCallback(() => {
+    if (!(repository.isCloudActive?.() ?? false)) return { pending: 0, conflicts: 0 };
+    const s = repository.getCloudStatus?.();
+    return { pending: s?.pending ?? 0, conflicts: repository.listConflicts?.().length ?? 0 };
+  }, [repository]);
+  const openInitialSync = useCallback(() => setInitialSyncOpen(true), []);
+  const closeInitialSync = useCallback(() => setInitialSyncOpen(false), []);
+  const requestConflictDialog = useCallback(() => setConflictDialogRequest((n) => n + 1), []);
+  // Network on / off: the badge shows it at once (the engine also retries when it comes back)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const update = () => {
+      setOnline(navigator.onLine);
+      refreshSync();
+    };
+    update();
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, [refreshSync]);
   useEffect(() => {
     refreshSync();
     const unsubscribe = repository.subscribeStatus?.(refreshSync);
@@ -500,6 +561,15 @@ export function JournalProvider({
         runInitialSync,
         cloudDownloadNotice,
         clearCloudDownloadNotice,
+        cloudStatus,
+        online,
+        syncNow,
+        readUnsynced,
+        initialSyncOpen,
+        openInitialSync,
+        closeInitialSync,
+        conflictDialogRequest,
+        requestConflictDialog,
         cloudActive,
         syncConflicts,
         resolveSyncConflict,

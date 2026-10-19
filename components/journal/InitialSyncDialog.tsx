@@ -244,20 +244,23 @@ export function InitialSyncDialog({ isOpen, onClose }: { isOpen: boolean; onClos
 
 /** "Upload to the cloud" in the Journal header: only for a signed-in account with sync on, until the first sync. */
 export function InitialSyncButton() {
-  const { initialSync } = useJournal();
+  const { initialSync, openInitialSync } = useJournal();
   const { dict } = useApp();
-  const [open, setOpen] = useState(false);
-  if (!initialSync.needed && !open) return null;
+  if (!initialSync.needed) return null;
+  const label = initialSync.started ? dict.journal.initialSync.buttonContinue : dict.journal.initialSync.button;
   return (
-    <>
-      <Button variant="secondary" onClick={() => setOpen(true)} data-testid="initial-sync-button">
-        <CloudUpload size={18} aria-hidden="true" />
-        <span className="hidden sm:inline">{initialSync.started ? dict.journal.initialSync.buttonContinue : dict.journal.initialSync.button}</span>
-        <span className="sr-only sm:hidden">{initialSync.started ? dict.journal.initialSync.buttonContinue : dict.journal.initialSync.button}</span>
-      </Button>
-      <InitialSyncDialog isOpen={open} onClose={() => setOpen(false)} />
-    </>
+    <Button variant="secondary" onClick={openInitialSync} data-testid="initial-sync-button">
+      <CloudUpload size={18} aria-hidden="true" />
+      <span className="hidden sm:inline">{label}</span>
+      <span className="sr-only sm:hidden">{label}</span>
+    </Button>
   );
+}
+
+/** The one first-upload window of the app (opened by the Journal button or the header badge). */
+export function GlobalInitialSyncDialog() {
+  const { initialSyncOpen, closeInitialSync } = useJournal();
+  return <InitialSyncDialog isOpen={initialSyncOpen} onClose={closeInitialSync} />;
 }
 
 /** One notice when an empty device downloaded the journal from the cloud by itself (anywhere in the app). */

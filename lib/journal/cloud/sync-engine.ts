@@ -184,9 +184,11 @@ export class JournalSyncEngine {
   }
 
   status(): SyncEngineStatus {
+    const conflicts = readConflicts(this.userId);
     return {
       state: this.state,
-      pending: this.outbox.size(),
+      // waiting to be sent: not refused by the size/time check and not waiting for the user's choice
+      pending: this.outbox.list().filter((e) => !e.blocked && !conflicts[outboxKey(e)]).length,
       blocked: this.outbox.blocked(),
       conflicts: Object.keys(readConflicts(this.userId)).length,
       lastError: this.lastError,

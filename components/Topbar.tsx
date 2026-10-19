@@ -8,6 +8,7 @@ import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { Character } from "@/components/Character";
 import { CoinsChip } from "@/components/CoinsChip";
+import { SyncBadge } from "@/components/SyncBadge";
 import { FRAMES } from "@/lib/items";
 
 export function Topbar() {
@@ -31,7 +32,7 @@ export function Topbar() {
   const frameColor = FRAMES[gameState.frame]?.color || "#a38ad1";
 
   return (
-    <header className="sticky top-0 z-20 flex h-14 items-center gap-2.5 border-b border-line bg-[#121117cc] px-4 backdrop-blur-md">
+    <header className="sticky top-0 z-20 flex h-14 items-center gap-1.5 border-b border-line bg-[#121117cc] px-3 backdrop-blur-md sm:gap-2.5 sm:px-4">
       {/* Compact Search Trigger (~120px on sm+, icon-only on mobile) */}
       <button
         onClick={() => setSearchOpen(true)}
@@ -78,6 +79,9 @@ export function Topbar() {
         <>
           <CoinsChip value={gameState.coins} />
 
+          {/* Cloud sync (only with sync on for this account): coins → cloud → bell → plan → avatar */}
+          <SyncBadge />
+
           <button
             onClick={() => showToast(dict.topbar.notificationsToast)}
             className="rounded-xl border border-line bg-s1 p-2 text-mu transition-colors hover:border-vi hover:text-tx"
@@ -89,7 +93,7 @@ export function Topbar() {
           {/* Plan chip after the bell; on phones the avatar stays last */}
           <Link
             href="/plans"
-            className="rounded-xl border border-go bg-go/10 px-3 py-1 text-xs font-semibold text-go transition-colors hover:bg-go/20 flex-none"
+            className="rounded-xl border border-go bg-go/10 px-2 py-1 text-xs font-semibold text-go transition-colors hover:bg-go/20 flex-none sm:px-3"
           >
             ★ {gameState.plan}
           </Link>
