@@ -966,6 +966,7 @@ export const en: Dictionary = {
         title: "Where are the trades from?",
         hint: "Pick a platform or keep auto-detect — the format is recognised from the file content.",
         auto: "Detect automatically",
+        tradetrackHint: "TradeTrack journal export",
         autoHint: "Any supported file",
         groups: { forex: "Forex & CFD", futures: "Futures", stocks: "Stocks & options", crypto: "Crypto exchanges", other: "Other" },
         universalHint: "Your own file: map the columns yourself",
@@ -986,6 +987,8 @@ export const en: Dictionary = {
         notDetected: "Format not recognised — you will map the columns yourself",
         looksLike: "This looks like a {platform} file.",
         useDetected: "Use {platform}",
+        mismatch: "This file does not look like a {platform} export: it has no {columns} columns. No trades would be found with this format — choose “Detect automatically” or another platform.",
+        mismatchGeneric: "This file does not look like a {platform} export: its columns do not match this format. Choose “Detect automatically” or another platform.",
         sheet: "Sheet / table",
         rows: "Rows: {count}",
         errors: {
@@ -999,6 +1002,7 @@ export const en: Dictionary = {
       mapping: {
         title: "Column mapping",
         auto: "{platform} columns are mapped automatically.",
+        tradetrackHint: "Recognised as TradeTrack. PnL is the final result of the trade: commission is kept as a separate field and never subtracted again. R comes from the RR column, the outcome (TP / SL) from the result column. This file has no entry / exit prices — that is normal.",
         manualHint: "Choose which file column holds each field. Required fields are marked.",
         headerRow: "Header row",
         headerRowOption: "Row {n}: {preview}",

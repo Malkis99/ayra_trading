@@ -8,6 +8,10 @@ export const ALLOWED_LATIN_WORDS = [
   "HTML",
   "UTF",
   "ID",
+  // column names of imported journal files (TradeTrack: "PnL", "RR") and the platform name
+  "PnL",
+  "RR",
+  "TradeTrack",
   // time zone offsets (UTC+4)
   "UTC",
   // social network names in the profile editor

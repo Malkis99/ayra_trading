@@ -5,7 +5,7 @@ import { Check, FileUp, History, Loader2, Sparkles, Undo2 } from "lucide-react";
 import type { Account, AccountCurrency, AccountType, Strategy, Trade } from "@/lib/journal/types";
 import type { ColumnMapping, ImportField, ImportFormatId, ImportPlatformGroup, RawTable, RowError } from "@/lib/journal/import/types";
 import { readImportFile, type ReadError } from "@/lib/journal/import/read";
-import { IMPORT_PARSERS, PLATFORM_NAMES, detectFormat, getParser, isBetaFormat, tableFor } from "@/lib/journal/import/registry";
+import { IMPORT_PARSERS, PLATFORM_NAMES, detectFormat, formatMismatch, getParser, isBetaFormat, tableFor } from "@/lib/journal/import/registry";
 import { buildPreview, strategyNameKey, type RMode } from "@/lib/journal/import/normalize";
 import { MAPPABLE_FIELDS, REQUIRED_FIELDS, completeMapping, guessHeaderRow, mappedColumnHasNoNumbers, suggestMapping } from "@/lib/journal/import/parsers/universal";
 import { COLOR_PALETTE } from "@/components/journal/StrategyModal";
@@ -214,13 +214,15 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
 
   const newRows = preview.filter((r) => r.status === "new");
   const selected = newRows.filter((r) => !excluded.has(r.index));
+  // A platform picked by hand that does not fit the file: explain why instead of silently finding 0 trades
+  const mismatch = format !== "auto" ? formatMismatch(parser, table) : null;
   const isMapped = (f: ImportField) => mapping[f] !== undefined && mapping[f]! >= 0;
   const missingRequired = isUniversal ? REQUIRED_FIELDS.filter((f) => !isMapped(f)) : [];
   const stepIndex = STEPS.indexOf(step);
 
   const canNext =
     (step === "source" && true) ||
-    (step === "file" && tables.length > 0 && !readError && !reading) ||
+    (step === "file" && tables.length > 0 && !readError && !reading && !mismatch) ||
     (step === "mapping" && missingRequired.length === 0) ||
     (step === "settings" && (rMode !== "fixedRisk" || Number(fixedRisk.replace(",", ".")) > 0));
 
@@ -397,7 +399,7 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
                         platformCard(
                           p.id,
                           PLATFORM_NAMES[p.id],
-                          p.id === "universal" ? t.source.universalHint : p.id === "ayra" ? t.source.ayraHint : "",
+                          p.id === "universal" ? t.source.universalHint : p.id === "ayra" ? t.source.ayraHint : p.id === "tradetrack" ? t.source.tradetrackHint : "",
                           kindsOf(p.id)
                         )
                       )}
@@ -500,6 +502,13 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
                         : t.file.notDetected
                       : formatString(t.file.detected, { platform: PLATFORM_NAMES[format] + (isBetaFormat(format) ? ` (${t.beta})` : "") })}
                   </div>
+                  {mismatch && (
+                    <p className="rounded-md border border-short/40 bg-short/10 p-2 text-sm text-tx" role="alert" data-testid="import-format-mismatch">
+                      {mismatch.missing.length
+                        ? formatString(t.file.mismatch, { platform: PLATFORM_NAMES[parserId], columns: mismatch.missing.map((c) => `«${c}»`).join(", ") })
+                        : formatString(t.file.mismatchGeneric, { platform: PLATFORM_NAMES[parserId] })}
+                    </p>
+                  )}
                   {format !== "auto" && detectedId && detectedId !== format && (
                     <div className="flex flex-wrap items-center gap-2 text-sm text-amber-200">
                       {formatString(t.file.looksLike, { platform: PLATFORM_NAMES[detectedId] })}
@@ -534,7 +543,10 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
           return (
             <p className="flex items-center gap-2 rounded-md border border-long/40 bg-long/10 p-3 text-sm text-tx">
               <Check size={16} className="shrink-0 text-long" aria-hidden="true" />
-              {formatString(t.mapping.auto, { platform: PLATFORM_NAMES[parserId] })}
+              <span>
+                {formatString(t.mapping.auto, { platform: PLATFORM_NAMES[parserId] })}
+                {parserId === "tradetrack" && <span className="mt-1 block text-mu" data-testid="import-preset-hint">{t.mapping.tradetrackHint}</span>}
+              </span>
             </p>
           );
         return (
@@ -653,9 +665,9 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
                 {rMode === "fixedRisk" && (
                   <NumberInput label={t.settings.fixedRisk} unit="$" value={fixedRisk} onChange={(e) => setFixedRisk(e.target.value)} placeholder="100" />
                 )}
-                {isUniversal && isMapped("rMultiple") && (
+                {(parserId === "tradetrack" || (isUniversal && isMapped("rMultiple"))) && (
                   <p className="text-xs text-long" data-testid="import-r-from-file">
-                    {formatString(t.settings.rFromFile, { column: headers[mapping.rMultiple!] || "R" })}
+                    {formatString(t.settings.rFromFile, { column: isUniversal ? headers[mapping.rMultiple!] || "R" : "RR" })}
                   </p>
                 )}
                 <p className="text-xs text-mu">{t.settings.rHint}</p>

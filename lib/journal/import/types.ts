@@ -36,6 +36,7 @@ export type ImportFormatId =
   | "gateio"
   | "kraken"
   | "coinbase"
+  | "tradetrack"
   | "universal"
   | "ayra";
 
@@ -144,4 +145,6 @@ export interface ImportParser {
   parse(table: RawTable, options: ParseOptions): ParseResult;
   /** "documented" = built from published column docs, "verified" = checked on a real file. */
   verification: "verified" | "documented";
+  /** Header groups the format must have (one alias per group is enough); used to explain a mismatch. */
+  requiredColumns?: string[][];
 }
