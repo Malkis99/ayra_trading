@@ -461,6 +461,10 @@ export interface JournalRepository {
   getInitialSyncInfo?(): { needed: boolean; started: boolean };
   /** Optional (cloud journal): records an empty device downloaded by itself (one notice), then forgotten. */
   takeCloudDownloadNotice?(): number | null;
+  /** Optional (cloud journal): state of the exchange with the cloud (the badge in the header). */
+  getCloudStatus?(): { state: "local" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error"; pending: number; blocked: unknown[]; conflicts: number; lastError?: string; lastSyncAt?: string };
+  /** Optional (cloud journal): exchange with the cloud now ("Retry"). */
+  syncNow?(): Promise<void>;
   /** Optional (cloud journal): preview of the first upload. */
   analyzeInitialSync?(): Promise<InitialSyncPlan>;
   /** Optional (cloud journal): the first upload (button), with progress and cancel. */

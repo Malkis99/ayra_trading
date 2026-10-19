@@ -136,6 +136,16 @@ export function createFakeSupabase() {
       cloudFlags.set(user.id, url.searchParams.get("on") === "1");
       return send(200, { userId: user.id, cloud_sync: cloudFlags.get(user.id) });
     }
+    // Another device writes a journal row (POST body = the record's data), newer than anything on the test device
+    if (path === "/__test/cloud-put" && req.method === "POST") {
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      const table = url.searchParams.get("table");
+      if (!user || !table) return send(404, { error: "no user/table" });
+      const data = await readBody(req);
+      journalClock = Math.max(journalClock + 1, Date.now());
+      journalRows.set(`${user.id}:${table}:${data.id}`, { user_id: user.id, table, id: data.id, data, updated_at: new Date(journalClock).toISOString() });
+      return send(200, { ok: true });
+    }
     if (path === "/__test/journal-write-delay") {
       journalWriteDelayMs = Number(url.searchParams.get("ms") || 0);
       return send(200, { journalWriteDelayMs });

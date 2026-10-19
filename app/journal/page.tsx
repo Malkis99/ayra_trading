@@ -38,7 +38,6 @@ import { recordPropRulesSaved } from "@/lib/game";
 import { calculatePropMetrics, resolvePrimaryPropAccount } from "@/lib/journal/prop";
 import { evaluatePropToastAlert } from "@/lib/journal/prop-toast";
 import { AppStorage } from "@/lib/storage";
-import { SyncConflictDialog } from "@/components/journal/SyncConflictDialog";
 import { InitialSyncButton } from "@/components/journal/InitialSyncDialog";
 
 const JOURNAL_TABS = ["trades", "analytics", "plan", "reports", "strategies", "accounts", "notes"] as const;
@@ -803,8 +802,6 @@ export default function JournalPage() {
         dict={dict}
       />
 
-      {/* Cloud sync conflicts (signed-in account with sync on only); opens by itself once per visit */}
-      <SyncConflictDialog />
       {isImportOpen && <ImportWizard isOpen={isImportOpen} onClose={() => setImportOpen(false)} accounts={accounts} trades={trades} userTimeZone={tz} />}
       {isExportOpen && (
       <ExportDialog

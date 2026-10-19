@@ -47,6 +47,8 @@ export interface JournalCloudStatus {
   /** Records changed both here and in the cloud, waiting for the user's choice (dialog in 4c). */
   conflicts: number;
   lastError?: string;
+  /** Last successful exchange with the cloud (ISO). */
+  lastSyncAt?: string;
 }
 
 export interface PullResult {
@@ -136,6 +138,7 @@ export class CloudJournalRepository implements JournalRepository {
       blocked: (s?.blocked ?? []).map(({ table, id, blocked }) => ({ table, id, blocked })),
       conflicts: s?.conflicts ?? 0,
       lastError: s?.lastError,
+      lastSyncAt: readSyncState(userId).lastSyncAt,
     };
   }
 

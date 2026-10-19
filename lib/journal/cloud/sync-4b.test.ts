@@ -312,6 +312,26 @@ describe("T7b-4b account isolation", () => {
     expect(localStorage.getItem(`ayra:${USER}:ayra_journal_cloud_cursor`)).toBeNull();
   });
 
+  it("the header badge and the sign-out warning only count this account: A's waiting changes and conflicts are not shown for B", async () => {
+    devA.saveTrade(trade("t1", { notes: "v1" }));
+    await sync(devA);
+    cloud.put("journal_trades", "t1", { ...trade("t1", { notes: "elsewhere" }), updatedAt: "2099-01-01T00:00:00.000Z" });
+    devA.saveTrade({ ...devA.getTrade("t1")!, notes: "here" });
+    await sync(devA); // A: one conflict
+    cloud.down = true;
+    devA.saveTrade(trade("t2"));
+    await sync(devA); // A: one change waiting
+    expect(devA.getCloudStatus()).toMatchObject({ pending: 1, conflicts: 1 });
+
+    cloud.down = false;
+    AppStorage.setUserId(OTHER);
+    cloud.session = OTHER;
+    markInitialSyncDone(OTHER);
+    await sync(devA);
+    expect(devA.getCloudStatus()).toMatchObject({ pending: 0, conflicts: 0 });
+    expect(devA.listConflicts()).toEqual([]);
+  });
+
   it("conflicts, base versions and cursor are stored per account; another account never sees them", async () => {
     devA.saveTrade(trade("t1", { notes: "v1" }));
     await sync(devA);

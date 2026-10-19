@@ -75,5 +75,7 @@ test.describe("Cloud journal with the sync flag off", () => {
     await expect.poll(async () => (await (await request.get(`${FAKE_SUPABASE}/__test/cloud-requests`)).json()).userFeatures).toBeGreaterThan(0);
     const counts = await (await request.get(`${FAKE_SUPABASE}/__test/cloud-requests`)).json();
     expect(counts.journal).toBe(0);
+    // flag off: no cloud badge in the header
+    await expect(page.getByTestId("sync-badge")).toHaveCount(0);
   });
 });

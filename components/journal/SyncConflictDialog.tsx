@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import { Cloud, Smartphone, Trash2 } from "lucide-react";
 import { useJournal } from "@/lib/journal/context";
 import { useApp } from "@/lib/context";
@@ -18,12 +19,15 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { cn } from "@/components/ui/cn";
 
 /**
- * T7b-4c: "This entry was changed on two devices". Opens by itself once per visit of the Journal when there are
- * conflicts (only for a signed-in account with cloud sync on), waits until no other dialog is open, never blocks
- * the Journal: "Decide later" keeps everything as is (the device version stays, nothing is sent).
+ * T7b-4c: "This entry was changed on two devices". Mounted once for the whole app. Opens by itself once per visit of
+ * the Journal when there are conflicts (only for a signed-in account with cloud sync on), waits until no other dialog
+ * is open; opens anywhere when asked (the header badge, 4e). Never blocks the Journal: "Decide later" keeps everything
+ * as is (the device version stays, nothing is sent).
  */
 export function SyncConflictDialog() {
-  const { cloudActive, syncConflicts, resolveSyncConflict, getAllRecords, accounts } = useJournal();
+  const { cloudActive, syncConflicts, resolveSyncConflict, getAllRecords, accounts, conflictDialogRequest } = useJournal();
+  const pathname = usePathname();
+  const onJournal = Boolean(pathname?.startsWith("/journal"));
   const { dict, lang, showToast } = useApp();
   const t = dict.journal.syncConflict;
   const [open, setOpen] = useState(false);
@@ -40,16 +44,29 @@ export function SyncConflictDialog() {
     );
   }, [cloudActive, syncConflicts, getAllRecords, accounts]);
 
-  // Once per visit: only when nothing else (a trade drawer, another dialog) is open
+  // A new visit of the Journal: it may open by itself again
   useEffect(() => {
-    if (!views.length || dismissed || open) return;
+    if (!onJournal) setDismissed(false);
+  }, [onJournal]);
+
+  // Asked from the header badge: open now, wherever the user is
+  const handledRequest = useRef(conflictDialogRequest);
+  useEffect(() => {
+    if (conflictDialogRequest === handledRequest.current) return;
+    handledRequest.current = conflictDialogRequest;
+    if (views.length) setOpen(true);
+  }, [conflictDialogRequest, views.length]);
+
+  // Once per visit of the Journal: only when nothing else (a trade drawer, another dialog) is open
+  useEffect(() => {
+    if (!onJournal || !views.length || dismissed || open) return;
     const tryOpen = () => {
       if (!document.querySelector('[role="dialog"]')) setOpen(true);
     };
     tryOpen();
     const timer = setInterval(tryOpen, 1000);
     return () => clearInterval(timer);
-  }, [views.length, dismissed, open]);
+  }, [onJournal, views.length, dismissed, open]);
 
   // Everything decided: close with a short confirmation
   useEffect(() => {

@@ -57,3 +57,6 @@ export const SYNC_LEASE_HEARTBEAT_MS = 5000;
 
 /** Background pull of changes made on other devices (plan section 8: every 5 min, PLACEHOLDER approved 2026-10-18). */
 export const SYNC_PULL_INTERVAL_MS = 5 * 60 * 1000;
+
+/** "Sign out and delete data": how long "Wait for sending" waits (owner decision 2026-10-18: up to 30 s). */
+export const SYNC_WAIT_BEFORE_DELETE_MS = 30_000;
