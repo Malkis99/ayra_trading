@@ -260,18 +260,25 @@ export class CloudJournalRepository implements JournalRepository {
     );
   }
 
-  /** Records changed both here and in the cloud (for the dialog in 4c). */
+  /** The cloud is used for the signed-in account right now (flag known to be on). Guests and flag off: false. */
+  isCloudActive(): boolean {
+    const userId = AppStorage.getUserId();
+    return Boolean(userId && this.remote && this.flagCache.get(userId)?.enabled);
+  }
+
+  /** Records changed both here and in the cloud (for the dialog in 4c). Empty unless the cloud is active. */
   listConflicts(): StoredConflict[] {
     const userId = this.mayUseCloud();
-    return userId ? this.engineFor(userId).listConflicts() : [];
+    if (!userId || !this.isCloudActive()) return [];
+    return this.engineFor(userId).listConflicts();
   }
 
   /** "Keep this device" or "Take from cloud" for one conflicting record. */
-  resolveConflict(table: JournalCloudTable, id: string, choice: ConflictChoice): boolean {
+  resolveConflict(table: JournalCloudTable | string, id: string, choice: ConflictChoice): boolean {
     const userId = this.mayUseCloud();
     if (!userId) return false;
     const engine = this.engineFor(userId);
-    const done = engine.resolveConflict(table, id, choice);
+    const done = engine.resolveConflict(table as JournalCloudTable, id, choice);
     if (done) void this.track(engine.flush(true));
     return done;
   }
