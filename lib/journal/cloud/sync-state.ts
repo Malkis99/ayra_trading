@@ -7,6 +7,8 @@ import { AppStorage } from "@/lib/storage";
 export interface SyncStateData {
   initialSyncAt?: string;
   lastSyncAt?: string;
+  /** The first upload was started (and maybe cancelled): the button offers to continue. */
+  initialUploadStartedAt?: string;
 }
 
 const SYNC_STATE_KEY = "ayra_sync_state";

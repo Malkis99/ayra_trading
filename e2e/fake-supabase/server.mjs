@@ -31,6 +31,7 @@ export function createFakeSupabase() {
   const cloudFlags = new Map(); // user id -> boolean
   const journalRows = new Map(); // `${userId}:${table}:${id}` -> { user_id, table, id, data, updated_at }
   let journalWriteFailuresLeft = 0; // next N journal writes fail with 500 (server trouble)
+  let journalWriteDelayMs = 0; // every journal write waits this long (slow network: lets a test cancel mid-upload)
   let journalClock = Date.now();
   const JOURNAL_ID_KEY = { journal_day_plans: "date", journal_week_plans: "weekStartDate" };
 
@@ -134,6 +135,10 @@ export function createFakeSupabase() {
       if (!user) return send(404, { error: "no user" });
       cloudFlags.set(user.id, url.searchParams.get("on") === "1");
       return send(200, { userId: user.id, cloud_sync: cloudFlags.get(user.id) });
+    }
+    if (path === "/__test/journal-write-delay") {
+      journalWriteDelayMs = Number(url.searchParams.get("ms") || 0);
+      return send(200, { journalWriteDelayMs });
     }
     if (path === "/__test/fail-journal-writes") {
       journalWriteFailuresLeft = Number(url.searchParams.get("count") || 0);
@@ -251,6 +256,7 @@ export function createFakeSupabase() {
       }
       if (req.method === "POST") {
         if (!cloudFlags.get(user.id)) return send(403, { code: "42501", message: "new row violates row-level security policy" });
+        if (journalWriteDelayMs > 0) await new Promise((r) => setTimeout(r, journalWriteDelayMs));
         if (journalWriteFailuresLeft > 0) {
           journalWriteFailuresLeft--;
           return send(500, { code: "XX000", message: "fake transient failure" });

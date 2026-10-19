@@ -15,6 +15,7 @@ import {
   SyncConflictChoice,
   JournalSnapshot,
 } from "./types";
+import type { InitialSyncPlan, InitialSyncResult } from "./cloud/sync-engine";
 import { journalRepository } from "./cloud";
 import { defaultAttachmentRepository } from "./attachments/indexeddb-repository";
 import { AppStorage } from "@/lib/storage";
@@ -64,6 +65,13 @@ interface JournalContextType {
   resolveSyncConflict: (table: string, id: string, choice: SyncConflictChoice) => boolean;
   /** Everything stored, tombstones included (the conflict dialog shows a record deleted here). */
   getAllRecords: () => JournalSnapshot;
+  /** First upload of this device's journal (4d): needed (button shown) / started before (offer "Continue"). */
+  initialSync: { needed: boolean; started: boolean };
+  analyzeInitialSync: () => Promise<InitialSyncPlan>;
+  runInitialSync: (opts?: { onProgress?: (done: number, total: number) => void; shouldCancel?: () => boolean }) => Promise<InitialSyncResult>;
+  /** Records an empty device downloaded from the cloud by itself; shown once, then cleared. */
+  cloudDownloadNotice: number | null;
+  clearCloudDownloadNotice: () => void;
   setLastSelectedAccountId: (id: string) => void;
   setLastSelectedInstrument: (inst: string) => void;
 }
@@ -144,11 +152,34 @@ export function JournalProvider({
   // Cloud sync status and conflicts (T7b-4c): only for a signed-in account with the flag on
   const [cloudActive, setCloudActive] = useState(false);
   const [syncConflicts, setSyncConflicts] = useState<SyncConflict[]>([]);
+  const [initialSync, setInitialSync] = useState<{ needed: boolean; started: boolean }>({ needed: false, started: false });
+  const [cloudDownloadNotice, setCloudDownloadNotice] = useState<number | null>(null);
   const refreshSync = useCallback(() => {
     const active = repository.isCloudActive?.() ?? false;
     setCloudActive(active);
     setSyncConflicts(active ? repository.listConflicts?.() ?? [] : []);
+    setInitialSync(repository.getInitialSyncInfo?.() ?? { needed: false, started: false });
+    const downloaded = repository.takeCloudDownloadNotice?.() ?? null;
+    if (downloaded) setCloudDownloadNotice(downloaded);
   }, [repository]);
+  // Local data appears / disappears (the first-upload button depends on it)
+  useEffect(() => {
+    refreshSync();
+  }, [trades, accounts, notes, refreshSync]);
+  const analyzeInitialSync = useCallback(() => repository.analyzeInitialSync?.() ?? Promise.reject(new Error("local")), [repository]);
+  const runInitialSync = useCallback(
+    async (opts?: { onProgress?: (done: number, total: number) => void; shouldCancel?: () => boolean }) => {
+      if (!repository.runInitialSync) throw new Error("local");
+      try {
+        return await repository.runInitialSync(opts);
+      } finally {
+        refresh();
+        refreshSync();
+      }
+    },
+    [repository, refresh, refreshSync]
+  );
+  const clearCloudDownloadNotice = useCallback(() => setCloudDownloadNotice(null), []);
   useEffect(() => {
     refreshSync();
     const unsubscribe = repository.subscribeStatus?.(refreshSync);
@@ -464,6 +495,11 @@ export function JournalProvider({
     <JournalContext.Provider
       value={{
         getAllRecords: () => repository.getAllRecords(),
+        initialSync,
+        analyzeInitialSync,
+        runInitialSync,
+        cloudDownloadNotice,
+        clearCloudDownloadNotice,
         cloudActive,
         syncConflicts,
         resolveSyncConflict,

@@ -17,7 +17,17 @@ import { spaceTabChannel } from "@/lib/auth/space-channel";
 import { JOURNAL_CLOUD_FLAG_TTL_MS, SYNC_FLUSH_ON_SIGN_OUT_MS } from "./config";
 import type { JournalCloudRemote } from "./remote";
 import { changedEntries, importBatchEntries, snapshotEntries, versionMap, type CloudEntry, type JournalCloudTable } from "./records";
-import { JournalSyncEngine, type CloudReadiness, type ConflictChoice, type LocalJournal, type SyncEngineState } from "./sync-engine";
+import {
+  JournalSyncEngine,
+  hasLiveData,
+  type CloudReadiness,
+  type ConflictChoice,
+  type InitialSyncPlan,
+  type InitialSyncResult,
+  type LocalJournal,
+  type SyncEngineState,
+} from "./sync-engine";
+import { isInitialSyncDone, readSyncState } from "./sync-state";
 import type { StoredConflict } from "./sync-merge";
 import type { OutboxEntry } from "./outbox";
 
@@ -80,6 +90,8 @@ export class CloudJournalRepository implements JournalRepository {
   private unregisterFlush: (() => void) | null = null;
   private unsubscribeSpace: (() => void) | null = null;
   private readonly tabId: string;
+  /** An empty device downloaded the cloud journal (records), not yet shown to the user. */
+  private cloudDownloaded: number | null = null;
 
   constructor(
     private readonly local: LocalStorageJournalRepository,
@@ -215,6 +227,10 @@ export class CloudJournalRepository implements JournalRepository {
         cloudReady: this.cloudReady,
         onFlagOff: (uid) => this.flagCache.set(uid, { enabled: false, at: this.now().getTime() }),
         onRemoteApplied: this.notifyData,
+        onCloudDownloaded: (n) => {
+          this.cloudDownloaded = n;
+          this.notifyStatus();
+        },
         tabId: this.tabId,
         now: () => this.now().getTime(),
         onChange: this.notifyStatus,
@@ -281,6 +297,41 @@ export class CloudJournalRepository implements JournalRepository {
     const done = engine.resolveConflict(table as JournalCloudTable, id, choice);
     if (done) void this.track(engine.flush(true));
     return done;
+  }
+
+  /* ---- first sync (4d) ---- */
+
+  /**
+   * needed: the cloud is active for this account and its journal on this device was never synced, with local data
+   * (an empty device downloads by itself). started: a first upload was started before (offer "Continue").
+   */
+  getInitialSyncInfo(): { needed: boolean; started: boolean } {
+    const userId = this.mayUseCloud();
+    if (!userId || !this.isCloudActive() || isInitialSyncDone(userId)) return { needed: false, started: false };
+    return { needed: hasLiveData(this.readJournal(userId)), started: Boolean(readSyncState(userId).initialUploadStartedAt) };
+  }
+
+  /** What the first upload will do (counts for the preview). Throws when the cloud cannot be reached. */
+  analyzeInitialSync(): Promise<InitialSyncPlan> {
+    const userId = this.mayUseCloud();
+    if (!userId) return Promise.reject(new Error("local"));
+    return this.track(this.engineFor(userId).analyzeInitial());
+  }
+
+  /** Runs the first upload (button). Throws on network errors / account switch; nothing is lost locally. */
+  async runInitialSync(opts?: { onProgress?: (done: number, total: number) => void; shouldCancel?: () => boolean }): Promise<InitialSyncResult> {
+    const userId = this.mayUseCloud();
+    if (!userId) throw new Error("local");
+    const result = await this.track(this.engineFor(userId).runInitial(opts));
+    this.notifyStatus();
+    return result;
+  }
+
+  /** Records an empty device downloaded by itself, once (then forgotten): the app shows one notice. */
+  takeCloudDownloadNotice(): number | null {
+    const n = this.cloudDownloaded;
+    this.cloudDownloaded = null;
+    return n;
   }
 
   /** The import history lives outside the repository; mirror its changes as well. */

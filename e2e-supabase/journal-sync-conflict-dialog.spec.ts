@@ -43,6 +43,8 @@ async function markFirstSyncDone(page: Page, userId: string) {
 async function editInstrument(page: Page, from: string, to: string) {
   await page.click(`tr:has-text('${from}')`);
   await page.click("button:has-text('Редактировать')");
+  // the edit form fills in the current value right after it opens: wait for it, or typing may be appended to it
+  await expect(page.getByTestId("instrument-input")).toHaveValue(from.toUpperCase());
   await page.getByTestId("instrument-input").fill(to);
   await page.click("button:has-text('Сохранить сделку')");
   await expect(page.getByTestId("trades-table")).toContainText(to.toUpperCase());

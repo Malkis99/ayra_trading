@@ -1,4 +1,4 @@
-import type { Account, Note, Strategy, Trade } from "../types";
+import type { Account, JournalSnapshot, Note, Strategy, Trade } from "../types";
 import { calculatePnlPercent } from "../calc";
 
 /* =============================================================== columns */
@@ -316,6 +316,38 @@ export function tradesToJson(
     notes: includeNotes ? data.notes.filter((n) => notDeleted(n) && n.links?.tradeId && tradeIds.has(n.links.tradeId)).map(stripDeleted) : [],
   };
   return JSON.stringify(payload, null, 2);
+}
+
+/**
+ * Backup of the whole journal of this device before the first upload to the cloud (T7b-4d): every live record, no
+ * screenshots, no XP / coins. Same envelope as a profile export ({ app: "ayra", journal: { trades… } }), so its trades
+ * can be brought back with the usual import (AYRA JSON).
+ */
+export function journalBackupJson(snapshot: JournalSnapshot, importBatches: unknown[], now: Date = new Date()): string {
+  const live = <T extends { deletedAt?: string | null }>(list: T[] | undefined): Omit<T, "deletedAt">[] => (list || []).filter(notDeleted).map(stripDeleted);
+  const payload = {
+    app: "ayra",
+    kind: "journalBackup",
+    exportVersion: AYRA_TRADES_EXPORT_VERSION,
+    exportedAt: now.toISOString(),
+    journal: {
+      primaryPropAccountId: snapshot.primaryPropAccountId ?? null,
+      accounts: live(snapshot.accounts),
+      trades: live(snapshot.trades).map(({ attachmentIds: _a, ...t }) => t),
+      strategies: live(snapshot.strategies),
+      noTrades: live(snapshot.noTrades),
+      plans: live(snapshot.plans),
+      weekPlans: live(snapshot.weekPlans),
+      notes: live(snapshot.notes),
+      importBatches: (importBatches as { undoneAt?: string }[]).filter((b) => !b.undoneAt),
+    },
+  };
+  return JSON.stringify(payload, null, 2);
+}
+
+export function journalBackupFileName(now: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `ayra-journal-backup-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.json`;
 }
 
 /* ================================================================ naming */
