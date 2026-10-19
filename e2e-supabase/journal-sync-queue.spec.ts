@@ -134,8 +134,11 @@ test.describe("Cloud journal outbox (flag on in the fake server)", () => {
     await page.goto("/settings");
     const signOutStarted = Date.now();
     await page.getByRole("button", { name: "Выйти", exact: true }).click();
-    // sign-out may wait up to 3 s for the queue (plan 1.4)
-    await expect(page.getByRole("link", { name: /Войти/ }).first()).toBeVisible({ timeout: 10000 });
+    // Signed out, the app sends a guest from /settings to /login (Shell rule 2). The guest header with a "Войти" link
+    // is only visible for a moment before that redirect, so wait for the final state: the sign-in screen.
+    // Sign-out itself may wait up to 3 s for the queue (plan 1.4).
+    await page.waitForURL(/\/login/, { timeout: 10000 });
+    await expect(page.getByRole("heading", { name: "Войди во вселенную" })).toBeVisible();
     console.log(`[e2e] sign-out took ${Date.now() - signOutStarted} ms`);
 
     await request.get(`${FAKE_SUPABASE}/__test/fail-journal-writes?count=0`);
