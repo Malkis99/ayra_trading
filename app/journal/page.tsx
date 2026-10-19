@@ -239,12 +239,10 @@ export default function JournalPage() {
     const acc = activeAccounts.find((a) => a.id === trade.accountId);
     const curr = acc?.currency || "USD";
 
-    if (unit === "R") {
-      if (trade.rMultiple != null) {
-        const val = trade.rMultiple;
-        return val > 0 ? `+${val.toFixed(2)} R` : `${val.toFixed(2)} R`;
-      }
-      return "—";
+    // R or % unknown but the result in money is known (e.g. imported without risk): show the money instead of "—"
+    if (unit === "R" && trade.rMultiple != null) {
+      const val = trade.rMultiple;
+      return val > 0 ? `+${val.toFixed(2)} R` : `${val.toFixed(2)} R`;
     }
 
     if (unit === "percent") {
@@ -253,7 +251,6 @@ export default function JournalPage() {
       if (pct != null) {
         return pct > 0 ? `+${pct.toFixed(2)}%` : `${pct.toFixed(2)}%`;
       }
-      return "—";
     }
 
     if (trade.pnlMoney != null) {

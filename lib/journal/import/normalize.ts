@@ -13,21 +13,47 @@ export interface ImportSettings {
   rMode: RMode;
   /** Risk per trade in account money for rMode "fixedRisk". */
   fixedRisk?: number;
+  /** Strategy ids by lower-cased name from the file (existing strategies or ones the user agreed to create). */
+  strategyIds?: Record<string, string>;
   nowIso: string;
 }
 
-const r6 = (n: number | undefined) => (n === undefined ? "" : String(Math.round(n * 1e6) / 1e6));
+const r6 = (n: number | null | undefined) => (n === undefined || n === null ? "" : String(Math.round(n * 1e6) / 1e6));
 
-/** Content key: instrument + opening minute + entry price + size + direction. */
-export function contentKey(t: { instrument: string; openedAt: string; entryPrice?: number; size?: number; direction: string }): string {
-  const minute = t.openedAt.slice(0, 16);
-  return `h:${hashString([normalizeInstrument(t.instrument), minute, r6(t.entryPrice), r6(t.size), t.direction].join("|"))}`;
+/** Name of a strategy from a file, as used for matching ("HTF FVG + CISD" = "htf fvg + cisd"). */
+export const strategyNameKey = (name: string) => name.trim().replace(/\s+/g, " ").toLowerCase();
+
+type ContentFields = Pick<Trade, "accountId" | "instrument" | "direction" | "openedAt"> &
+  Partial<Pick<Trade, "closedAt" | "size" | "pnlMoney" | "fees" | "entryPrice" | "exitPrice">>;
+
+/**
+ * Content key of a trade without a ticket: account + instrument + direction + entry and exit minute + size + result
+ * + commission (+ prices when known). Different trades with a different result never share a key.
+ */
+export function contentKey(t: ContentFields): string {
+  const minute = (iso?: string) => (iso ? iso.slice(0, 16) : "");
+  return `c:${hashString(
+    [
+      t.accountId,
+      normalizeInstrument(t.instrument),
+      t.direction,
+      minute(t.openedAt),
+      minute(t.closedAt),
+      r6(t.size),
+      r6(t.pnlMoney),
+      r6(t.fees),
+      r6(t.entryPrice),
+      r6(t.exitPrice),
+    ].join("|")
+  )}`;
 }
 
+const isTicketKey = (key?: string) => Boolean(key) && !/^[hc]:/.test(key!);
+
 /** Duplicate-protection key for an imported row: the platform ticket/ID when present, otherwise the content key. */
-export function importKeyFor(formatId: ImportFormatId, t: NormalizedTrade): string {
+export function importKeyFor(formatId: ImportFormatId, t: NormalizedTrade, trade: ContentFields): string {
   if (t.externalId) return `${formatId}:${t.externalId}`;
-  return contentKey(t);
+  return contentKey(trade);
 }
 
 function roundTo(n: number, digits: number): number {
@@ -57,9 +83,13 @@ export function computeR(t: NormalizedTrade, pnl: number | undefined, s: Pick<Im
   return undefined;
 }
 
+/** Win / loss / breakeven from the file's outcome when there is neither a result nor R (e.g. "TP" without P&L). */
+function resultFromOutcome(outcome: NormalizedTrade["outcome"]): Trade["result"] | undefined {
+  return outcome === "tp" ? "win" : outcome === "sl" ? "loss" : outcome === "be" ? "breakeven" : undefined;
+}
+
 /** Builds a journal trade from an imported row. Imported trades earn no XP and keep no attachments. */
 export function buildTrade(t: NormalizedTrade, s: ImportSettings, index: number): Trade {
-  const key = importKeyFor(s.formatId, t);
   if (s.formatId === "ayra" && t.ayra) {
     const original = t.ayra as unknown as Trade;
     return {
@@ -68,22 +98,31 @@ export function buildTrade(t: NormalizedTrade, s: ImportSettings, index: number)
       accountId: s.accountId,
       attachmentIds: [],
       importBatchId: s.batchId,
-      importKey: key,
+      importKey: importKeyFor(s.formatId, t, { ...original, accountId: s.accountId }),
       externalId: original.externalId ?? original.id,
       updatedAt: s.nowIso,
     };
   }
   const pnlMoney = netPnl(t);
-  const rMultiple = computeR(t, pnlMoney, s);
-  const closed = Boolean(t.closedAt || t.exitPrice !== undefined || pnlMoney !== undefined);
-  return {
+  // R from the file (e.g. an "RR" column) wins; otherwise calculated as chosen in the settings, never invented
+  const rMultiple = t.rMultiple ?? computeR(t, pnlMoney, s);
+  // Closed = the file gives a result: P&L, an outcome (TP/SL) or an exit price. Dates alone do not close a trade.
+  const closed = pnlMoney !== undefined || t.outcome !== undefined || t.exitPrice !== undefined;
+  const instrument = normalizeInstrument(t.instrument);
+  const closedAt = closed ? t.closedAt ?? t.openedAt : undefined;
+  const result =
+    pnlMoney === undefined && rMultiple === undefined
+      ? resultFromOutcome(t.outcome) ?? "breakeven"
+      : determineTradeResult({ pnlMoney: pnlMoney ?? null, rMultiple: rMultiple ?? null });
+  const strategyId = t.strategyName ? s.strategyIds?.[strategyNameKey(t.strategyName)] ?? null : null;
+  const trade: Trade = {
     id: `tr_imp_${s.batchId}_${index}`,
     accountId: s.accountId,
-    instrument: normalizeInstrument(t.instrument),
+    instrument,
     direction: t.direction,
     status: closed ? "closed" : "open",
     openedAt: t.openedAt,
-    closedAt: closed ? t.closedAt ?? t.openedAt : undefined,
+    closedAt,
     entryPrice: t.entryPrice,
     exitPrice: t.exitPrice,
     stopLoss: t.stopLoss,
@@ -92,10 +131,13 @@ export function buildTrade(t: NormalizedTrade, s: ImportSettings, index: number)
     fees: t.commission,
     swap: t.swap,
     riskAmount: s.rMode === "fixedRisk" && s.fixedRisk ? s.fixedRisk : undefined,
+    riskPercent: t.riskPercent,
     pnlMoney,
     rMultiple,
-    result: determineTradeResult({ pnlMoney: pnlMoney ?? null, rMultiple: rMultiple ?? null }),
-    strategyId: null,
+    result,
+    outcome: t.outcome,
+    session: t.session,
+    strategyId,
     strategyVersion: null,
     ruleChecks: {},
     emotions: [],
@@ -107,43 +149,76 @@ export function buildTrade(t: NormalizedTrade, s: ImportSettings, index: number)
     processScoreSnapshot: null,
     attachmentIds: [],
     importBatchId: s.batchId,
-    importKey: key,
     externalId: t.externalId,
     createdAt: s.nowIso,
     updatedAt: s.nowIso,
     schemaVersion: 3,
   };
+  trade.importKey = importKeyFor(s.formatId, t, trade);
+  return trade;
 }
 
 export type PreviewStatus = "new" | "duplicate" | "duplicateInFile";
+
+/**
+ * Why a row is a duplicate (shown in the preview):
+ * - ticket: a trade with the same ticket / ID is already in the journal
+ * - ticketInFile: the same ticket appears earlier in this file
+ * - content: the same trade (account, instrument, direction, entry and exit, size, result, commission) is in the journal
+ */
+export type DuplicateReason = "ticket" | "ticketInFile" | "content";
 
 export interface PreviewRow {
   index: number;
   source: NormalizedTrade;
   trade: Trade;
   status: PreviewStatus;
+  reason?: DuplicateReason;
+  /** No result in the file (no P&L, no outcome): imported as an open trade. */
+  open: boolean;
 }
 
 /**
- * Builds trades and marks duplicates: same import key / id as a trade already in the journal,
- * or the same row twice in this file. Re-importing the same file therefore adds nothing.
+ * Builds trades and marks duplicates. A trade with a ticket is a duplicate of the same ticket; any trade is a
+ * duplicate of an identical trade already in the journal (one journal trade covers one file row — counted, so two
+ * identical rows against one journal trade give one duplicate and one new trade). Identical rows without a ticket are
+ * separate trades, never "repeated in file". Re-importing the same file therefore adds nothing.
  */
 export function buildPreview(rows: NormalizedTrade[], existing: Trade[], s: ImportSettings): PreviewRow[] {
-  const known = new Set<string>();
+  const tickets = new Set<string>();
+  const pool = new Map<string, number>();
   for (const t of existing) {
-    if (t.importKey) known.add(t.importKey);
-    known.add(`id:${t.id}`);
-    known.add(contentKey(t));
+    if (t.deletedAt) continue;
+    if (isTicketKey(t.importKey)) tickets.add(t.importKey!);
+    tickets.add(`id:${t.id}`);
+    const k = contentKey(t);
+    pool.set(k, (pool.get(k) ?? 0) + 1);
   }
-  const seen = new Set<string>();
+  const takeFromPool = (k: string) => {
+    const n = pool.get(k) ?? 0;
+    if (n <= 0) return false;
+    pool.set(k, n - 1);
+    return true;
+  };
+  const seenTickets = new Set<string>();
   return rows.map((source, index) => {
     const trade = buildTrade(source, s, index);
-    const keys = [trade.importKey!, contentKey(trade)];
-    if (s.formatId === "ayra") keys.push(`id:${trade.id}`);
+    const open = trade.status === "open";
+    const ticket = isTicketKey(trade.importKey) ? trade.importKey! : null;
+    const ticketKeys = ticket ? [ticket, ...(s.formatId === "ayra" ? [`id:${trade.id}`] : [])] : [];
     let status: PreviewStatus = "new";
-    if (keys.some((k) => known.has(k))) status = "duplicate";
-    else if (keys.some((k) => seen.has(k))) status = "duplicateInFile";
-    keys.forEach((k) => seen.add(k));
-    return { index, source, trade, status };
+    let reason: DuplicateReason | undefined;
+    if (ticketKeys.some((k) => tickets.has(k))) {
+      status = "duplicate";
+      reason = "ticket";
+    } else if (ticket && seenTickets.has(ticket)) {
+      status = "duplicateInFile";
+      reason = "ticketInFile";
+    } else if (takeFromPool(contentKey(trade))) {
+      status = "duplicate";
+      reason = "content";
+    }
+    if (ticket) seenTickets.add(ticket);
+    return { index, source, trade, status, reason, open };
   });
 }

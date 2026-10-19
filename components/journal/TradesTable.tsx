@@ -120,12 +120,18 @@ export function TradesTable({ trades, accounts, strategies, tz, unit, dict, lang
   const timeLabel = (iso: string) =>
     new Intl.DateTimeFormat(locale, sortKey === "date" ? { hour: "2-digit", minute: "2-digit" } : { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
   const dayTotal = (g: { netR: number; netMoney: number | null; trades: Trade[] }) => {
-    if (unit === "money") {
+    // No trade of the day has R, but money is known (imports without risk): the day total is shown in money
+    const noR = g.trades.every((x) => typeof x.rMultiple !== "number");
+    if (unit === "money" || (noR && g.netMoney !== null)) {
       const cur = accounts.find((a) => a.id === g.trades[0]?.accountId)?.currency ?? "USD";
       return formatSignedMoney(g.netMoney, cur, lang);
     }
     return formatSignedR(g.netR);
   };
+
+  /** Sign of the shown day total (R, or money when the day has no R). */
+  const daySign = (g: { netR: number; netMoney: number | null; trades: Trade[] }) =>
+    unit === "money" || g.trades.every((x) => typeof x.rMultiple !== "number") ? g.netMoney ?? 0 : g.netR;
 
   const toggleSort = (key: TradeSortKey) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -381,7 +387,7 @@ export function TradesTable({ trades, accounts, strategies, tz, unit, dict, lang
                           <span className="text-tx first-letter:uppercase">{dayLabel(g.dateKey)}</span>
                           <span className="tabular-nums">
                             {dict.journal.overview.dayTotal}:{" "}
-                            <span className={cn("font-semibold", g.netR > 0 ? "text-long" : g.netR < 0 ? "text-short" : "text-tx")}>{dayTotal(g)}</span>
+                            <span className={cn("font-semibold", daySign(g) > 0 ? "text-long" : daySign(g) < 0 ? "text-short" : "text-tx")}>{dayTotal(g)}</span>
                             <span className="ml-2">· {g.trades.length}</span>
                           </span>
                         </div>
@@ -454,7 +460,7 @@ export function TradesTable({ trades, accounts, strategies, tz, unit, dict, lang
                 {g.dateKey && (
                   <div className="flex items-center justify-between px-1 text-xs font-semibold text-mu">
                     <span className="text-tx first-letter:uppercase">{dayLabel(g.dateKey)}</span>
-                    <span className={cn("tabular-nums", g.netR > 0 ? "text-long" : g.netR < 0 ? "text-short" : "text-mu")}>{dayTotal(g)}</span>
+                    <span className={cn("tabular-nums", daySign(g) > 0 ? "text-long" : daySign(g) < 0 ? "text-short" : "text-mu")}>{dayTotal(g)}</span>
                   </div>
                 )}
                 {g.trades.map((x) => (

@@ -123,6 +123,8 @@ export type TradeResult = "win" | "loss" | "breakeven";
 export type TradeSession = "asia" | "london" | "newyork" | "overlap" | "other";
 export type TradeVerification = "unverified" | "imported" | "connected" | "verified";
 export type TradeSource = "manual" | "import";
+/** How the trade ended according to the source file: take profit, stop loss or breakeven. */
+export type TradeOutcome = "tp" | "sl" | "be";
 
 export interface Trade extends SyncMeta {
   id: string;
@@ -140,6 +142,7 @@ export interface Trade extends SyncMeta {
   fees?: number;
   swap?: number; // Swap / financing in account money (signed), imported trades
   riskAmount?: number; // Risk in account money
+  riskPercent?: number; // Risk in % of the account (imported files that give it)
   pnlMoney?: number; // Net result in money
   rMultiple?: number; // Entered or calculated R
   result: TradeResult; // Derived/calculated
@@ -163,6 +166,8 @@ export interface Trade extends SyncMeta {
   importKey?: string;
   /** Ticket / position / trade ID in the source platform. */
   externalId?: string;
+  /** Take profit / stop loss / breakeven, as given by the imported file. */
+  outcome?: TradeOutcome;
   createdAt: string; // ISO String
   updatedAt: string; // ISO String
   schemaVersion: number;

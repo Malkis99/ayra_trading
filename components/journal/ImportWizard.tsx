@@ -2,12 +2,13 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, FileUp, History, Loader2, Sparkles, Undo2 } from "lucide-react";
-import type { Account, AccountCurrency, AccountType, Trade } from "@/lib/journal/types";
+import type { Account, AccountCurrency, AccountType, Strategy, Trade } from "@/lib/journal/types";
 import type { ColumnMapping, ImportField, ImportFormatId, ImportPlatformGroup, RawTable, RowError } from "@/lib/journal/import/types";
 import { readImportFile, type ReadError } from "@/lib/journal/import/read";
 import { IMPORT_PARSERS, PLATFORM_NAMES, detectFormat, getParser, isBetaFormat, tableFor } from "@/lib/journal/import/registry";
-import { buildPreview, type RMode } from "@/lib/journal/import/normalize";
-import { MAPPABLE_FIELDS, REQUIRED_FIELDS, guessHeaderRow, suggestMapping } from "@/lib/journal/import/parsers/universal";
+import { buildPreview, strategyNameKey, type RMode } from "@/lib/journal/import/normalize";
+import { MAPPABLE_FIELDS, REQUIRED_FIELDS, completeMapping, guessHeaderRow, mappedColumnHasNoNumbers, suggestMapping } from "@/lib/journal/import/parsers/universal";
+import { COLOR_PALETTE } from "@/components/journal/StrategyModal";
 import { addImportBatch, listImportBatches, markImportBatchUndone, newBatchId, type ImportBatch } from "@/lib/journal/import/batches";
 import { IMPORT_MAX_FILE_BYTES, IMPORT_MAX_FILE_MB, IMPORT_MAX_TRADES, IMPORT_PREVIEW_ROWS } from "@/lib/journal/import/limits";
 import { hashString } from "@/lib/journal/import/util";
@@ -60,7 +61,7 @@ function timeZoneOptions(user: string): string[] {
 export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }: Props) {
   const { dict, lang, showToast } = useApp();
   const t = dict.journal.importExport;
-  const { importTrades, deleteTradesByBatch, saveAccount } = useJournal();
+  const { importTrades, deleteTradesByBatch, saveAccount, saveStrategy, strategies } = useJournal();
 
   const [step, setStep] = useState<Step>("source");
   const [format, setFormat] = useState<ImportFormatId | "auto">("auto");
@@ -86,6 +87,9 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
   const [result, setResult] = useState<{ batchId: string; imported: number; skipped: number } | null>(null);
   const [undoBatch, setUndoBatch] = useState<ImportBatch | { id: string; tradeCount: number } | null>(null);
   const [history, setHistory] = useState<ImportBatch[]>([]);
+  /** Strategy names from the file the user does NOT want created (by name key); everything else is created. */
+  const [skipStrategies, setSkipStrategies] = useState<Set<string>>(new Set());
+  const plannedStrategyIds = useRef<Record<string, string>>({});
   const batchId = useRef(newBatchId());
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -99,6 +103,8 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
     setReadError(null);
     setDetectedId(null);
     setExcluded(new Set());
+    setSkipStrategies(new Set());
+    plannedStrategyIds.current = {};
     setResult(null);
     setTimeZone(userTimeZone);
     setAccountChoice(activeAccounts[0]?.id ?? NEW_ACCOUNT);
@@ -118,12 +124,14 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
     const hr = guessHeaderRow(tb.rows);
     const sig = hashString((tb.rows[hr] ?? []).join("|"));
     if (remembered[sig]) {
-      setHeaderRow(remembered[sig].headerRow);
-      setMapping(remembered[sig].mapping);
+      const rhr = remembered[sig].headerRow;
+      setHeaderRow(rhr);
+      // Fields added after this mapping was saved (or left empty then) are guessed again; "not used" (-1) is kept
+      setMapping(completeMapping(remembered[sig].mapping, tb.rows[rhr] ?? [], tb.rows.slice(rhr + 1)));
       setMappingRemembered(true);
     } else {
       setHeaderRow(hr);
-      setMapping(suggestMapping(tb.rows[hr] ?? []));
+      setMapping(suggestMapping(tb.rows[hr] ?? [], tb.rows.slice(hr + 1)));
       setMappingRemembered(false);
     }
   }, []);
@@ -167,6 +175,30 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
     }
   }, [table, parser, timeZone, mapping, headerRow, isUniversal]);
 
+  // Strategy names from the file: matched to the user's strategies by name, the rest offered for creation
+  const strategyPlan = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const tr of parsed?.trades ?? []) {
+      if (tr.strategyName && !names.has(strategyNameKey(tr.strategyName))) names.set(strategyNameKey(tr.strategyName), tr.strategyName.trim());
+    }
+    return [...names].map(([key, name]) => {
+      const existing = strategies.find((s) => strategyNameKey(s.name || dict.journal.strategiesTab.defaultName) === key);
+      if (!existing && !plannedStrategyIds.current[key]) {
+        plannedStrategyIds.current[key] = `str_imp_${batchId.current}_${Object.keys(plannedStrategyIds.current).length}`;
+      }
+      return { key, name, existing };
+    });
+  }, [parsed, strategies, dict]);
+
+  const strategyIds = useMemo(() => {
+    const ids: Record<string, string> = {};
+    for (const p of strategyPlan) {
+      if (p.existing) ids[p.key] = p.existing.id;
+      else if (!skipStrategies.has(p.key)) ids[p.key] = plannedStrategyIds.current[p.key];
+    }
+    return ids;
+  }, [strategyPlan, skipStrategies]);
+
   const preview = useMemo(() => {
     if (!parsed) return [];
     return buildPreview(parsed.trades, trades, {
@@ -175,13 +207,15 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
       batchId: batchId.current,
       rMode,
       fixedRisk: Number(fixedRisk.replace(",", ".")) || undefined,
+      strategyIds,
       nowIso: new Date().toISOString(),
     });
-  }, [parsed, trades, parserId, accountChoice, rMode, fixedRisk]);
+  }, [parsed, trades, parserId, accountChoice, rMode, fixedRisk, strategyIds]);
 
   const newRows = preview.filter((r) => r.status === "new");
   const selected = newRows.filter((r) => !excluded.has(r.index));
-  const missingRequired = isUniversal ? REQUIRED_FIELDS.filter((f) => mapping[f] === undefined) : [];
+  const isMapped = (f: ImportField) => mapping[f] !== undefined && mapping[f]! >= 0;
+  const missingRequired = isUniversal ? REQUIRED_FIELDS.filter((f) => !isMapped(f)) : [];
   const stepIndex = STEPS.indexOf(step);
 
   const canNext =
@@ -208,6 +242,26 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
       accountId = acc.id;
     }
     const list = selected.slice(0, IMPORT_MAX_TRADES).map((r) => ({ ...r.trade, accountId }));
+    // Strategies from the file the user agreed to create — only those that imported trades actually use
+    const usedStrategyIds = new Set(list.map((tr) => tr.strategyId).filter(Boolean));
+    strategyPlan
+      .filter((p) => !p.existing && !skipStrategies.has(p.key) && usedStrategyIds.has(plannedStrategyIds.current[p.key]))
+      .forEach((p, i) => {
+        const strategy: Strategy = {
+          id: plannedStrategyIds.current[p.key],
+          name: p.name,
+          description: null,
+          color: COLOR_PALETTE[(strategies.length + i) % COLOR_PALETTE.length],
+          rules: [],
+          tags: [],
+          riskLimit: null,
+          allowedSessions: null,
+          version: 1,
+          archivedAt: null,
+          createdAt: new Date().toISOString(),
+        };
+        saveStrategy(strategy);
+      });
     const added = importTrades(list);
     addImportBatch({
       id: batchId.current,
@@ -493,7 +547,7 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
               onChange={(v) => {
                 const hr = Number(v);
                 setHeaderRow(hr);
-                setMapping(suggestMapping(table?.rows[hr] ?? []));
+                setMapping(suggestMapping(table?.rows[hr] ?? [], table?.rows.slice(hr + 1)));
               }}
               options={(table?.rows ?? []).slice(0, 15).map((r, i) => ({
                 value: String(i),
@@ -502,7 +556,7 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
             />
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {MAPPABLE_FIELDS.map((f: ImportField) => {
-                const sample = mapping[f] !== undefined ? table?.rows[headerRow + 1]?.[mapping[f]!] : undefined;
+                const sample = isMapped(f) ? table?.rows[headerRow + 1]?.[mapping[f]!] : undefined;
                 return (
                   <Select
                     key={f}
@@ -513,10 +567,17 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
                       </>
                     }
                     data-testid={`map-${f}`}
-                    value={mapping[f] === undefined ? "none" : String(mapping[f])}
+                    value={isMapped(f) ? String(mapping[f]) : "none"}
                     hint={sample ? formatString(t.mapping.sample, { value: sample }) : undefined}
-                    error={missingRequired.includes(f) ? t.mapping.missingRequired.replace("{fields}", t.mapping.fields[f]) : undefined}
-                    onChange={(v) => setMapping((m) => ({ ...m, [f]: v === "none" ? undefined : Number(v) }))}
+                    error={
+                      missingRequired.includes(f)
+                        ? t.mapping.missingRequired.replace("{fields}", t.mapping.fields[f])
+                        : mappedColumnHasNoNumbers(f, table?.rows.slice(headerRow + 1) ?? [], mapping[f])
+                          ? t.mapping.notNumeric
+                          : undefined
+                    }
+                    // "not used" is stored as -1, so a remembered mapping keeps the choice instead of guessing again
+                    onChange={(v) => setMapping((m) => ({ ...m, [f]: v === "none" ? -1 : Number(v) }))}
                     options={[
                       { value: "none", label: t.mapping.notUsed },
                       ...headers.map((h, i) => ({ value: String(i), label: h || `#${i + 1}` })),
@@ -592,8 +653,43 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
                 {rMode === "fixedRisk" && (
                   <NumberInput label={t.settings.fixedRisk} unit="$" value={fixedRisk} onChange={(e) => setFixedRisk(e.target.value)} placeholder="100" />
                 )}
+                {isUniversal && isMapped("rMultiple") && (
+                  <p className="text-xs text-long" data-testid="import-r-from-file">
+                    {formatString(t.settings.rFromFile, { column: headers[mapping.rMultiple!] || "R" })}
+                  </p>
+                )}
                 <p className="text-xs text-mu">{t.settings.rHint}</p>
               </div>
+            )}
+            {strategyPlan.length > 0 && (
+              <section className="space-y-2" data-testid="import-strategies">
+                <h4 className="text-sm font-semibold text-tx">{t.settings.strategies}</h4>
+                <ul className="space-y-1.5">
+                  {strategyPlan.map((p) => (
+                    <li key={p.key} className="text-sm">
+                      {p.existing ? (
+                        <span className="text-mu">
+                          {formatString(t.settings.strategyMatched, { name: p.name, existing: p.existing.name || dict.journal.strategiesTab.defaultName })}
+                        </span>
+                      ) : (
+                        <Checkbox
+                          label={formatString(t.settings.strategyCreate, { name: p.name })}
+                          checked={!skipStrategies.has(p.key)}
+                          onChange={(c) =>
+                            setSkipStrategies((s) => {
+                              const n = new Set(s);
+                              if (c) n.delete(p.key);
+                              else n.add(p.key);
+                              return n;
+                            })
+                          }
+                        />
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-xs text-mu">{t.settings.strategiesHint}</p>
+              </section>
             )}
           </div>
         );
@@ -619,9 +715,13 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
               ))}
             </dl>
             {newRows.length > IMPORT_MAX_TRADES && <p className="text-sm text-amber-200">{formatString(t.preview.tooMany, { max: IMPORT_MAX_TRADES })}</p>}
-            {newRows.length === 0 ? (
-              <p className="rounded-md border border-dashed border-line p-4 text-center text-sm text-mu">{t.preview.nothing}</p>
-            ) : (
+            {newRows.some((r) => r.open) && (
+              <p className="text-xs text-mu" data-testid="import-open-count">
+                {formatString(t.preview.openCount, { count: newRows.filter((r) => r.open).length })}
+              </p>
+            )}
+            {newRows.length === 0 && <p className="rounded-md border border-dashed border-line p-4 text-center text-sm text-mu">{t.preview.nothing}</p>}
+            {preview.length > 0 && (
               <div className="overflow-x-auto rounded-md border border-line">
                 <table className="w-full min-w-[640px] text-left text-sm">
                   <thead className="border-b border-line text-xs text-mu">
@@ -669,7 +769,11 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
                             {fmtNum(tr.pnlMoney, 2)}
                           </td>
                           <td className="px-2 py-2 text-right tabular-nums">{fmtNum(tr.rMultiple, 2)}</td>
-                          <td className="whitespace-nowrap px-2 py-2 text-xs text-mu">{t.preview.status[r.status]}</td>
+                          <td className="px-2 py-2 text-xs text-mu" data-testid="import-row-status">
+                            <span className="whitespace-nowrap">{t.preview.status[r.status]}</span>
+                            {r.reason && <span className="block max-w-[260px] text-[11px] leading-snug">{t.preview.reasonText[r.reason]}</span>}
+                            {isNew && r.open && <span className="block max-w-[260px] text-[11px] leading-snug text-amber-200">{t.preview.openTrade}</span>}
+                          </td>
                         </tr>
                       );
                     })}

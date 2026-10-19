@@ -6,7 +6,7 @@ import { GAME_CONFIG } from "@/lib/game-config";
 import { Plus, Trash2, ArrowUp, ArrowDown, X, ShieldAlert, Check } from "lucide-react";
 import { Button, ChipMultiSelect, Input, Modal, NumberInput, Segmented, Select, Textarea, Toggle } from "@/components/ui";
 
-const COLOR_PALETTE = [
+export const COLOR_PALETTE = [
   "#50348f", // AYRA Purple
   "#3b82f6", // Blue
   "#10b981", // Emerald
