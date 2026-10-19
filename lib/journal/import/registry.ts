@@ -26,6 +26,8 @@ import { gateioParser } from "./parsers/gateio";
 import { krakenParser } from "./parsers/kraken";
 import { coinbaseParser } from "./parsers/coinbase";
 import { universalParser } from "./parsers/universal";
+import { tradeTrackParser } from "./parsers/tradetrack";
+import { findColumn } from "./util";
 
 /** Every supported source, in the order shown to the user. */
 export const IMPORT_PARSERS: ImportParser[] = [
@@ -54,6 +56,7 @@ export const IMPORT_PARSERS: ImportParser[] = [
   gateioParser,
   krakenParser,
   coinbaseParser,
+  tradeTrackParser,
   universalParser,
   ayraParser,
 ];
@@ -85,6 +88,7 @@ export const PLATFORM_NAMES: Record<ImportFormatId, string> = {
   gateio: "Gate.io",
   kraken: "Kraken",
   coinbase: "Coinbase",
+  tradetrack: "TradeTrack",
   universal: "CSV / XLSX",
   ayra: "AYRA JSON",
 };
@@ -93,7 +97,7 @@ export const PLATFORM_NAMES: Record<ImportFormatId, string> = {
  * Formats checked on real files. Every other parser was written from the platform documentation only and is shown
  * as "beta" until the owner provides real exports. Our own formats (universal mapping, AYRA JSON) are not beta.
  */
-export const VERIFIED_FORMATS: ReadonlySet<ImportFormatId> = new Set<ImportFormatId>(["universal", "ayra"]);
+export const VERIFIED_FORMATS: ReadonlySet<ImportFormatId> = new Set<ImportFormatId>(["universal", "ayra", "tradetrack"]);
 
 export function isBetaFormat(id: ImportFormatId): boolean {
   return !VERIFIED_FORMATS.has(id);
@@ -122,6 +126,24 @@ export function detectFormat(tables: RawTable[]): Detection | null {
   if (best && best.score >= 0.6) return best;
   const table = tables.find((t) => t.kind !== "json" && t.rows.length > 1) ?? null;
   return table ? { parser: universalParser, table, score: 0 } : null;
+}
+
+/**
+ * Why a file does not suit a format the user picked manually: the format's required columns missing from the best
+ * header row (first alias of each group). null = the file fits (or the format cannot say).
+ */
+export function formatMismatch(parser: ImportParser, table: RawTable | null): { missing: string[] } | null {
+  if (!table || parser.id === "universal") return null;
+  if (!parser.kinds.includes(table.kind)) return { missing: [] };
+  if (parser.detect(table) > 0) return null;
+  const groups = parser.requiredColumns;
+  if (!groups?.length) return { missing: [] };
+  let missing = groups.map((g) => g[0]);
+  for (const row of table.rows.slice(0, 40)) {
+    const m = groups.filter((g) => findColumn(row ?? [], g) < 0).map((g) => g[0]);
+    if (m.length < missing.length) missing = m;
+  }
+  return { missing };
 }
 
 /** Table of a file that suits a parser the user picked manually (best scoring sheet/table). */

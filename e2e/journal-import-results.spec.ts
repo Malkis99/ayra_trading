@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pickOption } from "./helpers/forms";
 
-// Universal CSV import of a real TradeTrack export (29 rows, dates without time):
+// Universal CSV import (format "CSV / XLSX" chosen by hand) of a real TradeTrack export (29 rows, dates without time):
 // no false duplicates, results and R in the journal, analytics calculated.
 const FILE = path.join(process.cwd(), "lib/journal/import/__fixtures__/tradetrack.csv");
 
@@ -34,7 +34,9 @@ const journal = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getI
 async function openWizardWithFile(page: Page, buffer: Buffer) {
   await page.getByTestId("journal-import").click();
   const wizard = page.getByTestId("import-wizard");
-  await wizard.getByTestId("import-next").click(); // source: auto
+  // the generic column mapping, not the TradeTrack preset (that one has its own spec)
+  await wizard.getByRole("radio", { name: /^CSV \/ XLSX/ }).click();
+  await wizard.getByTestId("import-next").click();
   await wizard.getByTestId("import-file-input").setInputFiles({ name: "tradetrack.csv", mimeType: "text/csv", buffer });
   await expect(wizard.getByTestId("import-file-summary")).toBeVisible();
   await wizard.getByTestId("import-next").click(); // -> columns

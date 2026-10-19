@@ -77,6 +77,7 @@ export function roundTripParser(cfg: RoundTripConfig): ImportParser {
     group: cfg.group,
     kinds: cfg.kinds,
     verification: cfg.verification ?? "documented",
+    requiredColumns: cfg.required,
     detect(table) {
       if (!cfg.kinds.includes(table.kind)) return 0;
       return headerScore(table.rows, cfg.required, cfg.signature ?? []);
@@ -234,6 +235,7 @@ export function fillsParser(cfg: FillsConfig): ImportParser {
     group: cfg.group,
     kinds: cfg.kinds,
     verification: cfg.verification ?? "documented",
+    requiredColumns: cfg.required,
     detect(table) {
       if (!cfg.kinds.includes(table.kind)) return 0;
       return headerScore(table.rows, cfg.required, cfg.signature ?? []);
