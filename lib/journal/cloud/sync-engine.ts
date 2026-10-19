@@ -4,7 +4,7 @@ import type { ImportBatch } from "../import/batches";
 import { JOURNAL_CLOUD_MAX_CLOCK_SKEW_MS, JOURNAL_CLOUD_PULL_OVERLAP_MS, SYNC_BATCH_SIZE, SYNC_DEBOUNCE_MS, SYNC_LEASE_HEARTBEAT_MS, SYNC_PULL_INTERVAL_MS } from "./config";
 import { SyncOutbox, outboxKey, type OutboxEntry } from "./outbox";
 import { SyncLease } from "./lease";
-import { isInitialSyncDone, writeSyncState } from "./sync-state";
+import { isInitialSyncDone, markInitialSyncDone, writeSyncState } from "./sync-state";
 import {
   JOURNAL_CLOUD_TABLES,
   decodeRow,
@@ -13,6 +13,7 @@ import {
   entryVersion,
   snapshotEntries,
   type CloudEntry,
+  type EncodeSkipReason,
   type JournalCloudReadRow,
   type JournalCloudTable,
   type JournalCloudWriteRow,
@@ -54,6 +55,8 @@ export interface SyncEngineDeps {
   onFlagOff?: (userId: string) => void;
   /** Records from the cloud were written into the local journal (the screen refreshes). */
   onRemoteApplied?: () => void;
+  /** An empty device downloaded the cloud journal by itself (one notice "Journal loaded from the cloud"). */
+  onCloudDownloaded?: (records: number) => void;
   tabId: string;
   now?: () => number;
   random?: () => number;
@@ -71,6 +74,65 @@ export interface SyncEngineStatus {
 
 export type ConflictChoice = "device" | "cloud";
 
+/** What the first sync will do (4d). */
+export interface InitialSyncPlan {
+  /** Live records only on this device, which can be sent. */
+  toUpload: CloudEntry[];
+  /** Live records only on this device that the server would refuse: shown with the reason, never block the rest. */
+  skipped: { table: JournalCloudTable; id: string; reason: EncodeSkipReason }[];
+  /** Cloud records missing here (taken as they are). */
+  onlyCloud: CloudEntry[];
+  /** Cloud versions of records that differ from this device (they become conflicts). */
+  differ: CloudEntry[];
+  /** Cloud versions equal to this device. */
+  same: CloudEntry[];
+  cursor: Partial<Record<JournalCloudTable, string>>;
+  /** Live records in the cloud / on this device. */
+  cloudLive: number;
+  localLive: number;
+}
+
+export interface InitialSyncResult {
+  uploaded: number;
+  total: number;
+  cancelled: boolean;
+  downloaded: number;
+  conflicts: number;
+  skipped: InitialSyncPlan["skipped"];
+}
+
+const isTombstone = (e: CloudEntry) => Boolean(e.record.deletedAt || e.record.undoneAt);
+
+/** JSON with sorted keys (the cloud database keeps fields in its own order). */
+function stable(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stable).join(",")}]`;
+  if (v && typeof v === "object") {
+    return `{${Object.keys(v as object)
+      .filter((k) => (v as Record<string, unknown>)[k] !== undefined)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(v);
+}
+
+/** Same contents in the cloud and here, apart from the time of the change (compared after a round trip through the cloud). */
+function sameContents(local: CloudEntry, cloud: CloudEntry): boolean {
+  const res = encodeEntry(local, null, new Date(8.64e15));
+  if (!res.ok) return false;
+  const back = decodeRow(local.table, { id: local.id, data: res.row.data, updated_at: "" });
+  // only the time of the change differs (the same record saved on two devices): nothing to choose between
+  const withoutTime = (r: Record<string, unknown>) => ({ ...r, updatedAt: undefined });
+  return back.ok && stable(withoutTime(back.entry.record)) === stable(withoutTime(cloud.record));
+}
+
+/** Any live journal record of this account on this device. */
+export function hasLiveData(journal: LocalJournal): boolean {
+  const s = journal.snapshot;
+  const lists = [s.accounts, s.trades, s.strategies, s.noTrades, s.plans, s.weekPlans, s.notes] as { deletedAt?: string | null }[][];
+  return lists.some((l) => (l || []).some((r) => !r.deletedAt)) || journal.batches.some((b) => !b.undoneAt);
+}
+
 const isNetworkError = (e: unknown) => {
   const msg = e instanceof Error ? e.message : String(e);
   return /fetch|network|offline|timed? ?out|abort/i.test(msg);
@@ -80,7 +142,11 @@ const isFlagOffError = (e: unknown) => (e as { code?: string })?.code === "42501
 export const DEVICE_CLOCK_AHEAD = "deviceClockAhead";
 const isFromFutureError = (e: unknown) => /journal_row_from_future/.test(e instanceof Error ? e.message : String(e));
 
-class Aborted extends Error {}
+/** The account changed (or the engine stopped) during an exchange: nothing more was sent or written. */
+export class SyncAbortedError extends Error {
+  name = "SyncAbortedError";
+}
+const Aborted = SyncAbortedError;
 
 /**
  * Sync engine of ONE account: pull, then push (T7b-4a queue + T7b-4b pull and conflicts).
@@ -264,7 +330,8 @@ export class JournalSyncEngine {
     if (!this.stillActive()) return;
     if (ready === "off") return this.park("off");
     if (ready === "otherSession") return this.park();
-    if (!isInitialSyncDone(this.userId)) return this.park("waitingInitialSync");
+    // First sync: an empty device downloads the cloud journal by itself; with local data it waits for the button
+    if (!isInitialSyncDone(this.userId) && !(await this.autoInitial())) return this.park("waitingInitialSync");
     if (ready === "unreachable") {
       this.outbox.markFailed(this.outbox.due(dueAt), "unreachable", this.now(), this.deps.random);
       return this.setState("offline");
@@ -435,6 +502,142 @@ export class JournalSyncEngine {
           this.merge(others);
         }
       }
+    }
+  }
+
+  /* ------------------------------------------------------------------ first sync (4d) */
+
+  /** Reads every cloud row of this account (first sync only). */
+  private async fetchAllCloud(): Promise<{ entries: Map<string, CloudEntry>; cursor: Partial<Record<JournalCloudTable, string>> }> {
+    const entries = new Map<string, CloudEntry>();
+    const cursor: Partial<Record<JournalCloudTable, string>> = {};
+    for (const table of JOURNAL_CLOUD_TABLES) {
+      const rows = await this.deps.remote.fetchSince(table, null);
+      this.guard();
+      for (const row of rows) {
+        const res = decodeRow(table, row);
+        if (res.ok) entries.set(entryKey(res.entry), res.entry);
+        if (!cursor[table] || row.updated_at > cursor[table]!) cursor[table] = row.updated_at;
+      }
+    }
+    return { entries, cursor };
+  }
+
+  /**
+   * What the first sync will do, without changing anything: records only on this device (to upload), only in the cloud
+   * (to download), on both and different (conflicts), and records that cannot be sent (too large / time from the future).
+   */
+  async analyzeInitial(): Promise<InitialSyncPlan> {
+    this.guard();
+    const ready = await this.deps.cloudReady(this.userId);
+    this.guard();
+    if (ready !== "on") throw new Error(ready === "unreachable" ? "offline" : ready);
+    const { entries: cloud, cursor } = await this.fetchAllCloud();
+    const journal = this.deps.readJournal(this.userId);
+    const local = snapshotEntries(journal.snapshot, journal.batches);
+    const localByKey = new Map(local.map((e) => [entryKey(e), e]));
+    const deviceId = this.deviceId();
+    const plan: InitialSyncPlan = { toUpload: [], skipped: [], onlyCloud: [], differ: [], same: [], cursor, cloudLive: 0, localLive: 0 };
+    for (const e of local) {
+      if (isTombstone(e)) continue; // deleted records are not uploaded and not counted
+      plan.localLive++;
+      const c = cloud.get(entryKey(e));
+      if (!c) {
+        const res = encodeEntry(e, deviceId, new Date(this.now()));
+        if (res.ok) plan.toUpload.push(e);
+        else plan.skipped.push({ table: e.table, id: e.id, reason: res.reason });
+      } else if (entryVersion(c) === entryVersion(e) || sameContents(e, c)) plan.same.push(c);
+      else plan.differ.push(c);
+    }
+    for (const [key, c] of cloud) {
+      if (!isTombstone(c)) plan.cloudLive++;
+      const l = localByKey.get(key);
+      if (!l) plan.onlyCloud.push(c);
+      else if (isTombstone(l) && !isTombstone(c)) plan.differ.push(c); // deleted here before any sync, alive in the cloud
+    }
+    return plan;
+  }
+
+  /**
+   * The first sync (by the button): downloads what is only in the cloud, keeps different records aside as conflicts
+   * (nothing in the cloud is overwritten), uploads what is only here in batches. Idempotent by record id: after a
+   * cancel, running again uploads only what is still missing. Never sends to or writes into another account.
+   */
+  async runInitial(opts: { onProgress?: (done: number, total: number) => void; shouldCancel?: () => boolean } = {}): Promise<InitialSyncResult> {
+    writeSyncState(this.userId, { initialUploadStartedAt: new Date(this.now()).toISOString() });
+    const plan = await this.analyzeInitial();
+    if ((await this.deps.remote.currentUserId()) !== this.userId) throw new Aborted();
+    this.guard();
+    this.applyCloudSide(plan);
+
+    const total = plan.toUpload.length;
+    let done = 0;
+    opts.onProgress?.(done, total);
+    const deviceId = this.deviceId();
+    const byTable = new Map<JournalCloudTable, CloudEntry[]>();
+    for (const e of plan.toUpload) byTable.set(e.table, [...(byTable.get(e.table) || []), e]);
+    for (const [table, items] of byTable) {
+      for (let i = 0; i < items.length; i += SYNC_BATCH_SIZE) {
+        if (opts.shouldCancel?.()) return { uploaded: done, total, cancelled: true, conflicts: plan.differ.length, skipped: plan.skipped, downloaded: plan.onlyCloud.length };
+        this.guard(); // never send this account's records while another account is open
+        const chunk = items.slice(i, i + SYNC_BATCH_SIZE);
+        const rows = chunk.map((e) => encodeEntry(e, deviceId, new Date(this.now()))).filter((r) => r.ok).map((r) => (r as { row: JournalCloudWriteRow }).row);
+        const written = new Set((await this.deps.remote.upsert(table, rows)).written);
+        this.guard();
+        const ok = chunk.filter((e) => written.has(e.id));
+        updateBase(this.userId, Object.fromEntries(ok.map((e) => [entryKey(e), entryVersion(e)])));
+        const okKeys = new Set(ok.map(entryKey));
+        this.outbox.markSent(this.outbox.list().filter((q) => okKeys.has(outboxKey(q)) && q.version === entryVersion(ok.find((e) => entryKey(e) === outboxKey(q))!)));
+        // Appeared in the cloud meanwhile (another device): the normal exchange sorts it out (conflict if different)
+        const late = chunk.filter((e) => !written.has(e.id));
+        if (late.length) this.enqueue(late);
+        done += chunk.length;
+        opts.onProgress?.(done, total);
+      }
+    }
+    this.guard();
+    writeCursor(this.userId, plan.cursor);
+    markInitialSyncDone(this.userId, new Date(this.now()));
+    this.deps.onChange?.();
+    void this.flush(true);
+    return { uploaded: done, total, cancelled: false, conflicts: plan.differ.length, skipped: plan.skipped, downloaded: plan.onlyCloud.length };
+  }
+
+  /** Cloud-only records are taken, equal ones get their base version, different ones become conflicts. */
+  private applyCloudSide(plan: InitialSyncPlan): void {
+    this.guard();
+    const journal = this.deps.readJournal(this.userId);
+    if (plan.onlyCloud.length) this.deps.writeJournal(this.userId, applyEntries(journal.snapshot, journal.batches, plan.onlyCloud));
+    updateBase(this.userId, Object.fromEntries([...plan.onlyCloud, ...plan.same].map((c) => [entryKey(c), entryVersion(c)])));
+    if (plan.differ.length) {
+      const conflicts = readConflicts(this.userId);
+      const at = new Date(this.now()).toISOString();
+      for (const c of plan.differ) conflicts[entryKey(c)] = { table: c.table, id: c.id, cloud: c.record, detectedAt: at };
+      writeConflicts(this.userId, conflicts);
+    }
+    const leave = new Set([...plan.same, ...plan.differ].map(entryKey));
+    if (leave.size) this.outbox.markSent(this.outbox.list().filter((q) => leave.has(outboxKey(q))));
+    if (plan.onlyCloud.length) this.deps.onRemoteApplied?.();
+  }
+
+  /**
+   * Empty device (no journal of this account here): download the cloud journal by itself, once, and say so.
+   * Nothing on either side: the first sync is simply done. Local data: wait for the button. Never throws.
+   */
+  private async autoInitial(): Promise<boolean> {
+    try {
+      const journal = this.deps.readJournal(this.userId);
+      if (hasLiveData(journal)) return false;
+      const plan = await this.analyzeInitial();
+      this.guard();
+      this.applyCloudSide(plan);
+      writeCursor(this.userId, plan.cursor);
+      markInitialSyncDone(this.userId, new Date(this.now()));
+      if (plan.cloudLive > 0) this.deps.onCloudDownloaded?.(plan.cloudLive);
+      return true;
+    } catch (e) {
+      if (!(e instanceof Aborted)) this.setState(isNetworkError(e) ? "offline" : "error", e instanceof Error ? e.message : String(e));
+      return false;
     }
   }
 

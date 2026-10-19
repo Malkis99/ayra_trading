@@ -86,26 +86,27 @@ test.describe("Cloud journal outbox (flag on in the fake server)", () => {
     await request.get(`${FAKE_SUPABASE}/__test/fail-journal-writes?count=0`);
   });
 
-  test("before the first sync changes only wait; afterwards the queue goes out, also after a reload", async ({ page, request }) => {
+  test("empty account and empty cloud: the first sync is done by itself; changes go out after the pause; the queue survives a reload", async ({ page, request }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const { email, userId } = await newAccount(page, request, "Queue");
     await page.reload(); // the flag was turned on after sign-in: fresh answer
+    // nothing on either side: nothing to upload or download (T7b-4d), no button needed
+    await expect
+      .poll(() => page.evaluate((id) => JSON.parse(localStorage.getItem(`ayra:${id}:ayra_sync_state`) || "{}").initialSyncAt ?? null, userId), { timeout: 15000 })
+      .not.toBeNull();
 
     await addTrade(page, "nas100", true);
-    await page.waitForTimeout(2500); // longer than the 1 s send pause
-    expect(await cloudRows(request, email)).toEqual([]);
-    await expect.poll(async () => (await outbox(page, userId)).length).toBeGreaterThan(0);
-
-    await markFirstSyncDone(page, userId);
-    await page.reload(); // the queue was kept on the device
     await expect.poll(() => cloudInstruments(request, email), { timeout: 15000 }).toEqual(["NAS100"]);
-    const tables = (await cloudRows(request, email)).map((r) => r.table).sort();
-    expect(tables).toContain("journal_accounts");
-    await expect.poll(async () => (await outbox(page, userId)).length).toBe(0);
+    expect((await cloudRows(request, email)).map((r) => r.table)).toContain("journal_accounts");
 
-    // next change goes on its own after the short pause
+    // the server is down: the change waits in the queue on the device, also through a reload
+    await request.get(`${FAKE_SUPABASE}/__test/fail-journal-writes?count=1000`);
     await addTrade(page, "eurusd");
-    await expect.poll(() => cloudInstruments(request, email), { timeout: 15000 }).toEqual(["EURUSD", "NAS100"]);
+    await expect.poll(async () => (await outbox(page, userId)).length).toBeGreaterThan(0);
+    await request.get(`${FAKE_SUPABASE}/__test/fail-journal-writes?count=0`);
+    await page.reload();
+    await expect.poll(() => cloudInstruments(request, email), { timeout: 20000 }).toEqual(["EURUSD", "NAS100"]);
+    await expect.poll(async () => (await outbox(page, userId)).length).toBe(0);
   });
 
   test("server failure: the change stays queued and is retried", async ({ page, request }) => {

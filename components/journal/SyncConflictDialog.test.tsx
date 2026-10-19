@@ -16,7 +16,10 @@ const journal = {
 const toast = vi.fn();
 let snapshot: JournalSnapshot;
 vi.mock("@/lib/journal/context", () => ({ useJournal: () => journal }));
-vi.mock("@/lib/context", () => ({ useApp: () => ({ dict: getDictionary("ru"), lang: "ru", showToast: toast }) }));
+vi.mock("@/lib/context", () => {
+  const app = () => ({ dict: getDictionary("ru"), lang: "ru", showToast: toast });
+  return { useApp: app, useOptionalApp: app };
+});
 
 import { SyncConflictDialog } from "./SyncConflictDialog";
 
@@ -108,8 +111,17 @@ describe("SyncConflictDialog", () => {
     journal.syncConflicts = [conflict(trade() as never), conflict(trade({ id: "t2", instrument: "XAUUSD" }) as never, "t2")];
     render(<SyncConflictDialog />);
     expect(screen.getByTestId("sync-conflict-dialog").textContent).toContain("Записи изменены на двух устройствах: 2");
+    // "For all" asks first, with the number of entries
     fireEvent.click(screen.getByTestId("conflict-take-all"));
+    expect(journal.resolveSyncConflict).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Заменить 2 записи версией из облака?");
+    // the confirmation has two ways to cancel (the button and the close cross): either one cancels
+    fireEvent.click(screen.getAllByRole("button", { name: "Отмена" })[0]);
+    expect(journal.resolveSyncConflict).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("conflict-take-all"));
+    fireEvent.click(screen.getByRole("button", { name: "Заменить: 2" }));
     expect(journal.resolveSyncConflict).toHaveBeenCalledTimes(2);
+    expect(journal.resolveSyncConflict).toHaveBeenCalledWith("journal_trades", "t2", "cloud");
     journal.resolveSyncConflict.mockClear();
     fireEvent.click(screen.getByTestId("conflict-later"));
     expect(screen.queryByTestId("sync-conflict-dialog")).toBeNull();

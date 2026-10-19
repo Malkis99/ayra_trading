@@ -39,6 +39,7 @@ import { calculatePropMetrics, resolvePrimaryPropAccount } from "@/lib/journal/p
 import { evaluatePropToastAlert } from "@/lib/journal/prop-toast";
 import { AppStorage } from "@/lib/storage";
 import { SyncConflictDialog } from "@/components/journal/SyncConflictDialog";
+import { InitialSyncButton } from "@/components/journal/InitialSyncDialog";
 
 const JOURNAL_TABS = ["trades", "analytics", "plan", "reports", "strategies", "accounts", "notes"] as const;
 type JournalTab = (typeof JOURNAL_TABS)[number];
@@ -452,6 +453,8 @@ export default function JournalPage() {
         </div>
         {!isDemoMode && (
           <div className="flex shrink-0 items-center gap-2">
+          {/* First upload of this device's journal (signed in, sync on, never synced, with local data) */}
+          <InitialSyncButton />
           <Button variant="secondary" onClick={() => setImportOpen(true)} data-testid="journal-import">
             <FileUp size={18} aria-hidden="true" />
             <span className="hidden sm:inline">{dict.journal.importExport.importBtn}</span>

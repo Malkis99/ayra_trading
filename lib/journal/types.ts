@@ -1,3 +1,5 @@
+import type { InitialSyncPlan, InitialSyncResult } from "./cloud/sync-engine";
+
 export type AccountType = "personal" | "prop" | "demo";
 
 export type AccountCurrency =
@@ -455,6 +457,14 @@ export interface JournalRepository {
   resolveConflict?(table: string, id: string, choice: SyncConflictChoice): boolean;
   /** Optional (cloud journal): notifies when the sync status (incl. conflicts) changes. */
   subscribeStatus?(listener: () => void): () => void;
+  /** Optional (cloud journal): is the first upload of this device's journal needed / was it started? */
+  getInitialSyncInfo?(): { needed: boolean; started: boolean };
+  /** Optional (cloud journal): records an empty device downloaded by itself (one notice), then forgotten. */
+  takeCloudDownloadNotice?(): number | null;
+  /** Optional (cloud journal): preview of the first upload. */
+  analyzeInitialSync?(): Promise<InitialSyncPlan>;
+  /** Optional (cloud journal): the first upload (button), with progress and cancel. */
+  runInitialSync?(opts?: { onProgress?: (done: number, total: number) => void; shouldCancel?: () => boolean }): Promise<InitialSyncResult>;
 }
 
 export type SyncConflictChoice = "device" | "cloud";

@@ -104,6 +104,8 @@ test.describe("Cloud journal: two devices of one account", () => {
     await B.context.setOffline(true);
     await B.page.click("tr:has-text('NAS100')");
     await B.page.click("button:has-text('Редактировать')");
+    // the edit form fills in the current value right after it opens: wait for it, or typing may be appended to it
+    await expect(B.page.getByTestId("instrument-input")).toHaveValue("NAS100");
     await B.page.getByTestId("instrument-input").fill("ger40");
     await B.page.click("button:has-text('Сохранить сделку')");
     await expect(B.page.getByTestId("trades-table")).toContainText("GER40");
