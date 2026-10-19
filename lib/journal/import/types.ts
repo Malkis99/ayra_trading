@@ -1,4 +1,4 @@
-import type { TradeDirection } from "../types";
+import type { TradeDirection, TradeOutcome, TradeSession } from "../types";
 
 /** A table read from a file: CSV/TSV, one XLSX sheet or one HTML table. Cells are raw strings. */
 export interface RawTable {
@@ -55,8 +55,14 @@ export type ImportField =
   | "swap"
   | "stopLoss"
   | "takeProfit"
-  | "externalId";
+  | "externalId"
+  | "rMultiple"
+  | "riskPercent"
+  | "outcome"
+  | "session"
+  | "strategy";
 
+/** Column index per field; -1 = the user chose "not used" (kept so a remembered mapping is not re-guessed). */
 export type ColumnMapping = Partial<Record<ImportField, number>>;
 
 /** A trade as read from a file, before it is attached to an account and saved. Times are UTC ISO strings. */
@@ -81,6 +87,14 @@ export interface NormalizedTrade {
   takeProfit?: number;
   currency?: string;
   notes?: string;
+  /** Realized R given by the file (e.g. an "RR" column). */
+  rMultiple?: number;
+  /** Risk in % of the account given by the file. */
+  riskPercent?: number;
+  outcome?: TradeOutcome;
+  session?: TradeSession;
+  /** Strategy / setup name as written in the file; matched to the user's strategies by name. */
+  strategyName?: string;
   /** Extra data carried by the AYRA JSON format (strategy, tags, mistakes...). */
   ayra?: Record<string, unknown>;
   /** 1-based row numbers in the file this trade was built from. */

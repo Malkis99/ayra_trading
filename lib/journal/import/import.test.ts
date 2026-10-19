@@ -325,8 +325,11 @@ describe("normalization, R and duplicates", () => {
     const saved: Trade[] = first.map((r) => r.trade);
     const again = buildPreview([nt(), nt({ externalId: "2", openedAt: "2024-03-05T10:00:00.000Z" })], saved, settings({ batchId: "b2" }));
     expect(again.every((r) => r.status === "duplicate")).toBe(true);
+    // Two identical rows without a ticket are two separate trades (never "repeated in file")
     const noTicket = buildPreview([nt({ externalId: undefined }), nt({ externalId: undefined })], [], settings());
-    expect(noTicket.map((r) => r.status)).toEqual(["new", "duplicateInFile"]);
+    expect(noTicket.map((r) => r.status)).toEqual(["new", "new"]);
+    // The same ticket twice in one file is a real repeat
+    expect(buildPreview([nt(), nt()], [], settings()).map((r) => [r.status, r.reason])).toEqual([["new", undefined], ["duplicateInFile", "ticketInFile"]]);
     const manual = { ...saved[0], id: "manual", importKey: undefined, source: "manual" } as Trade;
     expect(buildPreview([nt({ externalId: "other" })], [manual], settings())[0].status).toBe("duplicate");
   });

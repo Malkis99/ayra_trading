@@ -1,4 +1,4 @@
-import type { TradeDirection } from "../types";
+import type { TradeDirection, TradeOutcome, TradeSession } from "../types";
 
 /* ------------------------------------------------------------------ headers */
 
@@ -306,6 +306,37 @@ export function cleanInstrument(raw: unknown): string {
 /** True for rows that are blank or only contain totals/labels. */
 export function isBlankRow(row: string[] | undefined): boolean {
   return !row || row.every((c) => !c || !String(c).trim());
+}
+
+/** A date without a time of day ("10/13/26", "2026-10-13", "13.10.2026"). */
+export function isDateOnly(raw: unknown): boolean {
+  return /^\s*\d{1,4}[-./]\d{1,2}[-./]\d{1,4}\s*$/.test(String(raw ?? ""));
+}
+
+/** Exit reason written by journals: "TP", "Take Profit", "SL", "Stop Loss", "BE", "Тейк", "Стоп", "Безубыток". */
+export function parseOutcome(raw: unknown): TradeOutcome | undefined {
+  const s = String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+  if (!s) return undefined;
+  if (["tp", "takeprofit", "тп", "тейк", "тейкпрофит"].includes(s)) return "tp";
+  if (["sl", "stoploss", "stop", "сл", "стоп", "стоплосс"].includes(s)) return "sl";
+  if (["be", "breakeven", "бу", "безубыток"].includes(s)) return "be";
+  return undefined;
+}
+
+/** Trading session by name: "New York Session", "London", "Asian", "Overlap London/New York", "Лондон". Empty = none. */
+export function parseSession(raw: unknown): TradeSession | undefined {
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (!s) return undefined;
+  const london = /london|лондон/.test(s);
+  const ny = /new\s*york|\bny\b|нью[\s-]*йорк/.test(s);
+  if (/overlap|перекрыт/.test(s) || (london && ny)) return "overlap";
+  if (/asia|tokyo|sydney|ази|токио|сидне/.test(s)) return "asia";
+  if (london) return "london";
+  if (ny) return "newyork";
+  return "other";
 }
 
 /** Small stable hash (FNV-1a) for duplicate keys. */
