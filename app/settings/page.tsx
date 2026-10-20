@@ -5,7 +5,9 @@ import Link from "next/link";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useAuth } from "@/lib/auth/auth-context";
-import { Sparkles, Shield, Compass, HardDrive, AlertTriangle, User, LogOut, LogIn, Database } from "lucide-react";
+import { Sparkles, Shield, Compass, HardDrive, AlertTriangle, User, LogOut, LogIn, Database, Cloud } from "lucide-react";
+import { useJournal } from "@/lib/journal/context";
+import { cloudNoticeState } from "@/lib/journal/cloud/account-notice";
 import { defaultAttachmentRepository } from "@/lib/journal/attachments/indexeddb-repository";
 import { AttachmentStorageEstimate } from "@/lib/journal/attachments/types";
 import { OwnerDiagnosticsBlock } from "@/components/OwnerDiagnosticsBlock";
@@ -16,6 +18,11 @@ export default function SettingsPage() {
   const { dict, lang, setLanguage } = useApp();
   const { gameState, setAiConsent, updateTimezone } = useGame();
   const { user, signOut, isGuest } = useAuth();
+  const { cloudActive, cloudStatus, initialSync } = useJournal();
+  // Flag on: the account card tells the journal's cloud state; guest or flag off: the old text
+  const cloudNotice = user
+    ? cloudNoticeState({ cloudActive, initialNeeded: initialSync.needed, pending: cloudStatus.pending, conflicts: cloudStatus.conflicts })
+    : null;
   const [storageEstimate, setStorageEstimate] = React.useState<AttachmentStorageEstimate | null>(null);
 
   React.useEffect(() => {
@@ -52,9 +59,13 @@ export default function SettingsPage() {
             </div>
 
             {/* Local Data Storage Info Banner */}
-            <div className="flex items-center gap-2 rounded-xl border border-line/60 bg-s1/60 p-3 text-xs text-mu">
-              <Database size={14} className="shrink-0 text-vi" />
-              <span>{dict.account.localDataNotice}</span>
+            <div
+              className="flex items-center gap-2 rounded-xl border border-line/60 bg-s1/60 p-3 text-xs text-mu"
+              data-testid="account-data-notice"
+              data-state={cloudNotice ?? "local"}
+            >
+              {cloudNotice ? <Cloud size={14} className="shrink-0 text-vi" aria-hidden="true" /> : <Database size={14} className="shrink-0 text-vi" aria-hidden="true" />}
+              <span>{cloudNotice ? dict.account.cloudNotice[cloudNotice] : dict.account.localDataNotice}</span>
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-2 pt-2">

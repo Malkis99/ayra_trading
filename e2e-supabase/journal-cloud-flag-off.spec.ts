@@ -77,5 +77,17 @@ test.describe("Cloud journal with the sync flag off", () => {
     expect(counts.journal).toBe(0);
     // flag off: no cloud badge in the header
     await expect(page.getByTestId("sync-badge")).toHaveCount(0);
+
+    // flag off: Settings texts as before (local data notice, «no cloud sync yet» in the sign-out confirmation)
+    await page.goto("/settings");
+    const notice = page.getByTestId("account-data-notice");
+    await expect(notice).toHaveAttribute("data-state", "local");
+    await expect(notice).toContainText("Данные пока хранятся на этом устройстве");
+    await page
+      .locator(".card", { hasText: "Данные на этом устройстве" })
+      .getByRole("button", { name: "Выйти и удалить данные аккаунта с этого устройства" })
+      .click();
+    await expect(page.getByRole("dialog")).toContainText("Синхронизации с облаком пока нет");
+    await page.getByRole("dialog").getByRole("button", { name: "Отмена" }).first().click();
   });
 });
