@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useAttachments } from "@/lib/journal/attachments/hooks";
@@ -9,11 +9,18 @@ import { AttachmentKind, AttachmentRecord } from "@/lib/journal/attachments/type
 import { GAME_CONFIG } from "@/lib/game-config";
 import { LightboxViewer } from "./LightboxViewer";
 import { recordScreenshotAdded } from "@/lib/game";
+import { formatString } from "@/lib/i18n";
+import { noCloudAttachments, notOnDevice, screenshotsElsewhere, type CloudAttachmentStore } from "@/lib/journal/attachments/elsewhere";
 
 interface AttachmentManagerProps {
   tradeId?: string | null;
   tradeOpenedAt?: string;
   onAttachmentsChanged?: (attachmentIds: string[]) => void;
+  /** Screenshot ids the trade record lists (synced): ids missing here belong to another device and are kept. */
+  expectedIds?: string[];
+  /** Called after the user adds or deletes a screenshot, with the full id list for the trade record. */
+  onPersistIds?: (attachmentIds: string[]) => void;
+  cloudStore?: CloudAttachmentStore;
   readOnly?: boolean;
 }
 
@@ -21,6 +28,9 @@ export function AttachmentManager({
   tradeId,
   tradeOpenedAt,
   onAttachmentsChanged,
+  expectedIds,
+  onPersistIds,
+  cloudStore = noCloudAttachments,
   readOnly = false,
 }: AttachmentManagerProps) {
   const { dict, showToast } = useApp();
@@ -46,12 +56,54 @@ export function AttachmentManager({
   // File Input Ref
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Notify parent of updated attachment IDs
+  // Ids the trade lists that are not on this device (added on another device): kept in the record, never dropped
+  // by an edit here. A screenshot deleted here is not listed again.
+  const [deletedHere, setDeletedHere] = useState<string[]>([]);
+  const remoteIds = useMemo(
+    () => notOnDevice(expectedIds, attachments.map((a) => a.id)).filter((id) => !deletedHere.includes(id)),
+    [expectedIds, attachments, deletedHere]
+  );
+  const allIds = useMemo(() => [...attachments.map((a) => a.id), ...remoteIds], [attachments, remoteIds]);
+
+  // «Stored on another device»: listed ids found neither here nor in the cloud store
+  const [elsewhere, setElsewhere] = useState<string[]>([]);
   useEffect(() => {
-    if (onAttachmentsChanged) {
-      onAttachmentsChanged(attachments.map((a) => a.id));
+    if (loading) return;
+    let alive = true;
+    screenshotsElsewhere(remoteIds, attachments.map((a) => a.id), cloudStore).then((ids) => {
+      if (alive) setElsewhere(ids);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [loading, remoteIds, attachments, cloudStore]);
+
+  // Notify parent of updated attachment IDs (after loading, so a slow load never reports an empty list)
+  useEffect(() => {
+    if (onAttachmentsChanged && !loading) {
+      onAttachmentsChanged(allIds);
     }
-  }, [attachments, onAttachmentsChanged]);
+  }, [allIds, loading, onAttachmentsChanged]);
+
+  // After a user add/delete, hand the new list to the trade record
+  const userChangedRef = useRef(false);
+  useEffect(() => {
+    if (!userChangedRef.current || loading) return;
+    userChangedRef.current = false;
+    onPersistIds?.(allIds);
+  }, [allIds, loading, onPersistIds]);
+
+  const handleDeleteAttachment = useCallback(
+    async (id: string) => {
+      const ok = await deleteAttachment(id);
+      if (ok) {
+        userChangedRef.current = true;
+        setDeletedHere((prev) => [...prev, id]);
+      }
+      return ok;
+    },
+    [deleteAttachment]
+  );
 
   // Process and upload file
   const handleProcessAndAddFile = useCallback(
@@ -61,7 +113,7 @@ export function AttachmentManager({
         return;
       }
 
-      if (attachments.length >= GAME_CONFIG.MAX_ATTACHMENTS_PER_TRADE) {
+      if (allIds.length >= GAME_CONFIG.MAX_ATTACHMENTS_PER_TRADE) {
         showToast(dictAtt.limitReached.replace("{max}", String(GAME_CONFIG.MAX_ATTACHMENTS_PER_TRADE)));
         return;
       }
@@ -80,6 +132,7 @@ export function AttachmentManager({
           return;
         }
 
+        userChangedRef.current = true;
         const saved = await addAttachment({
           tradeId,
           kind: "before",
@@ -110,6 +163,7 @@ export function AttachmentManager({
           showToast(dict.journal.addTradeModal.tradeSavedToast);
         }
       } catch (err: any) {
+        userChangedRef.current = false;
         console.error("Error processing attachment:", err);
         let errorMsg = dictAtt.errors.uploadFailed;
         if (err.message === "UNSUPPORTED_FORMAT") {
@@ -129,6 +183,7 @@ export function AttachmentManager({
     [
       tradeId,
       attachments,
+      allIds,
       addAttachment,
       gameState,
       setGameState,
@@ -209,6 +264,12 @@ export function AttachmentManager({
         </div>
       )}
 
+      {elsewhere.length > 0 && (
+        <p className="rounded-xl border border-line bg-s2/40 p-2.5 text-xs text-mu" data-testid="screenshots-elsewhere">
+          {elsewhere.length === 1 ? dictAtt.elsewhereOne : formatString(dictAtt.elsewhereMany, { count: elsewhere.length })}
+        </p>
+      )}
+
       {/* Thumbnails Grid */}
       {attachments.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
@@ -223,7 +284,7 @@ export function AttachmentManager({
       )}
 
       {/* Dropzone Area */}
-      {!readOnly && attachments.length < GAME_CONFIG.MAX_ATTACHMENTS_PER_TRADE && (
+      {!readOnly && allIds.length < GAME_CONFIG.MAX_ATTACHMENTS_PER_TRADE && (
         <div
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
@@ -266,7 +327,7 @@ export function AttachmentManager({
           onClose={() => setActiveLightboxIndex(null)}
           onIndexChange={(idx) => setActiveLightboxIndex(idx)}
           onUpdateMetadata={updateMetadata}
-          onDeleteAttachment={deleteAttachment}
+          onDeleteAttachment={handleDeleteAttachment}
         />
       )}
     </div>

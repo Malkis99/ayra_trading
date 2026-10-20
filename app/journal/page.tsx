@@ -437,6 +437,15 @@ export default function JournalPage() {
     showToast(dict.journal.recalculatedToast);
   };
 
+  // Screenshots added or deleted in the quick view: keep the trade record's list in step (other devices see it)
+  const handleScreenshotsChanged = (trade: Trade, attachmentIds: string[]) => {
+    const fresh = trades.find((t) => t.id === trade.id);
+    if (!fresh) return;
+    const before = [...(fresh.attachmentIds || [])].sort().join("|");
+    if (before === [...attachmentIds].sort().join("|")) return;
+    saveTrade({ ...fresh, attachmentIds });
+  };
+
   const openAddTrade = () => {
     setAddTradeInitialDate(undefined);
     setAddTradeModalOpen(true);
@@ -831,6 +840,7 @@ export default function JournalPage() {
         onRecalculate={handleRecalculateProcessScore}
         onAddLinkedNote={(tr) => openNoteModal({ tradeId: tr.id, instrument: tr.instrument, strategyId: tr.strategyId || undefined })}
         onOpenNote={(n: Note) => openNoteModal(n.links)}
+        onScreenshotsChanged={handleScreenshotsChanged}
         dict={dict}
         lang={lang}
       />

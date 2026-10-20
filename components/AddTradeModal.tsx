@@ -992,7 +992,7 @@ export function AddTradeModal({ isOpen, onClose, initialTrade, initialOpenedAt }
                 onToggle={() => toggleSection("screenshots")}
                 summary={filled(attachmentIds.length)}
               >
-                <AttachmentManager tradeId={activeTradeId} tradeOpenedAt={openedAt} onAttachmentsChanged={(ids) => setAttachmentIds(ids)} />
+                <AttachmentManager tradeId={activeTradeId} tradeOpenedAt={openedAt} expectedIds={initialTrade?.attachmentIds} onAttachmentsChanged={(ids) => setAttachmentIds(ids)} />
               </FormSection>
 
               <FormSection
