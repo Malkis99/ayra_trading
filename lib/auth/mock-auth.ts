@@ -2,6 +2,9 @@ export interface MockUser {
   id: string;
   email: string;
   created_at: string;
+  hasPassword?: boolean;
+  /** e2e mock only: the stand-in for the password Supabase keeps as a hash. Never used outside AYRA_E2E_AUTH_MOCK. */
+  mockPassword?: string;
 }
 
 export interface MockProfile {

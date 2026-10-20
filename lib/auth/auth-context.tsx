@@ -1,7 +1,8 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { createSupabaseBrowserClient, createSupabaseCheckClient } from "@/lib/supabase/browser";
+import { passwordProblem, passwordUpdateErrorKey } from "./password";
 import { isE2EMockEnabled, getSupabaseEnv } from "@/lib/supabase/config";
 import { mapSupabaseError, type SanitizedErrorInfo } from "./error-sanitizer";
 import { authTabChannel } from "./tab-channel";
@@ -47,7 +48,16 @@ export interface AuthUser {
   id: string;
   email: string;
   created_at?: string;
+  /** The account has a password (set in Settings or by «Forgot password»); accounts made by the e-mail code have none. */
+  hasPassword?: boolean;
 }
+
+/** Supabase session user -> AuthUser. `has_password` is a UI hint in user_metadata, not a security check. */
+function toAuthUser(u: { id: string; email?: string | null; created_at?: string; user_metadata?: Record<string, unknown> | null }): AuthUser {
+  return { id: u.id, email: u.email || "", created_at: u.created_at, hasPassword: u.user_metadata?.has_password === true };
+}
+
+export type SetPasswordResult = { success: boolean; errorKey?: string; errorDetails?: SanitizedErrorInfo };
 
 interface AuthContextType {
   authState: AuthState;
@@ -79,6 +89,8 @@ interface AuthContextType {
     consentAccepted?: boolean
   ) => Promise<{ success: boolean; errorKey?: string; errorDetails?: SanitizedErrorInfo }>;
   signOut: () => Promise<void>;
+  /** Creates (no currentPassword) or changes the password of the signed-in account. Sends no e-mail. */
+  setPassword: (newPassword: string, currentPassword?: string) => Promise<SetPasswordResult>;
   checkNicknameAvailable: (nickname: string) => Promise<boolean>;
   saveNickname: (nickname: string) => Promise<{ success: boolean; errorKey?: string }>;
   refreshProfile: () => Promise<void>;
@@ -266,7 +278,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         supabase.auth.getSession().then(({ data: { session } }) => {
           if (!isMounted) return;
           if (session?.user) {
-            const u = { id: session.user.id, email: session.user.email || "", created_at: session.user.created_at };
+            const u = toAuthUser(session.user);
             updateToAuthenticated(u, true);
           } else {
             updateToGuest();
@@ -279,7 +291,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } = supabase.auth.onAuthStateChange((_event, session) => {
           if (!isMounted) return;
           if (session?.user) {
-            const u = { id: session.user.id, email: session.user.email || "", created_at: session.user.created_at };
+            const u = toAuthUser(session.user);
             updateToAuthenticated(u);
           } else {
             updateToGuest();
@@ -317,7 +329,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (supabase) {
             supabase.auth.getSession().then(({ data: { session } }) => {
               if (session?.user) {
-                const u = { id: session.user.id, email: session.user.email || "", created_at: session.user.created_at };
+                const u = toAuthUser(session.user);
                 setUser(u);
                 loadProfile(session.user.id);
                 setAuthState("authenticated");
@@ -461,11 +473,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (data.session?.user) {
-      const newUser = {
-        id: data.session.user.id,
-        email: data.session.user.email || "",
-        created_at: data.session.user.created_at,
-      };
+      const newUser = toAuthUser(data.session.user);
       setUser(newUser);
 
       await supabase
@@ -510,6 +518,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     AppStorage.setUserId(null);
     spaceTabChannel.notifyLocal(oldSpaceId, GUEST_SPACE_ID);
     spaceTabChannel.broadcastSpaceChange(oldSpaceId, GUEST_SPACE_ID);
+  };
+
+  const setPassword = async (newPassword: string, currentPassword?: string): Promise<SetPasswordResult> => {
+    const problem = passwordProblem(newPassword);
+    if (problem) {
+      return { success: false, errorKey: problem, errorDetails: mapSupabaseError({ status: 400, message: `Password rule: ${problem}` }) };
+    }
+    if (!user) {
+      return { success: false, errorKey: "generic", errorDetails: mapSupabaseError({ status: 401, message: "Not signed in" }) };
+    }
+    const changing = currentPassword !== undefined;
+
+    if (mockMode) {
+      const { user: mUser, profile: mProfile } = getMockState();
+      if (!mUser) return { success: false, errorKey: "generic" };
+      if (changing && currentPassword !== mUser.mockPassword) {
+        return { success: false, errorKey: "wrongCurrent", errorDetails: mapSupabaseError({ status: 400, message: "Invalid login credentials" }) };
+      }
+      if (mUser.mockPassword === newPassword) {
+        return { success: false, errorKey: "samePassword", errorDetails: mapSupabaseError({ status: 422, message: "same_password" }) };
+      }
+      const next: MockUser = { ...mUser, hasPassword: true, mockPassword: newPassword };
+      setMockState(next, mProfile);
+      setUser({ id: next.id, email: next.email, created_at: next.created_at, hasPassword: true });
+      return { success: true };
+    }
+
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) {
+      return { success: false, errorKey: "generic", errorDetails: mapSupabaseError({ status: 500, message: "Supabase client not configured" }) };
+    }
+
+    // Changing: check the current password on a throwaway client, so the app's own session is never replaced
+    if (changing) {
+      const check = createSupabaseCheckClient();
+      if (!check) return { success: false, errorKey: "generic" };
+      const { error } = await check.auth.signInWithPassword({ email: user.email, password: currentPassword });
+      if (error) {
+        const details = mapSupabaseError(error, envInfo.truncatedReason);
+        const key = details.errorKey === "rateLimitExceeded" ? "tooManyAttempts" : details.errorKey === "networkError" ? "network" : "wrongCurrent";
+        return { success: false, errorKey: key, errorDetails: details };
+      }
+      await check.auth.signOut({ scope: "local" }).catch(() => {});
+    }
+
+    const { data, error } = await supabase.auth.updateUser({ password: newPassword, data: { has_password: true } });
+    if (error) {
+      return { success: false, errorKey: passwordUpdateErrorKey(error), errorDetails: mapSupabaseError(error, envInfo.truncatedReason) };
+    }
+    if (data.user) setUser(toAuthUser(data.user));
+    return { success: true };
   };
 
   const checkNicknameAvailable = async (nickname: string): Promise<boolean> => {
@@ -623,6 +682,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signInWithOtp,
         verifyOtp,
         signOut,
+        setPassword,
         checkNicknameAvailable,
         saveNickname,
         refreshProfile,

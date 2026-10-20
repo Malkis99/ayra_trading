@@ -22,6 +22,8 @@ export function createFakeSupabase() {
   const pendingCodes = new Map(); // code -> { email, challenge, method }
   const lastLinkByEmail = new Map();
   const tokens = new Map(); // access/refresh token -> user id
+  const passwords = new Map(); // user id -> password (the real server keeps only a hash)
+  const logouts = []; // scope of every /logout call ("global" when none given)
   const takenNicknames = new Set(["taken_nick", "admin"]);
   let createProfileRows = true; // false = handle_new_user trigger absent (new users get no profiles row)
   let profilesTableMissing = false; // true = migration 0001 not applied (PostgREST 404 PGRST205)
@@ -192,6 +194,13 @@ export function createFakeSupabase() {
         pendingCodes.delete(body.auth_code);
         return send(200, issueSession(usersByEmail.get(pending.email)));
       }
+      if (grant === "password") {
+        const user = usersByEmail.get(body.email);
+        if (!user || passwords.get(user.id) !== body.password) {
+          return send(400, { code: "invalid_credentials", error: "invalid_grant", error_description: "Invalid login credentials", msg: "Invalid login credentials" });
+        }
+        return send(200, issueSession(user));
+      }
       if (grant === "refresh_token") {
         const id = tokens.get(body.refresh_token);
         const user = id && [...usersByEmail.values()].find((u) => u.id === id);
@@ -199,11 +208,36 @@ export function createFakeSupabase() {
       }
       return send(400, { error: "unsupported_grant_type" });
     }
+    if (path === "/auth/v1/user" && req.method === "PUT") {
+      const user = userFromAuthHeader(req);
+      if (!user) return send(401, { error: "not authenticated" });
+      const body = await readBody(req);
+      if (typeof body.password === "string") {
+        if (body.password.length < 8) return send(422, { code: "weak_password", msg: "Password should be at least 8 characters." });
+        if (passwords.get(user.id) === body.password) {
+          return send(422, { code: "same_password", msg: "New password should be different from the old password." });
+        }
+        passwords.set(user.id, body.password);
+      }
+      if (body.data && typeof body.data === "object") user.user_metadata = { ...user.user_metadata, ...body.data };
+      return send(200, user);
+    }
+    if (path === "/__test/password") {
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      return send(200, { hasPassword: Boolean(user && passwords.has(user.id)), metadata: user?.user_metadata ?? null });
+    }
     if (path === "/auth/v1/user") {
       const user = userFromAuthHeader(req);
       return user ? send(200, user) : send(401, { error: "not authenticated" });
     }
-    if (path === "/auth/v1/logout") return send(204);
+    if (path === "/auth/v1/logout") {
+      logouts.push(url.searchParams.get("scope") || "global");
+      return send(204);
+    }
+    if (path === "/__test/logouts") {
+      if (url.searchParams.get("reset")) logouts.length = 0;
+      return send(200, [...logouts]);
+    }
 
     // ---- PostgREST ----
     if (path === "/rest/v1/profiles" && profilesTableMissing) {
