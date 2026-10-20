@@ -9,3 +9,5 @@ export { Segmented, ChipMultiSelect, StarRating, Toggle, Checkbox } from "./choi
 export type { SegmentOption, SegmentTone, ChipOption, ChipTone } from "./choice";
 export { FilterChip } from "./FilterChip";
 export type { FilterOption } from "./FilterChip";
+export { PasswordInput } from "./PasswordInput";
+export type { PasswordInputProps } from "./PasswordInput";

@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useAuth } from "@/lib/auth/auth-context";
-import { Sparkles, Shield, Compass, HardDrive, AlertTriangle, User, LogOut, LogIn, Database, Cloud } from "lucide-react";
+import { Sparkles, Shield, Compass, HardDrive, AlertTriangle, User, LogOut, LogIn, Database, Cloud, KeyRound } from "lucide-react";
+import { SetPasswordDialog } from "@/components/SetPasswordDialog";
 import { useJournal } from "@/lib/journal/context";
 import { cloudNoticeState } from "@/lib/journal/cloud/account-notice";
 import { defaultAttachmentRepository } from "@/lib/journal/attachments/indexeddb-repository";
@@ -23,6 +24,8 @@ export default function SettingsPage() {
   const cloudNotice = user
     ? cloudNoticeState({ cloudActive, initialNeeded: initialSync.needed, pending: cloudStatus.pending, conflicts: cloudStatus.conflicts })
     : null;
+  const [passwordOpen, setPasswordOpen] = React.useState(false);
+  const [passwordSaved, setPasswordSaved] = React.useState(false);
   const [storageEstimate, setStorageEstimate] = React.useState<AttachmentStorageEstimate | null>(null);
 
   React.useEffect(() => {
@@ -68,14 +71,36 @@ export default function SettingsPage() {
               <span>{cloudNotice ? dict.account.cloudNotice[cloudNotice] : dict.account.localDataNotice}</span>
             </div>
 
+            <div aria-live="polite">
+              {passwordSaved && (
+                <p className="rounded-xl border border-vi/40 bg-pri/20 p-3 text-xs text-tx" data-testid="password-saved">
+                  {dict.account.password.saved}
+                </p>
+              )}
+            </div>
+
             <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
-              <button
-                onClick={() => signOut()}
-                className="btn-danger text-xs py-2 px-3.5 inline-flex items-center gap-1.5 cursor-pointer"
-              >
-                <LogOut size={14} />
-                <span>{dict.account.signOutBtn}</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => signOut()}
+                  className="btn-danger text-xs py-2 px-3.5 inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <LogOut size={14} />
+                  <span>{dict.account.signOutBtn}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPasswordSaved(false);
+                    setPasswordOpen(true);
+                  }}
+                  className="btn-ghost border border-line text-xs py-2 px-3.5 inline-flex items-center gap-1.5 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
+                  data-testid="password-open"
+                >
+                  <KeyRound size={14} aria-hidden="true" />
+                  <span>{user.hasPassword ? dict.account.password.change : dict.account.password.create}</span>
+                </button>
+              </div>
 
               <div className="flex flex-wrap gap-2 text-xs text-mu">
                 <span className="rounded-lg border border-line bg-s1 px-2.5 py-1 text-[11px]" title="T7d">
@@ -83,6 +108,14 @@ export default function SettingsPage() {
                 </span>
               </div>
             </div>
+            <SetPasswordDialog
+              isOpen={passwordOpen}
+              onClose={() => setPasswordOpen(false)}
+              onSaved={() => {
+                setPasswordOpen(false);
+                setPasswordSaved(true);
+              }}
+            />
           </div>
         ) : (
           <div className="space-y-3">
