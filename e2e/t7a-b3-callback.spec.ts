@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { submitRegistration } from "./helpers/auth";
 
 test.describe("T7a-B3 Bug Proof E2E", () => {
   test.beforeEach(async ({ context }) => {
@@ -23,9 +24,7 @@ test.describe("T7a-B3 Bug Proof E2E", () => {
 
     // Tab A goes to /login and enters email
     await pageA.goto("/login");
-    await pageA.fill("#email-input", "tab_b_test@example.com");
-    await pageA.click("input[type='checkbox']");
-    await pageA.click("button[type='submit']");
+    await submitRegistration(pageA, "tab_b_test@example.com");
     await expect(pageA.locator("label[for='otp-input']")).toBeVisible();
 
     // 2. Tab B opens from scratch on /auth/callback?...

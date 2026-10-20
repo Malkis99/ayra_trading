@@ -26,3 +26,29 @@ export function passwordUpdateErrorKey(error: { code?: string; message?: string;
   if (message.includes("fetch") || message.includes("network")) return "network";
   return "generic";
 }
+
+/** Sign-in screen lock after repeated wrong passwords (owner decision 6; placeholders). Server limits stay the real protection. */
+export const SIGN_IN_MAX_FAILS = 5;
+export const SIGN_IN_LOCK_SECONDS = 30;
+
+type AuthErrorLike = { code?: string; message?: string; status?: number; name?: string } | null | undefined;
+
+/**
+ * Supabase answers to a password sign-in -> keys of `auth.errors`. A wrong password and an unknown e-mail give the
+ * same key, so the screen never tells whether an e-mail is registered. «Not confirmed» comes only after a right password.
+ */
+export function signInErrorKey(error: AuthErrorLike): string {
+  const code = error?.code ?? "";
+  const message = (error?.message ?? "").toLowerCase();
+  if (error?.status === 429 || message.includes("rate limit") || message.includes("too many")) return "tooManyAttempts";
+  if (code === "email_not_confirmed" || message.includes("email not confirmed")) return "emailNotConfirmed";
+  if (message.includes("fetch") || message.includes("network") || error?.status === 0) return "networkError";
+  if (typeof error?.status === "number" && error.status >= 500) return "authUnavailable";
+  return "invalidCredentials";
+}
+
+/** «User already registered» must look like a normal sign-up (the code screen with a hint), never like an error. */
+export function isAlreadyRegistered(error: AuthErrorLike): boolean {
+  const code = error?.code ?? "";
+  return code === "user_already_exists" || code === "email_exists" || (error?.message ?? "").toLowerCase().includes("already registered");
+}

@@ -24,6 +24,10 @@ export function createFakeSupabase() {
   const tokens = new Map(); // access/refresh token -> user id
   const passwords = new Map(); // user id -> password (the real server keeps only a hash)
   const logouts = []; // scope of every /logout call ("global" when none given)
+  const emailCodes = new Map(); // email -> { token, type: "signup" | "recovery" } — the 6-digit code of the last letter
+  const lastCodeByEmail = new Map();
+  const sessionsByUser = new Map(); // user id -> Set of refresh tokens (for logout scope=others)
+  const refreshOf = new Map(); // access token -> its refresh token
   const takenNicknames = new Set(["taken_nick", "admin"]);
   let createProfileRows = true; // false = handle_new_user trigger absent (new users get no profiles row)
   let profilesTableMissing = false; // true = migration 0001 not applied (PostgREST 404 PGRST205)
@@ -74,6 +78,9 @@ export function createFakeSupabase() {
     const refresh_token = b64url(crypto.randomBytes(16));
     tokens.set(access_token, user.id);
     tokens.set(refresh_token, user.id);
+    if (!sessionsByUser.has(user.id)) sessionsByUser.set(user.id, new Set());
+    sessionsByUser.get(user.id).add(refresh_token);
+    refreshOf.set(access_token, refresh_token);
     return { access_token, refresh_token, token_type: "bearer", expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, user };
   }
 
@@ -178,6 +185,74 @@ export function createFakeSupabase() {
       lastLinkByEmail.set(user.email, link.toString());
       return send(200, {});
     }
+    // Letter with a link (PKCE code) and a 6-digit code, like the Supabase templates with {{ .Token }}
+    const sendLetter = (user, type, body, redirectTo) => {
+      const token = String(crypto.randomInt(100000, 1000000));
+      emailCodes.set(user.email, { token, type });
+      lastCodeByEmail.set(user.email, token);
+      const code = crypto.randomUUID();
+      pendingCodes.set(code, { email: user.email, challenge: body.code_challenge, method: body.code_challenge_method });
+      const link = new URL(redirectTo || "http://localhost:3001/auth/callback");
+      link.searchParams.set("code", code);
+      lastLinkByEmail.set(user.email, link.toString());
+    };
+    if (path === "/auth/v1/signup" && req.method === "POST") {
+      const body = await readBody(req);
+      const existing = usersByEmail.get(body.email);
+      if (existing && existing.email_confirmed_at) {
+        // Supabase with «Confirm email» on: no letter, an obfuscated user, nothing tells the e-mail is taken
+        return send(200, { id: crypto.randomUUID(), aud: "authenticated", role: "", email: body.email, identities: [], user_metadata: {}, app_metadata: {} });
+      }
+      const user = existing ?? getOrCreateUser(body.email);
+      user.email_confirmed_at = null;
+      if (typeof body.password === "string") passwords.set(user.id, body.password);
+      if (body.data && typeof body.data === "object") user.user_metadata = { ...user.user_metadata, ...body.data };
+      sendLetter(user, "signup", body, url.searchParams.get("redirect_to"));
+      return send(200, { ...user, identities: [{ provider: "email" }] });
+    }
+    if (path === "/auth/v1/resend" && req.method === "POST") {
+      const body = await readBody(req);
+      const user = usersByEmail.get(body.email);
+      if (user && !user.email_confirmed_at) sendLetter(user, "signup", body, url.searchParams.get("redirect_to"));
+      return send(200, {});
+    }
+    if (path === "/auth/v1/recover" && req.method === "POST") {
+      const body = await readBody(req);
+      const user = usersByEmail.get(body.email);
+      if (user) sendLetter(user, "recovery", body, url.searchParams.get("redirect_to"));
+      return send(200, {}); // the same answer for an unknown e-mail
+    }
+    if (path === "/auth/v1/verify" && req.method === "POST") {
+      const body = await readBody(req);
+      const pending = emailCodes.get(body.email);
+      const typeOk = pending && (body.type === pending.type || (body.type === "email" && pending.type === "signup"));
+      if (!pending || pending.token !== body.token || !typeOk) {
+        return send(403, { code: "otp_expired", error_code: "otp_expired", msg: "Token has expired or is invalid" });
+      }
+      emailCodes.delete(body.email);
+      const user = usersByEmail.get(body.email);
+      user.email_confirmed_at = new Date().toISOString();
+      return send(200, issueSession(user));
+    }
+    if (path === "/__test/last-code") {
+      return send(200, { code: lastCodeByEmail.get(url.searchParams.get("email")) ?? null });
+    }
+    if (path === "/__test/clear-password") {
+      // stands in for an account made by the e-mail code before passwords existed
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      if (user) {
+        passwords.delete(user.id);
+        const { has_password: _drop, ...rest } = user.user_metadata || {};
+        user.user_metadata = rest;
+      }
+      return send(200, {});
+    }
+    if (path === "/__test/sessions") {
+      // live refresh tokens of the user = signed-in devices (the real server revokes them the same way)
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      const live = user ? [...(sessionsByUser.get(user.id) || [])].filter((rt) => tokens.has(rt)).length : 0;
+      return send(200, { live });
+    }
     if (path === "/auth/v1/token" && req.method === "POST") {
       const body = await readBody(req);
       const grant = url.searchParams.get("grant_type");
@@ -192,13 +267,17 @@ export function createFakeSupabase() {
           return send(400, { error: "invalid_grant", error_description: "code challenge does not match previously saved code verifier" });
         }
         pendingCodes.delete(body.auth_code);
-        return send(200, issueSession(usersByEmail.get(pending.email)));
+        const linkUser = usersByEmail.get(pending.email);
+        if (!linkUser.email_confirmed_at) linkUser.email_confirmed_at = new Date().toISOString();
+        emailCodes.delete(pending.email);
+        return send(200, issueSession(linkUser));
       }
       if (grant === "password") {
         const user = usersByEmail.get(body.email);
         if (!user || passwords.get(user.id) !== body.password) {
           return send(400, { code: "invalid_credentials", error: "invalid_grant", error_description: "Invalid login credentials", msg: "Invalid login credentials" });
         }
+        if (!user.email_confirmed_at) return send(400, { code: "email_not_confirmed", msg: "Email not confirmed" });
         return send(200, issueSession(user));
       }
       if (grant === "refresh_token") {
@@ -231,7 +310,17 @@ export function createFakeSupabase() {
       return user ? send(200, user) : send(401, { error: "not authenticated" });
     }
     if (path === "/auth/v1/logout") {
-      logouts.push(url.searchParams.get("scope") || "global");
+      const scope = url.searchParams.get("scope") || "global";
+      logouts.push(scope);
+      const access = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+      const userId = tokens.get(access);
+      if (userId && scope === "others") {
+        // keep the caller's own session, end every other refresh token of this user
+        const all = [...(sessionsByUser.get(userId) || [])];
+        const keep = refreshOf.get(access);
+        for (const rt of all) if (rt !== keep) tokens.delete(rt);
+        sessionsByUser.set(userId, new Set([keep]));
+      }
       return send(204);
     }
     if (path === "/__test/logouts") {

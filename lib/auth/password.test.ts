@@ -36,3 +36,27 @@ describe("password rule (auth plan, owner decision 2)", () => {
     for (const lang of ["ru", "en"] as const) for (const k of keys) expect(getDictionary(lang).account.password.errors[k]).toBeTruthy();
   });
 });
+
+describe("sign-in answers (auth plan PR C)", () => {
+  it("wrong password and unknown e-mail give one and the same key", async () => {
+    const { signInErrorKey } = await import("./password");
+    expect(signInErrorKey({ code: "invalid_credentials", message: "Invalid login credentials", status: 400 })).toBe("invalidCredentials");
+    expect(signInErrorKey({ message: "Invalid login credentials", status: 400 })).toBe("invalidCredentials");
+    expect(signInErrorKey({ code: "email_not_confirmed", message: "Email not confirmed", status: 400 })).toBe("emailNotConfirmed");
+    expect(signInErrorKey({ status: 429, message: "Request rate limit reached" })).toBe("tooManyAttempts");
+    expect(signInErrorKey({ message: "Failed to fetch" })).toBe("networkError");
+    expect(signInErrorKey({ status: 503, message: "upstream" })).toBe("authUnavailable");
+  });
+
+  it("an already registered e-mail on sign-up is not an error", async () => {
+    const { isAlreadyRegistered } = await import("./password");
+    expect(isAlreadyRegistered({ code: "user_already_exists" })).toBe(true);
+    expect(isAlreadyRegistered({ message: "User already registered" })).toBe(true);
+    expect(isAlreadyRegistered({ code: "weak_password" })).toBe(false);
+  });
+
+  it("every login message exists in RU and EN", () => {
+    const keys = ["invalidCredentials", "emailNotConfirmed", "passwordBlank", "passwordTooShort", "passwordTooLong", "samePassword", "tooManyAttempts"] as const;
+    for (const lang of ["ru", "en"] as const) for (const k of keys) expect(getDictionary(lang).auth.errors[k]).toBeTruthy();
+  });
+});

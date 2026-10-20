@@ -1,4 +1,5 @@
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
+import { submitPasswordSignIn, submitRegistration } from "../e2e/helpers/auth";
 
 const FAKE_SUPABASE = "http://127.0.0.1:54329";
 const SIGN_OUT_LABEL = "Выйти";
@@ -22,9 +23,7 @@ async function seedGuestWithData(context: BrowserContext) {
 
 async function requestMagicLink(page: Page, email: string): Promise<string> {
   await page.goto("/login");
-  await page.fill("#email-input", email);
-  await page.click("input[type='checkbox']");
-  await page.click("button[type='submit']");
+  await submitRegistration(page, email);
   await expect(page.locator("#otp-input")).toBeVisible();
   const res = await page.request.get(`${FAKE_SUPABASE}/__test/last-link?email=${encodeURIComponent(email)}`);
   expect(res.ok()).toBeTruthy();
@@ -132,7 +131,7 @@ test.describe("After onboarding: optional guest transfer, existing accounts", ()
     expect(account.level).toBe(3);
   });
 
-  test("existing account (nickname + onboarded on this device) opens Home from the email link", async ({ context }) => {
+  test("existing account (nickname + onboarded on this device) signs in by password and opens Home, no letter", async ({ context }) => {
     await seedGuestWithData(context);
     const tabA = await context.newPage();
     await tabA.goto("/");
@@ -151,11 +150,11 @@ test.describe("After onboarding: optional guest transfer, existing accounts", ()
     await tabA.getByRole("button", { name: SIGN_OUT_LABEL, exact: true }).click();
     await expect(tabA.getByRole("link", { name: /Войти/ }).first()).toBeVisible();
 
-    // Second sign-in via a new email link in a new tab
-    const link = await requestMagicLink(tabA, email);
-    const tabB = await context.newPage();
-    await tabB.goto(link);
-    await tabB.waitForTimeout(2500);
-    expect(new URL(tabB.url()).pathname).toBe("/");
+    // Second sign-in: e-mail + password (auth plan PR C), no letter, straight Home without onboarding
+    await tabA.goto("/login");
+    await submitPasswordSignIn(tabA, email);
+    await tabA.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
+    await tabA.waitForTimeout(1500);
+    expect(new URL(tabA.url()).pathname).toBe("/");
   });
 });

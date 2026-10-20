@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
 import { createSupabaseBrowserClient, createSupabaseCheckClient } from "@/lib/supabase/browser";
-import { passwordProblem, passwordUpdateErrorKey } from "./password";
+import { isAlreadyRegistered, passwordProblem, passwordUpdateErrorKey, signInErrorKey } from "./password";
 import { isE2EMockEnabled, getSupabaseEnv } from "@/lib/supabase/config";
 import { mapSupabaseError, type SanitizedErrorInfo } from "./error-sanitizer";
 import { authTabChannel } from "./tab-channel";
@@ -11,6 +11,10 @@ import { AppStorage, GUEST_SPACE_ID } from "@/lib/storage";
 import {
   getMockState,
   setMockState,
+  getMockAccounts,
+  saveMockAccount,
+  getMockProfile,
+  mockProfileFor,
   mockIsNicknameAvailable,
   mockSetNickname,
   type MockUser,
@@ -58,6 +62,10 @@ function toAuthUser(u: { id: string; email?: string | null; created_at?: string;
 }
 
 export type SetPasswordResult = { success: boolean; errorKey?: string; errorDetails?: SanitizedErrorInfo };
+export type AuthResult = SetPasswordResult;
+
+/** e2e auth mock only: codes the mock accepts (the real server sends its own). */
+const MOCK_VALID_CODES = new Set(["123456", "000000", "1234567", "12345678"]);
 
 interface AuthContextType {
   authState: AuthState;
@@ -82,7 +90,13 @@ interface AuthContextType {
   chooseGuestExplicitly: () => void;
   lastRouteReason: string | null;
   reportRouteReason: (reason: string) => void;
-  signInWithOtp: (email: string) => Promise<{ success: boolean; errorKey?: string; errorDetails?: SanitizedErrorInfo }>;
+  /** E-mail + password; no e-mail is sent. */
+  signInWithPassword: (email: string, password: string) => Promise<AuthResult>;
+  /** E-mail + password + consent; the e-mail is then confirmed with the code (verifyOtp). */
+  signUpWithPassword: (email: string, password: string, consentAccepted: boolean) => Promise<AuthResult & { signedIn?: boolean }>;
+  resendSignupCode: (email: string) => Promise<AuthResult>;
+  requestPasswordReset: (email: string) => Promise<AuthResult>;
+  completePasswordReset: (email: string, code: string, newPassword: string) => Promise<AuthResult>;
   verifyOtp: (
     email: string,
     token: string,
@@ -280,6 +294,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (session?.user) {
             const u = toAuthUser(session.user);
             updateToAuthenticated(u, true);
+            // The stored session may hold old user data (a password set on another device): refresh only that flag
+            supabase.auth
+              .getUser()
+              .then(({ data }) => {
+                if (!isMounted || !data.user) return;
+                const fresh = toAuthUser(data.user);
+                setUser((prev) => (prev && prev.id === fresh.id && prev.hasPassword !== fresh.hasPassword ? { ...prev, hasPassword: fresh.hasPassword } : prev));
+              })
+              .catch(() => {});
           } else {
             updateToGuest();
           }
@@ -347,47 +370,178 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe();
   }, [mockMode, loadProfile]);
 
-  const signInWithOtp = async (email: string) => {
-    if (!email || !email.includes("@")) {
-      return {
-        success: false,
-        errorKey: "invalidEmail",
-        errorDetails: mapSupabaseError({ status: 400, message: "Invalid email address format" }),
-      };
-    }
-
-    if (mockMode) {
-      return { success: true };
-    }
-
-    const supabase = createSupabaseBrowserClient();
-    if (!supabase) {
-      return {
-        success: false,
-        errorKey: "genericError",
-        errorDetails: mapSupabaseError({ status: 500, message: "Supabase client not initialized" }),
-      };
-    }
-
+  const authRedirectUrl = () => {
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
-    const redirectUrl = siteUrl
+    return siteUrl
       ? `${siteUrl.replace(/\/+$/, "")}/auth/callback`
       : typeof window !== "undefined"
       ? `${window.location.origin}/auth/callback`
       : undefined;
+  };
 
-    const { error } = await supabase.auth.signInWithOtp({
+  const notConfigured = (): AuthResult => ({
+    success: false,
+    errorKey: "genericError",
+    errorDetails: mapSupabaseError({ status: 500, message: "Supabase client not initialized" }),
+  });
+
+  const invalidEmail = (email: string): AuthResult | null =>
+    !email || !email.includes("@")
+      ? { success: false, errorKey: "invalidEmail", errorDetails: mapSupabaseError({ status: 400, message: "Invalid email address format" }) }
+      : null;
+
+  const passwordRuleError = (password: string): AuthResult | null => {
+    const problem = passwordProblem(password);
+    if (!problem) return null;
+    const key = problem === "blank" ? "passwordBlank" : problem === "tooShort" ? "passwordTooShort" : "passwordTooLong";
+    return { success: false, errorKey: key };
+  };
+
+  /** Sign in with e-mail and password. Sends no e-mail. */
+  const signInWithPassword = async (email: string, password: string): Promise<AuthResult> => {
+    const bad = invalidEmail(email);
+    if (bad) return bad;
+    if (!password) return { success: false, errorKey: "passwordBlank" };
+
+    if (mockMode) {
+      const account = getMockAccounts()[email.toLowerCase()];
+      if (!account || account.password !== password) {
+        return { success: false, errorKey: "invalidCredentials", errorDetails: mapSupabaseError({ status: 400, message: "Invalid login credentials" }) };
+      }
+      if (!account.confirmed) {
+        return { success: false, errorKey: "emailNotConfirmed", errorDetails: mapSupabaseError({ status: 400, message: "Email not confirmed" }) };
+      }
+      const { profile: stored } = getMockState();
+      const mUser: MockUser = { id: account.id, email: account.email, created_at: account.created_at, hasPassword: true, mockPassword: account.password };
+      const mProfile = stored && stored.id === account.id ? stored : getMockProfile(account.id) ?? mockProfileFor(account.id);
+      setMockState(mUser, mProfile);
+      setUser({ id: mUser.id, email: mUser.email, created_at: mUser.created_at, hasPassword: true });
+      setProfile(mProfile);
+      setProfileStatus("loaded");
+      setAuthState("authenticated");
+      return { success: true };
+    }
+
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) return notConfigured();
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      return { success: false, errorKey: signInErrorKey(error), errorDetails: mapSupabaseError(error, envInfo.truncatedReason) };
+    }
+    return { success: true };
+  };
+
+  /**
+   * Sign up with e-mail and password; the e-mail is confirmed by the code from the letter (verifyOtp).
+   * An e-mail that already has an account gets the same answer (the code screen), so registration never reveals it.
+   */
+  const signUpWithPassword = async (email: string, password: string, consentAccepted: boolean): Promise<AuthResult & { signedIn?: boolean }> => {
+    const bad = invalidEmail(email);
+    if (bad) return bad;
+    const rule = passwordRuleError(password);
+    if (rule) return rule;
+    if (!consentAccepted) {
+      return { success: false, errorKey: "consentRequired", errorDetails: mapSupabaseError({ status: 400, message: "User consent required" }) };
+    }
+
+    if (mockMode) {
+      if (!getMockAccounts()[email.toLowerCase()]) {
+        saveMockAccount({ id: "mock-user-id-" + Date.now(), email, password, confirmed: false, created_at: new Date().toISOString() });
+      }
+      return { success: true };
+    }
+
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) return notConfigured();
+    const { data, error } = await supabase.auth.signUp({
       email,
-      options: {
-        emailRedirectTo: redirectUrl,
-      },
+      password,
+      options: { emailRedirectTo: authRedirectUrl(), data: { has_password: true } },
     });
+    if (error && !isAlreadyRegistered(error)) {
+      const details = mapSupabaseError(error, envInfo.truncatedReason);
+      const key = passwordUpdateErrorKey(error) === "tooShort" ? "passwordTooShort" : details.errorKey;
+      return { success: false, errorKey: key, errorDetails: details };
+    }
+    // «Confirm email» off in the panel: Supabase signs in right away
+    if (data?.session) {
+      await supabase.from("profiles").update({ consent_at: new Date().toISOString(), consent_version: "1.0-draft" }).eq("id", data.session.user.id);
+      return { success: true, signedIn: true };
+    }
+    return { success: true };
+  };
 
+  /** Sends the sign-up confirmation code again (also for «Email not confirmed» on sign-in). */
+  const resendSignupCode = async (email: string): Promise<AuthResult> => {
+    const bad = invalidEmail(email);
+    if (bad) return bad;
+    if (mockMode) return { success: true };
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) return notConfigured();
+    const { error } = await supabase.auth.resend({ type: "signup", email, options: { emailRedirectTo: authRedirectUrl() } });
     if (error) {
       const details = mapSupabaseError(error, envInfo.truncatedReason);
       return { success: false, errorKey: details.errorKey, errorDetails: details };
     }
+    return { success: true };
+  };
 
+  /**
+   * «Forgot password»: sends a code when the e-mail has an account. The answer is the same either way;
+   * only a sending limit or no network is shown (they say nothing about the e-mail).
+   */
+  const requestPasswordReset = async (email: string): Promise<AuthResult> => {
+    const bad = invalidEmail(email);
+    if (bad) return bad;
+    if (mockMode) return { success: true };
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) return notConfigured();
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: authRedirectUrl() });
+    if (error) {
+      const details = mapSupabaseError(error, envInfo.truncatedReason);
+      if (details.errorKey === "rateLimitExceeded" || details.errorKey === "networkError") {
+        return { success: false, errorKey: details.errorKey, errorDetails: details };
+      }
+    }
+    return { success: true };
+  };
+
+  /** Code from the «Forgot password» letter + new password -> signed in here, every other device signed out. */
+  const completePasswordReset = async (email: string, code: string, newPassword: string): Promise<AuthResult> => {
+    const cleanCode = code.replace(/\D/g, "");
+    if (cleanCode.length < 6 || cleanCode.length > 8) {
+      return { success: false, errorKey: "invalidOrExpiredCode", errorDetails: mapSupabaseError({ status: 400, message: "Verification code must be 6 to 8 digits" }) };
+    }
+    const rule = passwordRuleError(newPassword);
+    if (rule) return rule;
+
+    if (mockMode) {
+      const account = getMockAccounts()[email.toLowerCase()];
+      if (!MOCK_VALID_CODES.has(cleanCode) || !account) {
+        return { success: false, errorKey: "invalidOrExpiredCode", errorDetails: mapSupabaseError({ status: 400, message: "Invalid OTP token" }) };
+      }
+      saveMockAccount({ ...account, password: newPassword, confirmed: true });
+      return signInWithPassword(email, newPassword);
+    }
+
+    const supabase = createSupabaseBrowserClient();
+    if (!supabase) return notConfigured();
+    const { error: verifyError } = await supabase.auth.verifyOtp({ email, token: cleanCode, type: "recovery" });
+    if (verifyError) {
+      const details = mapSupabaseError(verifyError, envInfo.truncatedReason);
+      return { success: false, errorKey: details.errorKey === "rateLimitExceeded" ? "tooManyAttempts" : "invalidOrExpiredCode", errorDetails: details };
+    }
+    const { error } = await supabase.auth.updateUser({ password: newPassword, data: { has_password: true } });
+    if (error) {
+      const key = passwordUpdateErrorKey(error);
+      return {
+        success: false,
+        errorKey: key === "tooShort" ? "passwordTooShort" : key === "samePassword" ? "samePassword" : "genericError",
+        errorDetails: mapSupabaseError(error, envInfo.truncatedReason),
+      };
+    }
+    // Owner decision 4: after a reset every other device is signed out (in case the password leaked)
+    await supabase.auth.signOut({ scope: "others" }).catch(() => {});
     return { success: true };
   };
 
@@ -425,23 +579,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
       }
 
-      const mUser: MockUser = {
+      // The account registered on the sign-up tab (with its password); confirming the code marks it confirmed
+      const account = getMockAccounts()[email.toLowerCase()] ?? {
         id: "mock-user-id-" + Date.now(),
         email,
+        password: "",
+        confirmed: true,
         created_at: new Date().toISOString(),
       };
-      const mProfile: MockProfile = {
-        id: mUser.id,
-        nickname: null,
-        locale: "ru",
-        timezone: "UTC",
-        age_group: null,
-        minor_mode: false,
-        consent_at: new Date().toISOString(),
-        consent_version: "1.0-draft",
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+      saveMockAccount({ ...account, confirmed: true });
+      const mUser: MockUser = {
+        id: account.id,
+        email,
+        created_at: account.created_at,
+        hasPassword: Boolean(account.password),
+        mockPassword: account.password || undefined,
       };
+      const mProfile: MockProfile = { ...(getMockProfile(account.id) ?? mockProfileFor(account.id)), consent_at: new Date().toISOString(), consent_version: "1.0-draft" };
 
       setMockState(mUser, mProfile);
       setUser(mUser);
@@ -679,7 +833,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         chooseGuestExplicitly,
         lastRouteReason,
         reportRouteReason: setLastRouteReason,
-        signInWithOtp,
+        signInWithPassword,
+        signUpWithPassword,
+        resendSignupCode,
+        requestPasswordReset,
+        completePasswordReset,
         verifyOtp,
         signOut,
         setPassword,

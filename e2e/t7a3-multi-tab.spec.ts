@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { submitRegistration } from "./helpers/auth";
 
 test.describe("T7a.3 Multi-Tab Login & Awakening Lease (E2E)", () => {
   test.beforeEach(async ({ context }) => {
@@ -13,17 +14,13 @@ test.describe("T7a.3 Multi-Tab Login & Awakening Lease (E2E)", () => {
 
     // Tab A on /login fills email
     await pageA.goto("/login");
-    await pageA.fill("#email-input", "multitab1@example.com");
-    await pageA.click("input[type='checkbox']");
-    await pageA.click("button[type='submit']");
+    await submitRegistration(pageA, "multitab1@example.com");
 
     await expect(pageA.locator("label[for='otp-input']")).toBeVisible();
 
     // Tab B verifies code
     await pageB.goto("/login");
-    await pageB.fill("#email-input", "multitab1@example.com");
-    await pageB.click("input[type='checkbox']");
-    await pageB.click("button[type='submit']");
+    await submitRegistration(pageB, "multitab1@example.com");
     await pageB.fill("#otp-input", "123456");
     await pageB.click("button[type='submit']");
 
@@ -48,9 +45,7 @@ test.describe("T7a.3 Multi-Tab Login & Awakening Lease (E2E)", () => {
 
     // Setup existing account with nickname
     await pageA.goto("/login");
-    await pageA.fill("#email-input", "existing_multitab@example.com");
-    await pageA.click("input[type='checkbox']");
-    await pageA.click("button[type='submit']");
+    await submitRegistration(pageA, "existing_multitab@example.com");
     await pageA.fill("#otp-input", "123456");
     await pageA.click("button[type='submit']");
 
@@ -74,9 +69,7 @@ test.describe("T7a.3 Multi-Tab Login & Awakening Lease (E2E)", () => {
 
     // Sign in on Page A
     await pageA.goto("/login");
-    await pageA.fill("#email-input", "lease_user@example.com");
-    await pageA.click("input[type='checkbox']");
-    await pageA.click("button[type='submit']");
+    await submitRegistration(pageA, "lease_user@example.com");
     await pageA.fill("#otp-input", "123456");
     await pageA.click("button[type='submit']");
     await pageA.waitForURL("**/awakening**", { timeout: 5000 });

@@ -1,19 +1,10 @@
 import { test, expect, type Page, type APIRequestContext, type BrowserContext, type Browser } from "@playwright/test";
+import { signIn } from "../e2e/helpers/auth";
 
 const FAKE_SUPABASE = "http://127.0.0.1:54329";
 
 // T7b-4c: the conflict dialog, two devices of one account (two browser contexts) against the fake Supabase.
 // The flag is on ONLY for test users of the fake server; nothing here touches a real project.
-
-async function signIn(page: Page, email: string) {
-  await page.goto("/login");
-  await page.fill("#email-input", email);
-  await page.click("input[type='checkbox']");
-  await page.click("button[type='submit']");
-  await expect(page.locator("#otp-input")).toBeVisible();
-  const res = await page.request.get(`${FAKE_SUPABASE}/__test/last-link?email=${encodeURIComponent(email)}`);
-  await page.goto((await res.json()).link);
-}
 
 async function completeOnboarding(page: Page, nickname: string) {
   await page.waitForURL("**/awakening**", { timeout: 10000 });
