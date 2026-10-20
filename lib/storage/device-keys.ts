@@ -13,6 +13,8 @@ export const DEVICE_KEYS = [
   "ayra_space_event",
   "ayra_had_session",
   "ayra_mock_auth_v1",
+  // e2e auth mock only (AYRA_E2E_AUTH_MOCK): registered test accounts of the mock sign-in
+  "ayra_mock_accounts_v1",
 ] as const;
 
 export type DeviceKey = (typeof DEVICE_KEYS)[number];

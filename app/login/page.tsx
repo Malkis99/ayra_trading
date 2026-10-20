@@ -9,11 +9,84 @@ import { postLoginRouterUrl } from "@/lib/auth/routing";
 import { authTabChannel } from "@/lib/auth/tab-channel";
 import { sanitizeRedirectUrl, buildSafeSiteUrlRedirect } from "@/lib/auth/redirect-whitelist";
 import { type SanitizedErrorInfo } from "@/lib/auth/error-sanitizer";
-import { AppStorage } from "@/lib/storage";
-import { Mail, MailCheck, KeyRound, ArrowRight, ArrowLeft, Check, AlertCircle, RefreshCw, Copy, ExternalLink, ChevronDown, Sparkles, Loader2 } from "lucide-react";
+import { SIGN_IN_LOCK_SECONDS, SIGN_IN_MAX_FAILS } from "@/lib/auth/password";
+import { Mail, MailCheck, KeyRound, Lock, ArrowRight, ArrowLeft, Check, AlertCircle, RefreshCw, Copy, ExternalLink, ChevronDown, Sparkles, Loader2, Eye, EyeOff } from "lucide-react";
 import { formatString } from "@/lib/i18n";
 import { Checkbox } from "@/components/ui/forms";
 import { UniverseCard, UniverseScreen } from "@/components/universe/UniverseBackdrop";
+
+/** signIn = e-mail + password (no letter); signUp = e-mail + password + consent, then the code; forgot = code + new password. */
+type Mode = "signIn" | "signUp" | "forgot";
+/** form = the first screen of the mode; code = sign-up confirmation code; reset = «forgot» code + new password. */
+type Step = "form" | "code" | "reset";
+
+const fieldClass =
+  "h-14 w-full rounded-xl border border-edge bg-field/80 pl-12 text-base text-tx placeholder:text-mu/60 transition-colors focus:border-vi focus:outline-none focus:ring-2 focus:ring-vi/50 disabled:opacity-50";
+
+function PasswordField({
+  id,
+  value,
+  onChange,
+  label,
+  autoComplete,
+  disabled,
+  showLabel,
+  hideLabel,
+  hint,
+  invalid,
+}: {
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+  label: string;
+  autoComplete: "current-password" | "new-password";
+  disabled: boolean;
+  showLabel: string;
+  hideLabel: string;
+  hint?: string;
+  invalid?: boolean;
+}) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div>
+      <label htmlFor={id} className="sr-only">
+        {label}
+      </label>
+      <div className="relative">
+        <Lock className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-mu" aria-hidden="true" />
+        <input
+          id={id}
+          type={visible ? "text" : "password"}
+          autoComplete={autoComplete}
+          autoCapitalize="none"
+          spellCheck={false}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={label}
+          disabled={disabled}
+          aria-invalid={invalid || undefined}
+          aria-describedby={hint ? `${id}-hint` : undefined}
+          className={`${fieldClass} pr-14`}
+        />
+        <button
+          type="button"
+          onClick={() => setVisible((v) => !v)}
+          aria-label={visible ? hideLabel : showLabel}
+          aria-pressed={visible}
+          aria-controls={id}
+          className="absolute right-2 top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-lg text-mu hover:text-tx focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
+        >
+          {visible ? <EyeOff className="h-5 w-5" aria-hidden="true" /> : <Eye className="h-5 w-5" aria-hidden="true" />}
+        </button>
+      </div>
+      {hint && (
+        <p id={`${id}-hint`} className="mt-1.5 text-[11px] leading-snug text-mu">
+          {hint}
+        </p>
+      )}
+    </div>
+  );
+}
 
 export default function LoginPage() {
   const { dict, lang, setLanguage } = useApp();
@@ -22,11 +95,24 @@ export default function LoginPage() {
   const searchParams = useSearchParams();
   const rawNextParam = searchParams.get("next");
 
-  const { user, signInWithOtp, verifyOtp, isLoading: authLoading, setGuestDismissed } = useAuth();
+  const {
+    user,
+    signInWithPassword,
+    signUpWithPassword,
+    resendSignupCode,
+    requestPasswordReset,
+    completePasswordReset,
+    verifyOtp,
+    isLoading: authLoading,
+    setGuestDismissed,
+  } = useAuth();
 
+  const [mode, setMode] = useState<Mode>("signIn");
+  const [step, setStep] = useState<Step>("form");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [otpCode, setOtpCode] = useState("");
-  const [step, setStep] = useState<"email" | "otp">("email");
   const [consentAccepted, setConsentAccepted] = useState(false);
 
   const [loading, setLoading] = useState(false);
@@ -35,6 +121,10 @@ export default function LoginPage() {
 
   const [copyToast, setCopyToast] = useState<string | null>(null);
   const [resendTimer, setResendTimer] = useState(0);
+
+  // Sign-in screen lock after repeated wrong passwords (the server has its own limits)
+  const [failedSignIns, setFailedSignIns] = useState(0);
+  const [lockLeft, setLockLeft] = useState(0);
 
   // Multi-tab coordination state
   const [otherTabSignedIn, setOtherTabSignedIn] = useState(false);
@@ -116,73 +206,155 @@ export default function LoginPage() {
     return () => clearInterval(interval);
   }, [resendTimer]);
 
-  const handleSendCode = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  // Sign-in lock countdown
+  useEffect(() => {
+    if (lockLeft <= 0) return;
+    const interval = setInterval(() => setLockLeft((prev) => prev - 1), 1000);
+    return () => clearInterval(interval);
+  }, [lockLeft]);
+
+  const clearError = () => {
     setErrorKey(null);
     setErrorDetails(null);
-
-    if (!email || !email.includes("@")) {
-      setErrorKey("invalidEmail");
-      return;
-    }
-
-    if (!consentAccepted) {
-      setErrorKey("consentRequired");
-      return;
-    }
-
-    setLoading(true);
-    const res = await signInWithOtp(email.trim());
-    setLoading(false);
-
-    if (res.success) {
-      setStep("otp");
-      setResendTimer(60);
-    } else {
-      setErrorKey(res.errorKey || "genericError");
-      if (res.errorDetails) setErrorDetails(res.errorDetails);
-    }
   };
 
-  const handleVerifyOtp = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    setErrorKey(null);
-    setErrorDetails(null);
+  const showError = (key: string | undefined, details?: SanitizedErrorInfo) => {
+    setErrorKey(key || "genericError");
+    setErrorDetails(details ?? null);
+  };
 
+  const switchMode = (next: Mode) => {
+    setMode(next);
+    setStep("form");
+    setOtpCode("");
+    setNewPassword("");
+    clearError();
+  };
+
+  /** Runs an action that may sign in: this tab routes after it (multi-tab rule). */
+  const runSignIn = async (action: () => Promise<{ success: boolean; errorKey?: string; errorDetails?: SanitizedErrorInfo }>) => {
+    submittedThisTabRef.current = true;
+    setLoading(true);
+    const res = await action();
+    setLoading(false);
+    if (res.success) {
+      authTabChannel.broadcast("AUTH_SIGNED_IN");
+      // routing is done by the effect above once the user state is updated
+    } else {
+      submittedThisTabRef.current = false;
+    }
+    return res;
+  };
+
+  const handleSignIn = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (loading || lockLeft > 0) return;
+    clearError();
+    const res = await runSignIn(() => signInWithPassword(email.trim(), password));
+    if (res.success) {
+      setFailedSignIns(0);
+      return;
+    }
+    if (res.errorKey === "invalidCredentials") {
+      const fails = failedSignIns + 1;
+      if (fails >= SIGN_IN_MAX_FAILS) {
+        setFailedSignIns(0);
+        setLockLeft(SIGN_IN_LOCK_SECONDS);
+      } else {
+        setFailedSignIns(fails);
+      }
+    }
+    showError(res.errorKey, res.errorDetails);
+  };
+
+  const handleSignUp = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (loading) return;
+    clearError();
+    submittedThisTabRef.current = true; // «Confirm email» off: Supabase signs in right away
+    setLoading(true);
+    const res = await signUpWithPassword(email.trim(), password, consentAccepted);
+    setLoading(false);
+    if (!res.success) {
+      submittedThisTabRef.current = false;
+      showError(res.errorKey, res.errorDetails);
+      return;
+    }
+    if (res.signedIn) {
+      authTabChannel.broadcast("AUTH_SIGNED_IN");
+      return;
+    }
+    submittedThisTabRef.current = false;
+    setOtpCode("");
+    setStep("code");
+    setResendTimer(60);
+  };
+
+  const handleVerifyCode = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    clearError();
     const cleanCode = otpCode.replace(/\D/g, "");
     if (cleanCode.length < 6 || cleanCode.length > 8) {
       setErrorKey("invalidOrExpiredCode");
       return;
     }
+    // consent was given when the account was created
+    const res = await runSignIn(() => verifyOtp(email.trim(), cleanCode, true));
+    if (!res.success) showError(res.errorKey || "invalidOrExpiredCode", res.errorDetails);
+  };
 
-    submittedThisTabRef.current = true;
+  /** «Email not confirmed» on sign-in: send the sign-up code again and go to the code screen. */
+  const handleConfirmAgain = async () => {
+    if (loading) return;
+    clearError();
     setLoading(true);
-    const res = await verifyOtp(email.trim(), cleanCode, consentAccepted);
+    const res = await resendSignupCode(email.trim());
     setLoading(false);
-
-    if (res.success) {
-      authTabChannel.broadcast("AUTH_SIGNED_IN");
-      // executeRouting handled in useEffect when user state is updated
-    } else {
-      submittedThisTabRef.current = false;
-      setErrorKey(res.errorKey || "invalidOrExpiredCode");
-      if (res.errorDetails) setErrorDetails(res.errorDetails);
+    if (!res.success) {
+      showError(res.errorKey, res.errorDetails);
+      return;
     }
+    setMode("signUp");
+    setOtpCode("");
+    setStep("code");
+    setResendTimer(60);
+  };
+
+  const handleForgot = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (loading) return;
+    clearError();
+    setLoading(true);
+    const res = await requestPasswordReset(email.trim());
+    setLoading(false);
+    if (!res.success) {
+      showError(res.errorKey, res.errorDetails);
+      return;
+    }
+    setOtpCode("");
+    setNewPassword("");
+    setStep("reset");
+    setResendTimer(60);
+  };
+
+  const handleReset = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (loading) return;
+    clearError();
+    const res = await runSignIn(() => completePasswordReset(email.trim(), otpCode, newPassword));
+    if (!res.success) showError(res.errorKey, res.errorDetails);
   };
 
   const handleResendCode = async () => {
     if (resendTimer > 0 || loading) return;
-    setErrorKey(null);
-    setErrorDetails(null);
+    clearError();
     setLoading(true);
-    const res = await signInWithOtp(email.trim());
+    const res = step === "reset" ? await requestPasswordReset(email.trim()) : await resendSignupCode(email.trim());
     setLoading(false);
-
     if (res.success) {
       setResendTimer(60);
     } else {
-      setErrorKey(res.errorKey || "genericError");
-      if (res.errorDetails) setErrorDetails(res.errorDetails);
+      showError(res.errorKey, res.errorDetails);
     }
   };
 
@@ -235,10 +407,14 @@ Message: ${errorDetails.sanitizedMessage}${
     router.replace(destination);
   };
 
-  const isValidOtp = otpCode.replace(/\D/g, "").length >= 6 && otpCode.replace(/\D/g, "").length <= 8;
+  const cleanOtp = otpCode.replace(/\D/g, "");
+  const isValidOtp = cleanOtp.length >= 6 && cleanOtp.length <= 8;
 
   const primaryBtn =
     "relative flex h-[52px] w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-pri via-[#6b4bb4] to-pri text-[15px] font-semibold text-white shadow-[0_10px_30px_-10px_rgba(163,138,209,0.8)] transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi focus-visible:ring-offset-2 focus-visible:ring-offset-ink disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none";
+  const secondaryBtn =
+    "flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-edge text-sm font-semibold text-tx transition hover:border-vi focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi disabled:cursor-not-allowed disabled:text-mu disabled:hover:border-edge";
+  const linkBtn = "inline-flex items-center gap-1 text-xs text-mu hover:text-tx focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi rounded";
 
   const langSwitch = (
     <div className="fixed right-4 top-4 z-20 flex items-center rounded-lg border border-line bg-s2/60 p-0.5 backdrop-blur" role="group" aria-label={dict.settings.languageLabel}>
@@ -289,6 +465,94 @@ Message: ${errorDetails.sanitizedMessage}${
     );
   }
 
+  const title =
+    step === "code"
+      ? auth.checkMailTitle
+      : step === "reset"
+      ? auth.resetTitle
+      : mode === "forgot"
+      ? auth.forgotTitle
+      : mode === "signUp"
+      ? auth.signUpTitle
+      : auth.loginTitle;
+  const subtitle =
+    step === "code"
+      ? formatString(auth.signUpCodeSubtitle, { email })
+      : step === "reset"
+      ? formatString(auth.resetSentSubtitle, { email })
+      : mode === "forgot"
+      ? auth.forgotSubtitle
+      : mode === "signUp"
+      ? auth.signUpSubtitle
+      : auth.loginSubtitle;
+
+  const emailField = (
+    <div>
+      <label htmlFor="email-input" className="sr-only">
+        {auth.emailLabel}
+      </label>
+      <div className="relative">
+        <Mail className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-mu" aria-hidden="true" />
+        <input
+          id="email-input"
+          type="email"
+          inputMode="email"
+          autoComplete={mode === "signUp" ? "email" : "username"}
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder={auth.emailPlaceholder}
+          disabled={loading}
+          required
+          aria-invalid={errorKey === "invalidEmail" || undefined}
+          className={`${fieldClass} pr-4`}
+        />
+      </div>
+    </div>
+  );
+
+  const codeField = (labelText: string) => (
+    <div>
+      <label htmlFor="otp-input" className="mb-2 block text-center text-xs font-semibold uppercase tracking-wider text-mu">
+        {labelText}
+      </label>
+      <div className="relative">
+        <KeyRound className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-mu" aria-hidden="true" />
+        <input
+          id="otp-input"
+          type="text"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          maxLength={8}
+          value={otpCode}
+          onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
+          placeholder={auth.otpPlaceholder}
+          disabled={loading}
+          autoFocus
+          required
+          className="h-14 w-full rounded-xl border border-edge bg-field/80 pl-12 pr-4 text-center font-mono text-xl tracking-[0.4em] text-tx placeholder:text-mu/40 focus:border-vi focus:outline-none focus:ring-2 focus:ring-vi/50 disabled:opacity-50"
+        />
+      </div>
+      <p className="mt-2 text-center text-[11px] leading-snug text-mu">{auth.checkMailHint}</p>
+    </div>
+  );
+
+  const resendButton = (
+    <button type="button" onClick={handleResendCode} disabled={loading || resendTimer > 0} className={secondaryBtn}>
+      <RefreshCw className="h-4 w-4" aria-hidden="true" />
+      <span className="tabular-nums">{resendTimer > 0 ? formatString(auth.resendIn, { seconds: resendTimer }) : auth.resendNow}</span>
+    </button>
+  );
+
+  const submitContent = (label: string, icon: React.ReactNode) =>
+    loading ? (
+      <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+    ) : (
+      <>
+        {icon}
+        <span>{label}</span>
+      </>
+    );
+
   return (
     <UniverseScreen>
       {langSwitch}
@@ -307,30 +571,53 @@ Message: ${errorDetails.sanitizedMessage}${
           </div>
         )}
 
+        {/* Sign in / Sign up tabs */}
+        {step === "form" && mode !== "forgot" && (
+          <div role="tablist" aria-label={auth.tabsLabel} className="mb-6 grid grid-cols-2 gap-1 rounded-xl border border-line bg-s2/60 p-1">
+            {(["signIn", "signUp"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="tab"
+                id={`auth-tab-${m}`}
+                aria-selected={mode === m}
+                onClick={() => switchMode(m)}
+                className={`h-10 rounded-lg text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi ${
+                  mode === m ? "bg-pri text-white" : "text-mu hover:text-tx"
+                }`}
+              >
+                {m === "signIn" ? auth.tabSignIn : auth.tabSignUp}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Title */}
         <div className="mb-6 text-center">
-          {step === "email" ? (
-            <>
-              <h1 className="font-serif text-[22px] font-bold leading-tight text-tx sm:text-[28px]">{auth.loginTitle}</h1>
-              <p data-testid="login-subtitle" className="mt-2 text-sm text-mu">{auth.loginSubtitle}</p>
-            </>
-          ) : (
-            <>
-              <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl border border-vi/40 bg-vi/15 text-vi motion-safe:animate-[ayraPop_300ms_ease-out]">
-                <MailCheck className="h-6 w-6" aria-hidden="true" />
-              </div>
-              <h1 className="font-serif text-[22px] font-bold leading-tight text-tx sm:text-[28px]">{auth.checkMailTitle}</h1>
-              <p className="mt-2 break-words text-sm text-mu">{formatString(auth.enterOtpSubtitle, { email })}</p>
-            </>
+          {step !== "form" && (
+            <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl border border-vi/40 bg-vi/15 text-vi motion-safe:animate-[ayraPop_300ms_ease-out]">
+              <MailCheck className="h-6 w-6" aria-hidden="true" />
+            </div>
           )}
+          <h1 className="font-serif text-[22px] font-bold leading-tight text-tx sm:text-[28px]">{title}</h1>
+          <p data-testid="login-subtitle" className="mt-2 break-words text-sm text-mu">
+            {subtitle}
+          </p>
         </div>
 
         {/* Error Alert */}
         {errorKey && (
-          <div role="alert" className="mb-5 rounded-xl border border-short/40 bg-short/10 p-3.5 text-sm text-tx motion-safe:animate-[ayraFade_200ms_ease-out]">
+          <div role="alert" data-testid="login-error" className="mb-5 rounded-xl border border-short/40 bg-short/10 p-3.5 text-sm text-tx motion-safe:animate-[ayraFade_200ms_ease-out]">
             <div className="flex items-start gap-2.5">
               <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-short" aria-hidden="true" />
-              <div>{auth.errors[errorKey as keyof typeof auth.errors] || auth.errors.genericError}</div>
+              <div className="space-y-2">
+                <div>{auth.errors[errorKey as keyof typeof auth.errors] || auth.errors.genericError}</div>
+                {errorKey === "emailNotConfirmed" && (
+                  <button type="button" onClick={handleConfirmAgain} disabled={loading} className="text-sm font-semibold text-vi underline hover:text-tx">
+                    {auth.sendCodeAgainBtn}
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Collapsible Technical Details */}
@@ -378,31 +665,56 @@ Message: ${errorDetails.sanitizedMessage}${
         {/* Hidden textarea for copy fallback */}
         <textarea ref={hiddenCopyRef} aria-hidden="true" className="sr-only" tabIndex={-1} readOnly defaultValue="" />
 
-        {/* Form Steps */}
-        {step === "email" ? (
-          <form onSubmit={handleSendCode} className="space-y-4" noValidate>
-            <div>
-              <label htmlFor="email-input" className="sr-only">
-                {auth.emailLabel}
-              </label>
-              <div className="relative">
-                <Mail className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-mu" aria-hidden="true" />
-                <input
-                  id="email-input"
-                  type="email"
-                  inputMode="email"
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder={auth.emailPlaceholder}
-                  disabled={loading}
-                  required
-                  aria-invalid={errorKey === "invalidEmail" || undefined}
-                  className="h-14 w-full rounded-xl border border-edge bg-field/80 pl-12 pr-4 text-base text-tx placeholder:text-mu/60 transition-colors focus:border-vi focus:outline-none focus:ring-2 focus:ring-vi/50 disabled:opacity-50"
-                />
-              </div>
+        {/* Sign in: e-mail + password, no letter */}
+        {step === "form" && mode === "signIn" && (
+          <form onSubmit={handleSignIn} className="space-y-4" noValidate role="tabpanel" aria-labelledby="auth-tab-signIn">
+            {emailField}
+            <PasswordField
+              id="password-input"
+              value={password}
+              onChange={setPassword}
+              label={auth.passwordLabel}
+              autoComplete="current-password"
+              disabled={loading}
+              showLabel={auth.showPassword}
+              hideLabel={auth.hidePassword}
+              invalid={errorKey === "invalidCredentials" || errorKey === "passwordBlank"}
+            />
+            <div className="flex justify-end">
+              <button type="button" onClick={() => switchMode("forgot")} className={linkBtn} data-testid="forgot-link">
+                {auth.forgotLink}
+              </button>
             </div>
+            <button type="submit" disabled={loading || lockLeft > 0} aria-busy={loading} className={primaryBtn}>
+              {submitContent(auth.signInBtn, <ArrowRight className="h-4 w-4" aria-hidden="true" />)}
+            </button>
+            {lockLeft > 0 && (
+              <p role="status" data-testid="login-locked" className="text-center text-xs text-mu tabular-nums">
+                {formatString(auth.lockedFor, { seconds: lockLeft })}
+              </p>
+            )}
+            <p data-testid="old-account-hint" className="rounded-xl border border-line/60 bg-s1/60 p-3 text-[11px] leading-snug text-mu">
+              {auth.oldAccountHint}
+            </p>
+          </form>
+        )}
 
+        {/* Sign up: e-mail + password + consent, then the code */}
+        {step === "form" && mode === "signUp" && (
+          <form onSubmit={handleSignUp} className="space-y-4" noValidate role="tabpanel" aria-labelledby="auth-tab-signUp">
+            {emailField}
+            <PasswordField
+              id="password-input"
+              value={password}
+              onChange={setPassword}
+              label={auth.passwordLabel}
+              autoComplete="new-password"
+              disabled={loading}
+              showLabel={auth.showPassword}
+              hideLabel={auth.hidePassword}
+              hint={auth.passwordHint}
+              invalid={errorKey === "passwordBlank" || errorKey === "passwordTooShort" || errorKey === "passwordTooLong"}
+            />
             <Checkbox
               checked={consentAccepted}
               onChange={setConsentAccepted}
@@ -420,83 +732,77 @@ Message: ${errorDetails.sanitizedMessage}${
                 </span>
               }
             />
-
             <button type="submit" disabled={loading || !consentAccepted} aria-busy={loading} className={primaryBtn}>
-              {loading ? (
-                <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
-              ) : (
-                <>
-                  <span>{auth.getCodeBtn}</span>
-                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                </>
-              )}
+              {submitContent(auth.signUpBtn, <ArrowRight className="h-4 w-4" aria-hidden="true" />)}
             </button>
-
-            <p data-testid="login-age-note" className="text-center text-[11px] leading-snug text-mu/80">{auth.ageNote}</p>
+            <p data-testid="login-age-note" className="text-center text-[11px] leading-snug text-mu/80">
+              {auth.ageNote}
+            </p>
           </form>
-        ) : (
-          <form onSubmit={handleVerifyOtp} className="space-y-4">
-            <div>
-              <label htmlFor="otp-input" className="mb-2 block text-center text-xs font-semibold uppercase tracking-wider text-mu">
-                {auth.enterOtpTitle}
-              </label>
-              <div className="relative">
-                <KeyRound className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-mu" aria-hidden="true" />
-                <input
-                  id="otp-input"
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  maxLength={8}
-                  value={otpCode}
-                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
-                  placeholder={auth.otpPlaceholder}
-                  disabled={loading}
-                  autoFocus
-                  required
-                  className="h-14 w-full rounded-xl border border-edge bg-field/80 pl-12 pr-4 text-center font-mono text-xl tracking-[0.4em] text-tx placeholder:text-mu/40 focus:border-vi focus:outline-none focus:ring-2 focus:ring-vi/50 disabled:opacity-50"
-                />
-              </div>
-              <p className="mt-2 text-center text-[11px] leading-snug text-mu">{auth.checkMailHint}</p>
-            </div>
+        )}
 
-            <button type="submit" disabled={loading || !isValidOtp} aria-busy={loading} className={primaryBtn}>
-              {loading ? (
-                <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
-              ) : (
-                <>
-                  <Check className="h-4 w-4" aria-hidden="true" />
-                  <span>{auth.verifyCodeBtn}</span>
-                </>
-              )}
+        {/* Forgot password: e-mail -> code */}
+        {step === "form" && mode === "forgot" && (
+          <form onSubmit={handleForgot} className="space-y-4" noValidate>
+            {emailField}
+            <button type="submit" disabled={loading} aria-busy={loading} className={primaryBtn}>
+              {submitContent(auth.sendResetBtn, <Mail className="h-4 w-4" aria-hidden="true" />)}
             </button>
-
-            <button
-              type="button"
-              onClick={handleResendCode}
-              disabled={loading || resendTimer > 0}
-              className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-edge text-sm font-semibold text-tx transition hover:border-vi focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi disabled:cursor-not-allowed disabled:text-mu disabled:hover:border-edge"
-            >
-              <RefreshCw className="h-4 w-4" aria-hidden="true" />
-              <span className="tabular-nums">
-                {resendTimer > 0 ? formatString(auth.resendIn, { seconds: resendTimer }) : auth.resendNow}
-              </span>
-            </button>
-
-            <p className="text-center text-[11px] leading-snug text-mu">{auth.otpSubtext}</p>
-
             <div className="text-center">
-              <button
-                type="button"
-                onClick={() => {
-                  setStep("email");
-                  setErrorKey(null);
-                  setErrorDetails(null);
-                }}
-                className="inline-flex items-center gap-1 text-xs text-mu hover:text-tx"
-              >
+              <button type="button" onClick={() => switchMode("signIn")} className={linkBtn}>
+                <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                {auth.backToSignIn}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Sign-up confirmation code */}
+        {step === "code" && (
+          <form onSubmit={handleVerifyCode} className="space-y-4">
+            {codeField(auth.enterOtpTitle)}
+            <button type="submit" disabled={loading || !isValidOtp} aria-busy={loading} className={primaryBtn}>
+              {submitContent(auth.confirmBtn, <Check className="h-4 w-4" aria-hidden="true" />)}
+            </button>
+            {resendButton}
+            <p data-testid="existing-account-hint" className="text-center text-[11px] leading-snug text-mu">
+              {auth.existingAccountHint}
+            </p>
+            <p className="text-center text-[11px] leading-snug text-mu">{auth.otpSubtext}</p>
+            <div className="text-center">
+              <button type="button" onClick={() => switchMode("signUp")} className={linkBtn}>
                 <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
                 {auth.changeEmailBtn}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Forgot password: code + new password */}
+        {step === "reset" && (
+          <form onSubmit={handleReset} className="space-y-4" noValidate>
+            {codeField(auth.resetCodeLabel)}
+            <PasswordField
+              id="new-password-input"
+              value={newPassword}
+              onChange={setNewPassword}
+              label={auth.newPasswordLabel}
+              autoComplete="new-password"
+              disabled={loading}
+              showLabel={auth.showPassword}
+              hideLabel={auth.hidePassword}
+              hint={auth.passwordHint}
+              invalid={errorKey === "passwordBlank" || errorKey === "passwordTooShort" || errorKey === "passwordTooLong"}
+            />
+            <button type="submit" disabled={loading || !isValidOtp} aria-busy={loading} className={primaryBtn}>
+              {submitContent(auth.saveNewPasswordBtn, <Check className="h-4 w-4" aria-hidden="true" />)}
+            </button>
+            <p className="text-center text-[11px] leading-snug text-mu">{auth.resetOthersNote}</p>
+            {resendButton}
+            <div className="text-center">
+              <button type="button" onClick={() => switchMode("signIn")} className={linkBtn}>
+                <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                {auth.backToSignIn}
               </button>
             </div>
           </form>

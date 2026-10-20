@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { submitRegistration } from "./helpers/auth";
 
 // Sign-in screen in the "universe" and the right side of the top bar (guest vs signed-in).
 
@@ -48,9 +49,7 @@ for (const [w, h] of [
 test("login: email sent state shows 'Проверь почту' with a resend timer", async ({ page }) => {
   await mockAuth(page);
   await page.goto("/login");
-  await page.fill("#email-input", "timer_user@example.com");
-  await page.click("input[type='checkbox']");
-  await page.click("button[type='submit']");
+  await submitRegistration(page, "timer_user@example.com");
   await expect(page.getByRole("heading", { level: 1, name: "Проверь почту" })).toBeVisible();
   const resend = page.getByRole("button", { name: /Отправить ещё раз через \d+ сек/ });
   await expect(resend).toBeDisabled();
@@ -71,9 +70,7 @@ test("signed-in top bar: coins, then the bell, then the plan chip; avatar last o
   await mockAuth(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/login");
-  await page.fill("#email-input", "badges_user@example.com");
-  await page.click("input[type='checkbox']");
-  await page.click("button[type='submit']");
+  await submitRegistration(page, "badges_user@example.com");
   await page.fill("#otp-input", "123456");
   await page.click("button[type='submit']");
   await page.waitForURL((url) => url.pathname === "/awakening", { timeout: 10000 });
@@ -140,7 +137,7 @@ async function lineCount(page: Page, testIdOrRole: { testId?: string; heading?: 
 }
 
 for (const lang of ["ru", "en"] as const) {
-  test(`login texts fit in one line (${lang}): title, subtitle, consent and age note at 1440 and 768; all but the age note at 360`, async ({ page }) => {
+  test(`login texts fit in one line (${lang}): title and subtitle (sign in), consent and age note (sign up) at 1440 and 768; all but the age note at 360`, async ({ page }) => {
     await mockAuth(page);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/login");
@@ -154,8 +151,11 @@ for (const lang of ["ru", "en"] as const) {
       await page.setViewportSize({ width: w, height: h });
       expect(await lineCount(page, { heading: true }), `title ${w}`).toBe(1);
       expect(await lineCount(page, { testId: "login-subtitle" }), `subtitle ${w}`).toBe(1);
+      // consent and the age note are on the sign-up tab (auth plan PR C)
+      await page.getByRole("tab", { name: lang === "ru" ? "Регистрация" : "Sign up" }).click();
       expect(await lineCount(page, { testId: "login-consent" }), `consent ${w}`).toBe(1);
       if (w > 360) expect(await lineCount(page, { testId: "login-age-note" }), `age note ${w}`).toBe(1);
+      await page.getByRole("tab", { name: lang === "ru" ? "Вход" : "Sign in" }).click();
     }
   });
 }

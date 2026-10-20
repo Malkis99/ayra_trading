@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { submitRegistration } from "./helpers/auth";
 
 test.describe("T7a-B2 Space Switching & Isolation E2E", () => {
   test.beforeEach(async ({ page }) => {
@@ -31,9 +32,7 @@ test.describe("T7a-B2 Space Switching & Isolation E2E", () => {
 
     // 2. Login to new account
     await page.goto("/login");
-    await page.fill("#email-input", "user_account_a@example.com");
-    await page.click("input[type='checkbox']");
-    await page.click("button[type='submit']");
+    await submitRegistration(page, "user_account_a@example.com");
     await page.fill("#otp-input", "123456");
     await page.click("button[type='submit']");
 
@@ -68,9 +67,7 @@ test.describe("T7a-B2 Space Switching & Isolation E2E", () => {
 
     // Sign in on Page 1
     await page1.goto("/login");
-    await page1.fill("#email-input", "multitab_user@example.com");
-    await page1.click("input[type='checkbox']");
-    await page1.click("button[type='submit']");
+    await submitRegistration(page1, "multitab_user@example.com");
     await page1.fill("#otp-input", "123456");
     await page1.click("button[type='submit']");
 

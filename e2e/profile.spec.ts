@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { submitRegistration } from "./helpers/auth";
 
 // Profile: tabs on top, the sticky character stage on the left (all tabs), the active tab on the right.
 
@@ -18,9 +19,7 @@ async function signInAndOnboard(page: Page, email: string, nick: string) {
     (window as unknown as { __AYRA_E2E_AUTH_MOCK__: boolean }).__AYRA_E2E_AUTH_MOCK__ = true;
   });
   await page.goto("/login");
-  await page.fill("#email-input", email);
-  await page.click("input[type='checkbox']");
-  await page.click("button[type='submit']");
+  await submitRegistration(page, email);
   await page.fill("#otp-input", "123456");
   await page.click("button[type='submit']");
   await page.waitForURL((u) => u.pathname === "/awakening", { timeout: 10000 });
@@ -239,9 +238,7 @@ test.describe("Profile", () => {
       (window as unknown as { __AYRA_E2E_AUTH_MOCK__: boolean }).__AYRA_E2E_AUTH_MOCK__ = true;
     });
     await page.goto("/login");
-    await page.fill("#email-input", "back_and_forth@example.com");
-    await page.click("input[type='checkbox']");
-    await page.click("button[type='submit']");
+    await submitRegistration(page, "back_and_forth@example.com");
     await page.fill("#otp-input", "123456");
     await page.click("button[type='submit']");
     await page.waitForURL((u) => u.pathname === "/awakening", { timeout: 10000 });

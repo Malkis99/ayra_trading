@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { submitRegistration } from "./helpers/auth";
 
 test.describe("T7a.1 Auth & Screen Routing (Mock Mode)", () => {
   test.beforeEach(async ({ page }) => {
@@ -21,9 +22,7 @@ test.describe("T7a.1 Auth & Screen Routing (Mock Mode)", () => {
 
   test("2. Sign in with code -> /awakening -> Home -> log out -> /login", async ({ page }) => {
     await page.goto("/login");
-    await page.fill("#email-input", "new_user@example.com");
-    await page.click("input[type='checkbox']");
-    await page.click("button[type='submit']");
+    await submitRegistration(page, "new_user@example.com");
 
     await expect(page.locator("label[for='otp-input']")).toBeVisible();
 
@@ -84,9 +83,7 @@ test.describe("T7a.1 Auth & Screen Routing (Mock Mode)", () => {
   test("3. Repeated sign-in of existing profile -> Home without onboarding", async ({ page }) => {
     // Sign in first time
     await page.goto("/login");
-    await page.fill("#email-input", "existing_user@example.com");
-    await page.click("input[type='checkbox']");
-    await page.click("button[type='submit']");
+    await submitRegistration(page, "existing_user@example.com");
 
     await page.fill("#otp-input", "123456");
     await page.click("button[type='submit']");

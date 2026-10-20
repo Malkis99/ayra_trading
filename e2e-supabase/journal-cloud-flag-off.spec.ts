@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { submitRegistration } from "../e2e/helpers/auth";
 
 const FAKE_SUPABASE = "http://127.0.0.1:54329";
 
@@ -7,9 +8,7 @@ const FAKE_SUPABASE = "http://127.0.0.1:54329";
 
 async function requestMagicLink(page: Page, email: string): Promise<string> {
   await page.goto("/login");
-  await page.fill("#email-input", email);
-  await page.click("input[type='checkbox']");
-  await page.click("button[type='submit']");
+  await submitRegistration(page, email);
   await expect(page.locator("#otp-input")).toBeVisible();
   const res = await page.request.get(`${FAKE_SUPABASE}/__test/last-link?email=${encodeURIComponent(email)}`);
   return (await res.json()).link;

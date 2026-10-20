@@ -1,19 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
+import { signIn } from "../e2e/helpers/auth";
 
 const FAKE_SUPABASE = "http://127.0.0.1:54329";
 
-// Auth plan PR B: an account made by the e-mail code gets a password in Settings — no e-mail is sent, the session,
+// Auth plan PR B: an account made by the e-mail code (simulated: password removed on the server) gets a password in Settings — no e-mail is sent, the session,
 // the user id, the journal and cloud sync stay as they were. Runs against the fake Supabase only.
-
-async function signIn(page: Page, email: string) {
-  await page.goto("/login");
-  await page.fill("#email-input", email);
-  await page.click("input[type='checkbox']");
-  await page.click("button[type='submit']");
-  await expect(page.locator("#otp-input")).toBeVisible();
-  const res = await page.request.get(`${FAKE_SUPABASE}/__test/last-link?email=${encodeURIComponent(email)}`);
-  await page.goto((await res.json()).link);
-}
 
 async function completeOnboarding(page: Page, nickname: string) {
   await page.waitForURL("**/awakening**", { timeout: 10000 });
@@ -52,6 +43,8 @@ test.describe("Settings: create and change the password", () => {
       await signIn(page, email);
       await completeOnboarding(page, `Pwd${Date.now() % 100000}`);
       const userId = ((await (await request.get(`${FAKE_SUPABASE}/__test/profile?email=${encodeURIComponent(email)}`)).json()).id) as string;
+      // an account made by the e-mail code before passwords existed: no password on the server
+      await request.get(`${FAKE_SUPABASE}/__test/clear-password?email=${encodeURIComponent(email)}`);
 
       // cloud sync on with one trade in the cloud: must keep working after the password is set
       await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${encodeURIComponent(email)}&on=1`);

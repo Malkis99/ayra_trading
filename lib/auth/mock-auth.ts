@@ -48,6 +48,8 @@ export function setMockState(user: MockUser | null, profile: MockProfile | null)
       AppStorage.removeItem(MOCK_STORAGE_KEY);
     } else {
       AppStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify({ user, profile }));
+      const account = getMockAccounts()[user.email.toLowerCase()];
+      if (account && profile) saveMockAccount({ ...account, profile });
     }
   } catch {
     // Ignore storage errors
@@ -105,4 +107,56 @@ export function mockSetNickname(nick: string): { ok: true } | { ok: false; reaso
   setMockState(user, updatedProfile);
   TAKEN_NICKNAMES.add(nick.toLowerCase());
   return { ok: true };
+}
+
+// ---- e2e auth mock only: accounts registered with a password (never used outside AYRA_E2E_AUTH_MOCK) ----
+const MOCK_ACCOUNTS_KEY = "ayra_mock_accounts_v1";
+
+export interface MockAccount {
+  id: string;
+  email: string;
+  password: string;
+  confirmed: boolean;
+  created_at: string;
+  /** The account's profile kept between sign-outs, like the server's profiles row. */
+  profile?: MockProfile;
+}
+
+export function getMockAccounts(): Record<string, MockAccount> {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(AppStorage.getItem(MOCK_ACCOUNTS_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+export function saveMockAccount(account: MockAccount) {
+  if (typeof window === "undefined") return;
+  try {
+    AppStorage.setItem(MOCK_ACCOUNTS_KEY, JSON.stringify({ ...getMockAccounts(), [account.email.toLowerCase()]: account }));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export function getMockProfile(id: string): MockProfile | null {
+  return Object.values(getMockAccounts()).find((a) => a.id === id)?.profile ?? null;
+}
+
+/** A new account's profile: no nickname yet (onboarding asks for it). */
+export function mockProfileFor(id: string): MockProfile {
+  const now = new Date().toISOString();
+  return {
+    id,
+    nickname: null,
+    locale: "ru",
+    timezone: "UTC",
+    age_group: null,
+    minor_mode: false,
+    consent_at: now,
+    consent_version: "1.0-draft",
+    created_at: now,
+    updated_at: now,
+  };
 }

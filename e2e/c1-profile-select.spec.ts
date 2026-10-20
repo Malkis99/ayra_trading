@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { submitRegistration } from "./helpers/auth";
 
 const GUEST_STATE = {
   name: "GuestZed",
@@ -19,9 +20,7 @@ async function seedGuest(page: Page, state: object | null) {
 
 async function signIn(page: Page, email: string) {
   await page.goto("/login");
-  await page.fill("#email-input", email);
-  await page.click("input[type='checkbox']");
-  await page.click("button[type='submit']");
+  await submitRegistration(page, email);
   await page.fill("#otp-input", "123456");
   await page.click("button[type='submit']");
 }
