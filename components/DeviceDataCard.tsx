@@ -9,6 +9,7 @@ import { UnsyncedSignOutWarning } from "@/components/UnsyncedSignOutWarning";
 import { useJournal } from "@/lib/journal/context";
 import { formatNumber, formatString } from "@/lib/i18n";
 import { deviceJournalCounts } from "@/lib/journal/device-counts";
+import { signOutWarningState } from "@/lib/journal/cloud/account-notice";
 import {
   accountHasProgress,
   copyGuestToAccount,
@@ -39,16 +40,25 @@ export function DeviceDataCard() {
   const { dict, lang } = useApp();
   const t = dict.deviceData;
   const { user, profile, signOut } = useAuth();
-  const { readUnsynced, accounts, trades, strategies, notes, noTrades, plans, weekPlans } = useJournal();
+  const { readUnsynced, cloudActive, initialSync, accounts, trades, strategies, notes, noTrades, plans, weekPlans } = useJournal();
   const journalCounts = useMemo(
     () => deviceJournalCounts({ accounts, trades, strategies, notes, noTrades, plans, weekPlans }),
     [accounts, trades, strategies, notes, noTrades, plans, weekPlans]
   );
   const kindLabels = dict.journal.initialSync.kinds;
-  // Sign out and delete: first warn when changes are not in the cloud yet or conflicts wait (sync on only)
+  // Sign out and delete: first warn when changes are not in the cloud yet or conflicts wait (sync on only).
+  // The confirmation warning follows the cloud state at the moment it opens (flag off: the old text).
+  const [signOutWarning, setSignOutWarning] = useState<string | null>(null);
+  const openSignOutConfirm = () => {
+    const u = readUnsynced();
+    const s = signOutWarningState({ cloudActive, initialNeeded: initialSync.needed, pending: u.pending, conflicts: u.conflicts });
+    setSignOutWarning(s ? t.signOutDeleteWarningCloud[s] : null);
+    setDialog("signOutDelete");
+  };
   const startSignOutDelete = () => {
     const u = readUnsynced();
-    setDialog(u.pending > 0 || u.conflicts > 0 ? "unsynced" : "signOutDelete");
+    if (u.pending > 0 || u.conflicts > 0) return setDialog("unsynced");
+    openSignOutConfirm();
   };
 
   const [guest, setGuest] = useState<SpaceSummary | null>(null);
@@ -247,12 +257,12 @@ export function DeviceDataCard() {
         onConfirm={handleDeleteGuest}
         onCancel={() => setDialog(null)}
       />
-      <UnsyncedSignOutWarning isOpen={dialog === "unsynced"} onCancel={() => setDialog(null)} onProceed={() => setDialog("signOutDelete")} />
+      <UnsyncedSignOutWarning isOpen={dialog === "unsynced"} onCancel={() => setDialog(null)} onProceed={openSignOutConfirm} />
       <ConfirmDialog
         isOpen={dialog === "signOutDelete"}
         title={t.signOutDeleteTitle}
         description={t.signOutDeleteDescription}
-        warningNote={t.signOutDeleteWarning}
+        warningNote={signOutWarning ?? t.signOutDeleteWarning}
         confirmLabel={t.signOutDeleteConfirmBtn}
         cancelLabel={t.cancelBtn}
         matchText={t.signOutDeleteConfirmWord}

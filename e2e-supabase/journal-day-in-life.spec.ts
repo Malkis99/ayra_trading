@@ -343,6 +343,9 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
       // offline another page cannot be opened: Settings is opened first, the trade is added from the header «+»
       await B.page.goto("/settings");
       await expect(signOutDeleteBtn(B.page)).toBeVisible();
+      const notice = B.page.getByTestId("account-data-notice");
+      await expect(notice).toHaveAttribute("data-state", "synced", { timeout: 15000 });
+      await expect(notice).toContainText("Журнал сохраняется в облако");
       await B.context.setOffline(true);
       await B.page.getByRole("button", { name: "Добавить", exact: true }).click();
       await B.page.getByRole("button", { name: "Сделка", exact: true }).click();
@@ -352,6 +355,7 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
       await B.page.fill("input[placeholder='150 / -50']", "40");
       await B.page.getByTestId("instrument-input").press("Control+Enter");
       await expect(drawer).toBeHidden();
+      await expect(notice).toContainText("Есть изменения, ещё не отправленные в облако");
       await signOutDeleteBtn(B.page).click();
       const warning = B.page.getByTestId("unsynced-warning");
       await expect(warning.getByTestId("unsynced-counts")).toContainText("1 изменение ещё не в облаке");
@@ -360,6 +364,13 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
       await B.context.setOffline(false);
       await expect.poll(() => liveInstruments(request, email), { timeout: 30000 }).toEqual(["EURGBP", "NAS100"]);
       await expect(badge(B.page)).toHaveAttribute("data-state", "synced", { timeout: 15000 });
+      await expect(notice).toContainText("Журнал сохраняется в облако");
+      // all in the cloud: the confirmation says the journal comes back after sign-in (no «no cloud sync yet»)
+      await signOutDeleteBtn(B.page).click();
+      const confirm = B.page.getByRole("dialog");
+      await expect(confirm).toContainText("Журнал сохранён в облаке и вернётся после входа");
+      await expect(confirm).not.toContainText("Синхронизации с облаком пока нет");
+      await confirm.getByRole("button", { name: "Отмена" }).first().click();
     });
 
     const ownerCloud = async () => JSON.stringify(await cloudLive(request, email));
@@ -421,6 +432,8 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
       await expect(A.page.getByTestId("trades-table")).toContainText("NAS100");
       await addTrade(A.page, "btcusd");
       await expect(A.page.getByTestId("trades-table")).toContainText("BTCUSD");
+      await A.page.goto("/settings");
+      await expect(A.page.getByTestId("account-data-notice")).toContainText("Данные пока хранятся на этом устройстве");
       await A.page.waitForTimeout(1500);
       expect(await ownerCloud()).toBe(cloudBefore);
     });
