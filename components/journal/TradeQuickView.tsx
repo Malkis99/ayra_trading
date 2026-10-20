@@ -21,6 +21,8 @@ type Props = {
   onRecalculate: (t: Trade) => void;
   onAddLinkedNote: (t: Trade) => void;
   onOpenNote: (n: Note) => void;
+  /** The user added or deleted a screenshot here: store the new id list in the trade record (it syncs). */
+  onScreenshotsChanged: (t: Trade, attachmentIds: string[]) => void;
   dict: Dictionary;
   lang: string;
 };
@@ -58,6 +60,7 @@ export function TradeQuickView({
   onConfirmDelete,
   onRecalculate,
   onAddLinkedNote,
+  onScreenshotsChanged,
   onOpenNote,
   dict,
   lang,
@@ -249,7 +252,12 @@ export function TradeQuickView({
         )}
 
         <Section title={dict.journal.attachments.title}>
-          <AttachmentManager tradeId={trade.id} tradeOpenedAt={trade.openedAt} />
+          <AttachmentManager
+            tradeId={trade.id}
+            tradeOpenedAt={trade.openedAt}
+            expectedIds={trade.attachmentIds}
+            onPersistIds={readOnly ? undefined : (ids) => onScreenshotsChanged(trade, ids)}
+          />
         </Section>
 
         <Section

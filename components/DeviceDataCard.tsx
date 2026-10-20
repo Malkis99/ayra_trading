@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Smartphone, Download, Copy, Trash2, LogOut } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -8,6 +8,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { UnsyncedSignOutWarning } from "@/components/UnsyncedSignOutWarning";
 import { useJournal } from "@/lib/journal/context";
 import { formatNumber, formatString } from "@/lib/i18n";
+import { deviceJournalCounts } from "@/lib/journal/device-counts";
 import {
   accountHasProgress,
   copyGuestToAccount,
@@ -38,7 +39,12 @@ export function DeviceDataCard() {
   const { dict, lang } = useApp();
   const t = dict.deviceData;
   const { user, profile, signOut } = useAuth();
-  const { readUnsynced } = useJournal();
+  const { readUnsynced, accounts, trades, strategies, notes, noTrades, plans, weekPlans } = useJournal();
+  const journalCounts = useMemo(
+    () => deviceJournalCounts({ accounts, trades, strategies, notes, noTrades, plans, weekPlans }),
+    [accounts, trades, strategies, notes, noTrades, plans, weekPlans]
+  );
+  const kindLabels = dict.journal.initialSync.kinds;
   // Sign out and delete: first warn when changes are not in the cloud yet or conflicts wait (sync on only)
   const startSignOutDelete = () => {
     const u = readUnsynced();
@@ -178,6 +184,21 @@ export function DeviceDataCard() {
               <span>{t.deleteGuestBtn}</span>
             </button>
           )}
+        </div>
+      )}
+
+      {user && (
+        <div className="rounded-xl border border-line bg-s2/40 p-3.5 space-y-2">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-mu">{t.journalCounts.title}</div>
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-4" data-testid="device-journal-counts">
+            {journalCounts.map(({ table, count }) => (
+              <div key={table} className="flex items-baseline justify-between gap-2 text-xs" data-kind={table}>
+                <dt className="text-mu">{kindLabels[table]}</dt>
+                <dd className="font-semibold tabular-nums text-tx">{formatNumber(lang, count)}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="text-[11px] text-mu">{t.journalCounts.hint}</p>
         </div>
       )}
 

@@ -748,6 +748,8 @@ export const en: Dictionary = {
       addBtn: "Add screenshot",
       dragDropHint: "Drag and drop files here, paste from clipboard (Ctrl+V), or click to choose",
       privacyNotice: "Hide account numbers and personal data on the screenshot",
+      elsewhereOne: "The screenshot is stored on another device",
+      elsewhereMany: "Screenshots are stored on another device: {count}",
       alreadyAdded: "Already added",
       limitReached: "Maximum of {max} screenshots per trade",
       kindLabel: "Type",
@@ -2585,6 +2587,10 @@ export const en: Dictionary = {
     attachmentsWarning: "Some screenshots were not copied ({count}). They remain in the guest profile.",
   },
   deviceData: {
+    journalCounts: {
+      title: "This account's journal on this device",
+      hint: "Deleted records are not counted.",
+    },
     unsynced: {
       title: "Not everything is in the cloud",
       body: "If you delete the account data from this device now, this will be lost:",
