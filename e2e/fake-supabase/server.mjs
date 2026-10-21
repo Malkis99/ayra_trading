@@ -26,6 +26,7 @@ export function createFakeSupabase() {
   const logouts = []; // scope of every /logout call ("global" when none given)
   const emailCodes = new Map(); // email -> { token, type: "signup" | "recovery" } — the 6-digit code of the last letter
   const lastCodeByEmail = new Map();
+  let emailLimit = null; // "limit" | "soon": the next letters are refused like Supabase does (429)
   const sessionsByUser = new Map(); // user id -> Set of refresh tokens (for logout scope=others)
   const refreshOf = new Map(); // access token -> its refresh token
   const takenNicknames = new Set(["taken_nick", "admin"]);
@@ -196,6 +197,17 @@ export function createFakeSupabase() {
       link.searchParams.set("code", code);
       lastLinkByEmail.set(user.email, link.toString());
     };
+    if (path === "/__test/email-limit") {
+      emailLimit = url.searchParams.get("mode") || null;
+      return send(200, { emailLimit });
+    }
+    const letterRefused = () =>
+      emailLimit === "soon"
+        ? send(429, { code: "over_email_send_rate_limit", msg: "For security purposes, you can only request this after 42 seconds." })
+        : send(429, { code: "over_email_send_rate_limit", msg: "email rate limit exceeded" });
+    if (emailLimit && ["/auth/v1/signup", "/auth/v1/resend", "/auth/v1/recover"].includes(path) && req.method === "POST") {
+      return letterRefused();
+    }
     if (path === "/auth/v1/signup" && req.method === "POST") {
       const body = await readBody(req);
       const existing = usersByEmail.get(body.email);

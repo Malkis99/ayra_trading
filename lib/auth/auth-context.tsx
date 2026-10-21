@@ -499,7 +499,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: authRedirectUrl() });
     if (error) {
       const details = mapSupabaseError(error, envInfo.truncatedReason);
-      if (details.errorKey === "rateLimitExceeded" || details.errorKey === "networkError") {
+      if (["rateLimitExceeded", "resendTooSoon", "tooManyAttempts", "networkError"].includes(details.errorKey)) {
         return { success: false, errorKey: details.errorKey, errorDetails: details };
       }
     }

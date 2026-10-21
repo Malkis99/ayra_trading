@@ -46,6 +46,12 @@ async function openWizardWithFile(page: Page, buffer: Buffer) {
 test.describe("Import: TradeTrack file through the universal CSV wizard", () => {
   test.use({ reducedMotion: "reduce" });
 
+  // The fixture trades are dated 2026-09/10 and analytics opens on «30 days»: pin «today» so the numbers do not
+  // drift as the calendar moves on (on 2026-10-21 two trades fell out of the window).
+  test.beforeEach(async ({ page }) => {
+    await page.clock.setFixedTime(new Date("2026-10-17T12:00:00Z"));
+  });
+
   test("29 trades, 1 open, 0 duplicates; strategies matched or created; re-import = 29 duplicates with reasons; analytics calculated", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await seed(page);

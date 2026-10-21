@@ -5,6 +5,8 @@ export interface SanitizedErrorInfo {
   status: number | string;
   timestamp: string;
   urlTruncatedStatus?: string | null;
+  /** «You can only request this after N seconds»: N, for the «request the code again in N s» message. */
+  retryAfterSeconds?: number;
 }
 
 export function sanitizeErrorMessage(msg: string): string {
@@ -29,14 +31,18 @@ export function mapSupabaseError(error: any, urlTruncatedReason?: string | null)
 
   const lowerMsg = rawMessage.toLowerCase();
   let errorKey = "genericError";
+  const code = String(error?.code || "");
+  // Three different 429s: a code asked again too soon, the e-mail limit of the project, too many requests
+  const tooSoon = rawMessage.match(/only request this (?:after|once every) (\d+) seconds?/i);
+  let retryAfterSeconds: number | undefined;
 
-  if (
-    status === 429 ||
-    lowerMsg.includes("rate limit") ||
-    lowerMsg.includes("over_email_send_rate_limit") ||
-    lowerMsg.includes("too many requests")
-  ) {
+  if (tooSoon) {
+    errorKey = "resendTooSoon";
+    retryAfterSeconds = Number(tooSoon[1]);
+  } else if (code === "over_email_send_rate_limit" || lowerMsg.includes("over_email_send_rate_limit") || lowerMsg.includes("email rate limit")) {
     errorKey = "rateLimitExceeded";
+  } else if (status === 429 || lowerMsg.includes("rate limit") || lowerMsg.includes("too many requests")) {
+    errorKey = "tooManyAttempts";
   } else if (
     status === 0 ||
     errorName === "FetchError" ||
@@ -66,5 +72,6 @@ export function mapSupabaseError(error: any, urlTruncatedReason?: string | null)
     status,
     timestamp,
     urlTruncatedStatus: urlTruncatedReason || null,
+    ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
   };
 }
