@@ -40,7 +40,8 @@ export type CloudReadiness = "on" | "off" | "unreachable" | "otherSession";
  * - waitingInitialSync: the flag is on, but the first upload (4d) is not done — nothing is exchanged yet
  * - off: the flag is off (or the server refused because of it) — queue kept, nothing sent
  */
-export type SyncEngineState = "idle" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error" | "off";
+/** "manual": the device is in manual mode and nothing runs by itself (see sync-mode.ts). */
+export type SyncEngineState = "idle" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error" | "off" | "manual";
 
 export interface LocalJournal {
   snapshot: JournalSnapshot;
@@ -64,6 +65,8 @@ export interface SyncEngineDeps {
   random?: () => number;
   isOnline?: () => boolean;
   onChange?: () => void;
+  /** Manual mode on this device: only exchanges started by the user (flush with byUser) run. */
+  isManual?: () => boolean;
 }
 
 export interface SyncEngineStatus {
@@ -297,11 +300,14 @@ export class JournalSyncEngine {
     return this.running ?? Promise.resolve();
   }
 
-  /** Pull, then send what is due (everything with `force`). One run at a time; never throws. */
-  flush(force = false): Promise<void> {
-    if (this.running) return this.running.then(() => (force ? this.flush(true) : undefined));
+  /**
+   * Pull, then send what is due (everything with `force`). One run at a time; never throws.
+   * `byUser`: started by a person («Synchronise», a conflict choice, «Wait for sending») — the only runs in manual mode.
+   */
+  flush(force = false, byUser = false): Promise<void> {
+    if (this.running) return this.running.then(() => (force || byUser ? this.flush(force, byUser) : undefined));
     this.parked = false;
-    const run = this.run(force).finally(() => {
+    const run = this.run(force, byUser).finally(() => {
       this.running = null;
       // Nothing can progress now (waiting for the first sync, flag off, other tab leads): the heartbeat looks again
       if (!this.parked) this.schedule();
@@ -321,12 +327,15 @@ export class JournalSyncEngine {
     return this.deps.isOnline?.() === false || (typeof navigator !== "undefined" && navigator.onLine === false);
   }
 
-  private async run(force: boolean): Promise<void> {
+  private async run(force: boolean, byUser: boolean): Promise<void> {
     this.lastRun = { pulled: false, applied: 0 };
     if (!this.stillActive()) return;
-    if (!this.lease.tryAcquire()) return this.park(); // another tab of this account exchanges
+    // Manual mode: timers, return to the tab, the network coming back and the debounce after an edit exchange nothing.
+    // The flag is still asked (cached for minutes), so the badge and the mode switch stay visible.
+    const manualIdle = !byUser && Boolean(this.deps.isManual?.());
+    if (!manualIdle && !this.lease.tryAcquire()) return this.park(); // another tab of this account exchanges
     const dueAt = force ? Infinity : this.now();
-    if (this.offline()) {
+    if (!manualIdle && this.offline()) {
       this.outbox.markFailed(this.outbox.due(dueAt), "offline", this.now(), this.deps.random);
       return this.setState("offline");
     }
@@ -334,6 +343,7 @@ export class JournalSyncEngine {
     if (!this.stillActive()) return;
     if (ready === "off") return this.park("off");
     if (ready === "otherSession") return this.park();
+    if (manualIdle) return this.park("manual");
     // First sync: an empty device downloads the cloud journal by itself; with local data it waits for the button
     if (!isInitialSyncDone(this.userId) && !(await this.autoInitial())) return this.park("waitingInitialSync");
     if (ready === "unreachable") {

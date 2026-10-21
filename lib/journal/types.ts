@@ -473,7 +473,10 @@ export interface JournalRepository {
   /** Optional (cloud journal): records an empty device downloaded by itself (one notice), then forgotten. */
   takeCloudDownloadNotice?(): number | null;
   /** Optional (cloud journal): state of the exchange with the cloud (the badge in the header). */
-  getCloudStatus?(): { state: "local" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error"; pending: number; blocked: unknown[]; conflicts: number; lastError?: string; lastSyncAt?: string };
+  /** Auto / manual exchange on this device (cloud repository only). */
+  getSyncMode?(): "auto" | "manual";
+  setSyncMode?(mode: "auto" | "manual"): void;
+  getCloudStatus?(): { state: "local" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error" | "manual"; pending: number; blocked: unknown[]; conflicts: number; lastError?: string; lastSyncAt?: string };
   /** Optional (cloud journal): exchange with the cloud now ("Retry"). */
   syncNow?(): Promise<void>;
   /** Optional (cloud journal): preview of the first upload. */

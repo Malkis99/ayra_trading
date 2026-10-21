@@ -23,7 +23,7 @@ import { AppStorage } from "@/lib/storage";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
 
 export interface CloudStatusView {
-  state: "local" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error";
+  state: "local" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error" | "manual";
   pending: number;
   blocked: number;
   conflicts: number;
@@ -93,6 +93,9 @@ interface JournalContextType {
   online: boolean;
   /** Exchange with the cloud now ("Retry"). Never throws. */
   syncNow: () => Promise<void>;
+  /** Auto / manual cloud exchange on this device (signed in, flag on). */
+  syncMode: "auto" | "manual";
+  setSyncMode: (mode: "auto" | "manual") => void;
   /** What is still not in the cloud right now (read live, for "Sign out and delete"): changes to send and conflicts. */
   readUnsynced: () => { pending: number; conflicts: number };
   /** The first-upload window (one for the whole app: the Journal button and the header badge open it). */
@@ -187,6 +190,7 @@ export function JournalProvider({
   const [initialSync, setInitialSync] = useState<{ needed: boolean; started: boolean }>({ needed: false, started: false });
   const [cloudDownloadNotice, setCloudDownloadNotice] = useState<number | null>(null);
   const [cloudStatus, setCloudStatus] = useState<CloudStatusView>(LOCAL_STATUS);
+  const [syncMode, setSyncModeState] = useState<"auto" | "manual">("auto");
   const [online, setOnline] = useState(true);
   const [initialSyncOpen, setInitialSyncOpen] = useState(false);
   const [conflictDialogRequest, setConflictDialogRequest] = useState(0);
@@ -195,6 +199,7 @@ export function JournalProvider({
     setCloudStatus(status ? { ...status, blocked: status.blocked.length } : LOCAL_STATUS);
     const active = repository.isCloudActive?.() ?? false;
     setCloudActive(active);
+    setSyncModeState(repository.getSyncMode?.() ?? "auto");
     setSyncConflicts(active ? repository.listConflicts?.() ?? [] : []);
     setInitialSync(repository.getInitialSyncInfo?.() ?? { needed: false, started: false });
     const downloaded = repository.takeCloudDownloadNotice?.() ?? null;
@@ -224,6 +229,14 @@ export function JournalProvider({
     } catch {}
     refreshSync();
   }, [repository, refreshSync]);
+  const setSyncMode = useCallback(
+    (mode: "auto" | "manual") => {
+      repository.setSyncMode?.(mode);
+      setSyncModeState(mode);
+      refreshSync();
+    },
+    [repository, refreshSync]
+  );
   const readUnsynced = useCallback(() => {
     if (!(repository.isCloudActive?.() ?? false)) return { pending: 0, conflicts: 0 };
     const s = repository.getCloudStatus?.();
@@ -578,6 +591,8 @@ export function JournalProvider({
         cloudStatus,
         online,
         syncNow,
+        syncMode,
+        setSyncMode,
         readUnsynced,
         initialSyncOpen,
         openInitialSync,

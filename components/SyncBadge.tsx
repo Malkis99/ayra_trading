@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Check, Cloud, CloudOff, CloudUpload, RefreshCw } from "lucide-react";
+import { AlertTriangle, Check, Cloud, CloudOff, CloudUpload, Pause, RefreshCw } from "lucide-react";
 import { useJournal } from "@/lib/journal/context";
 import { useApp } from "@/lib/context";
 import { formatString } from "@/lib/i18n";
@@ -21,6 +21,11 @@ function BadgeIcon({ state, busy, conflicts }: { state: SyncBadgeState; busy: bo
       {state === "synced" && (
         <span className="absolute -bottom-1 -right-1 grid h-3 w-3 place-items-center rounded-full bg-long text-ink">
           <Check size={9} strokeWidth={3.5} />
+        </span>
+      )}
+      {state === "manual" && (
+        <span className="absolute -bottom-1 -right-1 grid h-3 w-3 place-items-center rounded-full bg-s2 text-tx ring-1 ring-line">
+          <Pause size={8} strokeWidth={3} />
         </span>
       )}
       {state === "error" && (
@@ -98,7 +103,7 @@ export function SyncBadge() {
     } else if (view.action === "upload") {
       setOpen(false);
       openInitialSync();
-    } else if (view.action === "retry") {
+    } else if (view.action === "retry" || view.action === "sync") {
       setRetrying(true);
       await syncNow();
       setRetrying(false);

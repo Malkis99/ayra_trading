@@ -677,6 +677,7 @@ export const en: Dictionary = {
     },
     syncBadge: {
       labels: {
+        manual: "Manual sync",
         synced: "Saved to cloud",
         syncing: "Syncing…",
         offline: "Offline — changes are saved on this device",
@@ -685,6 +686,7 @@ export const en: Dictionary = {
         waitingInitial: "Journal not in the cloud yet",
       },
       descriptions: {
+        manual: "Changes go to the cloud and come from other devices only when you press \"Synchronise\". Change the mode in Settings → Journal.",
         synced: "All journal changes are in the cloud.",
         syncing: "Changes are being sent to the cloud.",
         offline: "As soon as the network is back, changes go out by themselves. Nothing is lost on this device.",
@@ -697,7 +699,7 @@ export const en: Dictionary = {
       never: "Not synced yet",
       pending: "Waiting to be sent: {count}",
       blocked: "Not sent (too large or with a wrong time): {count}",
-      actions: { resolve: "Resolve conflict", upload: "Upload to the cloud", retry: "Retry" },
+      actions: { resolve: "Resolve conflict", upload: "Upload to the cloud", retry: "Retry", sync: "Synchronise" },
     },
     initialSync: {
       button: "Upload to the cloud",
@@ -2677,6 +2679,14 @@ export const en: Dictionary = {
     timezoneHint: "The time zone decides which day a trade belongs to in the calendar and day totals.",
     timezoneLocalNote: "The time zone is stored on this device for now and is not synced with the cloud.",
     footer: "You can change all of this at any time. The unit, main account and session are saved to the cloud with the journal when the cloud is on.",
+    cloudModeTitle: "Cloud sync",
+    cloudModeHint: "Automatic — the journal goes to the cloud by itself after every change and brings in changes from your other devices: when you open it, return to the tab, when the network is back and every 5 minutes. Manual — nothing is sent or fetched by itself: changes wait on this device until you press \"Synchronise\". The choice applies to this device only.",
+    cloudModeAuto: "Automatic",
+    cloudModeManual: "Manual",
+    cloudModeDeviceNote: "Applies to this device only.",
+    syncNowBtn: "Synchronise",
+    syncNowPending: "Waiting to be sent: {count}",
+    syncNowNothing: "No unsent changes.",
   },
   deviceData: {
     guestTitle: "Guest on this device",

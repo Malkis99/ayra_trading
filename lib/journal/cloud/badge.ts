@@ -2,15 +2,15 @@
  * Cloud badge in the header (T7b-4e): one state for the signed-in account with cloud sync on.
  * Pure function — the component only draws what this returns.
  */
-export type SyncBadgeState = "synced" | "syncing" | "offline" | "error" | "conflict" | "waitingInitial";
+export type SyncBadgeState = "synced" | "syncing" | "offline" | "error" | "conflict" | "waitingInitial" | "manual";
 
-export type SyncBadgeAction = "resolve" | "upload" | "retry" | null;
+export type SyncBadgeAction = "resolve" | "upload" | "retry" | "sync" | null;
 
 export interface SyncBadgeInput {
   /** Cloud sync is used for this account (flag on, signed in). */
   cloudActive: boolean;
   /** State of the account's sync engine (JournalCloudStatus.state). */
-  state: "local" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error";
+  state: "local" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error" | "manual";
   /** Changes waiting to be sent (records in conflict excluded). */
   pending: number;
   /** Records the server would refuse (too large / time from the future). */
@@ -35,6 +35,8 @@ export function syncBadge(i: SyncBadgeInput): SyncBadgeView | null {
   if (i.conflicts > 0) return { state: "conflict", action: "resolve", busy: false };
   if (i.initialNeeded) return { state: "waitingInitial", action: "upload", busy: false };
   if (!i.online || i.state === "offline") return { state: "offline", action: i.pending > 0 ? "retry" : null, busy: false };
+  // Manual mode on this device: nothing runs by itself; one button exchanges now
+  if (i.state === "manual") return { state: "manual", action: "sync", busy: false };
   if (i.state === "error") return { state: "error", action: "retry", busy: false };
   if (i.state === "syncing") return { state: "syncing", action: null, busy: true };
   if (i.pending > 0) return { state: "syncing", action: "retry", busy: false };

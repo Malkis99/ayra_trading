@@ -146,6 +146,81 @@ test.describe("Settings → Journal", () => {
     await ctxB.close();
   });
 
+  test("cloud sync «Automatic / Manual» on this device: in manual nothing goes by itself; «Synchronise» sends; automatic again sends at once", async ({ browser, request }) => {
+    const email = `JMode_${Date.now()}@example.com`;
+    const ctx = await browser.newContext();
+    const page = await openDevice(ctx);
+    await signIn(page, email);
+    await completeOnboarding(page, `JMod${Date.now() % 100000}`);
+    const userId = ((await (await request.get(`${FAKE_SUPABASE}/__test/profile?email=${q(email)}`)).json()).id) as string;
+    await page.evaluate((id) => localStorage.setItem(`ayra:${id}:ayra_sync_state`, JSON.stringify({ initialSyncAt: new Date().toISOString() })), userId);
+    await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${q(email)}&on=1`);
+    const cloudTrades = async () =>
+      ((await (await request.get(`${FAKE_SUPABASE}/__test/cloud-rows?email=${q(email)}`)).json()) as { table: string; data: Record<string, unknown> }[]).filter(
+        (r) => r.table === "journal_trades" && !r.data.deletedAt
+      ).length;
+    const addTrade = async (instrument: string, firstAccount = false) => {
+      await page.goto("/journal");
+      await page.getByRole("button", { name: "Добавить сделку" }).first().click();
+      const drawer = page.getByTestId("add-trade-drawer");
+      if (firstAccount) {
+        await drawer.getByPlaceholder("Название счёта").fill("Main");
+        await drawer.getByRole("button", { name: "Создать счёт" }).click();
+      }
+      await page.getByTestId("instrument-input").fill(instrument);
+      await page.fill("input[placeholder='150 / -50']", "40");
+      await page.getByTestId("instrument-input").press("Control+Enter");
+      await expect(drawer).toBeHidden();
+    };
+
+    // automatic (default): a trade goes up by itself
+    await addTrade("nas100", true);
+    await expect.poll(cloudTrades, { timeout: 15000 }).toBe(1);
+
+    await page.goto("/settings");
+    const row = page.getByTestId("journal-settings-cloud");
+    await expect(row).toBeVisible();
+    await expect(row.getByRole("radio", { name: "Автоматически" })).toHaveAttribute("aria-checked", "true");
+    await row.getByRole("button", { name: "Подсказка: Синхронизация с облаком" }).hover();
+    await expect(row).toContainText("Вручную — ничего не отправляется и не подтягивается само");
+    await shot(page, "settings-cloud-mode-1440", "journal-settings");
+    await page.keyboard.press("Escape");
+    await row.getByRole("radio", { name: "Вручную" }).click();
+    await expect(page.getByTestId("journal-settings-sync-now")).toBeVisible();
+
+    // manual: nothing goes by itself — not after the edit, not on return, not after a reload
+    await addTrade("eurusd");
+    await page.waitForTimeout(4000);
+    expect(await cloudTrades()).toBe(1);
+    await expect(page.getByTestId("sync-badge")).toHaveAttribute("data-state", "manual", { timeout: 15000 });
+    await page.reload();
+    await page.waitForTimeout(3000);
+    expect(await cloudTrades()).toBe(1);
+    await page.goto("/settings");
+    await expect(page.getByTestId("journal-settings-cloud").getByRole("radio", { name: "Вручную" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByTestId("journal-settings-pending")).toContainText("Ждёт отправки: 1");
+    await shot(page, "settings-cloud-manual-1440", "journal-settings");
+
+    // «Synchronise»: sent now
+    await page.getByTestId("journal-settings-sync-now").click();
+    await expect.poll(cloudTrades, { timeout: 15000 }).toBe(2);
+    await expect(page.getByTestId("journal-settings-pending")).toContainText("Неотправленных изменений нет.");
+
+    // the badge offers the same button
+    await addTrade("gbpusd");
+    await page.getByTestId("sync-badge").click();
+    await expect(page.getByTestId("sync-badge-panel")).toContainText("Синхронизация вручную");
+    await page.getByTestId("sync-badge-action").click();
+    await expect.poll(cloudTrades, { timeout: 15000 }).toBe(3);
+
+    // automatic again: the next trade goes by itself
+    await page.goto("/settings");
+    await page.getByTestId("journal-settings-cloud").getByRole("radio", { name: "Автоматически" }).click();
+    await addTrade("usdjpy");
+    await expect.poll(cloudTrades, { timeout: 15000 }).toBe(4);
+    await ctx.close();
+  });
+
   test("guest data on the device: a separate «Guest on this device» block with the guest's real numbers", async ({ browser, request }) => {
     const ctx = await browser.newContext();
     await ctx.addInitScript(() => {
@@ -183,6 +258,9 @@ test.describe("Settings → Journal", () => {
     }
 
     await page.goto("/settings");
+    // flag off for this account: no cloud sync switch
+    await expect(page.getByTestId("journal-settings")).toBeVisible();
+    await expect(page.getByTestId("journal-settings-cloud")).toHaveCount(0);
     const block = page.getByTestId("guest-block");
     await expect(block).toContainText("Гость на этом устройстве");
     await expect(block).toContainText("Не связан с аккаунтом");
