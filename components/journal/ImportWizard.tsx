@@ -19,6 +19,7 @@ import { formatString } from "@/lib/i18n";
 import { Button, Checkbox, Input, Modal, NumberInput, Segmented, Select } from "@/components/ui";
 import { cn } from "@/components/ui/cn";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { defaultAccountId } from "@/lib/journal/preferences";
 
 type Step = "source" | "file" | "mapping" | "settings" | "preview" | "done";
 const STEPS: Step[] = ["source", "file", "mapping", "settings", "preview", "done"];
@@ -61,7 +62,7 @@ function timeZoneOptions(user: string): string[] {
 export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }: Props) {
   const { dict, lang, showToast } = useApp();
   const t = dict.journal.importExport;
-  const { importTrades, deleteTradesByBatch, saveAccount, saveStrategy, strategies } = useJournal();
+  const { importTrades, deleteTradesByBatch, saveAccount, saveStrategy, strategies, preferences } = useJournal();
 
   const [step, setStep] = useState<Step>("source");
   const [format, setFormat] = useState<ImportFormatId | "auto">("auto");
@@ -76,7 +77,7 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
   const [mapping, setMapping] = useState<ColumnMapping>({});
   const [mappingRemembered, setMappingRemembered] = useState(false);
   const activeAccounts = useMemo(() => accounts.filter((a) => !a.archivedAt), [accounts]);
-  const [accountChoice, setAccountChoice] = useState<string>(activeAccounts[0]?.id ?? NEW_ACCOUNT);
+  const [accountChoice, setAccountChoice] = useState<string>(() => defaultAccountId(preferences, null, activeAccounts) || NEW_ACCOUNT);
   const [newAccName, setNewAccName] = useState("");
   const [newAccType, setNewAccType] = useState<AccountType>("personal");
   const [newAccCurrency, setNewAccCurrency] = useState<AccountCurrency>("USD");

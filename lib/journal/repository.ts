@@ -13,6 +13,8 @@ import {
 } from "./types";
 import { IndexedDBAttachmentRepository } from "./attachments/indexeddb-repository";
 import { AppStorage } from "@/lib/storage";
+import { sanitizePreferences } from "./preferences";
+import type { JournalPreferences } from "./types";
 
 const JOURNAL_STORAGE_KEY = "ayra_journal_v1";
 /**
@@ -97,6 +99,7 @@ export function migrateJournalData(raw: Record<string, unknown>, now: Date = new
     schemaVersion: CURRENT_JOURNAL_SCHEMA_VERSION,
     primaryPropAccountId,
     settingsUpdatedAt: typeof raw.settingsUpdatedAt === "string" ? raw.settingsUpdatedAt : undefined,
+    preferences: sanitizePreferences(raw.preferences),
     accounts: rawAccounts.map((a) => withMeta(a, nowIso)),
     trades,
     strategies: arr<Strategy>(raw.strategies).map((s) => withMeta(s, nowIso)),
@@ -194,6 +197,17 @@ export class LocalStorageJournalRepository implements JournalRepository {
   setPrimaryPropAccountId(id: string | null | undefined): void {
     const data = this.loadData();
     data.primaryPropAccountId = id;
+    data.settingsUpdatedAt = this.stampAfter(data.settingsUpdatedAt);
+    this.saveData(data);
+  }
+
+  getPreferences(): JournalPreferences {
+    return this.loadData().preferences ?? {};
+  }
+
+  setPreferences(preferences: JournalPreferences): void {
+    const data = this.loadData();
+    data.preferences = sanitizePreferences(preferences);
     data.settingsUpdatedAt = this.stampAfter(data.settingsUpdatedAt);
     this.saveData(data);
   }

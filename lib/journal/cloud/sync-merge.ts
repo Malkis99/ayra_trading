@@ -1,6 +1,7 @@
 import type { JournalSnapshot } from "../types";
 import type { ImportBatch } from "../import/batches";
 import { AppStorage } from "@/lib/storage";
+import { sanitizePreferences } from "../preferences";
 import { IMPORT_BATCHES_TABLE, SETTINGS_TABLE, entryKey, entryVersion, type CloudEntry, type JournalCloudTable } from "./records";
 
 /**
@@ -14,6 +15,8 @@ import { IMPORT_BATCHES_TABLE, SETTINGS_TABLE, entryKey, entryVersion, type Clou
  * | yes                   | yes, same version             | nothing (already equal)     |
  * | yes                   | yes, different                | conflict (both versions kept) |
  * Deleting on one device and editing on another is a conflict as well (a tombstone is a version too).
+ * Exception: the journal settings row (unit, main account, session, primary prop account) — the newer one wins,
+ * no dialog (docs/journal-setup-plan.md, section 3).
  */
 
 export interface MergeInput {
@@ -62,9 +65,22 @@ export function planMerge(input: MergeInput): MergePlan {
       plan.settled.push(key);
       continue;
     }
+    if (r.table === SETTINGS_TABLE) {
+      if (settingsNewer(r, local)) {
+        plan.take.push(r); // the cloud is newer: take it, ours is not sent
+        plan.base[key] = version;
+        plan.settled.push(key);
+      } // ours is newer: keep it, it will be sent
+      continue;
+    }
     plan.conflicts.push(r);
   }
   return plan;
+}
+
+/** Journal settings: is `a` newer than `b`? (ISO times compare as text) */
+export function settingsNewer(a: CloudEntry, b: CloudEntry): boolean {
+  return String(a.record.updatedAt ?? "") > String(b.record.updatedAt ?? "");
 }
 
 type ListField = "accounts" | "trades" | "strategies" | "noTrades" | "plans" | "weekPlans" | "notes";
@@ -86,6 +102,7 @@ export function applyEntries(snapshot: JournalSnapshot, batches: ImportBatch[], 
   for (const e of entries) {
     if (e.table === SETTINGS_TABLE) {
       next.primaryPropAccountId = (e.record.primaryPropAccountId as string | null | undefined) ?? null;
+      next.preferences = sanitizePreferences(e.record.preferences);
       next.settingsUpdatedAt = String(e.record.updatedAt);
       continue;
     }

@@ -11,6 +11,7 @@ import type {
   WeekPlan,
 } from "../types";
 import { LocalStorageJournalRepository } from "../repository";
+import type { JournalPreferences } from "../types";
 import { listImportBatches, replaceImportBatches, subscribeImportBatches } from "../import/batches";
 import { AppStorage } from "@/lib/storage";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
@@ -372,6 +373,14 @@ export class CloudJournalRepository implements JournalRepository {
   getAllRecords(): JournalSnapshot {
     return this.local.getAllRecords();
   }
+  getPreferences() {
+    return this.local.getPreferences();
+  }
+
+  setPreferences(preferences: JournalPreferences): void {
+    this.write(() => this.local.setPreferences(preferences));
+  }
+
   getPrimaryPropAccountId() {
     return this.local.getPrimaryPropAccountId();
   }

@@ -7,6 +7,7 @@ import { SyncLease } from "./lease";
 import { isInitialSyncDone, markInitialSyncDone, writeSyncState } from "./sync-state";
 import {
   JOURNAL_CLOUD_TABLES,
+  SETTINGS_TABLE,
   decodeRow,
   encodeEntry,
   entryKey,
@@ -24,6 +25,7 @@ import {
   readBase,
   readConflicts,
   readCursor,
+  settingsNewer,
   updateBase,
   writeConflicts,
   writeCursor,
@@ -549,7 +551,14 @@ export class JournalSyncEngine {
         if (res.ok) plan.toUpload.push(e);
         else plan.skipped.push({ table: e.table, id: e.id, reason: res.reason });
       } else if (entryVersion(c) === entryVersion(e) || sameContents(e, c)) plan.same.push(c);
-      else plan.differ.push(c);
+      else if (e.table === SETTINGS_TABLE) {
+        // journal settings: the newer one wins, no dialog (docs/journal-setup-plan.md, section 3)
+        if (settingsNewer(c, e)) plan.onlyCloud.push(c);
+        else {
+          const res = encodeEntry(e, deviceId, new Date(this.now()));
+          if (res.ok) plan.toUpload.push(e);
+        }
+      } else plan.differ.push(c);
     }
     for (const [key, c] of cloud) {
       if (!isTombstone(c)) plan.cloudLive++;

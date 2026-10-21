@@ -78,7 +78,13 @@ export function snapshotEntries(snapshot: JournalSnapshot, batches: ImportBatch[
     out.push({
       table: SETTINGS_TABLE,
       id: SETTINGS_ROW_ID,
-      record: { id: SETTINGS_ROW_ID, primaryPropAccountId: snapshot.primaryPropAccountId ?? null, updatedAt: snapshot.settingsUpdatedAt },
+      record: {
+        id: SETTINGS_ROW_ID,
+        primaryPropAccountId: snapshot.primaryPropAccountId ?? null,
+        // journal settings ride in the same row (no migration: `data` is free-form jsonb)
+        ...(snapshot.preferences ? { preferences: snapshot.preferences } : {}),
+        updatedAt: snapshot.settingsUpdatedAt,
+      },
     });
   }
   return out;

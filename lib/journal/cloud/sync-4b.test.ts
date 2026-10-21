@@ -351,3 +351,33 @@ describe("T7b-4b account isolation", () => {
     expect(cloud.get("journal_trades", "t1", OTHER)).toBeUndefined();
   });
 });
+
+describe("journal settings through the cloud (setup plan PR 1)", () => {
+  it("set on A → arrive on B; changed on both → the newer wins, no conflict dialog", async () => {
+    onDevice("A");
+    devA.setPreferences({ defaultUnit: "money", mainAccountId: "acc_prop", defaultSession: "london" });
+    await sync(devA);
+    onDevice("B");
+    await sync(devB);
+    expect(devB.getPreferences()).toEqual({ defaultUnit: "money", mainAccountId: "acc_prop", defaultSession: "london" });
+
+    // both change before syncing; B changes later, so B is newer
+    onDevice("A");
+    devA.setPreferences({ defaultUnit: "percent" });
+    await new Promise((r) => setTimeout(r, 5));
+    onDevice("B");
+    devB.setPreferences({ defaultUnit: "R", defaultSession: "newyork" });
+    onDevice("A");
+    await sync(devA);
+    onDevice("B");
+    await sync(devB);
+    onDevice("A");
+    await sync(devA);
+    expect(devA.getPreferences()).toEqual({ defaultUnit: "R", defaultSession: "newyork" });
+    onDevice("B");
+    expect(devB.getPreferences()).toEqual({ defaultUnit: "R", defaultSession: "newyork" });
+    expect(Object.keys(readConflicts(USER))).toEqual([]);
+    onDevice("A");
+    expect(Object.keys(readConflicts(USER))).toEqual([]);
+  });
+});

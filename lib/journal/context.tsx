@@ -6,6 +6,7 @@ import {
   Trade,
   Strategy,
   NoTradeEntry,
+  JournalPreferences,
   TradingPlan,
   WeekPlan,
   Note,
@@ -35,6 +36,9 @@ const LOCAL_STATUS: CloudStatusView = { state: "local", pending: 0, blocked: 0, 
 interface JournalContextType {
   primaryPropAccountId: string | null | undefined;
   setPrimaryPropAccountId: (id: string | null | undefined) => void;
+  /** Journal settings of the account: default unit, main account, default session (synced like the rest). */
+  preferences: JournalPreferences;
+  setPreferences: (preferences: JournalPreferences) => void;
   accounts: Account[];
   trades: Trade[];
   strategies: Strategy[];
@@ -128,12 +132,14 @@ export function JournalProvider({
     isWarning: false,
   });
   const [primaryPropAccountId, setPrimaryPropAccountIdState] = useState<string | null | undefined>(undefined);
+  const [preferences, setPreferencesState] = useState<JournalPreferences>({});
   const [lastSelectedAccountId, setLastSelectedAccountIdState] = useState<string | null>(null);
   const [lastSelectedInstrument, setLastSelectedInstrumentState] = useState<string | null>(null);
   const pendingDeletionsRef = React.useRef<Map<string, { timer: NodeJS.Timeout; account: Account }>>(new Map());
 
   const refresh = useCallback(() => {
     setPrimaryPropAccountIdState(repository.getPrimaryPropAccountId());
+    setPreferencesState(repository.getPreferences());
     setAccounts(repository.getAccounts());
     setTrades(repository.getTrades());
     setStrategies(repository.getStrategies());
@@ -297,6 +303,14 @@ export function JournalProvider({
     (id: string | null | undefined) => {
       setPrimaryPropAccountIdState(id);
       repository.setPrimaryPropAccountId(id);
+    },
+    [repository]
+  );
+
+  const setPreferences = useCallback(
+    (next: JournalPreferences) => {
+      repository.setPreferences(next);
+      setPreferencesState(repository.getPreferences());
     },
     [repository]
   );
@@ -583,6 +597,8 @@ export function JournalProvider({
         storageUsage,
         primaryPropAccountId,
         setPrimaryPropAccountId,
+        preferences,
+        setPreferences,
         lastSelectedAccountId,
         lastSelectedInstrument,
         saveAccount,
