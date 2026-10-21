@@ -123,6 +123,14 @@ export type TradeDirection = "long" | "short";
 export type TradeStatus = "open" | "closed";
 export type TradeResult = "win" | "loss" | "breakeven";
 export type TradeSession = "asia" | "london" | "newyork" | "overlap" | "other";
+/** How results are shown: R multiples, account money, percent of the account. */
+export type JournalUnit = "R" | "money" | "percent";
+/** Journal settings; a missing field = behave as before (last used account, last unit switch, no session). */
+export interface JournalPreferences {
+  defaultUnit?: JournalUnit;
+  mainAccountId?: string | null;
+  defaultSession?: TradeSession | null;
+}
 export type TradeVerification = "unverified" | "imported" | "connected" | "verified";
 export type TradeSource = "manual" | "import";
 /** How the trade ended according to the source file: take profit, stop loss or breakeven. */
@@ -401,6 +409,9 @@ export interface Note extends SyncMeta {
 export interface JournalRepository {
   getPrimaryPropAccountId(): string | null | undefined;
   setPrimaryPropAccountId(id: string | null | undefined): void;
+  /** Journal settings (default unit, main account, default session); synced with primaryPropAccountId. */
+  getPreferences(): JournalPreferences;
+  setPreferences(preferences: JournalPreferences): void;
   getAccounts(): Account[];
   getAccount(id: string): Account | null;
   saveAccount(account: Account): Account;
@@ -462,7 +473,10 @@ export interface JournalRepository {
   /** Optional (cloud journal): records an empty device downloaded by itself (one notice), then forgotten. */
   takeCloudDownloadNotice?(): number | null;
   /** Optional (cloud journal): state of the exchange with the cloud (the badge in the header). */
-  getCloudStatus?(): { state: "local" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error"; pending: number; blocked: unknown[]; conflicts: number; lastError?: string; lastSyncAt?: string };
+  /** Auto / manual exchange on this device (cloud repository only). */
+  getSyncMode?(): "auto" | "manual";
+  setSyncMode?(mode: "auto" | "manual"): void;
+  getCloudStatus?(): { state: "local" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error" | "manual"; pending: number; blocked: unknown[]; conflicts: number; lastError?: string; lastSyncAt?: string };
   /** Optional (cloud journal): exchange with the cloud now ("Retry"). */
   syncNow?(): Promise<void>;
   /** Optional (cloud journal): preview of the first upload. */
@@ -487,7 +501,9 @@ export interface SyncConflict {
 export interface JournalSnapshot {
   schemaVersion: number;
   primaryPropAccountId?: string | null;
-  /** When primaryPropAccountId last changed (sync). */
+  /** Journal settings of the account (docs/journal-setup-plan.md). */
+  preferences?: JournalPreferences;
+  /** When primaryPropAccountId or preferences last changed (sync). */
   settingsUpdatedAt?: string;
   accounts: Account[];
   trades: Trade[];

@@ -351,3 +351,81 @@ describe("T7b-4b account isolation", () => {
     expect(cloud.get("journal_trades", "t1", OTHER)).toBeUndefined();
   });
 });
+
+describe("journal settings through the cloud (setup plan PR 1)", () => {
+  it("set on A → arrive on B; changed on both → the newer wins, no conflict dialog", async () => {
+    onDevice("A");
+    devA.setPreferences({ defaultUnit: "money", mainAccountId: "acc_prop", defaultSession: "london" });
+    await sync(devA);
+    onDevice("B");
+    await sync(devB);
+    expect(devB.getPreferences()).toEqual({ defaultUnit: "money", mainAccountId: "acc_prop", defaultSession: "london" });
+
+    // both change before syncing; B changes later, so B is newer
+    onDevice("A");
+    devA.setPreferences({ defaultUnit: "percent" });
+    await new Promise((r) => setTimeout(r, 5));
+    onDevice("B");
+    devB.setPreferences({ defaultUnit: "R", defaultSession: "newyork" });
+    onDevice("A");
+    await sync(devA);
+    onDevice("B");
+    await sync(devB);
+    onDevice("A");
+    await sync(devA);
+    expect(devA.getPreferences()).toEqual({ defaultUnit: "R", defaultSession: "newyork" });
+    onDevice("B");
+    expect(devB.getPreferences()).toEqual({ defaultUnit: "R", defaultSession: "newyork" });
+    expect(Object.keys(readConflicts(USER))).toEqual([]);
+    onDevice("A");
+    expect(Object.keys(readConflicts(USER))).toEqual([]);
+  });
+});
+
+describe("auto / manual exchange on a device (owner decision 2026-10-21)", () => {
+  it("manual: nothing is sent or fetched by itself; «Synchronise» exchanges; auto again sends at once", async () => {
+    onDevice("A");
+    devA.setSyncMode("manual");
+    expect(devA.getSyncMode()).toBe("manual");
+    devA.saveTrade(trade("tm", { notes: "manual" }));
+    // the debounce after an edit, the background pull and a return to the tab do nothing
+    await new Promise((r) => setTimeout(r, 50));
+    await devA.pullFromCloud();
+    await devA.whenIdle();
+    expect(cloud.get("journal_trades", "tm")).toBeUndefined();
+    expect(devA.getCloudStatus().state).toBe("manual");
+    expect(devA.getCloudStatus().pending).toBe(1);
+
+    // B (automatic) changes something: A in manual mode does not fetch it by itself
+    onDevice("B");
+    devB.saveTrade(trade("tb", { notes: "from B" }));
+    await sync(devB);
+    onDevice("A");
+    expect(await devA.pullFromCloud()).toEqual({ ok: false, applied: 0 });
+    expect(devA.getTrade("tb")).toBeNull();
+
+    // «Synchronise» (by the user): both directions now
+    await devA.syncNow();
+    await devA.whenIdle();
+    expect(cloud.get("journal_trades", "tm")?.data.notes).toBe("manual");
+    expect(devA.getTrade("tb")?.notes).toBe("from B");
+
+    // back to automatic: what waited goes at once
+    devA.saveTrade(trade("tm2"));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(cloud.get("journal_trades", "tm2")).toBeUndefined();
+    devA.setSyncMode("auto");
+    await devA.whenIdle();
+    expect(cloud.get("journal_trades", "tm2")).toBeDefined();
+  });
+
+  it("the mode is per device: manual on A leaves B automatic", async () => {
+    onDevice("A");
+    devA.setSyncMode("manual");
+    onDevice("B");
+    expect(devB.getSyncMode()).toBe("auto");
+    devB.saveTrade(trade("tb2"));
+    await sync(devB);
+    expect(cloud.get("journal_trades", "tb2")).toBeDefined();
+  });
+});

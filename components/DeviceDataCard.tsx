@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Smartphone, Download, Copy, Trash2, LogOut } from "lucide-react";
+import { Smartphone, Download, Copy, Trash2, LogOut, UserRound } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useAuth } from "@/lib/auth/auth-context";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -136,6 +136,31 @@ export function DeviceDataCard() {
   const btnBase =
     "text-xs py-2 px-3.5 inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi";
 
+  // Unchanged guest actions; «Copy to account» only on its existing condition (owner: no new buttons)
+  const guestButtons = (
+    <div className="flex flex-wrap gap-2">
+      <button type="button" onClick={handleExport} disabled={busy} className={`btn-ghost border border-line ${btnBase}`}>
+        <Download size={14} aria-hidden="true" />
+        <span>{t.exportBtn}</span>
+      </button>
+
+      {user && !accountHasData && (
+        <button type="button" onClick={handleCopy} disabled={busy} title={t.copyHint} className={`btn ${btnBase}`}>
+          <Copy size={14} aria-hidden="true" />
+          <span>{t.copyBtn}</span>
+        </button>
+      )}
+
+      {user && (
+        <button type="button" onClick={() => setDialog("deleteGuest")} disabled={busy} className={`btn-danger ${btnBase}`}>
+          <Trash2 size={14} aria-hidden="true" />
+          <span>{t.deleteGuestBtn}</span>
+        </button>
+      )}
+    </div>
+  );
+
+
   return (
     <div className="card space-y-4">
       <div className="space-y-1">
@@ -143,60 +168,10 @@ export function DeviceDataCard() {
           <Smartphone size={18} className="text-vi" aria-hidden="true" />
           <span>{t.title}</span>
         </h4>
-        <p className="text-[11px] text-mu">{t.subtitle}</p>
+        <p className="text-[11px] text-mu">{user ? t.accountSubtitle : t.subtitle}</p>
       </div>
 
-      <div className="rounded-xl border border-line bg-s2/40 p-3.5 space-y-1">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-mu">{t.guestProfileLabel}</div>
-        {hasGuest && guest ? (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="font-serif text-base font-bold text-tx break-all">{guest.nickname}</span>
-            <span className="text-xs text-mu">
-              {formatString(t.levelLabel, { level: formatNumber(lang, guest.level) })}
-            </span>
-            <span className="text-xs text-mu">
-              {formatString(t.tradesLabel, { count: formatNumber(lang, guest.tradesCount) })}
-            </span>
-          </div>
-        ) : (
-          <p className="text-xs text-mu">{t.noGuestData}</p>
-        )}
-      </div>
-
-      {hasGuest && (
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={handleExport} disabled={busy} className={`btn-ghost border border-line ${btnBase}`}>
-            <Download size={14} aria-hidden="true" />
-            <span>{t.exportBtn}</span>
-          </button>
-
-          {user && !accountHasData && (
-            <button
-              type="button"
-              onClick={handleCopy}
-              disabled={busy}
-              title={t.copyHint}
-              className={`btn ${btnBase}`}
-            >
-              <Copy size={14} aria-hidden="true" />
-              <span>{t.copyBtn}</span>
-            </button>
-          )}
-
-          {user && (
-            <button
-              type="button"
-              onClick={() => setDialog("deleteGuest")}
-              disabled={busy}
-              className={`btn-danger ${btnBase}`}
-            >
-              <Trash2 size={14} aria-hidden="true" />
-              <span>{t.deleteGuestBtn}</span>
-            </button>
-          )}
-        </div>
-      )}
-
+      {/* Signed in: this account's journal first, then the guest data, clearly apart from the account */}
       {user && (
         <div className="rounded-xl border border-line bg-s2/40 p-3.5 space-y-2">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-mu">{t.journalCounts.title}</div>
@@ -212,7 +187,46 @@ export function DeviceDataCard() {
         </div>
       )}
 
-      {hasGuest && user && !accountHasData && <p className="text-[11px] text-mu">{t.copyHint}</p>}
+      {user ? (
+        <div className="space-y-2 rounded-xl border border-dashed border-line p-3.5" data-testid="guest-block">
+          <div className="flex flex-wrap items-center gap-2">
+            <UserRound size={14} className="shrink-0 text-mu" aria-hidden="true" />
+            <span className="text-xs font-semibold text-tx">{t.guestTitle}</span>
+            <span className="rounded-full border border-line px-2 py-0.5 text-[10px] text-mu">{t.guestNotLinked}</span>
+          </div>
+          <p className="text-[11px] text-mu">{t.guestExplain}</p>
+          {hasGuest && guest ? (
+            <p className="break-all text-xs text-tx/90" data-testid="guest-line">
+              {formatString(t.guestLine, {
+                name: guest.nickname || "—",
+                level: formatNumber(lang, guest.level),
+                trades: formatNumber(lang, guest.tradesCount),
+              })}
+            </p>
+          ) : (
+            <p className="text-xs text-mu">{t.guestNone}</p>
+          )}
+          {hasGuest && guestButtons}
+          {hasGuest && !accountHasData && <p className="text-[11px] text-mu">{t.copyHint}</p>}
+        </div>
+      ) : (
+        <>
+          <div className="rounded-xl border border-line bg-s2/40 p-3.5 space-y-1">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-mu">{t.guestOwnTitle}</div>
+            {hasGuest && guest ? (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="font-serif text-base font-bold text-tx break-all">{guest.nickname}</span>
+                <span className="text-xs text-mu">{formatString(t.levelLabel, { level: formatNumber(lang, guest.level) })}</span>
+                <span className="text-xs text-mu">{formatString(t.tradesLabel, { count: formatNumber(lang, guest.tradesCount) })}</span>
+              </div>
+            ) : (
+              <p className="text-xs text-mu">{t.noGuestData}</p>
+            )}
+          </div>
+          {hasGuest && guestButtons}
+        </>
+      )}
+
       {hasGuest && !user && <p className="text-[11px] text-mu">{t.guestOnlyNote}</p>}
 
       {user && (

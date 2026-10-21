@@ -41,6 +41,13 @@ beforeEach(() => {
 });
 
 describe("badge state (T7b-4e)", () => {
+  it("manual mode on this device: its own state with «Synchronise»; a conflict, the first upload and no network still win", () => {
+    expect(syncBadge({ ...base, state: "manual" })).toEqual({ state: "manual", action: "sync", busy: false });
+    expect(syncBadge({ ...base, state: "manual", conflicts: 1 })?.state).toBe("conflict");
+    expect(syncBadge({ ...base, state: "manual", initialNeeded: true })?.state).toBe("waitingInitial");
+    expect(syncBadge({ ...base, state: "manual", online: false })?.state).toBe("offline");
+  });
+
   it("no badge for guests or with the flag off", () => {
     expect(syncBadge({ ...base, cloudActive: false })).toBeNull();
   });

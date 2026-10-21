@@ -11,6 +11,7 @@ import type {
   WeekPlan,
 } from "../types";
 import { LocalStorageJournalRepository } from "../repository";
+import type { JournalPreferences } from "../types";
 import { listImportBatches, replaceImportBatches, subscribeImportBatches } from "../import/batches";
 import { AppStorage } from "@/lib/storage";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
@@ -28,6 +29,7 @@ import {
   type SyncEngineState,
 } from "./sync-engine";
 import { isInitialSyncDone, readSyncState } from "./sync-state";
+import { readSyncMode, writeSyncMode, type SyncMode } from "./sync-mode";
 import type { StoredConflict } from "./sync-merge";
 import type { OutboxEntry } from "./outbox";
 
@@ -36,7 +38,7 @@ import type { OutboxEntry } from "./outbox";
  * - waitingInitialSync: flag on, first upload not done yet — nothing is exchanged (4d adds the button)
  * - syncing / synced / offline / error: state of the last exchange
  */
-export type JournalCloudState = "local" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error";
+export type JournalCloudState = "local" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error" | "manual";
 
 export interface JournalCloudStatus {
   state: JournalCloudState;
@@ -66,6 +68,7 @@ const ENGINE_TO_CLOUD_STATE: Record<SyncEngineState, JournalCloudState> = {
   offline: "offline",
   error: "error",
   off: "local",
+  manual: "manual",
 };
 
 let tabCounter = 0;
@@ -165,7 +168,7 @@ export class CloudJournalRepository implements JournalRepository {
   /** Pulls and sends everything queued for the current account now ("Retry now"). Never throws. */
   syncNow(): Promise<void> {
     const userId = this.mayUseCloud();
-    return userId ? this.track(this.engineFor(userId).flush(true)) : Promise.resolve();
+    return userId ? this.track(this.engineFor(userId).flush(true, true)) : Promise.resolve();
   }
 
   private track<T>(p: Promise<T>): Promise<T> {
@@ -237,6 +240,7 @@ export class CloudJournalRepository implements JournalRepository {
         tabId: this.tabId,
         now: () => this.now().getTime(),
         onChange: this.notifyStatus,
+        isManual: () => readSyncMode(userId) === "manual",
       });
       this.engines.set(userId, engine);
       engine.start();
@@ -279,6 +283,25 @@ export class CloudJournalRepository implements JournalRepository {
     );
   }
 
+  /** Auto / manual exchange on this device for the signed-in account (not synced). */
+  getSyncMode(): SyncMode {
+    const userId = AppStorage.getUserId();
+    return userId ? readSyncMode(userId) : "auto";
+  }
+
+  /** Switching to auto exchanges at once (what waited goes up, changes from elsewhere come down). */
+  setSyncMode(mode: SyncMode): void {
+    const userId = AppStorage.getUserId();
+    if (!userId) return;
+    writeSyncMode(userId, mode);
+    if (this.mayUseCloud() === userId) {
+      const engine = this.engineFor(userId);
+      if (mode === "auto") void this.track(engine.flush(true));
+      else void this.track(engine.flush());
+    }
+    this.notifyStatus();
+  }
+
   /** The cloud is used for the signed-in account right now (flag known to be on). Guests and flag off: false. */
   isCloudActive(): boolean {
     const userId = AppStorage.getUserId();
@@ -298,7 +321,7 @@ export class CloudJournalRepository implements JournalRepository {
     if (!userId) return false;
     const engine = this.engineFor(userId);
     const done = engine.resolveConflict(table as JournalCloudTable, id, choice);
-    if (done) void this.track(engine.flush(true));
+    if (done) void this.track(engine.flush(true, true));
     return done;
   }
 
@@ -372,6 +395,14 @@ export class CloudJournalRepository implements JournalRepository {
   getAllRecords(): JournalSnapshot {
     return this.local.getAllRecords();
   }
+  getPreferences() {
+    return this.local.getPreferences();
+  }
+
+  setPreferences(preferences: JournalPreferences): void {
+    this.write(() => this.local.setPreferences(preferences));
+  }
+
   getPrimaryPropAccountId() {
     return this.local.getPrimaryPropAccountId();
   }
