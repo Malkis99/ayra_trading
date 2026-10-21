@@ -17,6 +17,14 @@ describe("error-sanitizer", () => {
     expect(res.errorKey).toBe("rateLimitExceeded");
   });
 
+  it("tells the three 429 cases apart: code asked too soon, e-mail limit, too many requests (auth plan PR A)", () => {
+    const soon = mapSupabaseError({ status: 429, code: "over_email_send_rate_limit", message: "For security purposes, you can only request this after 42 seconds." });
+    expect(soon.errorKey).toBe("resendTooSoon");
+    expect(soon.retryAfterSeconds).toBe(42);
+    expect(mapSupabaseError({ status: 429, code: "over_email_send_rate_limit", message: "email rate limit exceeded" }).errorKey).toBe("rateLimitExceeded");
+    expect(mapSupabaseError({ status: 429, code: "over_request_rate_limit", message: "Request rate limit reached" }).errorKey).toBe("tooManyAttempts");
+  });
+
   it("maps network errors correctly", () => {
     const res = mapSupabaseError({ name: "FetchError", message: "Failed to fetch" });
     expect(res.errorKey).toBe("networkError");

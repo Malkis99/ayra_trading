@@ -64,7 +64,8 @@ describe("T7a.1 Error Sanitization & Mapping", () => {
   });
 
   it("maps Supabase errors to concise user-facing error keys", () => {
-    expect(mapSupabaseError({ status: 429 }).errorKey).toBe("rateLimitExceeded");
+    expect(mapSupabaseError({ status: 429 }).errorKey).toBe("tooManyAttempts");
+    expect(mapSupabaseError({ status: 429, code: "over_email_send_rate_limit", message: "email rate limit exceeded" }).errorKey).toBe("rateLimitExceeded");
     expect(mapSupabaseError({ name: "FetchError" }).errorKey).toBe("networkError");
     expect(mapSupabaseError({ status: 400, message: "Invalid code" }).errorKey).toBe("invalidOrExpiredCode");
     expect(mapSupabaseError({ status: 500 }).errorKey).toBe("authUnavailable");

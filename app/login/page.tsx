@@ -10,6 +10,7 @@ import { authTabChannel } from "@/lib/auth/tab-channel";
 import { sanitizeRedirectUrl, buildSafeSiteUrlRedirect } from "@/lib/auth/redirect-whitelist";
 import { type SanitizedErrorInfo } from "@/lib/auth/error-sanitizer";
 import { SIGN_IN_LOCK_SECONDS, SIGN_IN_MAX_FAILS } from "@/lib/auth/password";
+import { authEmailFlowsOpen } from "@/lib/auth/email-sending";
 import { Mail, MailCheck, KeyRound, Lock, ArrowRight, ArrowLeft, Check, AlertCircle, RefreshCw, Copy, ExternalLink, ChevronDown, Sparkles, Loader2, Eye, EyeOff } from "lucide-react";
 import { formatString } from "@/lib/i18n";
 import { Checkbox } from "@/components/ui/forms";
@@ -407,6 +408,9 @@ Message: ${errorDetails.sanitizedMessage}${
     router.replace(destination);
   };
 
+  // Without custom SMTP: no registration and no «Forgot password» (they need letters); sign-in by password works
+  const emailOpen = authEmailFlowsOpen();
+
   const cleanOtp = otpCode.replace(/\D/g, "");
   const isValidOtp = cleanOtp.length >= 6 && cleanOtp.length <= 8;
 
@@ -476,7 +480,9 @@ Message: ${errorDetails.sanitizedMessage}${
       ? auth.signUpTitle
       : auth.loginTitle;
   const subtitle =
-    step === "code"
+    mode === "signUp" && step === "form" && !emailOpen
+      ? ""
+      : step === "code"
       ? formatString(auth.signUpCodeSubtitle, { email })
       : step === "reset"
       ? formatString(auth.resetSentSubtitle, { email })
@@ -600,9 +606,11 @@ Message: ${errorDetails.sanitizedMessage}${
             </div>
           )}
           <h1 className="font-serif text-[22px] font-bold leading-tight text-tx sm:text-[28px]">{title}</h1>
-          <p data-testid="login-subtitle" className="mt-2 break-words text-sm text-mu">
-            {subtitle}
-          </p>
+          {subtitle && (
+            <p data-testid="login-subtitle" className="mt-2 break-words text-sm text-mu">
+              {subtitle}
+            </p>
+          )}
         </div>
 
         {/* Error Alert */}
@@ -611,8 +619,14 @@ Message: ${errorDetails.sanitizedMessage}${
             <div className="flex items-start gap-2.5">
               <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-short" aria-hidden="true" />
               <div className="space-y-2">
-                <div>{auth.errors[errorKey as keyof typeof auth.errors] || auth.errors.genericError}</div>
-                {errorKey === "emailNotConfirmed" && (
+                <div>
+                  {errorKey === "emailNotConfirmed" && !emailOpen
+                    ? auth.emailNotConfirmedClosed
+                    : errorKey === "resendTooSoon"
+                    ? formatString(auth.errors.resendTooSoon, { seconds: errorDetails?.retryAfterSeconds ?? 60 })
+                    : auth.errors[errorKey as keyof typeof auth.errors] || auth.errors.genericError}
+                </div>
+                {errorKey === "emailNotConfirmed" && emailOpen && (
                   <button type="button" onClick={handleConfirmAgain} disabled={loading} className="text-sm font-semibold text-vi underline hover:text-tx">
                     {auth.sendCodeAgainBtn}
                   </button>
@@ -680,11 +694,13 @@ Message: ${errorDetails.sanitizedMessage}${
               hideLabel={auth.hidePassword}
               invalid={errorKey === "invalidCredentials" || errorKey === "passwordBlank"}
             />
-            <div className="flex justify-end">
-              <button type="button" onClick={() => switchMode("forgot")} className={linkBtn} data-testid="forgot-link">
-                {auth.forgotLink}
-              </button>
-            </div>
+            {emailOpen && (
+              <div className="flex justify-end">
+                <button type="button" onClick={() => switchMode("forgot")} className={linkBtn} data-testid="forgot-link">
+                  {auth.forgotLink}
+                </button>
+              </div>
+            )}
             <button type="submit" disabled={loading || lockLeft > 0} aria-busy={loading} className={primaryBtn}>
               {submitContent(auth.signInBtn, <ArrowRight className="h-4 w-4" aria-hidden="true" />)}
             </button>
@@ -694,13 +710,21 @@ Message: ${errorDetails.sanitizedMessage}${
               </p>
             )}
             <p data-testid="old-account-hint" className="rounded-xl border border-line/60 bg-s1/60 p-3 text-[11px] leading-snug text-mu">
-              {auth.oldAccountHint}
+              {emailOpen ? auth.oldAccountHint : auth.oldAccountHintClosed}
             </p>
           </form>
         )}
 
+        {/* Sign up closed until custom SMTP (lib/auth/email-sending.ts) */}
+        {step === "form" && mode === "signUp" && !emailOpen && (
+          <div role="tabpanel" aria-labelledby="auth-tab-signUp" data-testid="signup-closed" className="space-y-2 rounded-xl border border-line/60 bg-s1/60 p-4 text-center">
+            <p className="text-sm font-semibold text-tx">{auth.signUpClosedTitle}</p>
+            <p className="text-xs leading-snug text-mu">{auth.signUpClosedBody}</p>
+          </div>
+        )}
+
         {/* Sign up: e-mail + password + consent, then the code */}
-        {step === "form" && mode === "signUp" && (
+        {step === "form" && mode === "signUp" && emailOpen && (
           <form onSubmit={handleSignUp} className="space-y-4" noValidate role="tabpanel" aria-labelledby="auth-tab-signUp">
             {emailField}
             <PasswordField

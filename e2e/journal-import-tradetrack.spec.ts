@@ -43,6 +43,12 @@ async function chooseFile(page: Page, platform?: RegExp) {
 test.describe("Import: TradeTrack (CSV) preset", () => {
   test.use({ reducedMotion: "reduce" });
 
+  // The fixture trades are dated 2026-09/10 and analytics opens on «30 days»: pin «today» so the numbers do not
+  // drift as the calendar moves on (on 2026-10-21 two trades fell out of the window).
+  test.beforeEach(async ({ page }) => {
+    await page.clock.setFixedTime(new Date("2026-10-17T12:00:00Z"));
+  });
+
   test("detected automatically; columns by the preset; 29 trades (1 open); re-import = 29 duplicates", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await seed(page);
