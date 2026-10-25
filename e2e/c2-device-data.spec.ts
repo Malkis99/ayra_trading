@@ -79,7 +79,8 @@ test.describe("C2 Settings: data on this device", () => {
     await dialog.locator("input").fill("УДАЛИТЬ");
     await confirm.click();
 
-    await expect(card(page)).toContainText("Гостевых данных на устройстве нет");
+    // signed in: the separate «Guest on this device» block (setup plan section 11)
+    await expect(card(page)).toContainText("Гостевых данных на этом устройстве нет.");
     const guest = await page.evaluate(() => localStorage.getItem("ayra_demo_v1"));
     expect(guest).toBeNull();
     const account = await page.evaluate((id) => localStorage.getItem(`ayra:${id}:ayra_demo_v1`), USER_ID);

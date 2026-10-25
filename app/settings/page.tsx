@@ -13,7 +13,7 @@ import { defaultAttachmentRepository } from "@/lib/journal/attachments/indexeddb
 import { AttachmentStorageEstimate } from "@/lib/journal/attachments/types";
 import { OwnerDiagnosticsBlock } from "@/components/OwnerDiagnosticsBlock";
 import { DeviceDataCard } from "@/components/DeviceDataCard";
-import { TimezoneSelect } from "@/components/TimezoneSelect";
+import { JournalSettingsCard } from "@/components/JournalSettingsCard";
 
 export default function SettingsPage() {
   const { dict, lang, setLanguage } = useApp();
@@ -204,6 +204,9 @@ export default function SettingsPage() {
         )}
       </div>
 
+      {/* Journal settings: unit, main account, session, time zone (moved here from the interface card) */}
+      <JournalSettingsCard />
+
       {/* Interface Settings Card */}
       <div className="card space-y-4">
         <h4 className="h4">{dict.settings.uiParams}</h4>
@@ -237,11 +240,6 @@ export default function SettingsPage() {
               {dict.settings.languageEn}
             </button>
           </div>
-        </div>
-
-        {/* Time zone: the shared picker (stores the IANA id) */}
-        <div className="rounded-xl border border-line bg-s2/40 p-3">
-          <TimezoneSelect label={dict.timezones.label} value={gameState.profile.timezone} onChange={updateTimezone} />
         </div>
 
         <div className="text-xs text-mu space-y-2 pt-2">

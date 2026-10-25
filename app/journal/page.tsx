@@ -25,6 +25,7 @@ const ImportWizard = dynamic(() => import("@/components/journal/ImportWizard").t
 const ExportDialog = dynamic(() => import("@/components/journal/ExportDialog").then((m) => m.ExportDialog), { ssr: false });
 import { Tabs, Segmented, Button, Input, Modal, NumberInput, Select } from "@/components/ui";
 import { JournalKpiStrip, type JournalUnit } from "@/components/journal/JournalKpiStrip";
+import { initialUnit } from "@/lib/journal/preferences";
 import { TodayPanel } from "@/components/journal/TodayPanel";
 import { TradesTable } from "@/components/journal/TradesTable";
 import { TradeQuickView } from "@/components/journal/TradeQuickView";
@@ -69,6 +70,7 @@ export default function JournalPage() {
     deleteNoTrade,
     getTradingPlan,
     saveTradingPlan,
+    preferences,
   } = useJournal();
 
   // Subtab in Trades tab: 'trades' | 'noTrade'
@@ -136,14 +138,13 @@ export default function JournalPage() {
     } catch {}
   };
 
+  // Opens with the default unit from «Settings → Journal», else the last switch on this device, else R
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const savedUnit = AppStorage.getItem("ayra_journal_unit") as "R" | "money" | "percent";
-      if (savedUnit && ["R", "money", "percent"].includes(savedUnit)) {
-        setUnit(savedUnit);
-      }
+      setUnit(initialUnit(preferences, AppStorage.getItem("ayra_journal_unit")));
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preferences.defaultUnit]);
 
   const handleUnitChange = (newUnit: "R" | "money" | "percent") => {
     setUnit(newUnit);

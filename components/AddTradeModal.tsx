@@ -50,6 +50,7 @@ import {
   Textarea,
   toLocalDateTime,
 } from "@/components/ui";
+import { defaultAccountId } from "@/lib/journal/preferences";
 
 interface AddTradeModalProps {
   isOpen: boolean;
@@ -124,6 +125,7 @@ export function AddTradeModal({ isOpen, onClose, initialTrade, initialOpenedAt }
     strategies,
     lastSelectedAccountId,
     lastSelectedInstrument,
+    preferences,
     saveTrade,
     saveAccount,
     getTradingPlan,
@@ -294,15 +296,14 @@ export function AddTradeModal({ isOpen, onClose, initialTrade, initialOpenedAt }
         setDraftRestored(true);
       } else {
         setActiveTradeId(`tr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
-        const defaultAcc =
-          lastSelectedAccountId && activeAccounts.some((a) => a.id === lastSelectedAccountId)
-            ? lastSelectedAccountId
-            : activeAccounts[0]?.id || "";
+        // «Settings → Journal»: the main account if set and active, else the last used, else the first
+        const defaultAcc = defaultAccountId(preferences, lastSelectedAccountId, activeAccounts);
         setAccountId(defaultAcc);
         setInstrument(lastSelectedInstrument || "");
         setDirection("long");
         setOpenedAt(initialOpenedAt || getCurrentLocalIso());
         resetFields();
+        setSession(preferences.defaultSession ?? "");
         setStrategyId("");
         setRuleChecks({});
         setAttachmentIds([]);
