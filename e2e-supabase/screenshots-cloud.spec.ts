@@ -118,8 +118,10 @@ async function syncNow(page: Page) {
 
 /** Automatic mode: «Retry» in the cloud badge panel (what waits goes up now instead of after the pause). */
 async function retryNow(page: Page) {
-  // while an attempt is running the badge has no button: try again until it is there
+  // while an attempt is running the badge has no button: try again until it is there; if the automatic retry already
+  // sent everything, there is nothing to press
   await expect(async () => {
+    if ((await page.getByTestId("sync-badge").getAttribute("data-state")) === "synced") return;
     if (!(await page.getByTestId("sync-badge-panel").isVisible())) await page.getByTestId("sync-badge").click();
     await page.getByTestId("sync-badge-action").click({ timeout: 2000 });
   }).toPass({ timeout: 45000 });
