@@ -429,3 +429,27 @@ describe("auto / manual exchange on a device (owner decision 2026-10-21)", () =>
     expect(cloud.get("journal_trades", "tb2")).toBeDefined();
   });
 });
+
+describe("records written outside the repository (guest journal copied in, variant A)", () => {
+  it("are queued once and go to the cloud; what the cloud already has is not queued again", async () => {
+    onDevice("A");
+    devA.saveTrade(trade("t_known"));
+    await sync(devA);
+    // the copy writes the journal straight into storage (like copyGuestToAccount)
+    const key = `ayra:${USER}:ayra_journal_v1`;
+    const journal = JSON.parse(localStorage.getItem(key)!);
+    journal.trades.push({ ...trade("t_copied"), updatedAt: "2026-10-18T12:00:00.000Z" });
+    localStorage.setItem(key, JSON.stringify(journal));
+    expect(devA.adoptLocalRecords()).toBe(1);
+    expect(devA.getCloudStatus().pending).toBe(1);
+    await sync(devA);
+    expect(cloud.get("journal_trades", "t_copied")).toBeDefined();
+    expect(devA.adoptLocalRecords()).toBe(0);
+  });
+
+  it("before the first sync nothing is queued: the journal waits for «Upload to the cloud»", () => {
+    onDevice("A");
+    localStorage.removeItem(`ayra:${USER}:ayra_sync_state`);
+    expect(devA.adoptLocalRecords()).toBe(0);
+  });
+});

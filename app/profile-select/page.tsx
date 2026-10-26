@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp } from "@/lib/context";
 import { useAuth } from "@/lib/auth/auth-context";
+import { useJournal } from "@/lib/journal/context";
 import { sanitizeRedirectUrl } from "@/lib/auth/redirect-whitelist";
 import {
   copyGuestToAccount,
@@ -26,6 +27,7 @@ export default function ProfileSelectPage() {
   const { dict, lang } = useApp();
   const t = dict.profileSelect;
   const { authState, user, profile } = useAuth();
+  const { adoptCopiedJournal } = useJournal();
   const nextDestination = sanitizeRedirectUrl(searchParams.get("next"), "/");
 
   const [summary, setSummary] = useState<SpaceSummary | null>(null);
@@ -64,7 +66,9 @@ export default function ProfileSelectPage() {
     setBusy("copy");
     setError(null);
     try {
-      const result = await copyGuestToAccount(user.id, { nickname: profile?.nickname });
+      const result = await copyGuestToAccount(user.id);
+      // the copied journal goes to the cloud like any other change (variant A)
+      adoptCopiedJournal();
       setProfileChoice(user.id, "copied");
       if (result.failedAttachments > 0) {
         setFailedAttachments(result.failedAttachments);

@@ -121,14 +121,15 @@ test.describe("After onboarding: optional guest transfer, existing accounts", ()
 
     await tabB.waitForURL("**/profile-select**", { timeout: 10000 });
     await expect(tabB.locator("main")).toContainText("GuestZed");
-    await tabB.click("button:has-text('Перенести данные гостя')");
+    await tabB.click("button:has-text('Перенести журнал гостя')");
     await tabB.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
 
     const profile = await cloudProfile(tabB, email);
     expect(profile.nickname).toMatch(/^Acc\d+$/);
     const account = await tabB.evaluate((id) => JSON.parse(localStorage.getItem(`ayra:${id}:ayra_demo_v1`)!), profile.id);
     expect(account.name).toBe(profile.nickname);
-    expect(account.level).toBe(3);
+    // variant A: the guest level (3) is not moved into the account
+    expect(account.level ?? 1).toBe(1);
   });
 
   test("existing account (nickname + onboarded on this device) signs in by password and opens Home, no letter", async ({ context }) => {

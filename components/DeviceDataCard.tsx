@@ -40,7 +40,7 @@ export function DeviceDataCard() {
   const { dict, lang } = useApp();
   const t = dict.deviceData;
   const { user, profile, signOut } = useAuth();
-  const { readUnsynced, cloudActive, initialSync, accounts, trades, strategies, notes, noTrades, plans, weekPlans } = useJournal();
+  const { readUnsynced, cloudActive, initialSync, adoptCopiedJournal, accounts, trades, strategies, notes, noTrades, plans, weekPlans } = useJournal();
   const journalCounts = useMemo(
     () => deviceJournalCounts({ accounts, trades, strategies, notes, noTrades, plans, weekPlans }),
     [accounts, trades, strategies, notes, noTrades, plans, weekPlans]
@@ -104,7 +104,8 @@ export function DeviceDataCard() {
     run(async () => {
       if (!user) return null;
       try {
-        await copyGuestToAccount(user.id, { nickname: profile?.nickname });
+        await copyGuestToAccount(user.id);
+        adoptCopiedJournal();
       } catch {
         setStatus({ kind: "error", text: t.copyError });
         return null;
