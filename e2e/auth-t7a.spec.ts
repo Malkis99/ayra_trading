@@ -71,7 +71,7 @@ test.describe("T7a.1 Auth & Screen Routing (Mock Mode)", () => {
     await page.waitForURL((url) => url.pathname === "/", { timeout: 5000 });
 
     // Go to Settings and Log Out
-    await page.goto("/settings");
+    await page.goto("/settings/account");
     await page.click("button:has-text('Выйти')");
 
     // Unauthenticated user trying to access /settings should be redirected to /login

@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { BookOpen, RefreshCw } from "lucide-react";
+import React, { useMemo } from "react";
+import Link from "next/link";
+import { BookOpen } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useJournal } from "@/lib/journal/context";
@@ -11,8 +12,7 @@ import { SESSIONS_CATALOG, type JournalUnit, type TradeSession } from "@/lib/jou
 import { Segmented, Select } from "@/components/ui/forms";
 import { SettingRow } from "@/components/ui/SettingRow";
 import { TimezoneSelect } from "@/components/TimezoneSelect";
-import { InitialSyncButton } from "@/components/journal/InitialSyncDialog";
-import { Button } from "@/components/ui";
+import { settingsHref } from "@/lib/settings/sections";
 import { formatString } from "@/lib/i18n";
 
 const LAST_USED = "__last_used__";
@@ -27,8 +27,7 @@ export function JournalSettingsCard() {
   const { dict } = useApp();
   const t = dict.journalSettings;
   const { gameState, updateTimezone } = useGame();
-  const { preferences, setPreferences, accounts, cloudActive, syncMode, setSyncMode, syncNow, cloudStatus, initialSync } = useJournal();
-  const [syncing, setSyncing] = useState(false);
+  const { preferences, setPreferences, accounts, cloudActive, syncMode } = useJournal();
   const activeAccounts = useMemo(() => accounts.filter((a) => !a.archivedAt), [accounts]);
 
   // Shown value = what the Journal opens with now (the default, else the last switch on this device)
@@ -49,45 +48,14 @@ export function JournalSettingsCard() {
       </div>
 
       <div className="space-y-4 rounded-xl border border-line bg-s2/40 p-3.5">
-        {/* Signed in with the cloud flag on: automatic or manual exchange on this device */}
+        {/* The cloud switch lives in «Cloud and data»; here only where it is set now */}
         {cloudActive && (
-          <SettingRow title={t.cloudModeTitle} hint={t.cloudModeHint} hintLabel={t.hintLabel} data-testid="journal-settings-cloud">
-            <Segmented<"auto" | "manual">
-              name="journal-cloud-mode"
-              options={[
-                { value: "auto", label: t.cloudModeAuto },
-                { value: "manual", label: t.cloudModeManual },
-              ]}
-              value={syncMode}
-              onChange={setSyncMode}
-            />
-            <p className="text-[11px] text-mu">{t.cloudModeDeviceNote}</p>
-            {initialSync.needed ? (
-              <InitialSyncButton />
-            ) : (
-              syncMode === "manual" && (
-                <div className="flex flex-wrap items-center gap-3">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={syncing}
-                    onClick={async () => {
-                      setSyncing(true);
-                      await syncNow();
-                      setSyncing(false);
-                    }}
-                    data-testid="journal-settings-sync-now"
-                  >
-                    <RefreshCw size={14} className={syncing ? "motion-safe:animate-spin" : undefined} aria-hidden="true" />
-                    <span>{t.syncNowBtn}</span>
-                  </Button>
-                  <span className="text-xs text-mu" data-testid="journal-settings-pending">
-                    {cloudStatus.pending > 0 ? formatString(t.syncNowPending, { count: cloudStatus.pending }) : t.syncNowNothing}
-                  </span>
-                </div>
-              )
-            )}
-          </SettingRow>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs" data-testid="journal-settings-cloud-link">
+            <span className="text-tx">{formatString(dict.settings.sections.journalCloudRow, { mode: syncMode === "manual" ? t.cloudModeManual : t.cloudModeAuto })}</span>
+            <Link href={settingsHref("cloud", "mode")} className="font-semibold text-vi hover:underline">
+              {dict.settings.sections.journalCloudChange}
+            </Link>
+          </div>
         )}
 
         <SettingRow title={t.unitTitle} hint={t.unitHint} hintLabel={t.hintLabel} data-testid="journal-settings-unit">

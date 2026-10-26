@@ -78,7 +78,7 @@ test.describe("Cloud journal with the sync flag off", () => {
     await expect(page.getByTestId("sync-badge")).toHaveCount(0);
 
     // flag off: Settings texts as before (local data notice, «no cloud sync yet» in the sign-out confirmation)
-    await page.goto("/settings");
+    await page.goto("/settings/cloud");
     const notice = page.getByTestId("account-data-notice");
     await expect(notice).toHaveAttribute("data-state", "local");
     await expect(notice).toContainText("Данные пока хранятся на этом устройстве");

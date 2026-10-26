@@ -42,7 +42,7 @@ test.describe("T7a-B2 Space Switching & Isolation E2E", () => {
     await expect(page.locator("body")).not.toContainText("TraderOne");
 
     // 3. Logout
-    await page.goto("/settings");
+    await page.goto("/settings/account");
     await page.click("button:has-text('Выйти')");
 
     // 4. Returns to Guest mode with TraderOne restored and "Гость" badge
@@ -74,7 +74,7 @@ test.describe("T7a-B2 Space Switching & Isolation E2E", () => {
     await page1.waitForURL("**/awakening**", { timeout: 5000 });
 
     // Logout on Page 1
-    await page1.goto("/settings");
+    await page1.goto("/settings/account");
     await page1.click("button:has-text('Выйти')");
 
     // Page 2 receives space change event

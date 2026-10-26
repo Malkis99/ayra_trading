@@ -123,7 +123,7 @@ test.describe("Cloud journal outbox (flag on in the fake server)", () => {
 
     await addTrade(page, "gbpusd", true);
     await expect.poll(async () => (await outbox(page, a.userId)).map((e) => e.id).length).toBeGreaterThan(0);
-    await page.goto("/settings");
+    await page.goto("/settings/account");
     const signOutStarted = Date.now();
     await page.getByRole("button", { name: "Выйти", exact: true }).click();
     // Signed out, the app sends a guest from /settings to /login (Shell rule 2). The guest header with a "Войти" link

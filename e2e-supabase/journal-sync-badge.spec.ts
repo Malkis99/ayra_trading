@@ -191,7 +191,7 @@ test.describe("Cloud badge in the header", () => {
     await expect(badge(page)).toHaveAttribute("data-state", "synced", { timeout: 15000 });
 
     // nothing waiting: the usual confirmation straight away
-    await page.goto("/settings");
+    await page.goto("/settings/cloud");
     const card = page.locator(".card", { hasText: "Данные на этом устройстве" });
     await card.getByRole("button", { name: "Выйти и удалить данные аккаунта с этого устройства" }).click();
     await expect(page.getByTestId("unsynced-warning")).toHaveCount(0);
@@ -202,7 +202,7 @@ test.describe("Cloud badge in the header", () => {
     await request.get(`${FAKE_SUPABASE}/__test/fail-journal-writes?count=1000`);
     await addTrade(page, "eurusd");
     await expect(badge(page)).toHaveAttribute("data-state", "error", { timeout: 15000 });
-    await page.goto("/settings");
+    await page.goto("/settings/cloud");
     await card.getByRole("button", { name: "Выйти и удалить данные аккаунта с этого устройства" }).click();
     const warning = page.getByTestId("unsynced-warning");
     await expect(warning).toContainText("Не всё сохранено в облаке");

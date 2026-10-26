@@ -42,7 +42,7 @@ async function register(page: Page, request: APIRequestContext, email: string, n
 }
 
 async function plainSignOut(page: Page) {
-  await page.goto("/settings");
+  await page.goto("/settings/account");
   await page.getByRole("button", { name: "Выйти", exact: true }).click();
   await page.waitForURL(/\/login/, { timeout: 10000 });
   await expect(page.getByRole("heading", { name: "Войди во вселенную" })).toBeVisible();
@@ -116,13 +116,13 @@ test.describe("Login: e-mail + password", () => {
 
     // right password: back where the user was (?next=/settings), no onboarding, same account, no letter sent
     await submitPasswordSignIn(page, email);
-    await page.waitForURL((url) => url.pathname === "/settings", { timeout: 10000 });
+    await page.waitForURL((url) => url.pathname === "/settings/account", { timeout: 10000 });
     expect(await lastCode(request, email)).toBe(codeBefore);
     await page.goto("/journal");
     await expect(page.locator("main")).toContainText("NAS100");
     await expect(page.getByTestId("sync-badge")).toHaveAttribute("data-state", "synced", { timeout: 15000 });
     expect(await page.evaluate((id) => localStorage.getItem(`ayra:${id}:ayra_journal_v1`) || "", userId)).toContain("NAS100");
-    await page.goto("/settings");
+    await page.goto("/settings/account");
     await expect(page.getByTestId("password-open")).toHaveText("Сменить пароль");
   });
 

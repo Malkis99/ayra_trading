@@ -65,7 +65,7 @@ test.describe("Settings: create and change the password", () => {
       await expect.poll(cloudTrades, { timeout: 15000 }).toBe(1);
 
       await page.setViewportSize(viewport);
-      await page.goto("/settings");
+      await page.goto("/settings/account");
       await request.get(`${FAKE_SUPABASE}/__test/logouts?reset=1`);
       const lastLinkBefore = await (await request.get(`${FAKE_SUPABASE}/__test/last-link?email=${encodeURIComponent(email)}`)).json();
 
@@ -114,7 +114,7 @@ test.describe("Settings: create and change the password", () => {
       expect(space).toContain("NAS100");
 
       // change: the current password is checked first; a wrong one changes nothing
-      await page.goto("/settings");
+      await page.goto("/settings/account");
       await open.click();
       await expect(page.getByTestId("password-current")).toBeVisible();
       await page.getByTestId("password-current").fill("wrong password");

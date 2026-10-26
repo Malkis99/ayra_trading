@@ -49,7 +49,7 @@ const card = (page: Page) => page.locator(".card", { hasText: "Данные на
 test.describe("C2 Settings: data on this device", () => {
   test("shows the guest summary, exports JSON and copies the guest into an empty account", async ({ page }) => {
     await seed(page);
-    await page.goto("/settings");
+    await page.goto("/settings/cloud");
     await expect(card(page)).toContainText("GuestZed");
 
     const downloadPromise = page.waitForEvent("download");
@@ -68,7 +68,7 @@ test.describe("C2 Settings: data on this device", () => {
 
   test("hides copy when the account already has data; deletes guest data after typed confirmation", async ({ page }) => {
     await seed(page, { accountData: true });
-    await page.goto("/settings");
+    await page.goto("/settings/cloud");
     await expect(card(page)).toContainText("GuestZed");
     await expect(card(page).getByRole("button", { name: "Скопировать в аккаунт" })).toHaveCount(0);
 
@@ -89,7 +89,7 @@ test.describe("C2 Settings: data on this device", () => {
 
   test("signs out and deletes account data from the device, guest data stays", async ({ page }) => {
     await seed(page, { accountData: true });
-    await page.goto("/settings");
+    await page.goto("/settings/cloud");
 
     await card(page).getByRole("button", { name: "Выйти и удалить данные аккаунта с этого устройства" }).click();
     const dialog = page.getByRole("dialog");
@@ -106,7 +106,7 @@ test.describe("C2 Settings: data on this device", () => {
   test("360px layout has no horizontal overflow", async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 740 });
     await seed(page);
-    await page.goto("/settings");
+    await page.goto("/settings/cloud");
     await expect(card(page)).toContainText("GuestZed");
     const overflow = await page.evaluate(() => {
       const main = document.querySelector("main")!;
