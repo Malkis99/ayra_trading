@@ -146,7 +146,7 @@ test.describe("After onboarding: optional guest transfer, existing accounts", ()
     await first.click("button:has-text('Не переносить')");
     await first.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
     await first.close();
-    await tabA.goto("/settings");
+    await tabA.goto("/settings/account");
     await tabA.getByRole("button", { name: SIGN_OUT_LABEL, exact: true }).click();
     await expect(tabA.getByRole("link", { name: /Войти/ }).first()).toBeVisible();
 

@@ -105,7 +105,7 @@ test.describe("C1 /profile-select after onboarding", () => {
 
     await page.click("button:has-text('Решить позже')");
     await page.waitForURL((url) => url.pathname === "/", { timeout: 5000 });
-    await page.goto("/settings");
+    await page.goto("/settings/cloud");
     await expect(page.getByRole("button", { name: "Скопировать в аккаунт" })).toBeVisible();
   });
 

@@ -82,7 +82,7 @@ test.describe("Settings → Journal", () => {
     await expect(A.getByTestId("initial-sync-done")).toBeVisible({ timeout: 15000 });
     await A.getByTestId("initial-sync-close").click();
 
-    await A.goto("/settings");
+    await A.goto("/settings/journal");
     const card = A.getByTestId("journal-settings");
     await expect(card).toContainText("Журнал");
     await expect(card).toContainText("Часовой пояс пока хранится на этом устройстве и с облаком не синхронизируется.");
@@ -123,7 +123,7 @@ test.describe("Settings → Journal", () => {
     const B = await openDevice(ctxB, 360, 740);
     await signIn(B, email);
     await B.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 10000 });
-    await B.goto("/settings");
+    await B.goto("/settings/journal");
     const cardB = B.getByTestId("journal-settings");
     await expect(cardB.getByTestId("journal-settings-unit").getByRole("radio", { name: "$" })).toHaveAttribute("aria-checked", "true", { timeout: 15000 });
     await expect(B.getByTestId("journal-settings-account-select")).toContainText("Prop");
@@ -177,16 +177,16 @@ test.describe("Settings → Journal", () => {
     await addTrade("nas100", true);
     await expect.poll(cloudTrades, { timeout: 15000 }).toBe(1);
 
-    await page.goto("/settings");
-    const row = page.getByTestId("journal-settings-cloud");
+    await page.goto("/settings/cloud");
+    const row = page.getByTestId("cloud-sync-mode");
     await expect(row).toBeVisible();
     await expect(row.getByRole("radio", { name: "Автоматически" })).toHaveAttribute("aria-checked", "true");
     await row.getByRole("button", { name: "Подсказка: Синхронизация с облаком" }).hover();
     await expect(row).toContainText("Вручную — ничего не отправляется и не подтягивается само");
-    await shot(page, "settings-cloud-mode-1440", "journal-settings");
+    await shot(page, "settings-cloud-mode-1440", "cloud-settings");
     await page.keyboard.press("Escape");
     await row.getByRole("radio", { name: "Вручную" }).click();
-    await expect(page.getByTestId("journal-settings-sync-now")).toBeVisible();
+    await expect(page.getByTestId("cloud-sync-now")).toBeVisible();
 
     // manual: nothing goes by itself — not after the edit, not on return, not after a reload
     await addTrade("eurusd");
@@ -196,15 +196,15 @@ test.describe("Settings → Journal", () => {
     await page.reload();
     await page.waitForTimeout(3000);
     expect(await cloudTrades()).toBe(1);
-    await page.goto("/settings");
-    await expect(page.getByTestId("journal-settings-cloud").getByRole("radio", { name: "Вручную" })).toHaveAttribute("aria-checked", "true");
-    await expect(page.getByTestId("journal-settings-pending")).toContainText("Ждёт отправки: 1");
-    await shot(page, "settings-cloud-manual-1440", "journal-settings");
+    await page.goto("/settings/cloud");
+    await expect(page.getByTestId("cloud-sync-mode").getByRole("radio", { name: "Вручную" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByTestId("cloud-sync-pending")).toContainText("Ждёт отправки: 1");
+    await shot(page, "settings-cloud-manual-1440", "cloud-settings");
 
     // «Synchronise»: sent now
-    await page.getByTestId("journal-settings-sync-now").click();
+    await page.getByTestId("cloud-sync-now").click();
     await expect.poll(cloudTrades, { timeout: 15000 }).toBe(2);
-    await expect(page.getByTestId("journal-settings-pending")).toContainText("Неотправленных изменений нет.");
+    await expect(page.getByTestId("cloud-sync-pending")).toContainText("Неотправленных изменений нет.");
 
     // the badge offers the same button
     await addTrade("gbpusd");
@@ -214,8 +214,8 @@ test.describe("Settings → Journal", () => {
     await expect.poll(cloudTrades, { timeout: 15000 }).toBe(3);
 
     // automatic again: the next trade goes by itself
-    await page.goto("/settings");
-    await page.getByTestId("journal-settings-cloud").getByRole("radio", { name: "Автоматически" }).click();
+    await page.goto("/settings/cloud");
+    await page.getByTestId("cloud-sync-mode").getByRole("radio", { name: "Автоматически" }).click();
     await addTrade("usdjpy");
     await expect.poll(cloudTrades, { timeout: 15000 }).toBe(4);
     await ctx.close();
@@ -245,7 +245,7 @@ test.describe("Settings → Journal", () => {
     const page = await openDevice(ctx);
 
     // signed out: the guest's own profile
-    await page.goto("/settings");
+    await page.goto("/settings/cloud");
     await expect(page.locator("main")).toContainText("Твой гостевой профиль");
     await expect(page.getByTestId("guest-block")).toHaveCount(0);
 
@@ -257,10 +257,10 @@ test.describe("Settings → Journal", () => {
       await page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
     }
 
-    await page.goto("/settings");
+    await page.goto("/settings/cloud");
     // flag off for this account: no cloud sync switch
-    await expect(page.getByTestId("journal-settings")).toBeVisible();
-    await expect(page.getByTestId("journal-settings-cloud")).toHaveCount(0);
+    await expect(page.getByTestId("cloud-settings")).toBeVisible();
+    await expect(page.getByTestId("cloud-sync-mode")).toHaveCount(0);
     const block = page.getByTestId("guest-block");
     await expect(block).toContainText("Гость на этом устройстве");
     await expect(block).toContainText("Не связан с аккаунтом");

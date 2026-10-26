@@ -82,7 +82,7 @@ const accountXp = (page: Page, userId: string) => page.evaluate((id) => JSON.par
 
 /** Settings → «Данные на этом устройстве» → journal counters of the open account, by cloud table. */
 async function deviceCounts(page: Page) {
-  await page.goto("/settings");
+  await page.goto("/settings/cloud");
   const list = page.getByTestId("device-journal-counts");
   await expect(list).toBeVisible();
   return list.evaluate((dl) => {
@@ -106,7 +106,7 @@ const signOutDeleteBtn = (page: Page) =>
   page.locator(".card", { hasText: "Данные на этом устройстве" }).getByRole("button", { name: "Выйти и удалить данные аккаунта с этого устройства" });
 
 async function plainSignOut(page: Page) {
-  await page.goto("/settings");
+  await page.goto("/settings/account");
   await page.getByRole("button", { name: "Выйти", exact: true }).click();
   await page.waitForURL(/\/login/, { timeout: 10000 });
 }
@@ -332,7 +332,7 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
 
     await test.step("18: «Sign out and delete» with an unsent change — warning with the count, only «Cancel»", async () => {
       // offline another page cannot be opened: Settings is opened first, the trade is added from the header «+»
-      await B.page.goto("/settings");
+      await B.page.goto("/settings/cloud");
       await expect(signOutDeleteBtn(B.page)).toBeVisible();
       const notice = B.page.getByTestId("account-data-notice");
       await expect(notice).toHaveAttribute("data-state", "synced", { timeout: 15000 });
@@ -423,7 +423,7 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
       await expect(A.page.getByTestId("trades-table")).toContainText("NAS100");
       await addTrade(A.page, "btcusd");
       await expect(A.page.getByTestId("trades-table")).toContainText("BTCUSD");
-      await A.page.goto("/settings");
+      await A.page.goto("/settings/cloud");
       await expect(A.page.getByTestId("account-data-notice")).toContainText("Данные пока хранятся на этом устройстве");
       await A.page.waitForTimeout(1500);
       expect(await ownerCloud()).toBe(cloudBefore);

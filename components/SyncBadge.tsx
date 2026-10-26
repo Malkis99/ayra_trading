@@ -7,6 +7,8 @@ import { useApp } from "@/lib/context";
 import { formatString } from "@/lib/i18n";
 import { syncBadge, type SyncBadgeState } from "@/lib/journal/cloud/badge";
 import { Button } from "@/components/ui";
+import Link from "next/link";
+import { settingsHref } from "@/lib/settings/sections";
 import { cn } from "@/components/ui/cn";
 
 /** The badge glyph: a different shape for every state (never colour alone). */
@@ -156,6 +158,15 @@ export function SyncBadge() {
               {t.actions[view.action]}
             </Button>
           )}
+          {/* Cloud settings: mode, status, data on this device */}
+          <Link
+            href={settingsHref("cloud")}
+            onClick={() => setOpen(false)}
+            className="block text-center text-xs font-semibold text-vi hover:underline"
+            data-testid="sync-badge-settings"
+          >
+            {dict.settings.sections.openCloudSettings}
+          </Link>
         </div>
       )}
     </div>
