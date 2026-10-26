@@ -20,7 +20,22 @@ const STUB = `
   CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$
     SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
   GRANT USAGE ON SCHEMA auth TO anon, authenticated;`;
-async function fresh() { const db = new PGlite(); await db.exec(STUB); return db; }
+// Minimal Supabase Storage: buckets, objects (RLS on, rules decide), foldername(). The Storage server's own checks
+// (bucket size and type limits before a file is accepted) are not here — the bucket settings are checked instead.
+const STORAGE_STUB = `
+  CREATE SCHEMA storage;
+  CREATE TABLE storage.buckets (id text PRIMARY KEY, name text NOT NULL, public boolean DEFAULT false,
+    file_size_limit bigint, allowed_mime_types text[], created_at timestamptz DEFAULT now());
+  CREATE TABLE storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text REFERENCES storage.buckets(id),
+    name text NOT NULL, owner uuid, metadata jsonb, created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(),
+    UNIQUE (bucket_id, name));
+  ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+  CREATE FUNCTION storage.foldername(name text) RETURNS text[] LANGUAGE sql IMMUTABLE AS $$
+    SELECT (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1) - 1] $$;
+  GRANT USAGE ON SCHEMA storage TO anon, authenticated;
+  GRANT SELECT ON storage.buckets TO anon, authenticated;
+  GRANT ALL ON storage.objects TO anon, authenticated;`;
+async function fresh() { const db = new PGlite(); await db.exec(STUB); await db.exec(STORAGE_STUB); return db; }
 const ok = (m) => console.log("PASS", m);
 const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
 
@@ -118,4 +133,61 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   const left = (await db.query(`SELECT count(*)::int n FROM public.user_features WHERE cloud_sync`)).rows[0].n;
   const kept = (await db.query(`SELECT count(*)::int n FROM public.journal_trades`)).rows[0].n;
   off.affectedRows === 1 && left === 0 && kept === 4 ? ok("F: rollback UPDATE 1, flag off, nothing deleted") : fail(`F: rollback ${off.affectedRows}/${left}/${kept}`);
+}
+
+// G. 0005: screenshots in the cloud — bucket, rows, Storage rules (limits, hard cap, delayed removal), applied twice;
+// the usage check works; rollback stops on a non-empty bucket and otherwise removes everything, keeping 0001–0004
+{
+  const db = await fresh();
+  for (const f of ["0001_init", "0002_profile_defaults", "0003_nickname_cooldown", "0004_journal_sync"]) await db.exec(read(`supabase/migrations/${f}.sql`));
+  await db.exec(read("supabase/migrations/0005_journal_attachments.sql"));
+  await db.exec(read("supabase/migrations/0005_journal_attachments.sql")); ok("G: 0005 applied twice");
+  try { await db.exec(read("supabase/tests/journal_attachments_rls.sql")); ok("G: tests/journal_attachments_rls.sql passed"); } catch (e) { fail(`G: test script: ${e.message}`); }
+  const left = (await db.query(`SELECT (SELECT count(*) FROM public.journal_attachments)::int + (SELECT count(*) FROM storage.objects)::int AS n`)).rows[0].n;
+  left === 0 ? ok("G: test rolled back (no rows left)") : fail("G: rows left after test");
+  const chk = (await db.query(read("supabase/checks/0005_status.sql"))).rows[0];
+  console.log("   check:", JSON.stringify(chk));
+  const want = { attachments_table: true, rls_enabled: true, client_delete_grants: 0, files_trigger: true, bucket_private: true,
+    bucket_mime_types: "image/jpeg,image/png,image/webp", storage_policies: 3, storage_update_policies: 0, file_bytes: "5242880",
+    quota_bytes: "209715200", hard_cap_bytes: "419430400", delete_after_days: "30", orphan_min_age_hours: "24", helpers_bypass_rls: true };
+  const bad = Object.entries(want).filter(([k, v]) => chk[k] !== v);
+  bad.length === 0 && Number(chk.bucket_size_limit) === 5242880 ? ok("G: check query") : fail(`G: check query ${JSON.stringify(bad)}`);
+
+  // owner changes a limit, re-runs the migration: the change is kept
+  await db.exec(`UPDATE public.journal_limits SET attachment_quota_bytes = 1 WHERE id = 1`);
+  await db.exec(read("supabase/migrations/0005_journal_attachments.sql"));
+  const q = (await db.query(`SELECT attachment_quota_bytes::text AS q FROM public.journal_limits`)).rows[0].q;
+  q === "1" ? ok("G: re-run keeps the owner's limits") : fail(`G: re-run reset limits to ${q}`);
+  await db.exec(`UPDATE public.journal_limits SET attachment_quota_bytes = 209715200 WHERE id = 1`);
+
+  // usage check: one live file, one of a deleted screenshot, one without a row
+  const U = "00000000-0000-0000-0000-0000000000d5";
+  await db.exec(`INSERT INTO auth.users (id,email) VALUES ('${U}','usage@x');
+    INSERT INTO public.journal_attachments (user_id, id, data) VALUES
+      ('${U}','a1','{"id":"a1","tradeId":"t","bytes":1048576,"mime":"image/webp","createdAt":"2026-10-01T10:00:00Z"}'),
+      ('${U}','a2','{"id":"a2","tradeId":"t","bytes":2097152,"mime":"image/webp","createdAt":"2026-10-01T10:00:00Z","deletedAt":"2026-10-02T10:00:00Z"}');
+    INSERT INTO storage.objects (bucket_id, name, metadata) VALUES
+      ('journal-attachments','${U}/a1.webp','{"size":1048576}'), ('journal-attachments','${U}/a2.webp','{"size":2097152}'),
+      ('journal-attachments','${U}/x.webp','{"size":524288}')`);
+  const use = (await db.query(read("supabase/checks/attachments_usage.sql"))).rows[0];
+  console.log("   usage:", JSON.stringify(use));
+  (use.email === "usage@x" && Number(use.live_files) === 1 && Number(use.used_mb) === 1.5 && Number(use.all_mb) === 3.5
+    && Number(use.waiting_mb) === 2 && Number(use.orphans) === 1 && Number(use.limit_mb) === 200 && Number(use.hard_cap_mb) === 400)
+    ? ok("G: usage check by user") : fail("G: usage check");
+
+  // rollback with files in the bucket: stops, nothing changed
+  try { await db.exec(read("supabase/migrations/0005_journal_attachments.down.sql")); fail("G: rollback ran on a non-empty bucket"); }
+  catch (e) {
+    await db.exec("ROLLBACK").catch(() => {});
+    const still = (await db.query(read("supabase/checks/0005_status.sql"))).rows[0];
+    /not empty/.test(e.message) && still.attachments_table && still.storage_policies === 3 ? ok("G: rollback stops on a non-empty bucket, nothing changed") : fail(`G: rollback on non-empty: ${e.message}`);
+  }
+  await db.exec(`DELETE FROM storage.objects; DELETE FROM public.journal_attachments`);
+  await db.exec(read("supabase/migrations/0005_journal_attachments.down.sql"));
+  const after = (await db.query(read("supabase/checks/0005_status.sql"))).rows[0];
+  console.log("   after rollback:", JSON.stringify(after));
+  (!after.attachments_table && after.bucket_private === null && after.storage_policies === 0 && after.quota_bytes === null)
+    ? ok("G: rollback removes table, limits, rules and the empty bucket") : fail("G: rollback");
+  const j = (await db.query(read("supabase/checks/0004_status.sql"))).rows[0];
+  j.journal_tables === 9 && j.write_trigger_function && j.cloud_sync_function ? ok("G: rollback keeps 0001–0004") : fail("G: rollback touched 0004");
 }

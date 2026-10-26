@@ -33,6 +33,15 @@
    - Проверка: `supabase/checks/0004_status.sql`. Тест на тестовом проекте (всё откатывается): `supabase/tests/journal_sync_rls.sql`.
    - Откат: `supabase/migrations/0004_journal_sync.down.sql` — **удаляет облачные данные журнала**. Чтобы просто остановить синхронизацию, выключите флаг.
 
+6. Затем `supabase/migrations/0005_journal_attachments.sql` (после 0004). Скриншоты сделок в облаке. План: `docs/t7b-0005-attachments-plan.md`.
+   - Приватный bucket `journal-attachments`: только webp/png/jpeg, до 5 МБ на файл. Файл лежит в папке `<id пользователя>/`.
+   - Таблица `journal_attachments` (скриншот ↔ сделка) — по правилам 0004: только свои строки, мягкое удаление, запись только с флагом `cloud_sync`.
+   - Лимиты — строка в `journal_limits` (меняется `UPDATE`, без миграции): 200 МБ на аккаунт, жёсткий потолок 400 МБ с учётом ещё не убранных файлов, удаление файла через 30 дней после удаления скриншота, файлы без записи — через 24 часа.
+   - Проверка: `supabase/checks/0005_status.sql`; занятое место по пользователям: `supabase/checks/attachments_usage.sql` (только чтение).
+   - Ручная проверка правил на живом проекте: `node scripts/check-attachments-live.mjs low|normal` (шаги — в описании PR 0005-A).
+   - Тест (PGlite с заглушкой Storage, в CI): `supabase/tests/journal_attachments_rls.sql`.
+   - Откат: `supabase/migrations/0005_journal_attachments.down.sql` — **останавливается, если в bucket есть файлы**, ничего не удаляя. Журнал, профили и флаг не трогает.
+
 ## Проверка: применена ли миграция 0001
 
 1. **Supabase Dashboard** → **SQL Editor** → **New query**.
