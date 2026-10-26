@@ -85,7 +85,7 @@ test.describe("Settings → Journal", () => {
     await A.goto("/settings/journal");
     const card = A.getByTestId("journal-settings");
     await expect(card).toContainText("Журнал");
-    await expect(card).toContainText("Часовой пояс пока хранится на этом устройстве и с облаком не синхронизируется.");
+    await expect(card).toContainText("Часовой пояс сохраняется в облачный профиль и появляется на других устройствах");
     // the time zone moved here: one picker on the page
     await expect(A.getByText("Часовой пояс", { exact: true })).toHaveCount(1);
 
