@@ -54,11 +54,28 @@ export interface AuthUser {
   created_at?: string;
   /** The account has a password (set in Settings or by «Forgot password»); accounts made by the e-mail code have none. */
   hasPassword?: boolean;
+  /**
+   * The owner role: `app_metadata.ayra_role === "owner"`. app_metadata is changed only on the server (SQL in the
+   * Supabase panel), never by the user, and comes signed in the session, so it cannot be switched on from the app.
+   */
+  isOwner?: boolean;
 }
 
 /** Supabase session user -> AuthUser. `has_password` is a UI hint in user_metadata, not a security check. */
-function toAuthUser(u: { id: string; email?: string | null; created_at?: string; user_metadata?: Record<string, unknown> | null }): AuthUser {
-  return { id: u.id, email: u.email || "", created_at: u.created_at, hasPassword: u.user_metadata?.has_password === true };
+function toAuthUser(u: {
+  id: string;
+  email?: string | null;
+  created_at?: string;
+  user_metadata?: Record<string, unknown> | null;
+  app_metadata?: Record<string, unknown> | null;
+}): AuthUser {
+  return {
+    id: u.id,
+    email: u.email || "",
+    created_at: u.created_at,
+    hasPassword: u.user_metadata?.has_password === true,
+    isOwner: u.app_metadata?.ayra_role === "owner",
+  };
 }
 
 export type SetPasswordResult = { success: boolean; errorKey?: string; errorDetails?: SanitizedErrorInfo };
@@ -294,13 +311,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (session?.user) {
             const u = toAuthUser(session.user);
             updateToAuthenticated(u, true);
-            // The stored session may hold old user data (a password set on another device): refresh only that flag
+            // The stored session may hold old user data (a password set on another device, the owner role just given):
+            // refresh only these flags from the server
             supabase.auth
               .getUser()
               .then(({ data }) => {
                 if (!isMounted || !data.user) return;
                 const fresh = toAuthUser(data.user);
-                setUser((prev) => (prev && prev.id === fresh.id && prev.hasPassword !== fresh.hasPassword ? { ...prev, hasPassword: fresh.hasPassword } : prev));
+                setUser((prev) =>
+                  prev && prev.id === fresh.id && (prev.hasPassword !== fresh.hasPassword || prev.isOwner !== fresh.isOwner)
+                    ? { ...prev, hasPassword: fresh.hasPassword, isOwner: fresh.isOwner }
+                    : prev
+                );
               })
               .catch(() => {});
           } else {

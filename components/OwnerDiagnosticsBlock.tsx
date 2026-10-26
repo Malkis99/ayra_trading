@@ -6,7 +6,19 @@ import { useApp } from "@/lib/context";
 import { AppStorage } from "@/lib/storage";
 import { ChevronDown, Copy, Check, Terminal } from "lucide-react";
 
+/** Only the owner sees diagnostics (app_metadata.ayra_role = "owner", set by SQL; see the PR / supabase/README.md). */
+export function canSeeDiagnostics(user: { isOwner?: boolean } | null | undefined): boolean {
+  return Boolean(user?.isOwner);
+}
+
 export function OwnerDiagnosticsBlock() {
+  const { user } = useAuth();
+  if (!canSeeDiagnostics(user)) return null;
+  return <DiagnosticsBlock />;
+}
+
+/** The diagnostics themselves (no gate): auth state, space, route reason, version — no personal data or tokens. */
+export function DiagnosticsBlock() {
   const { dict } = useApp();
   const { auth } = dict;
   const { authState, activeSpaceId, lastRouteReason } = useAuth();

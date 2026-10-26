@@ -1,10 +1,31 @@
 import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { OwnerDiagnosticsBlock } from "@/components/OwnerDiagnosticsBlock";
+import { DiagnosticsBlock, OwnerDiagnosticsBlock, canSeeDiagnostics } from "@/components/OwnerDiagnosticsBlock";
 import { AppProvider } from "@/lib/context";
 import { AuthProvider } from "@/lib/auth/auth-context";
 import { AppStorage } from "@/lib/storage";
+
+describe("diagnostics only for the owner (app_metadata.ayra_role)", () => {
+  it("owner role → visible; anyone else (guest, account without the role) → hidden", () => {
+    expect(canSeeDiagnostics({ isOwner: true })).toBe(true);
+    expect(canSeeDiagnostics({ isOwner: false })).toBe(false);
+    expect(canSeeDiagnostics({})).toBe(false);
+    expect(canSeeDiagnostics(null)).toBe(false);
+  });
+
+  it("a guest (no account) does not see the block", () => {
+    localStorage.clear();
+    render(
+      <AppProvider initialLang="ru">
+        <AuthProvider>
+          <OwnerDiagnosticsBlock />
+        </AuthProvider>
+      </AppProvider>
+    );
+    expect(screen.queryByText(/Диагностика/i)).toBeNull();
+  });
+});
 
 describe("OwnerDiagnosticsBlock Unit Test", () => {
   beforeEach(() => {
@@ -22,7 +43,7 @@ describe("OwnerDiagnosticsBlock Unit Test", () => {
     render(
       <AppProvider initialLang="ru">
         <AuthProvider>
-          <OwnerDiagnosticsBlock />
+          <DiagnosticsBlock />
         </AuthProvider>
       </AppProvider>
     );
