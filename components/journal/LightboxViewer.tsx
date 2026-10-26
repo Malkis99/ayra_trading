@@ -366,6 +366,7 @@ export function LightboxViewer({
                 <button
                   onClick={handleConfirmDelete}
                   className="py-1.5 px-4 text-xs font-semibold text-black bg-rose-500 hover:bg-rose-400 rounded-xl transition-colors"
+                  data-testid="lightbox-confirm-delete"
                 >
                   {dictAtt.confirmDeleteBtn}
                 </button>

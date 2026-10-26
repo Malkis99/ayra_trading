@@ -1,4 +1,4 @@
-// Minimal in-memory stand-in for Supabase Auth (GoTrue) and PostgREST, used only by e2e tests.
+// Minimal in-memory stand-in for Supabase Auth (GoTrue), PostgREST and Storage (bucket of 0005), used only by e2e tests.
 // It speaks the same HTTP API that @supabase/supabase-js and @supabase/ssr use, so the app
 // runs its real PKCE magic-link flow: /otp -> email link -> /auth/callback?code -> /token?grant_type=pkce.
 import http from "node:http";
@@ -41,6 +41,28 @@ export function createFakeSupabase() {
   let journalWriteDelayMs = 0; // every journal write waits this long (slow network: lets a test cancel mid-upload)
   let journalClock = Date.now();
   const JOURNAL_ID_KEY = { journal_day_plans: "date", journal_week_plans: "weekStartDate" };
+  // Migration 0005 stand-in: private bucket journal-attachments with the same rules as the server
+  const BUCKET = "journal-attachments";
+  const IMAGE_TYPES = ["image/webp", "image/png", "image/jpeg"];
+  const FILE_LIMIT = 5 * 1024 * 1024;
+  let attachmentQuota = 200 * 1024 * 1024; // journal_limits.attachment_quota_bytes (the owner can lower it)
+  const storageFiles = new Map(); // path -> { bytes: Buffer, mime, created_at }
+  const signTokens = new Map(); // token -> { path, expires }
+  const storageLog = []; // "upload:<path>" | "sign:<path>" | "download:<path>" | "delete:<path>"
+  const liveAttachmentBytes = (userId, exceptId) =>
+    [...journalRows.values()]
+      .filter((r) => r.user_id === userId && r.table === "journal_attachments" && !r.data.deletedAt && r.id !== exceptId)
+      .reduce((s, r) => s + Number(r.data.bytes || 0), 0);
+  // Space taken in the folder: every file except those of deleted screenshots (0005, journal_attachment_space_ok)
+  const usedInFolder = (userId) =>
+    [...storageFiles.entries()]
+      .filter(([p]) => p.startsWith(`${userId}/`))
+      .filter(([p]) => {
+        const id = p.slice(userId.length + 1).replace(/\.(webp|png|jpg)$/, "");
+        const row = journalRows.get(`${userId}:journal_attachments:${id}`);
+        return !(row && row.data.deletedAt);
+      })
+      .reduce((s, [, f]) => s + f.bytes.length, 0);
 
   function getOrCreateUser(email) {
     let user = usersByEmail.get(email);
@@ -90,6 +112,13 @@ export function createFakeSupabase() {
     const id = tokens.get(token);
     return id ? [...usersByEmail.values()].find((u) => u.id === id) : null;
   }
+
+  const readRaw = (req) =>
+    new Promise((resolve) => {
+      const chunks = [];
+      req.on("data", (c) => chunks.push(c));
+      req.on("end", () => resolve(Buffer.concat(chunks)));
+    });
 
   const readBody = (req) =>
     new Promise((resolve) => {
@@ -168,6 +197,27 @@ export function createFakeSupabase() {
       const user = usersByEmail.get(url.searchParams.get("email"));
       const rows = user ? [...journalRows.values()].filter((r) => r.user_id === user.id) : [];
       return send(200, rows.map(({ table, id, data, updated_at }) => ({ table, id, data, updated_at })));
+    }
+    if (path === "/__test/attachment-quota") {
+      attachmentQuota = Number(url.searchParams.get("bytes") || 200 * 1024 * 1024);
+      return send(200, { attachmentQuota });
+    }
+    if (path === "/__test/storage") {
+      // files in the bucket (path, size, type) and the calls made — what the tests look at
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      const files = [...storageFiles.entries()]
+        .filter(([p]) => !user || p.startsWith(`${user.id}/`))
+        .map(([p, f]) => ({ path: p, size: f.bytes.length, mime: f.mime }));
+      if (url.searchParams.has("reset-log")) storageLog.length = 0;
+      return send(200, { files, log: [...storageLog] });
+    }
+    if (path === "/__test/storage-put" && req.method === "POST") {
+      // another device uploads a file (raw body), as the owner's script or a second browser would
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      if (!user) return send(404, { error: "no user" });
+      const bytes = await readRaw(req);
+      storageFiles.set(`${user.id}/${url.searchParams.get("name")}`, { bytes, mime: req.headers["content-type"] || "image/webp", created_at: new Date().toISOString() });
+      return send(200, { ok: true });
     }
     if (path === "/__test/profile") {
       const user = usersByEmail.get(url.searchParams.get("email"));
@@ -427,6 +477,14 @@ export function createFakeSupabase() {
           if (changedAt > Date.now() + 5 * 60 * 1000) return send(400, { code: "P0001", message: "journal_row_from_future" });
           if (JSON.stringify(data).length > 256 * 1024) return send(400, { code: "23514", message: "data check" });
           if (["xp", "coins", "xpAwarded", "coinsAwarded", "reward", "rewards"].some((k) => k in data)) return send(400, { code: "23514", message: "data check" });
+          if (table === "journal_attachments") {
+            // 0005 trigger: type, size, 200 MB of live screenshots
+            if (!IMAGE_TYPES.includes(data.mime)) return send(400, { code: "P0001", message: "journal_attachment_bad_type" });
+            if (!(Number(data.bytes) > 0 && Number(data.bytes) <= FILE_LIMIT)) return send(400, { code: "P0001", message: "journal_attachment_too_big" });
+            if (!data.deletedAt && liveAttachmentBytes(user.id, r.id) + Number(data.bytes) > attachmentQuota) {
+              return send(400, { code: "P0001", message: "journal_attachment_quota_exceeded" });
+            }
+          }
         }
         const written = [];
         for (const r of rows) {
@@ -442,6 +500,55 @@ export function createFakeSupabase() {
       }
       return send(403, { code: "42501", message: "permission denied" });
     }
+    // ---- Storage (bucket of 0005). Errors look like the real server's: HTTP 400 with statusCode in the body ----
+    if (path.startsWith(`/storage/v1/object/sign/${BUCKET}/`) && req.method === "GET") {
+      const objectPath = decodeURIComponent(path.slice(`/storage/v1/object/sign/${BUCKET}/`.length));
+      const t = signTokens.get(url.searchParams.get("token"));
+      if (!t || t.path !== objectPath || t.expires < Date.now()) return send(400, { statusCode: "400", error: "InvalidJWT", message: "jwt expired" });
+      const file = storageFiles.get(objectPath);
+      if (!file) return send(400, { statusCode: "404", error: "not_found", message: "Object not found" });
+      storageLog.push(`download:${objectPath}`);
+      res.writeHead(200, { "Access-Control-Allow-Origin": req.headers.origin || "*", "Content-Type": file.mime });
+      return res.end(file.bytes);
+    }
+    if (path.startsWith(`/storage/v1/object/sign/${BUCKET}/`) && req.method === "POST") {
+      const user = userFromAuthHeader(req);
+      const objectPath = decodeURIComponent(path.slice(`/storage/v1/object/sign/${BUCKET}/`.length));
+      const body = await readBody(req);
+      // SELECT rule: own folder only
+      if (!user || !objectPath.startsWith(`${user.id}/`) || !storageFiles.has(objectPath)) {
+        return send(400, { statusCode: "404", error: "not_found", message: "Object not found" });
+      }
+      const token = crypto.randomUUID();
+      signTokens.set(token, { path: objectPath, expires: Date.now() + Number(body.expiresIn || 60) * 1000 });
+      storageLog.push(`sign:${objectPath}`);
+      return send(200, { signedURL: `/object/sign/${BUCKET}/${objectPath}?token=${token}` });
+    }
+    if (path.startsWith(`/storage/v1/object/${BUCKET}/`) && req.method === "POST") {
+      const user = userFromAuthHeader(req);
+      const objectPath = decodeURIComponent(path.slice(`/storage/v1/object/${BUCKET}/`.length));
+      const mime = String(req.headers["content-type"] || "").split(";")[0];
+      const bytes = await readRaw(req);
+      storageLog.push(`upload:${objectPath}`);
+      if (!user) return send(400, { statusCode: "403", error: "Unauthorized", message: "new row violates row-level security policy" });
+      // bucket limits first (checked by the Storage server before the file is taken)
+      if (!IMAGE_TYPES.includes(mime)) return send(400, { statusCode: "415", error: "invalid_mime_type", message: `mime type ${mime} is not supported` });
+      if (bytes.length > FILE_LIMIT) return send(400, { statusCode: "413", error: "Payload too large", message: "The object exceeded the maximum allowed size" });
+      // INSERT rule: own folder, a plain name, the cloud flag, the 200 MB limit
+      const ok =
+        new RegExp(`^${user.id}/[A-Za-z0-9_-]{1,64}\\.(webp|png|jpg)$`).test(objectPath) &&
+        cloudFlags.get(user.id) === true &&
+        usedInFolder(user.id) + bytes.length <= attachmentQuota;
+      if (!ok) return send(400, { statusCode: "403", error: "Unauthorized", message: "new row violates row-level security policy" });
+      if (storageFiles.has(objectPath)) return send(400, { statusCode: "409", error: "Duplicate", message: "The resource already exists" });
+      storageFiles.set(objectPath, { bytes, mime, created_at: new Date().toISOString() });
+      return send(200, { Key: `${BUCKET}/${objectPath}`, Id: crypto.randomUUID() });
+    }
+    if (path.startsWith("/storage/v1/")) {
+      // no UPDATE rule (a file is never replaced); removal is the cleanup of 0005-C
+      return send(400, { statusCode: "403", error: "Unauthorized", message: "new row violates row-level security policy" });
+    }
+
     if (path === "/rest/v1/rpc/is_nickname_available") {
       const body = await readBody(req);
       const lower = String(body.nick || "").toLowerCase();

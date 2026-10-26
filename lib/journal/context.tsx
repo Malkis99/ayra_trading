@@ -15,7 +15,11 @@ import {
   SyncConflict,
   SyncConflictChoice,
   JournalSnapshot,
+  JournalAttachment,
+  AttachmentCloudState,
 } from "./types";
+import type { AttachmentMetadata } from "./attachments/types";
+import { cleanupFiles } from "./cloud/attachment-files";
 import type { InitialSyncPlan, InitialSyncResult } from "./cloud/sync-engine";
 import { journalRepository } from "./cloud";
 import { defaultAttachmentRepository } from "./attachments/indexeddb-repository";
@@ -29,6 +33,8 @@ export interface CloudStatusView {
   conflicts: number;
   lastError?: string;
   lastSyncAt?: string;
+  /** Screenshots waiting because the cloud has no space (0005). */
+  noSpace?: number;
 }
 
 const LOCAL_STATUS: CloudStatusView = { state: "local", pending: 0, blocked: 0, conflicts: 0 };
@@ -46,6 +52,20 @@ interface JournalContextType {
   plans: TradingPlan[];
   weekPlans: WeekPlan[];
   notes: Note[];
+  /** Screenshot descriptions (live), synced with the journal (0005). */
+  attachments: JournalAttachment[];
+  /** Screenshots deleted (tombstones): hidden at once, even while the file waits for «Undo». */
+  deletedAttachmentIds: Set<string>;
+  saveAttachmentRecord: (meta: AttachmentMetadata) => void;
+  updateAttachmentRecord: (id: string, updates: Partial<Pick<AttachmentMetadata, "kind" | "caption">>) => void;
+  deleteAttachmentRecord: (id: string) => boolean;
+  restoreAttachmentRecord: (id: string) => void;
+  /** A screenshot not on this device: its file is in the cloud / being downloaded (cloud journal only). */
+  attachmentCloudState: (id: string) => AttachmentCloudState;
+  /** byUser: «Download» pressed (the only way in manual mode). */
+  downloadAttachment: (id: string, opts?: { byUser?: boolean }) => Promise<boolean>;
+  /** Bumped when screenshot files arrive in or leave this browser (the screenshot list reloads). */
+  attachmentFilesVersion: number;
   storageUsage: StorageUsage;
   lastSelectedAccountId: string | null;
   lastSelectedInstrument: string | null;
@@ -134,6 +154,9 @@ export function JournalProvider({
   const [plans, setPlans] = useState<TradingPlan[]>([]);
   const [weekPlans, setWeekPlans] = useState<WeekPlan[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [attachments, setAttachments] = useState<JournalAttachment[]>([]);
+  const [deletedAttachmentIds, setDeletedAttachmentIds] = useState<Set<string>>(() => new Set());
+  const [attachmentFilesVersion, setAttachmentFilesVersion] = useState(0);
   const [storageUsage, setStorageUsage] = useState<StorageUsage>({
     bytesUsed: 0,
     bytesLimit: 5 * 1024 * 1024,
@@ -156,7 +179,57 @@ export function JournalProvider({
     setPlans(repository.getTradingPlans());
     setWeekPlans(repository.getWeekPlans());
     setNotes(repository.getNotes());
+    const shots = repository.getAttachmentRecords?.(true) ?? [];
+    setAttachments(shots.filter((a) => !a.deletedAt));
+    setDeletedAttachmentIds(new Set(shots.filter((a) => a.deletedAt).map((a) => a.id)));
     setStorageUsage(repository.getStorageUsage());
+  }, [repository]);
+
+  // Files of deleted screenshots leave this browser after the «Undo» pause (guests and the local journal too)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const rows = repository.getAttachmentRecords?.(true) ?? [];
+    if (!rows.some((a) => a.deletedAt)) return;
+    cleanupFiles(defaultAttachmentRepository, rows, Date.now())
+      .then((removed) => removed && setAttachmentFilesVersion((n) => n + 1))
+      .catch(() => {});
+  }, [repository, attachments]);
+  useEffect(() => repository.subscribeAttachmentFiles?.(() => setAttachmentFilesVersion((n) => n + 1)), [repository]);
+
+  const saveAttachmentRecord = useCallback(
+    (meta: AttachmentMetadata) => {
+      repository.saveAttachmentRecord?.(meta);
+      refresh();
+    },
+    [repository, refresh]
+  );
+  const updateAttachmentRecord = useCallback(
+    (id: string, updates: Partial<Pick<AttachmentMetadata, "kind" | "caption">>) => {
+      repository.updateAttachmentRecord?.(id, updates);
+      refresh();
+    },
+    [repository, refresh]
+  );
+  const deleteAttachmentRecord = useCallback(
+    (id: string) => {
+      const done = repository.deleteAttachmentRecord?.(id) ?? false;
+      refresh();
+      return done;
+    },
+    [repository, refresh]
+  );
+  const restoreAttachmentRecord = useCallback(
+    (id: string) => {
+      repository.restoreAttachmentRecord?.(id);
+      refresh();
+    },
+    [repository, refresh]
+  );
+  const attachmentCloudState = useCallback((id: string) => repository.attachmentCloudState?.(id) ?? "none", [repository]);
+  const downloadAttachment = useCallback(async (id: string, opts?: { byUser?: boolean }) => {
+    const ok = (await repository.downloadAttachment?.(id, opts)) ?? false;
+    setAttachmentFilesVersion((n) => n + 1);
+    return ok;
   }, [repository]);
 
   // Register flush handler to execute pending soft deletions for current space before switching
@@ -196,7 +269,8 @@ export function JournalProvider({
   const [initialSync, setInitialSync] = useState<{ needed: boolean; started: boolean }>({ needed: false, started: false });
   const [cloudDownloadNotice, setCloudDownloadNotice] = useState<number | null>(null);
   const [cloudStatus, setCloudStatus] = useState<CloudStatusView>(LOCAL_STATUS);
-  const [syncMode, setSyncModeState] = useState<"auto" | "manual">("auto");
+  // read at once: a child (the trade card) must not act on «auto» before the first status refresh
+  const [syncMode, setSyncModeState] = useState<"auto" | "manual">(() => (typeof window === "undefined" ? "auto" : repository.getSyncMode?.() ?? "auto"));
   const [online, setOnline] = useState(true);
   const [initialSyncOpen, setInitialSyncOpen] = useState(false);
   const [initialSyncAutoStart, setInitialSyncAutoStart] = useState(false);
@@ -306,6 +380,12 @@ export function JournalProvider({
       const currentTrades = repository.getTrades();
       const validTradeIds = new Set(currentTrades.map((t) => t.id));
       defaultAttachmentRepository.cleanupOrphans(validTradeIds).catch(() => {});
+      // Descriptions of screenshots added to a trade that was never saved: deleted like their files (after 24 h)
+      const anyTrade = new Set(repository.getAllRecords().trades.map((t) => t.id));
+      const day = 24 * 3600 * 1000;
+      for (const a of repository.getAttachmentRecords?.() ?? []) {
+        if (!anyTrade.has(a.tradeId) && Date.now() - Date.parse(a.createdAt) > day) repository.deleteAttachmentRecord?.(a.id);
+      }
     }
   }, [refresh, repository]);
 
@@ -629,6 +709,15 @@ export function JournalProvider({
         plans,
         weekPlans,
         notes,
+        attachments,
+        deletedAttachmentIds,
+        saveAttachmentRecord,
+        updateAttachmentRecord,
+        deleteAttachmentRecord,
+        restoreAttachmentRecord,
+        attachmentCloudState,
+        downloadAttachment,
+        attachmentFilesVersion,
         storageUsage,
         primaryPropAccountId,
         setPrimaryPropAccountId,

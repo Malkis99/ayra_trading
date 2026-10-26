@@ -79,6 +79,11 @@ export function CloudSyncCard() {
             <div data-testid="cloud-sync-pending">{cloudStatus.pending > 0 ? formatString(t.syncNowPending, { count: cloudStatus.pending }) : t.syncNowNothing}</div>
             {syncConflicts.length > 0 && <div>{formatString(dict.journal.syncBadge.labels.conflict, { count: syncConflicts.length })}</div>}
           </dl>
+          {(cloudStatus.noSpace ?? 0) > 0 && (
+            <p className="text-xs text-amber-300" data-testid="cloud-sync-no-space">
+              {t.syncNoSpace}
+            </p>
+          )}
 
           <div className="flex flex-wrap items-center gap-2">
             {initialSync.needed ? (

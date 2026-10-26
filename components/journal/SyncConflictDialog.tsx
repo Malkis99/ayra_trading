@@ -93,6 +93,7 @@ export function SyncConflictDialog() {
     const v = f[side];
     if (!v) return t.empty;
     if (f.id === "direction") return v === "long" ? t.long : v === "short" ? t.short : v;
+    if (f.id === "screenshotKind") return dict.journal.attachments.kinds[v as keyof typeof dict.journal.attachments.kinds] ?? v;
     if (f.id === "date") return fmtDateTime(v).replace(/,\s*\d{1,2}:\d{2}.*$/, "");
     return v;
   };

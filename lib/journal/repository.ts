@@ -9,8 +9,10 @@ import {
   StorageUsage,
   JournalRepository,
   JournalSnapshot,
+  JournalAttachment,
   SyncMeta,
 } from "./types";
+import type { AttachmentMetadata } from "./attachments/types";
 import { IndexedDBAttachmentRepository } from "./attachments/indexeddb-repository";
 import { AppStorage } from "@/lib/storage";
 import { sanitizePreferences } from "./preferences";
@@ -36,6 +38,7 @@ function emptyJournal(): JournalStorageData {
     plans: [],
     weekPlans: [],
     notes: [],
+    attachments: [],
   };
 }
 
@@ -107,6 +110,7 @@ export function migrateJournalData(raw: Record<string, unknown>, now: Date = new
     plans: arr<TradingPlan>(raw.plans).map((p) => withMeta(p, nowIso)),
     weekPlans: arr<WeekPlan>(raw.weekPlans).map((p) => withMeta(p, nowIso)),
     notes: arr<Note>(raw.notes).map((n) => withMeta(n, nowIso)),
+    attachments: arr<JournalAttachment>(raw.attachments).map((a) => withMeta(a, nowIso)),
   };
 }
 
@@ -342,15 +346,77 @@ export class LocalStorageJournalRepository implements JournalRepository {
   deleteTrade(id: string): boolean {
     const data = this.loadData();
     if (!this.softDelete(data.trades, (t) => t.id === id)) return false;
+    const described = this.deleteTradeAttachments(data, [id]);
     this.saveData(data);
-    // Screenshot files of a deleted trade are not needed any more; the trade itself stays as a tombstone
-    if (typeof window !== "undefined") {
-      const attRepo = new IndexedDBAttachmentRepository(this.userId);
-      attRepo.deleteAttachmentsByTradeId(id).catch((err) => {
-        console.error(`Failed to delete attachments for deleted trade ${id}:`, err);
-      });
-    }
+    this.dropUndescribedFiles([id], described);
     return true;
+  }
+
+  /**
+   * Screenshots of deleted trades: their descriptions become tombstones (synced; the files are cleaned up later,
+   * in the cloud not before 30 days — 0005). Returns the ids that have a description.
+   */
+  private deleteTradeAttachments(data: JournalStorageData, tradeIds: string[]): Set<string> {
+    const trades = new Set(tradeIds);
+    const list = data.attachments || (data.attachments = []);
+    const described = new Set(list.filter((a) => trades.has(a.tradeId)).map((a) => a.id));
+    for (const a of list) if (trades.has(a.tradeId) && isLive(a)) this.softDelete(list, (x) => x.id === a.id);
+    return described;
+  }
+
+  /** Files on this device that the journal does not describe (added before 0005) are not needed any more. */
+  private dropUndescribedFiles(tradeIds: string[], described: Set<string>): void {
+    if (typeof window === "undefined") return;
+    const attRepo = new IndexedDBAttachmentRepository(this.userId);
+    for (const tradeId of tradeIds) {
+      attRepo
+        .getAttachmentsByTradeId(tradeId)
+        .then((items) => Promise.all(items.filter((a) => !described.has(a.id)).map((a) => attRepo.deleteAttachment(a.id))))
+        .catch((err) => console.error(`Failed to delete attachments for deleted trade ${tradeId}:`, err));
+    }
+  }
+
+  getAttachmentRecords(withDeleted = false): JournalAttachment[] {
+    const list = this.loadData().attachments || [];
+    return withDeleted ? list : live(list);
+  }
+
+  saveAttachmentRecord(meta: AttachmentMetadata): JournalAttachment {
+    const data = this.loadData();
+    const list = data.attachments || (data.attachments = []);
+    const { originalBlob: _o, previewBlob: _p, ...plain } = meta as AttachmentMetadata & { originalBlob?: Blob; previewBlob?: Blob };
+    const saved = this.upsert<JournalAttachment>(list, plain, (a) => a.id === meta.id);
+    this.saveData(data);
+    return saved;
+  }
+
+  updateAttachmentRecord(id: string, updates: Partial<Pick<AttachmentMetadata, "kind" | "caption">>): JournalAttachment | null {
+    const data = this.loadData();
+    const item = (data.attachments || []).find((a) => a.id === id && isLive(a));
+    if (!item) return null;
+    if (updates.kind) item.kind = updates.kind;
+    if (updates.caption !== undefined) item.caption = updates.caption ? updates.caption.substring(0, 120) : undefined;
+    item.updatedAt = this.stampAfter(item.updatedAt);
+    this.saveData(data);
+    return item;
+  }
+
+  deleteAttachmentRecord(id: string): boolean {
+    const data = this.loadData();
+    if (!this.softDelete(data.attachments || [], (a) => a.id === id)) return false;
+    this.saveData(data);
+    return true;
+  }
+
+  restoreAttachmentRecord(id: string): JournalAttachment | null {
+    const data = this.loadData();
+    const list = data.attachments || [];
+    const item = list.find((a) => a.id === id);
+    if (!item) return null;
+    if (isLive(item)) return item;
+    const restored = this.upsert(list, item, (a) => a.id === id);
+    this.saveData(data);
+    return restored;
   }
 
   /**
@@ -384,15 +450,10 @@ export class LocalStorageJournalRepository implements JournalRepository {
       t.deletedAt = at;
       t.updatedAt = at;
     });
+    const ids = removed.map((t) => t.id);
+    const described = this.deleteTradeAttachments(data, ids);
     this.saveData(data);
-    if (typeof window !== "undefined") {
-      const attRepo = new IndexedDBAttachmentRepository(this.userId);
-      removed.forEach((t) =>
-        attRepo.deleteAttachmentsByTradeId(t.id).catch((err) => {
-          console.error(`Failed to delete attachments for trade ${t.id}:`, err);
-        })
-      );
-    }
+    this.dropUndescribedFiles(ids, described);
     return removed.length;
   }
 

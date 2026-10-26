@@ -9,7 +9,8 @@ export function Toast() {
   if (!toastMessage) return null;
 
   return (
-    <div className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-xl border border-vi bg-s2 px-4 py-2.5 text-xs font-medium text-tx shadow-2xl md:bottom-6 flex items-center gap-3">
+    // above open windows (trade card z-[100], lightbox z-[120]): «Undo» must stay clickable while a card is open
+    <div role="status" aria-live="polite" className="fixed bottom-20 left-1/2 z-[130] -translate-x-1/2 rounded-xl border border-vi bg-s2 px-4 py-2.5 text-xs font-medium text-tx shadow-2xl md:bottom-6 flex items-center gap-3">
       <span>{toastMessage}</span>
       {toastActionLabel && onToastAction && (
         <button

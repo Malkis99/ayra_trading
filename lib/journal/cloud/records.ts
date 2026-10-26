@@ -4,11 +4,11 @@ import { CURRENT_JOURNAL_SCHEMA_VERSION } from "../repository";
 import { JOURNAL_CLOUD_FORBIDDEN_KEYS, JOURNAL_CLOUD_MAX_CLOCK_SKEW_MS, JOURNAL_CLOUD_MAX_RECORD_BYTES } from "./config";
 
 /**
- * Mapping between the local journal (one JSON document) and the 9 cloud tables of migration 0004.
+ * Mapping between the local journal (one JSON document) and the cloud tables of migrations 0004 and 0005.
  * Pure functions: no storage, no network.
  */
 
-type ListField = "accounts" | "trades" | "strategies" | "noTrades" | "plans" | "weekPlans" | "notes";
+type ListField = "accounts" | "trades" | "strategies" | "noTrades" | "plans" | "weekPlans" | "notes" | "attachments";
 
 const LIST_TABLES = [
   { table: "journal_accounts", field: "accounts", idKey: "id" },
@@ -18,6 +18,8 @@ const LIST_TABLES = [
   { table: "journal_day_plans", field: "plans", idKey: "date" },
   { table: "journal_week_plans", field: "weekPlans", idKey: "weekStartDate" },
   { table: "journal_notes", field: "notes", idKey: "id" },
+  // 0005: screenshot descriptions (after trades: a pull brings the trade before its screenshots)
+  { table: "journal_attachments", field: "attachments", idKey: "id" },
 ] as const satisfies readonly { table: string; field: ListField; idKey: string }[];
 
 export const SETTINGS_TABLE = "journal_settings";
