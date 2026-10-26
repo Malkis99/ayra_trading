@@ -67,6 +67,13 @@ export interface SyncEngineDeps {
   onChange?: () => void;
   /** Manual mode on this device: only exchanges started by the user (flush with byUser) run. */
   isManual?: () => boolean;
+  /**
+   * Screenshot descriptions (0005): file first, then the row. Uploads the files of these entries; only `ready` rows
+   * are sent, the others stay queued with the reason (no space in the cloud, file missing here) and are retried.
+   */
+  prepareFiles?: (userId: string, entries: CloudEntry[]) => Promise<{ ready: Set<string>; failed: { id: string; reason: string }[] }>;
+  /** An exchange went through (pull and send): files of screenshots from other devices may come down now. */
+  onExchanged?: (userId: string) => void;
 }
 
 export interface SyncEngineStatus {
@@ -107,6 +114,7 @@ export interface InitialSyncResult {
 }
 
 const isTombstone = (e: CloudEntry) => Boolean(e.record.deletedAt || e.record.undoneAt);
+const ATTACHMENTS_TABLE: JournalCloudTable = "journal_attachments";
 
 /** JSON with sorted keys (the cloud database keeps fields in its own order). */
 function stable(v: unknown): string {
@@ -134,7 +142,7 @@ function sameContents(local: CloudEntry, cloud: CloudEntry): boolean {
 /** Any live journal record of this account on this device. */
 export function hasLiveData(journal: LocalJournal): boolean {
   const s = journal.snapshot;
-  const lists = [s.accounts, s.trades, s.strategies, s.noTrades, s.plans, s.weekPlans, s.notes] as { deletedAt?: string | null }[][];
+  const lists = [s.accounts, s.trades, s.strategies, s.noTrades, s.plans, s.weekPlans, s.notes, s.attachments || []] as { deletedAt?: string | null }[][];
   return lists.some((l) => (l || []).some((r) => !r.deletedAt)) || journal.batches.some((b) => !b.undoneAt);
 }
 
@@ -369,8 +377,14 @@ export class JournalSyncEngine {
     }
     if (!this.stillActive()) return;
     writeSyncState(this.userId, { lastSyncAt: new Date(this.now()).toISOString() });
+    this.deps.onExchanged?.(this.userId);
     const conflicts = readConflicts(this.userId);
-    this.setState(this.outbox.due(Infinity).some((e) => !conflicts[outboxKey(e)]) ? "syncing" : "synced");
+    const waiting = this.outbox.due(Infinity).filter((e) => !conflicts[outboxKey(e)]);
+    if (!waiting.length) return this.setState("synced");
+    // Everything left was tried and refused (a screenshot without space in the cloud, its file missing here): not
+    // «syncing» forever — an error with «Retry»; the reason is shown next to it
+    const refused = waiting.every((e) => e.attempts > 0 && e.lastError);
+    this.setState(refused ? "error" : "syncing", refused ? waiting[0].lastError : undefined);
   }
 
   private guard(): void {
@@ -474,6 +488,8 @@ export class JournalSyncEngine {
       for (const items of byTable.values()) for (const c of items) if (fixed.has(entryKey(c.entry))) c.version = fixed.get(entryKey(c.entry))!;
     }
 
+    await this.withFiles(byTable);
+
     for (const [table, items] of byTable) {
       for (let i = 0; i < items.length; i += SYNC_BATCH_SIZE) {
         const chunk = items.slice(i, i + SYNC_BATCH_SIZE);
@@ -517,6 +533,33 @@ export class JournalSyncEngine {
         }
       }
     }
+  }
+
+  /**
+   * File first, then the row (0005): screenshot rows whose file could not be uploaded stay in the queue with the
+   * reason and are tried again later; the rest of the journal is sent as usual.
+   */
+  private async withFiles<T extends { entry: CloudEntry }>(byTable: Map<JournalCloudTable, T[]>): Promise<void> {
+    const items = byTable.get(ATTACHMENTS_TABLE);
+    if (!items?.length || !this.deps.prepareFiles) return;
+    this.guard();
+    let prepared: Awaited<ReturnType<NonNullable<SyncEngineDeps["prepareFiles"]>>>;
+    try {
+      prepared = await this.deps.prepareFiles(this.userId, items.map((c) => c.entry));
+    } catch (e) {
+      // no network while uploading: the usual growing pauses, never a tight loop
+      this.outbox.markFailed(items.map((c) => c.entry), e instanceof Error ? e.message : String(e), this.now(), this.deps.random);
+      throw e;
+    }
+    const { ready, failed } = prepared;
+    this.guard();
+    for (const reason of new Set(failed.map((f) => f.reason))) {
+      const keys = failed.filter((f) => f.reason === reason).map((f) => ({ table: ATTACHMENTS_TABLE, id: f.id }));
+      this.outbox.markFailed(keys, reason, this.now(), this.deps.random);
+    }
+    const sendable = items.filter((c) => ready.has(c.entry.id));
+    if (sendable.length) byTable.set(ATTACHMENTS_TABLE, sendable);
+    else byTable.delete(ATTACHMENTS_TABLE);
   }
 
   /* ------------------------------------------------------------------ first sync (4d) */
@@ -597,6 +640,17 @@ export class JournalSyncEngine {
     const deviceId = this.deviceId();
     const byTable = new Map<JournalCloudTable, CloudEntry[]>();
     for (const e of plan.toUpload) byTable.set(e.table, [...(byTable.get(e.table) || []), e]);
+    // Screenshots: rows whose file is not in the cloud yet are queued for the normal exchange instead
+    const wrapped = new Map([...byTable].map(([t, list]) => [t, list.map((entry) => ({ entry }))]));
+    const shots = byTable.get(ATTACHMENTS_TABLE);
+    if (shots?.length) {
+      // queued first: the ones whose file does not go up keep the reason and are retried by the normal exchange
+      this.enqueue(shots);
+      await this.withFiles(wrapped);
+      const sent = new Set((wrapped.get(ATTACHMENTS_TABLE) || []).map((c) => c.entry.id));
+      if (sent.size) byTable.set(ATTACHMENTS_TABLE, shots.filter((e) => sent.has(e.id)));
+      else byTable.delete(ATTACHMENTS_TABLE);
+    }
     for (const [table, items] of byTable) {
       for (let i = 0; i < items.length; i += SYNC_BATCH_SIZE) {
         if (opts.shouldCancel?.()) return { uploaded: done, total, cancelled: true, conflicts: plan.differ.length, skipped: plan.skipped, downloaded: plan.onlyCloud.length };

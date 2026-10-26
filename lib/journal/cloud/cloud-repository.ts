@@ -1,5 +1,7 @@
 import type {
   Account,
+  AttachmentCloudState,
+  JournalAttachment,
   JournalRepository,
   JournalSnapshot,
   Note,
@@ -34,6 +36,8 @@ import { isInitialSyncDone, readSyncState } from "./sync-state";
 import { readSyncMode, writeSyncMode, type SyncMode } from "./sync-mode";
 import type { StoredConflict } from "./sync-merge";
 import type { OutboxEntry } from "./outbox";
+import type { AttachmentMetadata } from "../attachments/types";
+import { ATTACHMENTS_TABLE, AttachmentFiles, type AttachmentFileRemote, type AttachmentFilesDeps } from "./attachment-files";
 
 /**
  * - local: cloud not used (guest, flag off, not configured)
@@ -53,6 +57,8 @@ export interface JournalCloudStatus {
   lastError?: string;
   /** Last successful exchange with the cloud (ISO). */
   lastSyncAt?: string;
+  /** Screenshots waiting because the cloud has no space for them (they stay on this device). */
+  noSpace?: number;
 }
 
 export interface PullResult {
@@ -99,14 +105,20 @@ export class CloudJournalRepository implements JournalRepository {
   private readonly tabId: string;
   /** An empty device downloaded the cloud journal (records), not yet shown to the user. */
   private cloudDownloaded: number | null = null;
+  /** Screenshot files in the cloud (0005). */
+  readonly attachmentFiles: AttachmentFiles;
 
   constructor(
     private readonly local: LocalStorageJournalRepository,
     private readonly remote: JournalCloudRemote | null,
     private readonly now: () => Date = () => new Date(),
-    tabId?: string
+    tabId?: string,
+    fileRemote: AttachmentFileRemote | null = null,
+    /** Tests: the browser store of screenshots and the preview maker (the app uses IndexedDB and a canvas). */
+    fileOptions: Pick<AttachmentFilesDeps, "files" | "makePreview"> = {}
   ) {
     this.tabId = tabId ?? `tab_${Math.random().toString(36).slice(2, 10)}_${++tabCounter}`;
+    this.attachmentFiles = new AttachmentFiles({ remote: fileRemote, readJournal: this.readJournal, now: () => this.now().getTime(), ...fileOptions });
     if (typeof window !== "undefined" && remote) {
       // Sign-out / account switch: give the old account's queue a short chance, then stop its engine
       this.unregisterFlush = AppStorage.registerFlushHandler(async (spaceId) => {
@@ -136,8 +148,11 @@ export class CloudJournalRepository implements JournalRepository {
     const userId = AppStorage.getUserId();
     const cached = userId ? this.flagCache.get(userId) : undefined;
     if (!userId || !this.remote || !cached?.enabled) return { state: "local", pending: 0, blocked: [], conflicts: 0 };
-    const s = this.engines.get(userId)?.status();
+    const engine = this.engines.get(userId);
+    const s = engine?.status();
+    const noSpace = engine ? engine.outbox.list().filter((e) => e.table === ATTACHMENTS_TABLE && e.lastError === "noSpace").length : 0;
     return {
+      noSpace,
       state: s ? ENGINE_TO_CLOUD_STATE[s.state] : "synced",
       pending: s?.pending ?? 0,
       blocked: (s?.blocked ?? []).map(({ table, id, blocked }) => ({ table, id, blocked })),
@@ -243,6 +258,9 @@ export class CloudJournalRepository implements JournalRepository {
         now: () => this.now().getTime(),
         onChange: this.notifyStatus,
         isManual: () => readSyncMode(userId) === "manual",
+        prepareFiles: (uid, entries) => this.attachmentFiles.prepare(uid, entries),
+        // Files of screenshots from other devices: by themselves only in automatic mode (manual: «Download»)
+        onExchanged: (uid) => void this.track(this.attachmentFiles.reconcile(uid, { download: readSyncMode(uid) !== "manual" })),
       });
       this.engines.set(userId, engine);
       engine.start();
@@ -351,8 +369,23 @@ export class CloudJournalRepository implements JournalRepository {
     if (!userId) return false;
     const engine = this.engineFor(userId);
     const done = engine.resolveConflict(table as JournalCloudTable, id, choice);
+    if (done && table === "journal_trades") this.restoreTradeScreenshots(id);
     if (done) void this.track(engine.flush(true, true));
     return done;
+  }
+
+  /**
+   * «Deleted against edited» for a trade, settled in favour of the edit (either side): the trade is live again, so the
+   * screenshots it lists, deleted together with it, come back too. Their files are still in the cloud (removed only
+   * 30 days after a deletion). A screenshot deleted on purpose is no longer listed by its trade and stays deleted.
+   */
+  private restoreTradeScreenshots(tradeId: string): void {
+    const trade = this.local.getTrade(tradeId);
+    if (!trade) return;
+    const listed = new Set(trade.attachmentIds || []);
+    const gone = this.local.getAttachmentRecords(true).filter((a) => a.tradeId === tradeId && a.deletedAt && listed.has(a.id));
+    if (gone.length) this.write(() => gone.forEach((a) => this.local.restoreAttachmentRecord(a.id)));
+    this.notifyData();
   }
 
   /* ---- first sync (4d) ---- */
@@ -543,5 +576,43 @@ export class CloudJournalRepository implements JournalRepository {
   }
   deleteNote(id: string): boolean {
     return this.write(() => this.local.deleteNote(id));
+  }
+
+  attachmentCloudState(id: string): AttachmentCloudState {
+    const userId = AppStorage.getUserId();
+    if (!userId || !this.isCloudActive()) return "none";
+    if (this.attachmentFiles.isDownloading(id)) return "downloading";
+    const queued = this.engines.get(userId)?.outbox.list().find((e) => e.table === ATTACHMENTS_TABLE && e.id === id);
+    if (queued?.lastError === "noSpace") return "noSpace";
+    const row = this.local.getAttachmentRecords().find((a) => a.id === id);
+    return row && this.attachmentFiles.isInCloud(userId, id) ? "inCloud" : "none";
+  }
+
+  downloadAttachment(id: string, opts: { byUser?: boolean } = {}): Promise<boolean> {
+    const userId = AppStorage.getUserId();
+    if (!userId || !this.isCloudActive()) return Promise.resolve(false);
+    // «Manual»: a file comes down only when the person presses «Download» (owner decision 2026-10-26)
+    if (!opts.byUser && readSyncMode(userId) === "manual") return Promise.resolve(false);
+    return this.track(this.attachmentFiles.download(userId, id));
+  }
+
+  subscribeAttachmentFiles(listener: () => void): () => void {
+    return this.attachmentFiles.subscribe(listener);
+  }
+
+  getAttachmentRecords(withDeleted = false): JournalAttachment[] {
+    return this.local.getAttachmentRecords(withDeleted);
+  }
+  saveAttachmentRecord(meta: AttachmentMetadata): JournalAttachment {
+    return this.write(() => this.local.saveAttachmentRecord(meta));
+  }
+  updateAttachmentRecord(id: string, updates: Partial<Pick<AttachmentMetadata, "kind" | "caption">>): JournalAttachment | null {
+    return this.write(() => this.local.updateAttachmentRecord(id, updates));
+  }
+  deleteAttachmentRecord(id: string): boolean {
+    return this.write(() => this.local.deleteAttachmentRecord(id));
+  }
+  restoreAttachmentRecord(id: string): JournalAttachment | null {
+    return this.write(() => this.local.restoreAttachmentRecord(id));
   }
 }

@@ -5,7 +5,7 @@ import type { ImportBatch } from "../import/batches";
  * What the conflict dialog shows for one record (T7b-4c): kind, both versions' key fields (values, not labels — the
  * component translates field ids), which fields differ, when each version changed and whether one side deleted it.
  */
-export type ConflictKind = "trade" | "note" | "dayPlan" | "weekPlan" | "account" | "strategy" | "noTrade" | "importBatch" | "settings";
+export type ConflictKind = "trade" | "note" | "dayPlan" | "weekPlan" | "account" | "strategy" | "noTrade" | "importBatch" | "settings" | "screenshot";
 
 export type ConflictFieldId =
   | "instrument"
@@ -25,7 +25,9 @@ export type ConflictFieldId =
   | "reason"
   | "fileName"
   | "trades"
-  | "primaryProp";
+  | "primaryProp"
+  | "screenshotKind"
+  | "caption";
 
 export interface ConflictField {
   id: ConflictFieldId;
@@ -60,6 +62,7 @@ const KIND_BY_TABLE: Record<string, ConflictKind> = {
   journal_no_trades: "noTrade",
   journal_import_batches: "importBatch",
   journal_settings: "settings",
+  journal_attachments: "screenshot",
 };
 
 type Rec = Record<string, unknown>;
@@ -91,6 +94,8 @@ export function deviceRecord(snapshot: JournalSnapshot, batches: ImportBatch[], 
       return find(snapshot.noTrades);
     case "journal_import_batches":
       return find(batches);
+    case "journal_attachments":
+      return find(snapshot.attachments);
     case "journal_settings":
       return { id: "journal", primaryPropAccountId: snapshot.primaryPropAccountId ?? null, updatedAt: snapshot.settingsUpdatedAt };
     default:
@@ -126,6 +131,8 @@ function fieldsOf(kind: ConflictKind, r: Rec, accountName: (id: unknown) => stri
       return { fileName: str(r.fileName), trades: str(r.tradeCount) };
     case "settings":
       return { primaryProp: accountName(r.primaryPropAccountId) };
+    case "screenshot":
+      return { screenshotKind: str(r.kind), caption: short(r.caption, 60) };
   }
 }
 

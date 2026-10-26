@@ -4,8 +4,9 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useAttachments } from "@/lib/journal/attachments/hooks";
-import { processImageFile } from "@/lib/journal/attachments/image-processor";
-import { AttachmentKind, AttachmentRecord } from "@/lib/journal/attachments/types";
+import { processScreenshot } from "@/lib/journal/attachments/image-processor";
+import { AttachmentKind, AttachmentMetadata, AttachmentRecord } from "@/lib/journal/attachments/types";
+import { useJournal } from "@/lib/journal/context";
 import { GAME_CONFIG } from "@/lib/game-config";
 import { LightboxViewer } from "./LightboxViewer";
 import { recordScreenshotAdded } from "@/lib/game";
@@ -35,16 +36,33 @@ export function AttachmentManager({
 }: AttachmentManagerProps) {
   const { dict, showToast } = useApp();
   const { gameState, setGameState } = useGame();
+  const {
+    syncMode,
+    cloudActive,
+    attachmentCloudState,
+    downloadAttachment,
+    attachmentFilesVersion,
+    deletedAttachmentIds: deletedIds,
+    saveAttachmentRecord,
+    updateAttachmentRecord,
+    deleteAttachmentRecord,
+    restoreAttachmentRecord,
+  } = useJournal();
   const dictAtt = dict.journal.attachments;
 
   const {
-    attachments,
+    attachments: stored,
     loading,
     error,
     addAttachment,
     updateMetadata,
     deleteAttachment,
-  } = useAttachments(tradeId);
+    forget,
+    reload,
+  } = useAttachments(tradeId, undefined, attachmentFilesVersion);
+
+  // A screenshot deleted here (or elsewhere) is hidden at once, even while its file waits for «Undo»
+  const attachments = useMemo(() => stored.filter((a) => !deletedIds.has(a.id)), [stored, deletedIds]);
 
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -60,23 +78,57 @@ export function AttachmentManager({
   // by an edit here. A screenshot deleted here is not listed again.
   const [deletedHere, setDeletedHere] = useState<string[]>([]);
   const remoteIds = useMemo(
-    () => notOnDevice(expectedIds, attachments.map((a) => a.id)).filter((id) => !deletedHere.includes(id)),
-    [expectedIds, attachments, deletedHere]
+    () => notOnDevice(expectedIds, attachments.map((a) => a.id)).filter((id) => !deletedHere.includes(id) && !deletedIds.has(id)),
+    [expectedIds, attachments, deletedHere, deletedIds]
   );
   const allIds = useMemo(() => [...attachments.map((a) => a.id), ...remoteIds], [attachments, remoteIds]);
+
+  // Screenshots of this trade whose file is in the cloud but not here (0005). Read on every render: the answer
+  // changes with the files arriving and with the exchange, both of which re-render this component.
+  const cloudState = new Map(remoteIds.map((id) => [id, attachmentCloudState(id)]));
+  const inCloud = remoteIds.filter((id) => cloudState.get(id) === "inCloud");
+  const inCloudKey = inCloud.join("|");
+  const downloadingIds = remoteIds.filter((id) => cloudState.get(id) === "downloading");
+  const noSpaceHere = cloudActive && attachments.some((a) => attachmentCloudState(a.id) === "noSpace");
+  const knownKey = remoteIds.filter((id) => cloudState.get(id) !== "none").join("|");
+  const contextStore = useMemo<CloudAttachmentStore>(() => {
+    const known = new Set(knownKey ? knownKey.split("|") : []);
+    return { has: async (ids) => new Set(ids.filter((id) => known.has(id))) };
+  }, [knownKey]);
+  const store = cloudStore === noCloudAttachments ? contextStore : cloudStore;
+
+  // «Automatic»: opening the trade downloads its screenshots from the cloud by themselves
+  const autoTried = useRef(new Set<string>());
+  useEffect(() => {
+    if (syncMode !== "auto" || !inCloudKey) return;
+    for (const id of inCloudKey.split("|")) {
+      if (autoTried.current.has(id)) continue;
+      autoTried.current.add(id);
+      void downloadAttachment(id);
+    }
+  }, [syncMode, inCloudKey, downloadAttachment]);
+
+  const [downloadError, setDownloadError] = useState(false);
+  const downloadAll = useCallback(async () => {
+    setDownloadError(false);
+    const ids = inCloudKey ? inCloudKey.split("|") : [];
+    const results = await Promise.all(ids.map((id) => downloadAttachment(id, { byUser: true })));
+    if (results.some((ok) => !ok)) setDownloadError(true);
+    reload();
+  }, [inCloudKey, downloadAttachment, reload]);
 
   // «Stored on another device»: listed ids found neither here nor in the cloud store
   const [elsewhere, setElsewhere] = useState<string[]>([]);
   useEffect(() => {
     if (loading) return;
     let alive = true;
-    screenshotsElsewhere(remoteIds, attachments.map((a) => a.id), cloudStore).then((ids) => {
-      if (alive) setElsewhere(ids);
+    screenshotsElsewhere(remoteIds, attachments.map((a) => a.id), store).then((ids) => {
+      if (alive) setElsewhere((prev) => (prev.join("|") === ids.join("|") ? prev : ids));
     });
     return () => {
       alive = false;
     };
-  }, [loading, remoteIds, attachments, cloudStore]);
+  }, [loading, remoteIds, attachments, store]);
 
   // Notify parent of updated attachment IDs (after loading, so a slow load never reports an empty list)
   useEffect(() => {
@@ -95,6 +147,20 @@ export function AttachmentManager({
 
   const handleDeleteAttachment = useCallback(
     async (id: string) => {
+      // Described in the journal (0005): a soft delete with «Undo»; the file leaves this browser after a pause and
+      // stays in the cloud 30 days. A screenshot from before 0005 (no description) is deleted at once, as before.
+      if (deleteAttachmentRecord(id)) {
+        forget(id);
+        userChangedRef.current = true;
+        setDeletedHere((prev) => [...prev, id]);
+        showToast(dictAtt.deletedToast, dict.confirmDialog.undo, () => {
+          restoreAttachmentRecord(id);
+          setDeletedHere((prev) => prev.filter((x) => x !== id));
+          userChangedRef.current = true;
+          reload();
+        });
+        return true;
+      }
       const ok = await deleteAttachment(id);
       if (ok) {
         userChangedRef.current = true;
@@ -102,7 +168,16 @@ export function AttachmentManager({
       }
       return ok;
     },
-    [deleteAttachment]
+    [deleteAttachment, deleteAttachmentRecord, restoreAttachmentRecord, forget, showToast, dictAtt, dict, reload]
+  );
+
+  const handleUpdateMetadata = useCallback(
+    async (id: string, updates: Partial<Pick<AttachmentMetadata, "kind" | "caption">>) => {
+      const meta = await updateMetadata(id, updates);
+      if (meta) updateAttachmentRecord(id, updates);
+      return meta;
+    },
+    [updateMetadata, updateAttachmentRecord]
   );
 
   // Process and upload file
@@ -122,7 +197,7 @@ export function AttachmentManager({
       setLocalError(null);
 
       try {
-        const processed = await processImageFile(file);
+        const processed = await processScreenshot(file);
 
         // Check duplicate hash within same trade
         const isDuplicate = attachments.some((att) => att.hash === processed.hash);
@@ -144,6 +219,9 @@ export function AttachmentManager({
           originalBlob: processed.originalBlob,
           previewBlob: processed.previewBlob,
         });
+        // The journal describes it too: the description is synced, the file goes to the cloud first (0005)
+        const { originalBlob: _o, previewBlob: _p, ...meta } = saved;
+        saveAttachmentRecord(meta);
 
         // Award XP and check achievement
         const rewardRes = recordScreenshotAdded(gameState, {
@@ -174,6 +252,8 @@ export function AttachmentManager({
           errorMsg = dictAtt.errors.imageTooLargePixels;
         } else if (err.message === "EMPTY_FILE") {
           errorMsg = dictAtt.errors.emptyFile;
+        } else if (err.message === "TOO_BIG_AFTER_COMPRESSION") {
+          errorMsg = dictAtt.errors.tooBigAfterCompression;
         }
         setLocalError(errorMsg);
       } finally {
@@ -185,6 +265,7 @@ export function AttachmentManager({
       attachments,
       allIds,
       addAttachment,
+      saveAttachmentRecord,
       gameState,
       setGameState,
       showToast,
@@ -264,6 +345,38 @@ export function AttachmentManager({
         </div>
       )}
 
+      {noSpaceHere && (
+        <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-300" data-testid="screenshots-no-space">
+          {dictAtt.noSpaceHere}
+        </p>
+      )}
+
+      {downloadingIds.length > 0 && (
+        <p className="rounded-xl border border-line bg-s2/40 p-2.5 text-xs text-mu" role="status" data-testid="screenshots-downloading">
+          {dictAtt.downloading}
+        </p>
+      )}
+
+      {syncMode === "manual" && inCloud.length > 0 && downloadingIds.length === 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-s2/40 p-2.5 text-xs text-mu" data-testid="screenshots-in-cloud">
+          <span>{inCloud.length === 1 ? dictAtt.inCloudOne : formatString(dictAtt.inCloudMany, { count: inCloud.length })}</span>
+          <button
+            type="button"
+            onClick={() => void downloadAll()}
+            className="rounded-lg border border-line px-2.5 py-1 font-semibold text-tx hover:border-acc focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-acc"
+            data-testid="screenshots-download"
+          >
+            {dictAtt.downloadBtn}
+          </button>
+        </div>
+      )}
+
+      {downloadError && (
+        <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-300" role="alert">
+          {dictAtt.downloadFailed}
+        </p>
+      )}
+
       {elsewhere.length > 0 && (
         <p className="rounded-xl border border-line bg-s2/40 p-2.5 text-xs text-mu" data-testid="screenshots-elsewhere">
           {elsewhere.length === 1 ? dictAtt.elsewhereOne : formatString(dictAtt.elsewhereMany, { count: elsewhere.length })}
@@ -326,7 +439,7 @@ export function AttachmentManager({
           isOpen={activeLightboxIndex !== null}
           onClose={() => setActiveLightboxIndex(null)}
           onIndexChange={(idx) => setActiveLightboxIndex(idx)}
-          onUpdateMetadata={updateMetadata}
+          onUpdateMetadata={handleUpdateMetadata}
           onDeleteAttachment={handleDeleteAttachment}
         />
       )}

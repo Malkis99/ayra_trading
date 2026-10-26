@@ -8,7 +8,9 @@ import { defaultAttachmentRepository } from "./indexeddb-repository";
 
 export function useAttachments(
   tradeId?: string | null,
-  repository: AttachmentRepository = defaultAttachmentRepository
+  repository: AttachmentRepository = defaultAttachmentRepository,
+  /** Bumped when files arrive in or leave this browser (cloud download, cleanup): the list is read again. */
+  filesVersion = 0
 ) {
   const [attachments, setAttachments] = useState<AttachmentRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -50,7 +52,7 @@ export function useAttachments(
 
   useEffect(() => {
     loadAttachments();
-  }, [loadAttachments]);
+  }, [loadAttachments, filesVersion]);
 
   // Clean up object URLs on unmount
   useEffect(() => {
@@ -129,7 +131,13 @@ export function useAttachments(
     [repository]
   );
 
+  /** Hidden from the list at once; the file itself stays a little while for «Undo» (0005). */
+  const forget = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((item) => item.id !== id));
+  }, []);
+
   return {
+    forget,
     attachments,
     loading,
     error,

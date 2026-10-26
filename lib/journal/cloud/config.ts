@@ -60,3 +60,17 @@ export const SYNC_PULL_INTERVAL_MS = 5 * 60 * 1000;
 
 /** "Sign out and delete data": how long "Wait for sending" waits (owner decision 2026-10-18: up to 30 s). */
 export const SYNC_WAIT_BEFORE_DELETE_MS = 30_000;
+
+// ---- Screenshots in the cloud (0005, docs/t7b-0005-attachments-plan.md; limits approved by the owner 2026-10-26) ----
+
+/** Private bucket of migration 0005. */
+export const ATTACHMENTS_BUCKET = "journal-attachments";
+
+/** 200 MB per account (journal_limits.attachment_quota_bytes); the server checks it again. */
+export const ATTACHMENT_QUOTA_BYTES = 200 * 1024 * 1024;
+
+/**
+ * A deleted screenshot's file stays in this browser this long, so «Undo» brings it back without a download
+ * (technical pause, not a business number; in the cloud the file stays 30 days — server rule, 0005).
+ */
+export const ATTACHMENT_LOCAL_GRACE_MS = 2 * 60 * 1000;

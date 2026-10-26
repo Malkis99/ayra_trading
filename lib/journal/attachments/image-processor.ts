@@ -131,9 +131,18 @@ export async function calculateBufferSha256(buffer: ArrayBuffer): Promise<string
   return `fallback_${Math.abs(hash).toString(16)}`;
 }
 
+/** Size and quality of the main image; the defaults are the usual 1600 px WebP. */
+export interface ProcessOptions {
+  maxDimension?: number;
+  quality?: number;
+}
+
 export async function processImageFile(
-  file: File | Blob
+  file: File | Blob,
+  options: ProcessOptions = {}
 ): Promise<ProcessedImageResult> {
+  const maxDimension = options.maxDimension ?? TARGET_MAX_DIMENSION;
+  const quality = options.quality ?? WEBP_QUALITY;
   const arrayBuffer = await file.arrayBuffer();
 
   // 1. Magic bytes validation
@@ -176,7 +185,7 @@ export async function processImageFile(
 
       try {
         // Calculate dimensions
-        const fullDim = calculateTargetDimensions(origWidth, origHeight, TARGET_MAX_DIMENSION);
+        const fullDim = calculateTargetDimensions(origWidth, origHeight, maxDimension);
         const thumbDim = calculateTargetDimensions(origWidth, origHeight, THUMBNAIL_MAX_DIMENSION);
 
         // Render full size canvas
@@ -234,7 +243,7 @@ export async function processImageFile(
           return new Blob([ab], { type: mimeString });
         }
 
-        const fullBlob = await canvasToBlob(fullCanvas, exportMime, WEBP_QUALITY);
+        const fullBlob = await canvasToBlob(fullCanvas, exportMime, quality);
         const thumbBlob = await canvasToBlob(thumbCanvas, exportMime, WEBP_QUALITY);
 
         const finalMime = (fullBlob.type.includes("webp") ? "image/webp" : "image/jpeg") as AllowedMimeType;
@@ -259,5 +268,57 @@ export async function processImageFile(
     };
 
     img.src = blobUrl;
+  });
+}
+
+/** Largest file the cloud takes (bucket `journal-attachments`, migration 0005). */
+export const CLOUD_FILE_MAX_BYTES = 5 * 1024 * 1024;
+/** Second try when the usual result is still larger than the cloud takes (plan 0005, section 1.3). */
+export const FALLBACK_MAX_DIMENSION = 1280;
+export const FALLBACK_QUALITY = 0.7;
+
+/**
+ * A screenshot as it is stored: the usual 1600 px WebP; if that is still over 5 MB, 1280 px at quality 0.7;
+ * if even that is over 5 MB, TOO_BIG_AFTER_COMPRESSION (nothing is added).
+ */
+export async function processScreenshot(
+  file: File | Blob,
+  process: (file: File | Blob, options?: ProcessOptions) => Promise<ProcessedImageResult> = processImageFile
+): Promise<ProcessedImageResult> {
+  const first = await process(file);
+  if (first.bytes <= CLOUD_FILE_MAX_BYTES) return first;
+  const second = await process(file, { maxDimension: FALLBACK_MAX_DIMENSION, quality: FALLBACK_QUALITY });
+  if (second.bytes <= CLOUD_FILE_MAX_BYTES) return second;
+  throw new Error("TOO_BIG_AFTER_COMPRESSION");
+}
+
+/** Small copy for the list of screenshots, made on this device from a file downloaded from the cloud. */
+export function makePreviewBlob(blob: Blob): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    if (typeof document === "undefined") {
+      reject(new Error("DOM_NOT_AVAILABLE"));
+      return;
+    }
+    const img = new Image();
+    const url = URL.createObjectURL(blob);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const dim = calculateTargetDimensions(img.naturalWidth || img.width, img.naturalHeight || img.height, THUMBNAIL_MAX_DIMENSION);
+      const canvas = document.createElement("canvas");
+      canvas.width = dim.width;
+      canvas.height = dim.height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("CANVAS_CONTEXT_FAILED"));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, dim.width, dim.height);
+      canvas.toBlob((b) => (b && b.size > 0 ? resolve(b) : reject(new Error("PREVIEW_FAILED"))), "image/webp", WEBP_QUALITY);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("IMAGE_DECODE_FAILED"));
+    };
+    img.src = url;
   });
 }

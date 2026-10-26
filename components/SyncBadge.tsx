@@ -153,6 +153,11 @@ export function SyncBadge() {
             {cloudStatus.pending > 0 && <div data-testid="sync-badge-pending">{formatString(t.pending, { count: cloudStatus.pending })}</div>}
             {cloudStatus.blocked > 0 && <div>{formatString(t.blocked, { count: cloudStatus.blocked })}</div>}
           </dl>
+          {(cloudStatus.noSpace ?? 0) > 0 && (
+            <p className="text-xs text-amber-300" data-testid="sync-badge-no-space">
+              {t.noSpace}
+            </p>
+          )}
           {view.action && (
             <Button size="sm" className="w-full" onClick={act} disabled={retrying} data-testid="sync-badge-action">
               {t.actions[view.action]}

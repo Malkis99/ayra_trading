@@ -308,7 +308,7 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
       await expect.poll(async () => ((await local(B.page, `ayra:${userId}:ayra_journal_v1`)).trades as Row["data"][]).filter((t) => !t.deletedAt).map((t) => t.instrument), { timeout: 15000 }).toEqual(["NAS100"]);
     });
 
-    await test.step("22: screenshot added on A → on B the trade says it is stored on another device", async () => {
+    await test.step("22: screenshot added on A → B downloads it from the cloud by itself (0005)", async () => {
       await A.page.goto("/journal");
       await A.page.keyboard.press("Escape");
       await A.page.click("tr:has-text('NAS100')");
@@ -322,11 +322,8 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
       await expect.poll(async () => ((await local(B.page, `ayra:${userId}:ayra_journal_v1`)).trades as Row["data"][]).find((t) => t.instrument === "NAS100")?.attachmentIds, { timeout: 15000 }).toHaveLength(1);
       await B.page.reload();
       await B.page.click("tr:has-text('NAS100')");
-      await expect(B.page.getByTestId("screenshots-elsewhere")).toContainText("Скриншот хранится на другом устройстве");
-      await shot(B.page, "caption-1440", "screenshots-elsewhere");
-      await B.page.setViewportSize({ width: 360, height: 740 });
-      await shot(B.page, "caption-360", "screenshots-elsewhere");
-      await B.page.setViewportSize({ width: 1440, height: 900 });
+      await expect(B.page.getByTestId("trade-quick-view").locator(".aspect-video img")).toHaveCount(1, { timeout: 15000 });
+      await expect(B.page.getByTestId("screenshots-elsewhere")).toHaveCount(0);
       await B.page.keyboard.press("Escape");
     });
 
@@ -344,6 +341,9 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
       await expect(drawer).toBeVisible();
       await B.page.getByTestId("instrument-input").fill("eurgbp");
       await B.page.fill("input[placeholder='150 / -50']", "40");
+      // both values are in the form before saving (if the form reset them, this says so instead of «still open»)
+      await expect(B.page.getByTestId("instrument-input")).toHaveValue("EURGBP");
+      await expect(B.page.locator("input[placeholder='150 / -50']")).toHaveValue("40");
       await B.page.getByTestId("instrument-input").press("Control+Enter");
       await expect(drawer).toBeHidden();
       await expect(notice).toContainText("Есть изменения, ещё не отправленные в облако");
@@ -359,7 +359,7 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
       // all in the cloud: the confirmation says the journal comes back after sign-in (no «no cloud sync yet»)
       await signOutDeleteBtn(B.page).click();
       const confirm = B.page.getByRole("dialog");
-      await expect(confirm).toContainText("Журнал сохранён в облаке и вернётся после входа");
+      await expect(confirm).toContainText("Журнал и скриншоты сохранены в облаке и вернутся после входа");
       await expect(confirm).not.toContainText("Синхронизации с облаком пока нет");
       await confirm.getByRole("button", { name: "Отмена" }).first().click();
     });

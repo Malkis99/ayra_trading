@@ -83,7 +83,7 @@ export function settingsNewer(a: CloudEntry, b: CloudEntry): boolean {
   return String(a.record.updatedAt ?? "") > String(b.record.updatedAt ?? "");
 }
 
-type ListField = "accounts" | "trades" | "strategies" | "noTrades" | "plans" | "weekPlans" | "notes";
+type ListField = "accounts" | "trades" | "strategies" | "noTrades" | "plans" | "weekPlans" | "notes" | "attachments";
 const FIELD_BY_TABLE: Partial<Record<JournalCloudTable, { field: ListField; idKey: string }>> = {
   journal_accounts: { field: "accounts", idKey: "id" },
   journal_trades: { field: "trades", idKey: "id" },
@@ -92,6 +92,7 @@ const FIELD_BY_TABLE: Partial<Record<JournalCloudTable, { field: ListField; idKe
   journal_day_plans: { field: "plans", idKey: "date" },
   journal_week_plans: { field: "weekPlans", idKey: "weekStartDate" },
   journal_notes: { field: "notes", idKey: "id" },
+  journal_attachments: { field: "attachments", idKey: "id" },
 };
 
 /** Writes records into a snapshot as they are (replace by id or add). Tombstones stay tombstones (soft delete). */

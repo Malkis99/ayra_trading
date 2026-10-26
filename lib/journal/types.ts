@@ -1,4 +1,5 @@
 import type { InitialSyncPlan, InitialSyncResult } from "./cloud/sync-engine";
+import type { AttachmentMetadata } from "./attachments/types";
 
 export type AccountType = "personal" | "prop" | "demo";
 
@@ -105,6 +106,18 @@ export interface SyncMeta {
   updatedAt?: string;
   deletedAt?: string | null;
 }
+
+/**
+ * A screenshot of a trade as the journal knows it (0005): its description only, synced like any record
+ * (table journal_attachments). The image itself lives in the browser (IndexedDB) and in the cloud bucket.
+ */
+export interface JournalAttachment extends AttachmentMetadata, SyncMeta {}
+
+/**
+ * Where a screenshot is, for the trade card: inCloud / downloading — not here, its file is in the cloud;
+ * noSpace — here, waiting: the cloud has no space for it; none — nothing to say.
+ */
+export type AttachmentCloudState = "inCloud" | "downloading" | "noSpace" | "none";
 
 export interface Account extends SyncMeta {
   id: string;
@@ -454,6 +467,23 @@ export interface JournalRepository {
 
   getStorageUsage(): StorageUsage;
 
+  /** Screenshot descriptions of the journal (0005). Live only, unless `withDeleted`. */
+  getAttachmentRecords?(withDeleted?: boolean): JournalAttachment[];
+  /** A screenshot added on this device (its file is already in the browser). */
+  saveAttachmentRecord?(meta: AttachmentMetadata): JournalAttachment;
+  /** Type or caption changed. */
+  updateAttachmentRecord?(id: string, updates: Partial<Pick<AttachmentMetadata, "kind" | "caption">>): JournalAttachment | null;
+  /** Soft delete: the description stays as a tombstone, the file in the cloud stays 30 days (0005). */
+  deleteAttachmentRecord?(id: string): boolean;
+  /** «Undo» of a deletion. */
+  restoreAttachmentRecord?(id: string): JournalAttachment | null;
+  /** Cloud journal: where a screenshot that is not on this device is — its file is in the cloud / being downloaded. */
+  attachmentCloudState?(id: string): AttachmentCloudState;
+  /** Cloud journal: download one screenshot's file now («Download» in manual mode). */
+  downloadAttachment?(id: string, opts?: { byUser?: boolean }): Promise<boolean>;
+  /** Cloud journal: files arrived or left this browser. Returns unsubscribe. */
+  subscribeAttachmentFiles?(listener: () => void): () => void;
+
   /** Everything stored, including tombstones (deletedAt set) — for sync (T7b) and tests; never for the UI. */
   getAllRecords(): JournalSnapshot;
 
@@ -480,7 +510,7 @@ export interface JournalRepository {
   /** Auto / manual exchange on this device (cloud repository only). */
   getSyncMode?(): "auto" | "manual";
   setSyncMode?(mode: "auto" | "manual"): void;
-  getCloudStatus?(): { state: "local" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error" | "manual"; pending: number; blocked: unknown[]; conflicts: number; lastError?: string; lastSyncAt?: string };
+  getCloudStatus?(): { state: "local" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error" | "manual"; pending: number; blocked: unknown[]; conflicts: number; lastError?: string; lastSyncAt?: string; noSpace?: number };
   /** Optional (cloud journal): exchange with the cloud now ("Retry"). */
   syncNow?(): Promise<void>;
   /** Optional (cloud journal): preview of the first upload. */
@@ -516,4 +546,6 @@ export interface JournalSnapshot {
   plans: TradingPlan[];
   weekPlans: WeekPlan[];
   notes: Note[];
+  /** Screenshot descriptions (0005); absent in journals stored before it. */
+  attachments?: JournalAttachment[];
 }

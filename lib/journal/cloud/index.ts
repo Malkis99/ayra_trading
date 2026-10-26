@@ -4,6 +4,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isE2EMockEnabled } from "@/lib/supabase/config";
 import { CloudJournalRepository } from "./cloud-repository";
 import { SupabaseJournalRemote } from "./remote";
+import { SupabaseAttachmentFiles } from "./attachment-files";
 
 export { CloudJournalRepository } from "./cloud-repository";
 export type { JournalCloudStatus, JournalCloudState, PullResult } from "./cloud-repository";
@@ -15,7 +16,13 @@ export type { JournalCloudRemote } from "./remote";
  */
 export function createJournalRepository(): JournalRepository {
   if (typeof window === "undefined" || isE2EMockEnabled()) return defaultJournalRepository;
-  return new CloudJournalRepository(defaultJournalRepository, new SupabaseJournalRemote(createSupabaseBrowserClient));
+  return new CloudJournalRepository(
+    defaultJournalRepository,
+    new SupabaseJournalRemote(createSupabaseBrowserClient),
+    undefined,
+    undefined,
+    new SupabaseAttachmentFiles(createSupabaseBrowserClient)
+  );
 }
 
 export const journalRepository: JournalRepository = createJournalRepository();
