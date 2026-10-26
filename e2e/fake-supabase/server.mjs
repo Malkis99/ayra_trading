@@ -249,6 +249,16 @@ export function createFakeSupabase() {
     if (path === "/__test/last-code") {
       return send(200, { code: lastCodeByEmail.get(url.searchParams.get("email")) ?? null });
     }
+    if (path === "/__test/app-role") {
+      // stands in for the owner's SQL on auth.users.raw_app_meta_data (only the server can change app_metadata)
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      const role = url.searchParams.get("role");
+      if (user) {
+        const { ayra_role: _old, ...rest } = user.app_metadata || {};
+        user.app_metadata = role ? { ...rest, ayra_role: role } : rest;
+      }
+      return send(200, { app_metadata: user?.app_metadata ?? null });
+    }
     if (path === "/__test/clear-password") {
       // stands in for an account made by the e-mail code before passwords existed
       const user = usersByEmail.get(url.searchParams.get("email"));
