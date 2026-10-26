@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { AppStorage } from "@/lib/storage";
-import { IndexedDBAttachmentRepository } from "@/lib/storage/indexeddb-repository";
+import { IndexedDBAttachmentRepository, readBlobBytes } from "@/lib/storage/indexeddb-repository";
 import type { AttachmentRepository } from "../attachments/types";
 import type { JournalAttachment } from "../types";
 import { makePreviewBlob } from "../attachments/image-processor";
@@ -61,7 +61,7 @@ export class SupabaseAttachmentFiles implements AttachmentFileRemote {
 
   async upload(path: string, blob: Blob, mime: string): Promise<void> {
     // Raw bytes with their type (not a form): the bucket checks the type and the size before taking the file
-    const { error } = await this.bucket().upload(path, await blob.arrayBuffer(), { contentType: mime, upsert: false });
+    const { error } = await this.bucket().upload(path, await readBlobBytes(blob), { contentType: mime, upsert: false });
     if (error) throw classify(error);
   }
 
@@ -201,28 +201,36 @@ export class AttachmentFiles {
     return result;
   }
 
-  /** Downloads one screenshot's file from the cloud into this browser (also «Download» in manual mode). */
-  async download(userId: string, id: string): Promise<boolean> {
+  /**
+   * Downloads one screenshot's file from the cloud into this browser (also «Download» in manual mode).
+   * `replace`: the copy here cannot be shown (broken) — a fresh one replaces it, only once it is fully downloaded.
+   */
+  async download(userId: string, id: string, opts: { replace?: boolean } = {}): Promise<boolean> {
     if (!this.deps.remote || this.downloading.has(id)) return false;
     const meta = ((this.deps.readJournal(userId).snapshot.attachments || []) as JournalAttachment[]).find((a) => a.id === id);
     if (!meta || !isLive(meta)) return false;
     const store = this.files(userId);
     // already here (the trade card and the exchange both asked): nothing to download
-    if (await store.getAttachment(id).catch(() => null)) return true;
+    if (!opts.replace && (await store.getAttachment(id).catch(() => null))) return true;
     if (this.downloading.has(id)) return false;
     this.downloading.add(id);
     this.notify();
     try {
-      const blob = await this.deps.remote.download(attachmentPath(userId, id, meta.mime));
+      const downloaded = await this.deps.remote.download(attachmentPath(userId, id, meta.mime));
       if (AppStorage.getUserId() !== userId) return false;
-      const previewBlob = await (this.deps.makePreview ?? makePreviewBlob)(blob);
-      if (!(await store.getAttachment(id).catch(() => null))) {
-        const { updatedAt: _u, deletedAt: _d, ...plain } = meta;
-        await store.addAttachment({ ...plain, originalBlob: blob, previewBlob });
-      }
+      // WebKit (iPhone) cannot keep a Blob that came from the network in IndexedDB ("Error preparing Blob/File data
+      // to be stored in object store", or a copy that later does not open): store a fresh Blob of the bytes, with the
+      // type of the screenshot, never the response's own
+      const originalBlob = await storableBlob(downloaded, meta.mime);
+      const preview = await (this.deps.makePreview ?? makePreviewBlob)(originalBlob);
+      const previewBlob = await storableBlob(preview, preview.type || meta.mime);
+      const { updatedAt: _u, deletedAt: _d, ...plain } = meta;
+      if (opts.replace) await store.deleteAttachment(id).catch(() => false);
+      if (!(await store.getAttachment(id).catch(() => null))) await store.addAttachment({ ...plain, originalBlob, previewBlob });
       addInCloud(userId, [id]);
       return true;
-    } catch {
+    } catch (err) {
+      console.warn("Screenshot download failed", id, err);
       return false; // tried again after the next exchange
     } finally {
       this.downloading.delete(id);
@@ -268,6 +276,11 @@ export class AttachmentFiles {
     }
     if (changed) this.notify();
   }
+}
+
+/** A Blob made of the bytes themselves (not tied to a network response), with an explicit type. */
+export async function storableBlob(blob: Blob, type: string): Promise<Blob> {
+  return new Blob([await readBlobBytes(blob)], { type });
 }
 
 /**

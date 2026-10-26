@@ -16,6 +16,8 @@ interface LightboxViewerProps {
     updates: Partial<Pick<AttachmentMetadata, "kind" | "caption">>
   ) => Promise<any>;
   onDeleteAttachment?: (id: string) => Promise<any>;
+  /** The picture could not be drawn (a broken copy on this device). */
+  onImageError?: (id: string) => void;
 }
 
 export function LightboxViewer({
@@ -26,6 +28,7 @@ export function LightboxViewer({
   onIndexChange,
   onUpdateMetadata,
   onDeleteAttachment,
+  onImageError,
 }: LightboxViewerProps) {
   const { dict } = useApp();
   const currentItem = attachments[currentIndex] || null;
@@ -307,7 +310,9 @@ export function LightboxViewer({
           {/* Image */}
           {imageUrl && (
             <img
+              data-testid="lightbox-image"
               src={imageUrl}
+              onError={() => onImageError?.(currentItem.id)}
               alt={currentItem.caption || dictAtt.title}
               style={{
                 transform: `scale(${zoomLevel}) translate(${panOffset.x / zoomLevel}px, ${panOffset.y / zoomLevel}px)`,

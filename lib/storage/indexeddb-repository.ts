@@ -9,6 +9,51 @@ import { AppStorage } from "./index";
 const DB_VERSION = 1;
 const STORE_NAME = "attachments";
 
+/**
+ * How an image is kept in IndexedDB: its bytes and type, not a Blob. WebKit (every browser on iPhone) cannot reliably
+ * keep Blobs there — a store fails ("Error preparing Blob/File data to be stored in object store") or the kept copy
+ * later does not open (a broken picture). Records written before keep their Blob and are read as they are.
+ */
+interface StoredBytes {
+  bytes: ArrayBuffer;
+  type: string;
+}
+type StoredImage = Blob | StoredBytes;
+export type StoredRecord = Omit<AttachmentRecord, "originalBlob" | "previewBlob"> & { originalBlob: StoredImage; previewBlob: StoredImage };
+
+/** The bytes of a Blob (also where Blob.arrayBuffer is missing, e.g. older WebKit and jsdom). */
+export function readBlobBytes(blob: Blob): Promise<ArrayBuffer> {
+  if (typeof blob.arrayBuffer === "function") return blob.arrayBuffer();
+  if (typeof Response === "function") {
+    try {
+      return new Response(blob).arrayBuffer();
+    } catch {
+      // fall back to FileReader
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as ArrayBuffer);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(blob);
+  });
+}
+
+// not `instanceof`: a value read back from IndexedDB may come from another realm
+const isStoredBytes = (v: unknown): v is StoredBytes =>
+  Boolean(v && typeof v === "object" && !(v instanceof Blob) && typeof (v as StoredBytes).bytes?.byteLength === "number" && typeof (v as StoredBytes).type === "string");
+
+async function toStored(record: AttachmentRecord): Promise<StoredRecord> {
+  const pack = async (b: Blob): Promise<StoredBytes> => ({ bytes: await readBlobBytes(b), type: b.type });
+  return { ...record, originalBlob: await pack(record.originalBlob), previewBlob: await pack(record.previewBlob) };
+}
+
+export function fromStored(record: StoredRecord | undefined | null): AttachmentRecord | null {
+  if (!record) return null;
+  const unpack = (v: StoredImage): Blob => (isStoredBytes(v) ? new Blob([v.bytes], { type: v.type }) : (v as Blob));
+  return { ...record, originalBlob: unpack(record.originalBlob), previewBlob: unpack(record.previewBlob) };
+}
+
 function openDB(dbName: string): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof window === "undefined" && typeof globalThis.indexedDB === "undefined") {
@@ -73,11 +118,13 @@ export class IndexedDBAttachmentRepository implements AttachmentRepository {
       createdAt,
       caption: input.caption ? input.caption.substring(0, 120) : undefined,
     };
+    // bytes are read before the transaction opens (it would close while waiting)
+    const stored = await toStored(record);
 
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readwrite");
       const store = tx.objectStore(STORE_NAME);
-      const request = store.add(record);
+      const request = store.add(stored);
 
       request.onsuccess = () => {
         resolve(record);
@@ -97,7 +144,7 @@ export class IndexedDBAttachmentRepository implements AttachmentRepository {
       const request = store.get(id);
 
       request.onsuccess = () => {
-        resolve((request.result as AttachmentRecord) || null);
+        resolve(fromStored(request.result as StoredRecord | undefined));
       };
 
       request.onerror = () => {
@@ -115,7 +162,7 @@ export class IndexedDBAttachmentRepository implements AttachmentRepository {
       const request = index.getAll(tradeId);
 
       request.onsuccess = () => {
-        const results = (request.result as AttachmentRecord[]) || [];
+        const results = ((request.result as StoredRecord[]) || []).map((r) => fromStored(r)!);
         results.sort(
           (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
         );
@@ -177,11 +224,12 @@ export class IndexedDBAttachmentRepository implements AttachmentRepository {
         ? { caption: updates.caption ? updates.caption.substring(0, 120) : undefined }
         : {}),
     };
+    const stored = await toStored(updatedRecord);
 
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readwrite");
       const store = tx.objectStore(STORE_NAME);
-      const request = store.put(updatedRecord);
+      const request = store.put(stored);
 
       request.onsuccess = () => {
         const { originalBlob, previewBlob, ...meta } = updatedRecord;

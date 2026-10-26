@@ -148,20 +148,21 @@ test.describe("Screenshots in the cloud (0005-B)", () => {
     await expect(thumbnails(B.page)).toHaveCount(1, { timeout: 15000 });
     await expect(B.page.getByTestId("screenshots-elsewhere")).toHaveCount(0);
     expect((await bucket(request, email)).log.filter((l) => l.startsWith("sign:"))).toEqual([`sign:${userId}/${row.id}.webp`]);
-    const stored = await B.page.evaluate(async () => {
+    const stored = await B.page.evaluate(async (uid) => {
       const dbs = await indexedDB.databases();
-      const name = dbs.map((d) => d.name).find((n) => n && n.includes("attachments"));
+      const name = dbs.map((d) => d.name).find((n) => n && n.includes("attachments") && n.includes(uid));
       return new Promise<{ preview: number; original: number } | null>((resolve) => {
         const open = indexedDB.open(name!);
         open.onsuccess = () => {
           const all = open.result.transaction("attachments", "readonly").objectStore("attachments").getAll();
           all.onsuccess = () => {
             const r = all.result[0];
-            resolve(r ? { preview: r.previewBlob.size, original: r.originalBlob.size } : null);
+            // kept as bytes + type (see lib/storage/indexeddb-repository.ts)
+            resolve(r ? { preview: r.previewBlob.bytes.byteLength, original: r.originalBlob.bytes.byteLength } : null);
           };
         };
       });
-    });
+    }, userId);
     expect(stored?.preview).toBeGreaterThan(0);
     expect(stored?.original).toBe(Number(row.data.bytes));
 
