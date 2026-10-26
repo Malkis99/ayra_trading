@@ -173,7 +173,7 @@ test.describe("Screenshots in the cloud (0005-B)", () => {
   });
 
   test("manual on both devices: nothing goes up or comes down by itself; «Synchronise» uploads, «Download» downloads", async ({ browser, request }) => {
-    const { A, B, email } = await twoDevices(browser, request, { manualA: true, manualB: true });
+    const { A, B, email, userId } = await twoDevices(browser, request, { manualA: true, manualB: true });
     await addScreenshot(A.page);
     await A.page.waitForTimeout(4000);
     expect(await cloudShots(request, email)).toEqual([]);
@@ -182,8 +182,12 @@ test.describe("Screenshots in the cloud (0005-B)", () => {
     await expect.poll(async () => (await cloudShots(request, email)).length).toBe(1);
     expect((await bucket(request, email)).files.length).toBe(1);
 
-    // B: «Synchronise» brings the row; the file waits for «Download»
+    // B: «Synchronise» brings the row; the file waits for «Download». Wait for the exchange to end before leaving
+    // the page (the «nothing to send» line was already there before the click)
     await syncNow(B.page);
+    await expect
+      .poll(async () => (await B.page.evaluate((id) => (JSON.parse(localStorage.getItem(`ayra:${id}:ayra_journal_v1`) || "{}").attachments || []).length, userId)), { timeout: 15000 })
+      .toBe(1);
     await openTrade(B.page);
     const inCloud = B.page.getByTestId("screenshots-in-cloud");
     await expect(inCloud).toContainText("Скриншот в облаке", { timeout: 15000 });

@@ -341,6 +341,9 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
       await expect(drawer).toBeVisible();
       await B.page.getByTestId("instrument-input").fill("eurgbp");
       await B.page.fill("input[placeholder='150 / -50']", "40");
+      // both values are in the form before saving (if the form reset them, this says so instead of «still open»)
+      await expect(B.page.getByTestId("instrument-input")).toHaveValue("EURGBP");
+      await expect(B.page.locator("input[placeholder='150 / -50']")).toHaveValue("40");
       await B.page.getByTestId("instrument-input").press("Control+Enter");
       await expect(drawer).toBeHidden();
       await expect(notice).toContainText("Есть изменения, ещё не отправленные в облако");
