@@ -60,23 +60,25 @@ async function signInAndOnboard(page: Page, email: string, nickname: string) {
 }
 
 test.describe("C1 /profile-select after onboarding", () => {
-  test("guest data -> new account -> onboarding -> 'Перенести данные гостя' keeps account identity", async ({ page }) => {
+  test("guest data -> new account -> onboarding -> 'Перенести журнал гостя': account identity and its own level (guest level/XP not moved)", async ({ page }) => {
     await seedGuest(page, GUEST_STATE);
     await page.goto("/");
     await expect(page.locator("body")).toContainText("GuestZed");
 
     await signInAndOnboard(page, "c1_use@example.com", "AccOne");
     await page.waitForURL("**/profile-select**", { timeout: 5000 });
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("Перенести данные гостя?");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Перенести журнал гостя?");
     await expect(page.locator("main")).toContainText("GuestZed");
 
-    await page.click("button:has-text('Перенести данные гостя')");
+    await page.click("button:has-text('Перенести журнал гостя')");
     await page.waitForURL((url) => url.pathname === "/", { timeout: 5000 });
     await expect(page.locator("body")).toContainText("AccOne");
 
     const account = await accountGameState(page);
     expect(account?.name).toBe("AccOne");
-    expect(account?.level).toBe(3);
+    // variant A: the guest level (3) and XP stay with the guest
+    expect(account?.level ?? 1).toBe(1);
+    expect(account?.xp ?? 0).toBe(0);
     const guest = await page.evaluate(() => JSON.parse(localStorage.getItem("ayra_demo_v1")!));
     expect(guest.name).toBe("GuestZed");
   });

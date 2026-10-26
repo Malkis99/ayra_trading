@@ -17,7 +17,9 @@ import { AppStorage } from "@/lib/storage";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
 import { JOURNAL_CLOUD_FLAG_TTL_MS, SYNC_FLUSH_ON_SIGN_OUT_MS } from "./config";
 import type { JournalCloudRemote } from "./remote";
-import { changedEntries, importBatchEntries, snapshotEntries, versionMap, type CloudEntry, type JournalCloudTable } from "./records";
+import { changedEntries, entryKey, entryVersion, importBatchEntries, snapshotEntries, versionMap, type CloudEntry, type JournalCloudTable } from "./records";
+import { readBase } from "./sync-merge";
+import { outboxKey } from "./outbox";
 import {
   JournalSyncEngine,
   hasLiveData,
@@ -281,6 +283,29 @@ export class CloudJournalRepository implements JournalRepository {
         return { ok: r.pulled, applied: r.applied };
       })
     );
+  }
+
+  /**
+   * Records written into this account's journal outside the repository (the guest journal copied in, variant A):
+   * every record the cloud has not seen in this version is queued, so it goes up like any other change and the
+   * badge shows «waiting to be sent» until it has. Before the first sync nothing is queued: the journal waits for
+   * «Upload to the cloud» as a whole (the badge says so). Returns how many records were queued.
+   */
+  adoptLocalRecords(): number {
+    const userId = this.mayUseCloud();
+    if (!userId) return 0;
+    if (!isInitialSyncDone(userId)) {
+      this.notifyStatus();
+      return 0;
+    }
+    const engine = this.engineFor(userId);
+    const journal = this.readJournal(userId);
+    const base = readBase(userId);
+    const queued = new Set(engine.outbox.list().map(outboxKey));
+    const fresh = snapshotEntries(journal.snapshot, journal.batches).filter((e) => base[entryKey(e)] !== entryVersion(e) && !queued.has(entryKey(e)));
+    engine.enqueue(fresh);
+    this.notifyStatus();
+    return fresh.length;
   }
 
   /** Auto / manual exchange on this device for the signed-in account (not synced). */

@@ -127,13 +127,31 @@ export function listGuestDataKeys(): string[] {
 }
 
 /**
- * Copies the guest profile (IndexedDB attachments, then localStorage keys) into the account space
- * and reloads this tab's providers from it. Guest data is left untouched.
+ * The guest's JOURNAL keys that move into the account (owner decision 2026-10-25, variant A): trades, accounts,
+ * strategies, notes, plans, import history and the Journal's own view settings. The guest's level, XP, Coins,
+ * quests, items, profile and onboarding (ayra_demo_v1) and social data stay with the guest.
+ */
+export const GUEST_JOURNAL_KEYS = [
+  JOURNAL_KEY,
+  "ayra_import_batches",
+  "ayra_import_mappings",
+  "ayra_journal_unit",
+  "ayra_journal_last_account",
+  "ayra_journal_last_instrument",
+  "ayra_journal_kpi_period",
+  "ayra_journal_density",
+  "ayra_prop_toasts_v1",
+] as const;
+
+/**
+ * Copies the guest JOURNAL (IndexedDB screenshots, then the journal keys) into the account space and reloads this
+ * tab's providers from it. Level, XP and Coins of the guest are NOT copied. The copied records are written outside
+ * the repository, so the caller hands them to the cloud queue (useJournal().adoptCopiedJournal) — they then go up
+ * like any other change and the cloud badge tells the truth. Guest data is left untouched.
  * The account space must be the active space.
  */
 export async function copyGuestToAccount(
-  userId: string,
-  options: { nickname?: string | null } = {}
+  userId: string
 ): Promise<{ copiedKeys: number; copiedAttachments: number; failedAttachments: number }> {
   validateUserId(userId);
   if (AppStorage.getActiveSpaceId() !== `account:${userId}`) {
@@ -163,14 +181,10 @@ export async function copyGuestToAccount(
 
   // Synchronous from here on: copy keys and reload providers before any provider can save
   // its in-memory (empty) account state over the copied data.
-  const keys = listGuestDataKeys();
+  const keys = listGuestDataKeys().filter((k) => (GUEST_JOURNAL_KEYS as readonly string[]).includes(k));
   for (const key of keys) {
-    let value = AppStorage.getItem(key, null);
+    const value = AppStorage.getItem(key, null);
     if (value === null) continue;
-    if (key === GAME_KEY) {
-      value = withAccountIdentity(value, AppStorage.getItem(GAME_KEY, userId));
-      if (options.nickname) value = withNickname(value, options.nickname);
-    }
     AppStorage.setItem(key, value, userId);
   }
   const spaceId = AppStorage.getActiveSpaceId();
@@ -179,32 +193,6 @@ export async function copyGuestToAccount(
   return { copiedKeys: keys.length, copiedAttachments, failedAttachments };
 }
 
-/**
- * Guest progress (level, XP, Coins, quests, items, chronicle) moves into the account, but an account
- * that already finished onboarding keeps its own identity: nickname, onboarding answers and appearance.
- */
-function withAccountIdentity(rawGuest: string, rawAccount: string | null): string {
-  try {
-    const account = rawAccount ? JSON.parse(rawAccount) : null;
-    if (account?.onboarding?.status !== "done") return rawGuest;
-    const guest = JSON.parse(rawGuest);
-    return JSON.stringify({ ...guest, name: account.name, onboarding: account.onboarding, profile: account.profile });
-  } catch {
-    return rawGuest;
-  }
-}
-
-/** The cloud nickname always wins over the copied guest name. */
-function withNickname(rawGame: string, nickname: string): string {
-  try {
-    const game = JSON.parse(rawGame);
-    game.name = nickname;
-    if (game.onboarding?.answers) game.onboarding.answers.nickname = nickname;
-    return JSON.stringify(game);
-  } catch {
-    return rawGame;
-  }
-}
 
 export interface GuestExport {
   app: "AYRA";

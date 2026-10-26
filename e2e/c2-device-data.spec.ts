@@ -15,6 +15,15 @@ async function seed(page: Page, opts: { accountData?: boolean } = {}) {
         JSON.stringify({ name: "GuestZed", level: 3, xp: 40, onboarding: { status: "done", answers: { nickname: "GuestZed" } } })
       );
       const now = new Date().toISOString();
+      // the guest journal: one account and one trade (variant A moves the journal, not the level)
+      localStorage.setItem(
+        "ayra_journal_v1",
+        JSON.stringify({
+          schemaVersion: 6,
+          accounts: [{ id: "acc_g", name: "Guest acc", type: "personal", currency: "USD", platform: "manual", createdAt: now, updatedAt: now, deletedAt: null }],
+          trades: [{ id: "tg1", accountId: "acc_g", instrument: "EURUSD", direction: "long", openedAt: now, pnlMoney: 10, status: "closed", createdAt: now, updatedAt: now, deletedAt: null, schemaVersion: 6 }],
+        })
+      );
       localStorage.setItem(
         "ayra_mock_auth_v1",
         JSON.stringify({
@@ -58,12 +67,14 @@ test.describe("C2 Settings: data on this device", () => {
     expect(download.suggestedFilename()).toMatch(/^ayra-guest-\d{4}-\d{2}-\d{2}\.json$/);
 
     await card(page).getByRole("button", { name: "Скопировать в аккаунт" }).click();
-    await expect(card(page)).toContainText("Данные гостя скопированы в аккаунт");
+    await expect(card(page)).toContainText("Журнал гостя скопирован в аккаунт.");
     await expect(card(page).getByRole("button", { name: "Скопировать в аккаунт" })).toHaveCount(0);
 
-    const account = await page.evaluate((id) => JSON.parse(localStorage.getItem(`ayra:${id}:ayra_demo_v1`)!), USER_ID);
-    expect(account.name).toBe("CloudNick");
-    expect(account.level).toBe(3);
+    // variant A: the trade moved; the guest level (3) did not
+    const journal = await page.evaluate((id) => JSON.parse(localStorage.getItem(`ayra:${id}:ayra_journal_v1`)!), USER_ID);
+    expect(journal.trades.map((t: { id: string }) => t.id)).toContain("tg1");
+    const account = await page.evaluate((id) => JSON.parse(localStorage.getItem(`ayra:${id}:ayra_demo_v1`) || "{}"), USER_ID);
+    expect(account.level ?? 1).not.toBe(3);
   });
 
   test("hides copy when the account already has data; deletes guest data after typed confirmation", async ({ page }) => {

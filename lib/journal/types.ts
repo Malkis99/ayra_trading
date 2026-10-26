@@ -464,6 +464,8 @@ export interface JournalRepository {
   isCloudActive?(): boolean;
   /** The server already answered whether cloud sync is on for the signed-in account (guests: true). */
   isCloudFlagKnown?(): boolean;
+  /** Queue for the cloud the records written outside the repository (guest journal copied in). */
+  adoptLocalRecords?(): number;
   /** Optional (cloud journal): records changed both here and in the cloud, waiting for the user's choice. */
   listConflicts?(): SyncConflict[];
   /** Optional (cloud journal): "keep this device" / "take from cloud" for one record. */

@@ -78,7 +78,7 @@ describe("profile-transfer (C1)", () => {
     await expect(copyGuestToAccount(USER)).rejects.toThrow();
   });
 
-  it("copies guest data and attachments into the account, keeps guest intact, reloads providers", async () => {
+  it("copies the guest JOURNAL and screenshots into the account (variant A), keeps guest intact, reloads providers", async () => {
     seedGuest();
     const guestRepo = new IndexedDBAttachmentRepository(null);
     const blob = new Blob(["x"], { type: "image/png" });
@@ -99,8 +99,10 @@ describe("profile-transfer (C1)", () => {
     const notify = vi.spyOn(spaceTabChannel, "notifyLocal");
     const result = await copyGuestToAccount(USER);
 
-    expect(result).toMatchObject({ copiedKeys: 2, copiedAttachments: 1, failedAttachments: 0 });
-    expect(JSON.parse(AppStorage.getItem("ayra_demo_v1", USER)!).name).toBe("GuestZed");
+    expect(result).toMatchObject({ copiedKeys: 1, copiedAttachments: 1, failedAttachments: 0 });
+    expect(AppStorage.getItem("ayra_journal_v1", USER)).toBe(localStorage.getItem("ayra_journal_v1"));
+    // level, XP, Coins (the game state) stay with the guest
+    expect(AppStorage.getItem("ayra_demo_v1", USER)).toBeNull();
     expect(JSON.parse(localStorage.getItem("ayra_demo_v1")!).name).toBe("GuestZed");
     expect(await new IndexedDBAttachmentRepository(USER).getAttachment("att_c1")).not.toBeNull();
     expect(await guestRepo.getAttachment("att_c1")).not.toBeNull();
@@ -118,7 +120,7 @@ describe("profile-transfer (C1)", () => {
     expect(res.destination).toBe("/awakening");
   });
 
-  it("transfer into an onboarded account keeps the account identity and takes guest progress", async () => {
+  it("transfer into an onboarded account keeps the account's own level, XP and Coins (guest progress is not copied)", async () => {
     seedGuest();
     AppStorage.setItem(
       "ayra_demo_v1",
@@ -128,16 +130,23 @@ describe("profile-transfer (C1)", () => {
     AppStorage.setUserId(USER);
     await copyGuestToAccount(USER);
     const account = JSON.parse(AppStorage.getItem("ayra_demo_v1", USER)!);
-    expect(account).toMatchObject({ name: "AccNick", level: 4, xp: 10 });
+    expect(account).toMatchObject({ name: "AccNick", level: 1 });
+    expect(account.xp ?? 0).toBe(0);
     expect(account.onboarding.answers.nickname).toBe("AccNick");
+    expect(AppStorage.getItem("ayra_journal_v1", USER)).not.toBeNull();
   });
 
-  it("copies with the cloud nickname taking precedence over the guest name", async () => {
+  it("only journal keys move; game, social and other guest keys never reach the account", async () => {
     seedGuest();
+    localStorage.setItem("ayra_import_batches", "[]");
+    localStorage.setItem("ayra_journal_unit", "money");
+    localStorage.setItem("ayra_social_v1", "{}");
     AppStorage.setUserId(USER);
-    await copyGuestToAccount(USER, { nickname: "CloudNick" });
-    expect(JSON.parse(AppStorage.getItem("ayra_demo_v1", USER)!).name).toBe("CloudNick");
-    expect(JSON.parse(localStorage.getItem("ayra_demo_v1")!).name).toBe("GuestZed");
+    await copyGuestToAccount(USER);
+    expect(AppStorage.getItem("ayra_import_batches", USER)).toBe("[]");
+    expect(AppStorage.getItem("ayra_journal_unit", USER)).toBe("money");
+    expect(AppStorage.getItem("ayra_social_v1", USER)).toBeNull();
+    expect(AppStorage.getItem("ayra_demo_v1", USER)).toBeNull();
   });
 
   it("exports guest data as JSON without device keys or account data", async () => {

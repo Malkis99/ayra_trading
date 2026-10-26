@@ -105,6 +105,8 @@ interface JournalContextType {
   initialSyncAutoStart: boolean;
   /** The server already said whether cloud sync is on (guests: true). */
   cloudFlagKnown: boolean;
+  /** After the guest journal was copied into the account: reload it and queue it for the cloud. */
+  adoptCopiedJournal: () => void;
   closeInitialSync: () => void;
   /** Bumped when the user asks to resolve conflicts (the header badge): the conflict dialog opens anywhere. */
   conflictDialogRequest: number;
@@ -244,6 +246,11 @@ export function JournalProvider({
     },
     [repository, refreshSync]
   );
+  const adoptCopiedJournal = useCallback(() => {
+    refresh();
+    repository.adoptLocalRecords?.();
+    refreshSync();
+  }, [repository, refresh, refreshSync]);
   const readUnsynced = useCallback(() => {
     if (!(repository.isCloudActive?.() ?? false)) return { pending: 0, conflicts: 0 };
     const s = repository.getCloudStatus?.();
@@ -608,6 +615,7 @@ export function JournalProvider({
         openInitialSync,
         initialSyncAutoStart,
         cloudFlagKnown,
+        adoptCopiedJournal,
         closeInitialSync,
         conflictDialogRequest,
         requestConflictDialog,
