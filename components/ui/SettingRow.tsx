@@ -36,11 +36,15 @@ export function SettingRow({ title, hint, hintLabel, children, className, "data-
 
   useEffect(() => {
     if (!open) return;
+    // Capture phase: an open hint takes Esc first, so a dialog around it (setup window) stays open
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      close();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [open]);
 
   return (

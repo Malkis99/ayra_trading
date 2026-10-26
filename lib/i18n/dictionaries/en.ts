@@ -2690,6 +2690,17 @@ export const en: Dictionary = {
     copyError: "Could not copy data. Please try again.",
     attachmentsWarning: "Some screenshots were not copied ({count}). They remain in the guest profile.",
   },
+  journalSetup: {
+    title: "Let's set up your Journal",
+    subtitle: "A few questions. You can change all of this later in Settings.",
+    subtitleCloudOnly: "Your Journal settings already came from another device. Choose how this device exchanges with the cloud.",
+    save: "Save",
+    skip: "Skip",
+    later: "Change later:",
+    uploadAuto: "After \"Save\", this device's journal starts uploading to the cloud — with progress and a \"Cancel\" button.",
+    uploadManual: "This device's journal uploads when you press \"Upload to the cloud\".",
+    close: "Close",
+  },
   journalSettings: {
     title: "Journal",
     subtitle: "How the Journal opens and what new trades get filled in with.",

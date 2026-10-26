@@ -28,8 +28,9 @@ function download(name: string, text: string) {
  * what is already in the cloud, offers a JSON backup first, uploads with progress, can be cancelled and continued
  * without copies. Different records never overwrite the cloud: they become conflicts (dialog of 4c).
  */
-export function InitialSyncDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+export function InitialSyncDialog({ isOpen, onClose, autoStart = false }: { isOpen: boolean; onClose: () => void; autoStart?: boolean }) {
   const { analyzeInitialSync, runInitialSync, getAllRecords } = useJournal();
+  const autoStarted = useRef(false);
   const { dict } = useApp();
   const t = dict.journal.initialSync;
   const [phase, setPhase] = useState<Phase>("checking");
@@ -56,6 +57,7 @@ export function InitialSyncDialog({ isOpen, onClose }: { isOpen: boolean; onClos
     cancelRef.current = false;
     setCancelling(false);
     setResult(null);
+    autoStarted.current = false;
     void analyze();
   }, [isOpen, analyze]);
 
@@ -73,6 +75,17 @@ export function InitialSyncDialog({ isOpen, onClose }: { isOpen: boolean; onClos
       setPhase("error");
     }
   };
+
+  // Setup window, «Automatic»: nothing in the cloud yet → upload at once with progress and «Cancel»;
+  // something in the cloud already → the usual preview (only here / only in the cloud / different), the person decides
+  useEffect(() => {
+    if (!autoStart || autoStarted.current || phase !== "preview" || !plan) return;
+    if (plan.cloudLive === 0 && plan.toUpload.length > 0) {
+      autoStarted.current = true;
+      void start();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, phase, plan]);
 
   const cancel = () => {
     cancelRef.current = true;
@@ -249,7 +262,7 @@ export function InitialSyncButton() {
   if (!initialSync.needed) return null;
   const label = initialSync.started ? dict.journal.initialSync.buttonContinue : dict.journal.initialSync.button;
   return (
-    <Button variant="secondary" onClick={openInitialSync} data-testid="initial-sync-button">
+    <Button variant="secondary" onClick={() => openInitialSync()} data-testid="initial-sync-button">
       <CloudUpload size={18} aria-hidden="true" />
       <span className="hidden sm:inline">{label}</span>
       <span className="sr-only sm:hidden">{label}</span>
@@ -259,8 +272,8 @@ export function InitialSyncButton() {
 
 /** The one first-upload window of the app (opened by the Journal button or the header badge). */
 export function GlobalInitialSyncDialog() {
-  const { initialSyncOpen, closeInitialSync } = useJournal();
-  return <InitialSyncDialog isOpen={initialSyncOpen} onClose={closeInitialSync} />;
+  const { initialSyncOpen, closeInitialSync, initialSyncAutoStart } = useJournal();
+  return <InitialSyncDialog isOpen={initialSyncOpen} onClose={closeInitialSync} autoStart={initialSyncAutoStart} />;
 }
 
 /** One notice when an empty device downloaded the journal from the cloud by itself (anywhere in the app). */

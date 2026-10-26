@@ -29,6 +29,7 @@ import { initialUnit } from "@/lib/journal/preferences";
 import { TodayPanel } from "@/components/journal/TodayPanel";
 import { TradesTable } from "@/components/journal/TradesTable";
 import { TradeQuickView } from "@/components/journal/TradeQuickView";
+import { JournalSetupWindow } from "@/components/journal/JournalSetupWindow";
 import { NoTradeModal } from "@/components/journal/NoTradeModal";
 import type { KpiPeriod } from "@/lib/journal/overview";
 import { getLocalDateString } from "@/lib/date-utils";
@@ -824,6 +825,9 @@ export default function JournalPage() {
         notes={notes}
       />
       )}
+
+      {/* First-run setup (once per account on this device; docs/journal-setup-plan.md) */}
+      <JournalSetupWindow />
 
       {/* TRADE QUICK VIEW */}
       <TradeQuickView

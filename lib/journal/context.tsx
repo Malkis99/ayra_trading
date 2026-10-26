@@ -100,7 +100,11 @@ interface JournalContextType {
   readUnsynced: () => { pending: number; conflicts: number };
   /** The first-upload window (one for the whole app: the Journal button and the header badge open it). */
   initialSyncOpen: boolean;
-  openInitialSync: () => void;
+  /** Open the first-upload window; autoStart: upload at once when the cloud is empty (setup window, «Automatic»). */
+  openInitialSync: (opts?: { autoStart?: boolean }) => void;
+  initialSyncAutoStart: boolean;
+  /** The server already said whether cloud sync is on (guests: true). */
+  cloudFlagKnown: boolean;
   closeInitialSync: () => void;
   /** Bumped when the user asks to resolve conflicts (the header badge): the conflict dialog opens anywhere. */
   conflictDialogRequest: number;
@@ -193,12 +197,15 @@ export function JournalProvider({
   const [syncMode, setSyncModeState] = useState<"auto" | "manual">("auto");
   const [online, setOnline] = useState(true);
   const [initialSyncOpen, setInitialSyncOpen] = useState(false);
+  const [initialSyncAutoStart, setInitialSyncAutoStart] = useState(false);
+  const [cloudFlagKnown, setCloudFlagKnown] = useState(false);
   const [conflictDialogRequest, setConflictDialogRequest] = useState(0);
   const refreshSync = useCallback(() => {
     const status = repository.getCloudStatus?.();
     setCloudStatus(status ? { ...status, blocked: status.blocked.length } : LOCAL_STATUS);
     const active = repository.isCloudActive?.() ?? false;
     setCloudActive(active);
+    setCloudFlagKnown(repository.isCloudFlagKnown?.() ?? true);
     setSyncModeState(repository.getSyncMode?.() ?? "auto");
     setSyncConflicts(active ? repository.listConflicts?.() ?? [] : []);
     setInitialSync(repository.getInitialSyncInfo?.() ?? { needed: false, started: false });
@@ -242,7 +249,10 @@ export function JournalProvider({
     const s = repository.getCloudStatus?.();
     return { pending: s?.pending ?? 0, conflicts: repository.listConflicts?.().length ?? 0 };
   }, [repository]);
-  const openInitialSync = useCallback(() => setInitialSyncOpen(true), []);
+  const openInitialSync = useCallback((opts?: { autoStart?: boolean }) => {
+    setInitialSyncAutoStart(Boolean(opts?.autoStart));
+    setInitialSyncOpen(true);
+  }, []);
   const closeInitialSync = useCallback(() => setInitialSyncOpen(false), []);
   const requestConflictDialog = useCallback(() => setConflictDialogRequest((n) => n + 1), []);
   // Network on / off: the badge shows it at once (the engine also retries when it comes back)
@@ -596,6 +606,8 @@ export function JournalProvider({
         readUnsynced,
         initialSyncOpen,
         openInitialSync,
+        initialSyncAutoStart,
+        cloudFlagKnown,
         closeInitialSync,
         conflictDialogRequest,
         requestConflictDialog,
