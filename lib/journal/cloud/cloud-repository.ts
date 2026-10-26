@@ -303,6 +303,11 @@ export class CloudJournalRepository implements JournalRepository {
   }
 
   /** The cloud is used for the signed-in account right now (flag known to be on). Guests and flag off: false. */
+  isCloudFlagKnown(): boolean {
+    const userId = AppStorage.getUserId();
+    return !userId || !this.remote || this.flagCache.has(userId);
+  }
+
   isCloudActive(): boolean {
     const userId = AppStorage.getUserId();
     return Boolean(userId && this.remote && this.flagCache.get(userId)?.enabled);

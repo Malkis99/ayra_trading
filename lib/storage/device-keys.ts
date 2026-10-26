@@ -15,6 +15,8 @@ export const DEVICE_KEYS = [
   "ayra_mock_auth_v1",
   // e2e auth mock only (AYRA_E2E_AUTH_MOCK): registered test accounts of the mock sign-in
   "ayra_mock_accounts_v1",
+  // e2e builds only: a test asks to see the Journal setup window (lib/journal/setup-window.ts)
+  "ayra_e2e_setup_window",
 ] as const;
 
 export type DeviceKey = (typeof DEVICE_KEYS)[number];

@@ -462,6 +462,8 @@ export interface JournalRepository {
 
   /** Optional (cloud journal): is the cloud used for this account now (flag on, signed in)? */
   isCloudActive?(): boolean;
+  /** The server already answered whether cloud sync is on for the signed-in account (guests: true). */
+  isCloudFlagKnown?(): boolean;
   /** Optional (cloud journal): records changed both here and in the cloud, waiting for the user's choice. */
   listConflicts?(): SyncConflict[];
   /** Optional (cloud journal): "keep this device" / "take from cloud" for one record. */
