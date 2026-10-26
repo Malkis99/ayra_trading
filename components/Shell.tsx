@@ -15,6 +15,7 @@ import { SearchModal } from "@/components/SearchModal";
 import { Toast } from "@/components/Toast";
 import { Language } from "@/lib/i18n/types";
 import { JournalProvider } from "@/lib/journal/context";
+import { ProfileTimezoneSync } from "@/components/ProfileTimezoneSync";
 import { CloudDownloadNotice, GlobalInitialSyncDialog } from "@/components/journal/InitialSyncDialog";
 import { SyncConflictDialog } from "@/components/journal/SyncConflictDialog";
 import { AuthProvider, useAuth } from "@/lib/auth/auth-context";
@@ -284,6 +285,8 @@ export function Shell({
             {/* Cloud sync windows (signed-in account with sync on only): opened by the Journal or the header badge */}
             <SyncConflictDialog />
             <GlobalInitialSyncDialog />
+            {/* Time zone of the account in the cloud profile (after each cloud exchange; guests never) */}
+            <ProfileTimezoneSync />
           </JournalProvider>
         </GameProvider>
       </AuthProvider>

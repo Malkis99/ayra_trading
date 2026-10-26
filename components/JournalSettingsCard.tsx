@@ -93,7 +93,7 @@ export function JournalSettingsCard() {
 
         <SettingRow title={t.timezoneTitle} hint={t.timezoneHint} hintLabel={t.hintLabel} data-testid="journal-settings-timezone">
           <TimezoneSelect value={gameState.profile.timezone} onChange={updateTimezone} />
-          <p className="text-[11px] text-mu">{t.timezoneLocalNote}</p>
+          <p className="text-[11px] text-mu" data-testid="journal-settings-timezone-note">{cloudActive ? t.timezoneCloudNote : t.timezoneLocalNote}</p>
         </SettingRow>
       </div>
 
