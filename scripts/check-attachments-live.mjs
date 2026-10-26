@@ -1,8 +1,10 @@
 // Manual check of the 0005 Storage rules on the LIVE Supabase project, signed in as yourself (the owner).
 // Uses only the public project URL and anon key; your password is asked here and sent only to Supabase.
-//   node scripts/check-attachments-live.mjs low     — after lowering the limit to 0: an upload must be refused
+//   node scripts/check-attachments-live.mjs low     — after lowering the limit to 0: two uploads; the second must be refused
+//     (the server does not know the size of the file being uploaded, only of files already saved, so in an empty
+//     folder the first one passes: the limit can be exceeded by at most one file, up to 5 MB)
 //   node scripts/check-attachments-live.mjs normal  — with the normal limit: allowed / refused as expected
-// Leaves at most one ~1 KB test file `live_check_….webp` in your folder (a file without a row; the daily cleanup
+// Leaves at most one ~1 KB test file per run `live_check_….webp` in your folder (a file without a row; the daily cleanup
 // may remove it after 24 hours, or delete it in the dashboard: Storage → journal-attachments).
 import { createClient } from "@supabase/supabase-js";
 import { createInterface } from "node:readline";
@@ -58,7 +60,11 @@ function expect(label, got, want) {
 
 const testName = `${uid}/live_check_${Date.now()}.webp`;
 if (mode === "low") {
-  expect("1 KB upload with the limit lowered to 0", await upload(testName, small, "image/webp"), "refused");
+  const { data: before } = await bucket.list(uid, { limit: 1000 });
+  const saved = (before || []).reduce((sum, f) => sum + Number(f.metadata?.size || 0), 0);
+  const first = await upload(testName, small, "image/webp");
+  expect(`1st 1 KB upload with the limit at 0 (already saved: ${saved} bytes)`, first, saved > 0 ? "refused" : "allowed");
+  expect("2nd 1 KB upload with the limit at 0", await upload(`${uid}/live_check_2_${Date.now()}.webp`, small, "image/webp"), "refused");
 } else {
   expect("1 KB webp into your folder", await upload(testName, small, "image/webp"), "allowed");
   expect("gif into your folder", await upload(`${uid}/live_check_gif_${Date.now()}.webp`, small, "image/gif"), "refused");
