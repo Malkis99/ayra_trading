@@ -481,6 +481,8 @@ export interface JournalRepository {
   attachmentCloudState?(id: string): AttachmentCloudState;
   /** Cloud journal: download one screenshot's file now («Download» in manual mode). */
   downloadAttachment?(id: string, opts?: { byUser?: boolean }): Promise<boolean>;
+  /** Cloud journal: the copy here does not open — replace it with a fresh one from the cloud. */
+  repairAttachment?(id: string, opts?: { byUser?: boolean }): Promise<boolean>;
   /** Cloud journal: files arrived or left this browser. Returns unsubscribe. */
   subscribeAttachmentFiles?(listener: () => void): () => void;
 

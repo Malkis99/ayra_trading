@@ -764,6 +764,8 @@ export const en: Dictionary = {
       downloadFailed: "Could not download the screenshot from the cloud. Try again.",
       noSpaceHere: "The screenshot is saved on this device only: no space in the cloud",
       deletedToast: "Screenshot deleted",
+      brokenHere: "The screenshot does not open on this device. It is intact in the cloud",
+      redownloadBtn: "Download again",
       alreadyAdded: "Already added",
       limitReached: "Maximum of {max} screenshots per trade",
       kindLabel: "Type",

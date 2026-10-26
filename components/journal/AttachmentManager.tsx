@@ -41,6 +41,7 @@ export function AttachmentManager({
     cloudActive,
     attachmentCloudState,
     downloadAttachment,
+    repairAttachment,
     attachmentFilesVersion,
     deletedAttachmentIds: deletedIds,
     saveAttachmentRecord,
@@ -116,6 +117,29 @@ export function AttachmentManager({
     if (results.some((ok) => !ok)) setDownloadError(true);
     reload();
   }, [inCloudKey, downloadAttachment, reload]);
+
+  // A copy here that cannot be drawn (WebKit kept a broken file before the fix): a fresh one from the cloud replaces
+  // it by itself in «Automatic»; in «Manual» the person presses «Download again». Only for files the cloud has.
+  const [broken, setBroken] = useState<string[]>([]);
+  const repairTried = useRef(new Set<string>());
+  const onBroken = useCallback(
+    (id: string) => {
+      if (repairTried.current.has(id)) return;
+      repairTried.current.add(id);
+      void repairAttachment(id).then((ok) => {
+        if (ok) reload();
+        else setBroken((prev) => (prev.includes(id) ? prev : [...prev, id]));
+      });
+    },
+    [repairAttachment, reload]
+  );
+  const repairByUser = useCallback(async () => {
+    const results = await Promise.all(broken.map((id) => repairAttachment(id, { byUser: true })));
+    if (results.every(Boolean)) setBroken([]);
+    else setDownloadError(true);
+    reload();
+  }, [broken, repairAttachment, reload]);
+  const brokenInCloud = cloudActive ? broken.filter((id) => attachments.some((a) => a.id === id)) : [];
 
   // «Stored on another device»: listed ids found neither here nor in the cloud store
   const [elsewhere, setElsewhere] = useState<string[]>([]);
@@ -371,6 +395,20 @@ export function AttachmentManager({
         </div>
       )}
 
+      {brokenInCloud.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-s2/40 p-2.5 text-xs text-mu" data-testid="screenshots-broken">
+          <span>{dictAtt.brokenHere}</span>
+          <button
+            type="button"
+            onClick={() => void repairByUser()}
+            className="rounded-lg border border-line px-2.5 py-1 font-semibold text-tx hover:border-acc focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-acc"
+            data-testid="screenshots-redownload"
+          >
+            {dictAtt.redownloadBtn}
+          </button>
+        </div>
+      )}
+
       {downloadError && (
         <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-2.5 text-xs text-rose-300" role="alert">
           {dictAtt.downloadFailed}
@@ -391,6 +429,7 @@ export function AttachmentManager({
               key={item.id}
               record={item}
               onClick={() => setActiveLightboxIndex(idx)}
+              onBroken={onBroken}
             />
           ))}
         </div>
@@ -441,6 +480,7 @@ export function AttachmentManager({
           onIndexChange={(idx) => setActiveLightboxIndex(idx)}
           onUpdateMetadata={handleUpdateMetadata}
           onDeleteAttachment={handleDeleteAttachment}
+          onImageError={onBroken}
         />
       )}
     </div>
@@ -450,9 +490,11 @@ export function AttachmentManager({
 function AttachmentThumbnailCard({
   record,
   onClick,
+  onBroken,
 }: {
   record: AttachmentRecord;
   onClick: () => void;
+  onBroken?: (id: string) => void;
 }) {
   const { dict } = useApp();
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
@@ -478,6 +520,7 @@ function AttachmentThumbnailCard({
           alt={record.caption || record.kind}
           className="absolute inset-0 w-full h-full object-cover transition-transform group-hover:scale-105"
           loading="lazy"
+          onError={() => onBroken?.(record.id)}
         />
       ) : (
         <div className="absolute inset-0 grid place-items-center bg-s2 text-xs text-mu">
