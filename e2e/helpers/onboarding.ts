@@ -12,11 +12,14 @@ export async function completeOnboarding(page: Page, nickname: string) {
   await expect(async () => {
     if (await nick.isVisible()) {
       const name = tries++ === 0 ? nickname : `${nickname.slice(0, 18)}${Math.floor(Math.random() * 1e5)}`;
-      await nick.fill(name);
-      await page.click('button:has-text("Продолжить")');
+      await nick.fill(name, { timeout: 3000 });
+      // the page took it (not wiped when it got ready)
+      await page.waitForTimeout(300);
+      await expect(nick).toHaveValue(name, { timeout: 1000 });
+      await page.locator('button:has-text("Продолжить")').first().click({ timeout: 3000 });
     }
-    await expect(nick).toBeHidden({ timeout: 2000 });
-  }).toPass({ timeout: 30000 });
+    await expect(nick).toBeHidden({ timeout: 3000 });
+  }).toPass({ timeout: 45000 });
   await page.click('button:has-text("Продолжить")');
   await page.click('button:has-text("Продолжить")');
   await page.click('button:has-text("18–24 года")');
