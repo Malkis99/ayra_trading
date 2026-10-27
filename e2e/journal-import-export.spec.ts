@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { GAME_CONFIG } from "../lib/game-config";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -146,7 +147,8 @@ test.describe("Import", () => {
     await w.getByTestId("import-confirm").click();
     await expect(w).toContainText("Добавлено сделок: 2");
     const xpAfter = await page.evaluate(() => JSON.parse(localStorage.getItem("ayra_demo_v1") || "{}").xp ?? 0);
-    expect(xpAfter).toBe(xpBefore);
+    // the imported trades give nothing; the account's first import gives its one-time reward (docs/economy-coins-plan.md)
+    expect(xpAfter).toBe(xpBefore + GAME_CONFIG.FIRST_ACTION_REWARDS.import.xp);
   });
 
   test("MetaTrader 4 HTML report is detected automatically; undo right after import", async ({ page }) => {

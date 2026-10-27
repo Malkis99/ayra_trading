@@ -72,6 +72,13 @@ export function StatsTab() {
         case "dailyReward":
           text = formatString(dict.chronicleEvents.dailyReward, { coins: entry.coins });
           break;
+        case "firstAction":
+          text = formatString(dict.chronicleEvents.firstAction, {
+            what: dict.chronicleEvents.firstActionKinds[entry.kind] ?? entry.kind,
+            coins: entry.coins,
+            xp: entry.xp,
+          });
+          break;
         case "planChanged":
           text = formatString(dict.chronicleEvents.planChanged, { plan: entry.plan });
           break;

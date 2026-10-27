@@ -1,4 +1,5 @@
 import { test, expect, type Page, type APIRequestContext, type Browser, type BrowserContext } from "@playwright/test";
+import { GAME_CONFIG } from "../lib/game-config";
 import fs from "node:fs";
 import path from "node:path";
 import { signIn } from "../e2e/helpers/auth";
@@ -295,7 +296,8 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
       await wizard.getByTestId("import-confirm").click();
       await expect(wizard).toContainText("Добавлено сделок: 29");
       await expect.poll(async () => (await liveInstruments(request, email)).length, { timeout: 30000 }).toBe(30);
-      expect(await accountXp(A.page, userId)).toBe(xpBefore); // no XP for imported trades
+      // no XP for the imported trades; the account's first import gives its one-time reward (docs/economy-coins-plan.md)
+      expect(await accountXp(A.page, userId)).toBe(xpBefore + GAME_CONFIG.FIRST_ACTION_REWARDS.import.xp);
       for (const r of await cloudRows(request, email)) for (const k of ["xp", "coins", "xpAwarded", "coinsAwarded"]) expect(r.data).not.toHaveProperty(k);
       await B.page.reload();
       await expect.poll(async () => ((await local(B.page, `ayra:${userId}:ayra_journal_v1`)).trades as Row["data"][]).filter((t) => !t.deletedAt).length, { timeout: 15000 }).toBe(30);

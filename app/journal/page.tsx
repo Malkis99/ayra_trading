@@ -410,7 +410,13 @@ export default function JournalPage() {
   };
 
   const handleSaveNoTradeAction = (entry: any) => {
+    const isEdit = noTrades.some((n) => n.id === entry.id);
     const saved = saveNoTrade(entry);
+    // Only a new entry can earn XP: an edit is not a new action
+    if (isEdit) {
+      showToast(dict.journal.noTrade.savedToast);
+      return;
+    }
     const rewardRes = recordNoTrade(saved, noTrades);
 
     if (rewardRes.xpAwarded > 0) {

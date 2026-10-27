@@ -35,7 +35,11 @@ export type ChronicleEventType =
   | { type: "achievementUnlocked"; achievementId: string; title?: string }
   | { type: "postPublished" }
   | { type: "profileUpdated" }
-  | { type: "legacy"; text: string };
+  | { type: "legacy"; text: string }
+  /** One-time reward for the first action of a kind on this account (docs/economy-coins-plan.md). */
+  | { type: "firstAction"; kind: FirstActionKind; coins: number; xp: number };
+
+export type FirstActionKind = keyof typeof GAME_CONFIG.FIRST_ACTION_REWARDS;
 
 export type ChronicleEntry = ChronicleEventType | string;
 
@@ -108,6 +112,45 @@ export interface GameState {
   aiConsent: boolean;
   /** Optional profile fields (country, socials, …) kept locally until cloud sync. */
   profileDetails?: ProfileDetails;
+  /** Latest time this device has seen (ms): the clock moved back → no rewards until real time catches up. */
+  lastSeenAt?: number;
+  /** First actions already rewarded on this device (kind → ISO time). */
+  firstActions?: Partial<Record<FirstActionKind, string>>;
+}
+
+/* ---------------------------------------------------------- economy on this device (until 0007) */
+
+/** The device clock is behind the latest time it has seen (moved back): rewards wait. */
+export function isClockBehind(state: Pick<GameState, "lastSeenAt">, currentDate: Date): boolean {
+  return typeof state.lastSeenAt === "number" && currentDate.getTime() < state.lastSeenAt - GAME_CONFIG.CLOCK_BACK_TOLERANCE_MS;
+}
+
+/** Coins quests and the daily reward may still give today (the daily cap). */
+export function remainingDailyCoins(state: Pick<GameState, "dailyStats">, todayStr: string): number {
+  return Math.max(0, GAME_CONFIG.DAILY_COIN_CAP - (state.dailyStats?.[todayStr]?.coinsGained || 0));
+}
+
+/**
+ * One-time reward for the first action of a kind on this account. The caller decides it is the first (the account's
+ * journal had no record of this kind, deleted ones included); this device also remembers it. Not limited by the daily
+ * cap or the clock: it can happen only once.
+ */
+export function grantFirstAction(state: GameState, kind: FirstActionKind, currentDate: Date = new Date()): { state: GameState; coins: number; xp: number } {
+  if (state.firstActions?.[kind]) return { state, coins: 0, xp: 0 };
+  const { coins, xp } = GAME_CONFIG.FIRST_ACTION_REWARDS[kind];
+  let newXp = state.xp + xp;
+  let level = state.level;
+  let chronicle = addChronicleEvent(state.chronicle, { type: "firstAction", kind, coins, xp });
+  while (newXp >= xpForNextLevel(level)) {
+    newXp -= xpForNextLevel(level);
+    level++;
+    chronicle = addChronicleEvent(chronicle, { type: "levelUp", level });
+  }
+  return {
+    state: { ...state, xp: newXp, level, coins: state.coins + coins, chronicle, firstActions: { ...state.firstActions, [kind]: currentDate.toISOString() } },
+    coins,
+    xp,
+  };
 }
 
 export function getIsoDateString(date: Date): string {
@@ -344,6 +387,9 @@ export function checkAndApplyDateResets(
   const mondayStr = getMondayIsoDateString(currentDate);
 
   let updated = migrateState(state);
+  // Clock moved back: no new day (quests and the daily reward are not renewed) until real time catches up
+  if (isClockBehind(updated, currentDate)) return updated;
+  updated.lastSeenAt = Math.max(updated.lastSeenAt || 0, currentDate.getTime());
 
   if (updated.lastQuestDate && updated.lastQuestDate !== todayStr) {
     const yesterdayDoneCount = Object.keys(updated.completedQuestsToday).length;
@@ -444,6 +490,7 @@ export function recordPropDisciplineDay(
   );
 
   let isEligible =
+    !isClockBehind(newState, currentDate) &&
     isWithinLimits &&
     hasTradeToday &&
     hasPlanWithLimitsToday &&
@@ -685,7 +732,7 @@ export function recordScreenshotAdded(
   let newState = checkAndApplyDateResets(state, currentDate);
   const todayStr = getIsoDateString(currentDate);
 
-  let isPlausible = true;
+  let isPlausible = !isClockBehind(newState, currentDate);
 
   // 1. Min dimension check
   const minDim = Math.min(screenshot.width, screenshot.height);
@@ -888,7 +935,8 @@ export function evaluatePlanQuestClosure(
     hasBiasWithInst &&
     hasLimitFilled &&
     isCreatedBeforeFirstTrade &&
-    planXpCountToday < 1
+    planXpCountToday < 1 &&
+    !isClockBehind(newState, currentDate)
   ) {
     const planXp = GAME_CONFIG.PLAN_DISCIPLINE_XP;
     xpAwarded += planXp;
@@ -982,7 +1030,7 @@ export function recordNoTradeEntry(
   let newState = checkAndApplyDateResets(state, currentDate);
   const todayStr = getIsoDateString(currentDate);
 
-  let isPlausible = true;
+  let isPlausible = !isClockBehind(newState, currentDate);
 
   if (!entry.reason || !entry.reason.trim()) {
     isPlausible = false;
@@ -1093,9 +1141,10 @@ export function completeQuest(
   let newState = checkAndApplyDateResets(state, currentDate);
   const todayStr = getIsoDateString(currentDate);
 
-  if (newState.completedQuestsToday[questId]) {
+  if (newState.completedQuestsToday[questId] || isClockBehind(newState, currentDate)) {
     return { state: newState, leveledUp: false, newlyUnlocked: [] };
   }
+  coinsAmount = Math.min(coinsAmount, remainingDailyCoins(newState, todayStr));
 
   const updatedCompletedToday = {
     ...newState.completedQuestsToday,
@@ -1243,12 +1292,17 @@ export function claimDailyReward(
   let newState = checkAndApplyDateResets(state, currentDate);
   const todayStr = getIsoDateString(currentDate);
 
-  if (newState.lastRewardClaimDate === todayStr) {
+  // once a day; never for a day before the last claim; nothing while the clock is behind
+  if (
+    newState.lastRewardClaimDate === todayStr ||
+    (newState.lastRewardClaimDate && todayStr < newState.lastRewardClaimDate) ||
+    isClockBehind(newState, currentDate)
+  ) {
     return { state: newState, claimedCoins: 0 };
   }
 
   const rewardIndex = newState.dailyRewardIndex % 7;
-  const claimedCoins = DAILY_REWARDS[rewardIndex];
+  const claimedCoins = Math.min(DAILY_REWARDS[rewardIndex], remainingDailyCoins(newState, todayStr));
 
   const chronicle = addChronicleEvent(newState.chronicle, {
     type: "dailyReward",
@@ -1525,7 +1579,7 @@ export function recordNoteSaved(
   let newState = checkAndApplyDateResets(state, currentDate);
   const todayStr = getIsoDateString(currentDate);
 
-  let isPlausible = true;
+  let isPlausible = !isClockBehind(newState, currentDate);
   const bodyText = (note.body || "").trim();
 
   if (bodyText.length < 80) {
@@ -1661,7 +1715,7 @@ export function recordLoggedTrade(
   }
 
   // 1. Anti-farm validation
-  let isPlausible = true;
+  let isPlausible = !isClockBehind(newState, currentDate);
 
   const tradeOpenedMs = new Date(trade.openedAt).getTime();
   if (isNaN(tradeOpenedMs) || tradeOpenedMs > currentDate.getTime() + 24 * 60 * 60 * 1000) {

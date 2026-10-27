@@ -263,7 +263,7 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
           archivedAt: null,
           createdAt: new Date().toISOString(),
         };
-        saveStrategy(strategy);
+        saveStrategy(strategy, { fromImport: true });
       });
     const added = importTrades(list);
     addImportBatch({

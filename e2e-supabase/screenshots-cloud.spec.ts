@@ -89,9 +89,13 @@ async function twoDevices(browser: Browser, request: APIRequestContext, opts: { 
   await signIn(B.page, email);
   await B.page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
   await markFirstSyncDone(B.page, userId);
-  if (opts.manualB) await setManual(B.page, userId);
   await B.page.goto("/journal");
   await expect(B.page.getByTestId("trades-table")).toContainText("NAS100", { timeout: 15000 });
+  // «Manual» only after the journal arrived: in manual mode an empty device does not download it by itself
+  if (opts.manualB) {
+    await setManual(B.page, userId);
+    await B.page.reload();
+  }
   return { A, B, email, userId };
 }
 

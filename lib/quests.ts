@@ -26,6 +26,18 @@ export interface QuestTemplate {
   fallbackWhyEn: string;
 }
 
+/**
+ * Quests the app closes by itself from the journal (lib/game.ts: the trade log, the day plan's bias and risk check,
+ * the review). Only these give coins, and they cannot be ticked by hand. Every other quest is self-reported: XP only
+ * (owner decision 2026-10-27; coins already earned for them are kept).
+ */
+export const APP_CLOSED_QUESTS: ReadonlySet<string> = new Set(["q_tradelog", "q_bias", "q_riskcheck", "q_reflect"]);
+
+/** What a quest gives: coins only for quests the app checks itself. */
+export function questReward(q: Pick<QuestTemplate, "id" | "xpReward" | "coinsReward">): { xp: number; coins: number } {
+  return { xp: q.xpReward, coins: APP_CLOSED_QUESTS.has(q.id) ? q.coinsReward : 0 };
+}
+
 export const QUEST_CATEGORY_META: Record<
   QuestCategory,
   { color: string; bg: string; iconName: string }
