@@ -596,6 +596,18 @@ export class CloudJournalRepository implements JournalRepository {
     return this.track(this.attachmentFiles.download(userId, id));
   }
 
+  /**
+   * The copy of a screenshot on this device cannot be shown (a broken picture, seen on iPhones before the fix): when the
+   * cloud has the file, a fresh copy is downloaded and replaces it. In manual mode only by «Download». Nothing in the
+   * cloud is touched; a screenshot that is only on this device is never replaced.
+   */
+  repairAttachment(id: string, opts: { byUser?: boolean } = {}): Promise<boolean> {
+    const userId = AppStorage.getUserId();
+    if (!userId || !this.isCloudActive() || !this.attachmentFiles.isInCloud(userId, id)) return Promise.resolve(false);
+    if (!opts.byUser && readSyncMode(userId) === "manual") return Promise.resolve(false);
+    return this.track(this.attachmentFiles.download(userId, id, { replace: true }));
+  }
+
   subscribeAttachmentFiles(listener: () => void): () => void {
     return this.attachmentFiles.subscribe(listener);
   }

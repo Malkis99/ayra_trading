@@ -29,7 +29,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: npm }
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      # WebKit too: iPhone browsers are WebKit (e2e-supabase/screenshots-webkit.spec.ts)
+      - run: npx playwright install --with-deps chromium webkit
       - name: e2e (mock auth)
         run: npx playwright test
       - name: e2e (fake Supabase)

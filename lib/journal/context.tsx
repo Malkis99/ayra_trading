@@ -64,6 +64,8 @@ interface JournalContextType {
   attachmentCloudState: (id: string) => AttachmentCloudState;
   /** byUser: «Download» pressed (the only way in manual mode). */
   downloadAttachment: (id: string, opts?: { byUser?: boolean }) => Promise<boolean>;
+  /** The copy here does not open (broken picture): a fresh one from the cloud replaces it. */
+  repairAttachment: (id: string, opts?: { byUser?: boolean }) => Promise<boolean>;
   /** Bumped when screenshot files arrive in or leave this browser (the screenshot list reloads). */
   attachmentFilesVersion: number;
   storageUsage: StorageUsage;
@@ -226,6 +228,11 @@ export function JournalProvider({
     [repository, refresh]
   );
   const attachmentCloudState = useCallback((id: string) => repository.attachmentCloudState?.(id) ?? "none", [repository]);
+  const repairAttachment = useCallback(async (id: string, opts?: { byUser?: boolean }) => {
+    const ok = (await repository.repairAttachment?.(id, opts)) ?? false;
+    if (ok) setAttachmentFilesVersion((n) => n + 1);
+    return ok;
+  }, [repository]);
   const downloadAttachment = useCallback(async (id: string, opts?: { byUser?: boolean }) => {
     const ok = (await repository.downloadAttachment?.(id, opts)) ?? false;
     setAttachmentFilesVersion((n) => n + 1);
@@ -717,6 +724,7 @@ export function JournalProvider({
         restoreAttachmentRecord,
         attachmentCloudState,
         downloadAttachment,
+        repairAttachment,
         attachmentFilesVersion,
         storageUsage,
         primaryPropAccountId,
