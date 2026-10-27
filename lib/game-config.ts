@@ -58,6 +58,30 @@ export const GAME_CONFIG = {
     REACHED: 1.00,
   },
 
+  // ---- Economy on this device until the server economy (0007), docs/economy-coins-plan.md (owner 2026-10-27) ----
+  /**
+   * Coins per day from daily quests and the daily reward together. PLACEHOLDER proposed by the developer: the honest
+   * maximum today is 50 (day 7 of the reward) + 40 (quests the app checks) = 90. One-time rewards are not counted.
+   */
+  DAILY_COIN_CAP: 100,
+  /** The device clock moved back by more than this: no rewards and no new day until real time catches up. */
+  CLOCK_BACK_TOLERANCE_MS: 10 * 60 * 1000,
+  /**
+   * One-time reward per account for the first action of each kind (created in the app; not edits, sync, undo or the
+   * guest copy). PLACEHOLDER amounts — the owner has not set them yet.
+   */
+  FIRST_ACTION_REWARDS: {
+    trade: { coins: 20, xp: 20 },
+    account: { coins: 10, xp: 10 },
+    strategy: { coins: 10, xp: 10 },
+    import: { coins: 10, xp: 10 },
+    dayPlan: { coins: 10, xp: 10 },
+    weekPlan: { coins: 10, xp: 10 },
+    note: { coins: 10, xp: 10 },
+    noTrade: { coins: 10, xp: 10 },
+    screenshot: { coins: 10, xp: 10 },
+  } as Record<"trade" | "account" | "strategy" | "import" | "dayPlan" | "weekPlan" | "note" | "noTrade" | "screenshot", { coins: number; xp: number }>,
+
   // Screenshot & Attachments Config (T6c-2b)
   MAX_ATTACHMENTS_PER_TRADE: 5,
   SCREENSHOT_DAILY_XP_CAP: 1,

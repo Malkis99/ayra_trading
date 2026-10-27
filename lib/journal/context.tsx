@@ -25,6 +25,11 @@ import { journalRepository } from "./cloud";
 import { defaultAttachmentRepository } from "./attachments/indexeddb-repository";
 import { AppStorage } from "@/lib/storage";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
+import { useOptionalGame } from "@/lib/game-context";
+import { useOptionalApp } from "@/lib/context";
+import { formatString } from "@/lib/i18n";
+import type { FirstActionKind } from "@/lib/game";
+import { listImportBatches } from "./import/batches";
 
 export interface CloudStatusView {
   state: "local" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error" | "manual";
@@ -85,7 +90,8 @@ interface JournalContextType {
   deleteTrade: (id: string) => boolean;
   importTrades: (trades: Trade[]) => number;
   deleteTradesByBatch: (batchId: string) => number;
-  saveStrategy: (strategy: Strategy) => Strategy;
+  /** fromImport: created by an import file (no «first strategy» reward). */
+  saveStrategy: (strategy: Strategy, opts?: { fromImport?: boolean }) => Strategy;
   archiveStrategy: (id: string) => Strategy;
   deleteStrategy: (id: string) => boolean;
   saveNoTrade: (entry: NoTradeEntry) => NoTradeEntry;
@@ -207,12 +213,51 @@ export function JournalProvider({
   }, [repository, attachments]);
   useEffect(() => repository.subscribeAttachmentFiles?.(() => setAttachmentFilesVersion((n) => n + 1)), [repository]);
 
+  // ---- One-time reward for the first action of a kind on this account (docs/economy-coins-plan.md) ----
+  // Only what a person creates here comes through these functions: records from the cloud, the guest copy, «Undo»
+  // and the import of trades do not. «First» = the account's journal has no record of this kind yet, deleted ones
+  // included (deleted and added again, or downloaded from another device = not the first).
+  const game = useOptionalGame();
+  const app = useOptionalApp();
+  const rewardRef = React.useRef({ game, app });
+  rewardRef.current = { game, app };
+  const noRecordsYet = useCallback(
+    (kind: FirstActionKind): boolean => {
+      const all = repository.getAllRecords();
+      const lists: Record<FirstActionKind, unknown[]> = {
+        trade: all.trades,
+        account: all.accounts,
+        strategy: all.strategies,
+        import: listImportBatches(),
+        dayPlan: all.plans,
+        weekPlan: all.weekPlans,
+        note: all.notes,
+        noTrade: all.noTrades,
+        // screenshots from before 0005 are listed by their trade only
+        screenshot: [...(all.attachments || []), ...all.trades.filter((t) => t.attachmentIds?.length)],
+      };
+      return (lists[kind] || []).length === 0;
+    },
+    [repository]
+  );
+  const rewardFirstAction = useCallback((kind: FirstActionKind, isFirst: boolean) => {
+    const { game: g, app: a } = rewardRef.current;
+    if (!isFirst || !g) return;
+    const { coins, xp } = g.grantFirstAction(kind);
+    if (!a || (!coins && !xp)) return;
+    const what = a.dict.chronicleEvents.firstActionKinds[kind];
+    // after the screen's own «saved» message
+    setTimeout(() => a.showToast(formatString(a.dict.chronicleEvents.firstActionToast, { what, coins, xp })), 0);
+  }, []);
+
   const saveAttachmentRecord = useCallback(
     (meta: AttachmentMetadata) => {
+      const first = noRecordsYet("screenshot");
       repository.saveAttachmentRecord?.(meta);
       refresh();
+      rewardFirstAction("screenshot", first);
     },
-    [repository, refresh]
+    [repository, refresh, noRecordsYet, rewardFirstAction]
   );
   const updateAttachmentRecord = useCallback(
     (id: string, updates: Partial<Pick<AttachmentMetadata, "kind" | "caption">>) => {
@@ -459,11 +504,13 @@ export function JournalProvider({
 
   const saveAccount = useCallback(
     (account: Account) => {
+      const first = noRecordsYet("account");
       const saved = repository.saveAccount(account);
       refresh();
+      rewardFirstAction("account", first);
       return saved;
     },
-    [repository, refresh]
+    [repository, refresh, noRecordsYet, rewardFirstAction]
   );
 
   const softDeleteAccount = useCallback(
@@ -527,13 +574,15 @@ export function JournalProvider({
 
   const saveTrade = useCallback(
     (trade: Trade) => {
+      const first = noRecordsYet("trade");
       const saved = repository.saveTrade(trade);
       setLastSelectedAccountId(trade.accountId);
       setLastSelectedInstrument(trade.instrument);
       refresh();
+      rewardFirstAction("trade", first);
       return saved;
     },
-    [repository, setLastSelectedAccountId, setLastSelectedInstrument, refresh]
+    [repository, setLastSelectedAccountId, setLastSelectedInstrument, refresh, noRecordsYet, rewardFirstAction]
   );
 
   const deleteTrade = useCallback(
@@ -547,11 +596,14 @@ export function JournalProvider({
 
   const importTrades = useCallback(
     (list: Trade[]) => {
+      const first = noRecordsYet("import");
       const added = repository.importTrades(list);
       refresh();
+      // the trades themselves give nothing (imports never do); the first import of the account does, once
+      if (added > 0) rewardFirstAction("import", first);
       return added;
     },
-    [repository, refresh]
+    [repository, refresh, noRecordsYet, rewardFirstAction]
   );
 
   const deleteTradesByBatch = useCallback(
@@ -564,12 +616,14 @@ export function JournalProvider({
   );
 
   const saveStrategy = useCallback(
-    (strategy: Strategy) => {
+    (strategy: Strategy, opts?: { fromImport?: boolean }) => {
+      const first = !opts?.fromImport && noRecordsYet("strategy");
       const saved = repository.saveStrategy(strategy);
       refresh();
+      rewardFirstAction("strategy", first);
       return saved;
     },
-    [repository, refresh]
+    [repository, refresh, noRecordsYet, rewardFirstAction]
   );
 
   const archiveStrategy = useCallback(
@@ -592,11 +646,13 @@ export function JournalProvider({
 
   const saveNoTrade = useCallback(
     (entry: NoTradeEntry) => {
+      const first = noRecordsYet("noTrade");
       const saved = repository.saveNoTrade(entry);
       refresh();
+      rewardFirstAction("noTrade", first);
       return saved;
     },
-    [repository, refresh]
+    [repository, refresh, noRecordsYet, rewardFirstAction]
   );
 
   const deleteNoTrade = useCallback(
@@ -617,11 +673,13 @@ export function JournalProvider({
 
   const saveTradingPlan = useCallback(
     (plan: TradingPlan) => {
+      const first = noRecordsYet("dayPlan");
       const saved = repository.saveTradingPlan(plan);
       refresh();
+      rewardFirstAction("dayPlan", first);
       return saved;
     },
-    [repository, refresh]
+    [repository, refresh, noRecordsYet, rewardFirstAction]
   );
 
   const deleteTradingPlan = useCallback(
@@ -642,11 +700,13 @@ export function JournalProvider({
 
   const saveWeekPlan = useCallback(
     (plan: WeekPlan) => {
+      const first = noRecordsYet("weekPlan");
       const saved = repository.saveWeekPlan(plan);
       refresh();
+      rewardFirstAction("weekPlan", first);
       return saved;
     },
-    [repository, refresh]
+    [repository, refresh, noRecordsYet, rewardFirstAction]
   );
 
   const deleteWeekPlan = useCallback(
@@ -667,11 +727,13 @@ export function JournalProvider({
 
   const saveNote = useCallback(
     (note: Note) => {
+      const first = noRecordsYet("note");
       const saved = repository.saveNote(note);
       refresh();
+      rewardFirstAction("note", first);
       return saved;
     },
-    [repository, refresh]
+    [repository, refresh, noRecordsYet, rewardFirstAction]
   );
 
   const archiveNote = useCallback(

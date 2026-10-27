@@ -25,7 +25,10 @@ import {
   recordNoTradeEntry,
   evaluatePlanQuestClosure,
   recordNoteSaved as recordNoteSavedLogic,
+  grantFirstAction as grantFirstActionLogic,
+  type FirstActionKind,
 } from "@/lib/game";
+import { APP_CLOSED_QUESTS } from "@/lib/quests";
 import { ITEMS, FRAMES, TITLES, BACKGROUNDS } from "@/lib/items";
 import { AvatarAppearance, validateAvatarAppearance } from "@/lib/avatar";
 import type { ProfileDetails } from "@/lib/profile";
@@ -50,7 +53,9 @@ interface GameContextType {
     category: string,
     xp?: number,
     coins?: number
-  ) => { leveledUp: boolean; newLevel?: number; newlyUnlocked: string[] };
+  ) => { completed: boolean; xp: number; leveledUp: boolean; newLevel?: number; newlyUnlocked: string[] };
+  /** One-time reward for the first action of a kind on this account (coins and XP given; 0 if already given). */
+  grantFirstAction: (kind: FirstActionKind) => { coins: number; xp: number };
   passQuest: (questId: string) => void;
   replaceQuest: (questId: string) => boolean;
   toggleRestDay: () => void;
@@ -347,30 +352,30 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     }));
   }, []);
 
+  // A quest ticked by the person (Quests, Home). Quests the app checks itself close only by themselves; a
+  // self-reported quest gives XP, never coins (owner decision 2026-10-27).
   const completeQuest = useCallback(
     (
       questId: string,
       title: string,
       category: string,
       xp?: number,
-      coins?: number
+      _coins?: number
     ) => {
       let result = {
+        completed: false,
+        xp: 0,
         leveledUp: false,
         newLevel: undefined as number | undefined,
         newlyUnlocked: [] as string[],
       };
+      if (APP_CLOSED_QUESTS.has(questId)) return result;
       setGameState((prev) => {
-        const res = completeQuestLogic(
-          prev,
-          questId,
-          title,
-          category,
-          xp,
-          coins,
-          new Date()
-        );
+        const res = completeQuestLogic(prev, questId, title, category, xp, 0, new Date());
+        const completed = res.state.completedQuestsToday[questId] === true && !prev.completedQuestsToday[questId];
         result = {
+          completed,
+          xp: completed ? res.state.history[0]?.xp ?? 0 : 0,
           leveledUp: res.leveledUp,
           newLevel: res.newLevel,
           newlyUnlocked: res.newlyUnlocked,
@@ -381,6 +386,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     },
     []
   );
+
+  // One-time reward for the first action of a kind on this account (the journal decides it is the first)
+  const grantFirstAction = useCallback((kind: FirstActionKind) => {
+    let granted = { coins: 0, xp: 0 };
+    setGameState((prev) => {
+      const res = grantFirstActionLogic(prev, kind, new Date());
+      granted = { coins: res.coins, xp: res.xp };
+      return res.state;
+    });
+    return granted;
+  }, []);
 
   const passQuest = useCallback((questId: string) => {
     setGameState((prev) => passQuestLogic(prev, questId, new Date()));
@@ -656,6 +672,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         setWardrobeFilter,
         effectiveEquipment,
         completeQuest,
+        grantFirstAction,
         passQuest,
         replaceQuest,
         toggleRestDay,
@@ -697,6 +714,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       {children}
     </GameContext.Provider>
   );
+}
+
+/** The game, or null outside a GameProvider (the journal works without it in tests). */
+export function useOptionalGame() {
+  return useContext(GameContext);
 }
 
 export function useGame() {

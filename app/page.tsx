@@ -20,7 +20,7 @@ import {
   MarketMiniCard,
   TopicOfDayCard,
 } from "@/components/home/SharedBlocks";
-import { getDeterministicDailyQuests } from "@/lib/quests";
+import { APP_CLOSED_QUESTS, getDeterministicDailyQuests } from "@/lib/quests";
 import { TITLES, FRAMES, ITEMS } from "@/lib/items";
 
 export default function HomePage() {
@@ -52,13 +52,19 @@ export default function HomePage() {
   const todayIso = new Date().toISOString().split("T")[0];
   const dailyQuests = getDeterministicDailyQuests(todayIso).core;
 
-  const handleQuestClick = (questId: string, fallbackTitle: string, category: string) => {
+  // A quest the app checks itself closes by itself; a self-reported one gives its XP (no coins)
+  const handleQuestClick = (questId: string, fallbackTitle: string, category: string, xp: number) => {
     if (gameState.completedQuestsToday[questId]) return;
-    const res = completeQuest(questId, fallbackTitle, category);
+    if (APP_CLOSED_QUESTS.has(questId)) {
+      showToast(dict.questsPage.todayTab.autoCloses);
+      return;
+    }
+    const res = completeQuest(questId, fallbackTitle, category, xp);
+    if (!res.completed) return;
     if (res.leveledUp) {
       showToast(`Level up! Lv ${res.newLevel}`);
     } else {
-      showToast("+40 XP · +10 Coins");
+      showToast(formatString(dict.questsPage.todayTab.rewardXp, { xp: res.xp }));
     }
   };
 
@@ -108,6 +114,13 @@ export default function HomePage() {
           break;
         case "dailyReward":
           text = formatString(dict.chronicleEvents.dailyReward, { coins: entry.coins });
+          break;
+        case "firstAction":
+          text = formatString(dict.chronicleEvents.firstAction, {
+            what: dict.chronicleEvents.firstActionKinds[entry.kind] ?? entry.kind,
+            coins: entry.coins,
+            xp: entry.xp,
+          });
           break;
         case "planChanged":
           text = formatString(dict.chronicleEvents.planChanged, { plan: entry.plan });
@@ -290,7 +303,7 @@ export default function HomePage() {
                 return (
                   <button
                     key={q.id}
-                    onClick={() => handleQuestClick(q.id, title, q.category)}
+                    onClick={() => handleQuestClick(q.id, title, q.category, q.xpReward)}
                     className={`w-full text-left flex items-center justify-between rounded-xl border border-line bg-s2/60 p-3 text-xs transition-colors ${
                       isDone ? "opacity-60 line-through" : "hover:border-vi hover:bg-[#50348f22]"
                     }`}

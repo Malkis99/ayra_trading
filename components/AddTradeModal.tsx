@@ -565,7 +565,10 @@ export function AddTradeModal({ isOpen, onClose, initialTrade, initialOpenedAt }
       }
     }
 
-    const rewardRes = recordTrade(tradeToSave, trades);
+    // Only a new trade can earn anything: an edit is not a new action (owner decision 2026-10-27)
+    const rewardRes = initialTrade
+      ? { xpAwarded: 0, questClosed: false, leveledUp: false, newLevel: undefined, newlyUnlocked: [] as string[] }
+      : recordTrade(tradeToSave, trades);
 
     if (propToastText) {
       showToast(propToastText);

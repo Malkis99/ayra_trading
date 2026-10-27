@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { formatString, formatNumber } from "@/lib/i18n";
-import { getDeterministicDailyQuests, QUEST_CATEGORY_META, QuestCategory } from "@/lib/quests";
+import { APP_CLOSED_QUESTS, getDeterministicDailyQuests, questReward, QUEST_CATEGORY_META, QuestCategory } from "@/lib/quests";
 import { GAME_CONFIG } from "@/lib/game-config";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
@@ -65,14 +65,22 @@ export default function QuestsPage() {
     }
   };
 
-  const handleComplete = (id: string, fallbackTitle: string, category: string, xp: number, coins: number) => {
+  // Ticked by the person: XP only (coins are for quests the app checks itself, which close by themselves)
+  const handleComplete = (id: string, fallbackTitle: string, category: string, xp: number) => {
     if (gameState.completedQuestsToday[id]) return;
-    const res = completeQuest(id, fallbackTitle, category, xp, coins);
+    const res = completeQuest(id, fallbackTitle, category, xp);
+    if (!res.completed) return;
     if (res.leveledUp) {
       showToast(`Level up! Lv ${res.newLevel}`);
     } else {
-      showToast(`+${xp} XP · +${coins} Coins`);
+      showToast(formatString(dict.questsPage.todayTab.rewardXp, { xp: res.xp }));
     }
+  };
+  const rewardText = (q: { id: string; xpReward: number; coinsReward: number }) => {
+    const r = questReward(q);
+    return r.coins > 0
+      ? formatString(dict.questsPage.todayTab.rewardXpCoins, { xp: r.xp, coins: r.coins })
+      : formatString(dict.questsPage.todayTab.rewardXp, { xp: r.xp });
   };
 
   const handlePass = (id: string) => {
@@ -227,7 +235,7 @@ export default function QuestsPage() {
                                   {dict.categories[q.category]}
                                 </span>
                                 <span>· {q.durationMinutes} min</span>
-                                <span>· +{q.xpReward} XP / +{q.coinsReward} Coins</span>
+                                <span>· {rewardText(q)}</span>
                               </div>
                             </div>
                           </div>
@@ -257,14 +265,18 @@ export default function QuestsPage() {
                                 >
                                   <RotateCcw size={15} />
                                 </button>
-                                <button
-                                  onClick={() =>
-                                    handleComplete(q.id, title, q.category, q.xpReward, q.coinsReward)
-                                  }
-                                  className="btn text-xs py-1.5 px-3.5"
-                                >
-                                  {dict.questsPage.todayTab.completeBtn}
-                                </button>
+                                {APP_CLOSED_QUESTS.has(q.id) ? (
+                                  <span className="text-[11px] text-mu" data-testid="quest-auto-closes">
+                                    {dict.questsPage.todayTab.autoCloses}
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={() => handleComplete(q.id, title, q.category, q.xpReward)}
+                                    className="btn text-xs py-1.5 px-3.5"
+                                  >
+                                    {dict.questsPage.todayTab.completeBtn}
+                                  </button>
+                                )}
                               </>
                             )}
                           </div>
@@ -317,18 +329,20 @@ export default function QuestsPage() {
                           <div>
                             <div className="text-xs font-semibold text-tx">{title}</div>
                             <div className="text-[10px] text-mu mt-0.5">
-                              +{q.xpReward} XP · +{q.coinsReward} Coins
+                              {rewardText(q)}
                             </div>
                           </div>
                         </div>
 
                         {isDone ? (
                           <span className="text-xs font-bold text-vi">✓</span>
+                        ) : APP_CLOSED_QUESTS.has(q.id) ? (
+                          <span className="text-[11px] text-mu" data-testid="quest-auto-closes">
+                            {dict.questsPage.todayTab.autoCloses}
+                          </span>
                         ) : (
                           <button
-                            onClick={() =>
-                              handleComplete(q.id, title, q.category, q.xpReward, q.coinsReward)
-                            }
+                            onClick={() => handleComplete(q.id, title, q.category, q.xpReward)}
                             className="btn text-xs py-1.5 px-3"
                           >
                             {dict.questsPage.todayTab.completeBtn}

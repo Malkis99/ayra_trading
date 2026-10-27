@@ -162,7 +162,8 @@ export function NoteModal({
     saveNote(noteToSave);
 
     // Reward Knowledge XP & Quest closure check
-    const rewardRes = recordNoteSaved(noteToSave, notes);
+    // Only a new note can earn XP: an edit is not a new action
+    const rewardRes = initialNote ? { xpAwarded: 0 } : recordNoteSaved(noteToSave, notes);
     if (rewardRes.xpAwarded > 0) {
       showToast(`+${rewardRes.xpAwarded} XP (${dict.stats.knowledge})`);
     } else {
