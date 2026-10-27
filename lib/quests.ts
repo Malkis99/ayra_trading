@@ -1,4 +1,5 @@
 import { AwakeningProgram } from "./awakening";
+import { GAME_CONFIG } from "./game-config";
 
 export type QuestCategory =
   | "Trading"
@@ -33,9 +34,12 @@ export interface QuestTemplate {
  */
 export const APP_CLOSED_QUESTS: ReadonlySet<string> = new Set(["q_tradelog", "q_bias", "q_riskcheck", "q_reflect"]);
 
-/** What a quest gives: coins only for quests the app checks itself. */
+/**
+ * What a quest really gives. Quests the app closes itself are paid the same (lib/game.ts: QUEST_XP and QUEST_COINS),
+ * whatever their card said before; self-reported quests give their XP and no coins.
+ */
 export function questReward(q: Pick<QuestTemplate, "id" | "xpReward" | "coinsReward">): { xp: number; coins: number } {
-  return { xp: q.xpReward, coins: APP_CLOSED_QUESTS.has(q.id) ? q.coinsReward : 0 };
+  return APP_CLOSED_QUESTS.has(q.id) ? { xp: GAME_CONFIG.QUEST_XP, coins: GAME_CONFIG.QUEST_COINS } : { xp: q.xpReward, coins: 0 };
 }
 
 export const QUEST_CATEGORY_META: Record<

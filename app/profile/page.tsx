@@ -10,6 +10,7 @@ import { OverviewTab } from "@/components/profile/OverviewTab";
 import { StatsTab } from "@/components/profile/StatsTab";
 import { WardrobeTab } from "@/components/profile/WardrobeTab";
 import { AchievementsTab } from "@/components/profile/AchievementsTab";
+import { CoinsTab } from "@/components/profile/CoinsTab";
 import { EditProfileTab } from "@/components/profile/EditProfileTab";
 import { AppearanceSection } from "@/components/profile/AppearanceSection";
 import { SlotPicker } from "@/components/profile/SlotPicker";
@@ -17,7 +18,7 @@ import { sameAppearance } from "@/lib/profile";
 import type { AvatarAppearance } from "@/lib/avatar";
 import type { SlotName } from "@/lib/items";
 
-const PROFILE_TABS = ["overview", "stats", "wardrobe", "achievements", "edit"] as const;
+const PROFILE_TABS = ["overview", "stats", "wardrobe", "achievements", "coins", "edit"] as const;
 type ProfileTab = (typeof PROFILE_TABS)[number];
 
 function isTab(v: string | null): v is ProfileTab {
@@ -194,6 +195,7 @@ export default function ProfilePage() {
           </div>
         )}
         {tab === "achievements" && <AchievementsTab />}
+        {tab === "coins" && <CoinsTab />}
         {tab === "edit" && <EditProfileTab onExit={exitEditor} onDirtyChange={setEditDirty} saveRef={saveEditRef} />}
       </section>
 

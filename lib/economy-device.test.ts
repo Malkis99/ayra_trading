@@ -31,7 +31,7 @@ describe("daily coin cap (quests + daily reward)", () => {
   });
 
   it("the honest maximum of a day (day 7 of the reward + the quests the app checks) fits under the cap", () => {
-    const appQuestsCoins = QUEST_POOL.filter((q) => APP_CLOSED_QUESTS.has(q.id)).reduce((s, q) => s + q.coinsReward, 0);
+    const appQuestsCoins = QUEST_POOL.filter((q) => APP_CLOSED_QUESTS.has(q.id)).reduce((s, q) => s + questReward(q).coins, 0);
     expect(Math.max(...GAME_CONFIG.DAILY_REWARD_VALUES) + appQuestsCoins).toBeLessThanOrEqual(GAME_CONFIG.DAILY_COIN_CAP);
   });
 });
@@ -75,8 +75,8 @@ describe("quests the app checks vs self-reported", () => {
   it("only quests the app closes itself give coins", () => {
     for (const q of QUEST_POOL) {
       const r = questReward(q);
-      expect(r.xp).toBe(q.xpReward);
-      expect(r.coins).toBe(APP_CLOSED_QUESTS.has(q.id) ? q.coinsReward : 0);
+      // what the card shows = what is paid (app-closed quests: QUEST_XP / QUEST_COINS in lib/game.ts)
+      expect(r).toEqual(APP_CLOSED_QUESTS.has(q.id) ? { xp: GAME_CONFIG.QUEST_XP, coins: GAME_CONFIG.QUEST_COINS } : { xp: q.xpReward, coins: 0 });
     }
     expect([...APP_CLOSED_QUESTS].sort()).toEqual(["q_bias", "q_reflect", "q_riskcheck", "q_tradelog"]);
   });
@@ -92,5 +92,35 @@ describe("first action of a kind: once per account", () => {
     const again = grantFirstAction(first.state, "trade", day("2026-10-28"));
     expect(again.coins).toBe(0);
     expect(again.state.coins).toBe(first.state.coins);
+  });
+});
+
+describe("coin history (the «Coins» tab)", () => {
+  it("records quests with coins, the daily reward and first actions — what, when, how much; nothing for 0 coins", () => {
+    let s = fresh();
+    s = completeQuest(s, "q_tradelog", "Запись сделки", "Discipline", 40, 10, day("2026-10-27")).state;
+    s = completeQuest(s, "q_walk", "Прогулка", "Physical", 30, 0, day("2026-10-27")).state; // self-reported: no coins
+    s = claimDailyReward(s, day("2026-10-27")).state;
+    s = grantFirstAction(s, "note", day("2026-10-27")).state;
+    expect(s.coinLog?.map((e) => [e.source, e.amount])).toEqual([
+      ["firstAction", GAME_CONFIG.FIRST_ACTION_REWARDS.note.coins],
+      ["dailyReward", 10],
+      ["quest", 10],
+    ]);
+    expect(s.coinLog?.[2]).toMatchObject({ questId: "q_tradelog", title: "Запись сделки", at: day("2026-10-27").toISOString() });
+  });
+
+  it("a capped credit is recorded with the amount actually given", () => {
+    const record = { questsCompleted: {}, totalQuestsCompleted: 0, xpGained: 0, coinsGained: GAME_CONFIG.DAILY_COIN_CAP - 3, questsSkipped: 0, questsReplaced: 0, isRestDay: false, shieldUsed: false, rewardsClaimed: 0 };
+    const nearCap: GameState = { ...fresh(), dailyStats: { "2026-10-27": record } };
+    const s = completeQuest(nearCap, "q_bias", "Bias", "Trading", 40, 10, day("2026-10-27")).state;
+    expect(s.coinLog?.[0].amount).toBe(3);
+  });
+
+  it("the history starts when this version first runs; earlier coins stay in the balance only", () => {
+    const old = checkAndApplyDateResets({ ...fresh(), coins: 250, coinLog: undefined, coinLogSince: undefined } as unknown as GameState, day("2026-10-27"));
+    expect(old.coins).toBe(250);
+    expect(old.coinLog).toEqual([]);
+    expect(typeof old.coinLogSince).toBe("string");
   });
 });
