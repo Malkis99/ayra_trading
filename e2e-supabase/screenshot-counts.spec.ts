@@ -52,80 +52,92 @@ async function openTrade(page: Page) {
 }
 const countInList = (page: Page) => page.locator("tr:has-text('US30')").getByTestId("trade-shots-count");
 
+/**
+ * Device A of a new account with the cloud on, and the trade US30 with `shots` screenshots already in the cloud — put
+ * there directly, as another device would have (rows and files), so the test spends its time only on what it checks.
+ */
+async function accountWithTrade(browser: Browser, request: APIRequestContext, baseURL: string | undefined, shots: number) {
+  const email = `Counts_${Date.now()}_${Math.floor(Math.random() * 1000)}@example.com`;
+  const A = await (await browser.newContext({ baseURL, viewport: { width: 1440, height: 900 } })).newPage();
+  await signIn(A, email);
+  await completeOnboarding(A, `Cnt${Date.now() % 100000}`);
+  const userId = (await (await request.get(`${FAKE_SUPABASE}/__test/profile?email=${encodeURIComponent(email)}`)).json()).id as string;
+  await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${encodeURIComponent(email)}&on=1`);
+  await markFirstSyncDone(A, userId);
+
+  const now = new Date().toISOString();
+  const put = (table: string, data: Record<string, unknown>) =>
+    request.post(`${FAKE_SUPABASE}/__test/cloud-put?email=${encodeURIComponent(email)}&table=${table}`, { data });
+  await put("journal_accounts", { id: "acc_counts", name: "Main", type: "personal", currency: "USD", platform: "manual", createdAt: now, updatedAt: now });
+  const ids = Array.from({ length: shots }, (_, i) => `att_counts_${i + 1}`);
+  for (const [i, id] of ids.entries()) {
+    const png = solidPng(120, 80, [60 + i * 70, 52, 143]);
+    await request.post(`${FAKE_SUPABASE}/__test/storage-put?email=${encodeURIComponent(email)}&name=${id}.png`, { headers: { "Content-Type": "image/png" }, data: png });
+    await put("journal_attachments", { id, tradeId: "tr_counts", kind: "before", width: 120, height: 80, bytes: png.length, mime: "image/png", hash: `h_${id}`, createdAt: now, updatedAt: now });
+  }
+  await put("journal_trades", {
+    id: "tr_counts", accountId: "acc_counts", instrument: "US30", direction: "long", status: "closed", openedAt: now, result: "win", pnlMoney: 40,
+    emotions: [], mistakes: [], verification: "unverified", source: "manual", createdAt: now, updatedAt: now, schemaVersion: 6, attachmentIds: ids,
+  });
+  await gotoJournal(A);
+  await expect(countInList(A)).toHaveText(String(shots), { timeout: 15000 });
+  return { A, email, userId };
+}
+
+/** Device B (a phone) of the same account, its trade card open with every screenshot downloaded. */
+async function phoneWithTrade(browser: Browser, baseURL: string | undefined, email: string, userId: string, shots: number) {
+  const B = await (await browser.newContext({ baseURL, viewport: { width: 390, height: 844 } })).newPage();
+  await signIn(B, email);
+  await B.waitForURL((url) => url.pathname === "/", { timeout: 15000 });
+  await markFirstSyncDone(B, userId);
+  await openTrade(B);
+  await expect(B.getByTestId("trade-quick-view").getByTestId("screenshot-thumb")).toHaveCount(shots, { timeout: 20000 });
+  return B;
+}
+
+async function deleteInViewer(B: Page) {
+  await B.locator("button:has-text('✕ Удалить')").click();
+  await B.getByTestId("lightbox-confirm-delete").click();
+}
+
 test.describe("Number of screenshots follows deletions on another device", () => {
   test.use({ reducedMotion: "reduce" });
-  test.setTimeout(180_000);
+  test.setTimeout(150_000);
 
   for (const engine of ["chromium", "webkit"] as const) {
-    test(`${engine}: deleted on B (in the card, then in the edit form without saving) → A's list shows the live number`, async ({ request, baseURL }) => {
-      const browser: Browser = await (engine === "webkit" ? webkit : chromium).launch();
+    test(`${engine}: deleted on the phone in the trade card → the laptop's list shows the live number`, async ({ request, baseURL }) => {
+      const browser = await (engine === "webkit" ? webkit : chromium).launch();
       try {
-        const email = `Counts_${engine}_${Date.now()}@example.com`;
-        const device = async (viewport = { width: 1440, height: 900 }) => (await browser.newContext({ baseURL, viewport })).newPage();
-
-        // A: account with the flag on, trade US30 with two screenshots
-        const A = await device();
-        await signIn(A, email);
-        await completeOnboarding(A, `Counts${Date.now() % 100000}`);
-        const userId = (await (await request.get(`${FAKE_SUPABASE}/__test/profile?email=${encodeURIComponent(email)}`)).json()).id as string;
-        await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${encodeURIComponent(email)}&on=1`);
-        await markFirstSyncDone(A, userId);
-        await gotoJournal(A);
-        await A.getByRole("button", { name: "Добавить сделку" }).first().click();
-        const drawer = A.getByTestId("add-trade-drawer");
-        await drawer.getByPlaceholder("Название счёта").fill("Main");
-        await drawer.getByRole("button", { name: "Создать счёт" }).click();
-        await A.getByTestId("instrument-input").fill("us30");
-        await A.fill("input[placeholder='150 / -50']", "40");
-        await A.getByTestId("instrument-input").press("Control+Enter");
-        await expect(drawer).toBeHidden();
-        await openTrade(A);
-        const input = A.getByTestId("trade-quick-view").locator("input[type='file'][accept='image/*']");
-        await input.setInputFiles({ name: "a.png", mimeType: "image/png", buffer: solidPng(120, 80, [80, 52, 143]) });
-        await expect(A.getByTestId("trade-quick-view").getByTestId("screenshot-thumb")).toHaveCount(1, { timeout: 15000 });
-        await input.setInputFiles({ name: "b.png", mimeType: "image/png", buffer: solidPng(120, 80, [214, 169, 74]) });
-        await expect(A.getByTestId("trade-quick-view").getByTestId("screenshot-thumb")).toHaveCount(2, { timeout: 15000 });
-        await expect.poll(() => liveShots(request, email), { timeout: 15000 }).toBe(2);
-        await gotoJournal(A);
-        await expect(countInList(A)).toHaveText("2", { timeout: 15000 });
-
-        // B: same account; deletes one screenshot in the trade card
-        const B = await device({ width: 390, height: 844 }); // the phone
-        await signIn(B, email);
-        await B.waitForURL((url) => url.pathname === "/", { timeout: 15000 });
-        await markFirstSyncDone(B, userId);
-        await openTrade(B);
-        const thumbsB = B.getByTestId("trade-quick-view").getByTestId("screenshot-thumb");
-        await expect(thumbsB).toHaveCount(2, { timeout: 20000 });
+        const { A, email, userId } = await accountWithTrade(browser, request, baseURL, 2);
+        const B = await phoneWithTrade(browser, baseURL, email, userId, 2);
         await B.getByTestId("trade-quick-view").locator(".aspect-video").first().click();
-        await B.locator("button:has-text('✕ Удалить')").click();
-        await B.getByTestId("lightbox-confirm-delete").click();
-        await expect(thumbsB).toHaveCount(1);
+        await deleteInViewer(B);
+        await expect(B.getByTestId("trade-quick-view").getByTestId("screenshot-thumb")).toHaveCount(1);
         await expect.poll(() => liveShots(request, email), { timeout: 15000 }).toBe(1);
-
-        // A: the list shows 1 after the exchange, the trade was not edited here
-        await gotoJournal(A);
+        // the laptop page stays open; returning to the tab exchanges; the trade was not edited there
+        await A.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
         await expect(countInList(A)).toHaveText("1", { timeout: 15000 });
+      } finally {
+        await browser.close();
+      }
+    });
 
-        // B: deletes the other one in the edit form and closes it WITHOUT saving the trade
-        await gotoJournal(B);
-        await B.getByText("US30").locator("visible=true").first().click();
+    test(`${engine}: deleted on the phone in the edit form, closed WITHOUT saving → the laptop's list shows the live number`, async ({ request, baseURL }) => {
+      const browser = await (engine === "webkit" ? webkit : chromium).launch();
+      try {
+        const { A, email, userId } = await accountWithTrade(browser, request, baseURL, 1);
+        const B = await phoneWithTrade(browser, baseURL, email, userId, 1);
         await B.click("button:has-text('Редактировать')");
         const form = B.getByTestId("add-trade-drawer");
         await expect(form).toBeVisible();
-        // the «Screenshots» section is open by itself when the trade has screenshots
-        // below the fold of the form: to the middle, so the bar with «Save» does not cover it
+        // the «Screenshots» section is open by itself; the form's bottom bar («Save») may cover the tile: its own click
         const thumbInForm = form.getByTestId("screenshot-thumb").first();
         await expect(thumbInForm).toBeVisible({ timeout: 20000 });
-        // the bottom bar of the form («Save») may cover it: open the viewer with the tile's own click
         await thumbInForm.evaluate((img) => (img.closest(".aspect-video") as HTMLElement).click());
-        await B.locator("button:has-text('✕ Удалить')").click();
-        await B.getByTestId("lightbox-confirm-delete").click();
+        await deleteInViewer(B);
         await expect.poll(() => liveShots(request, email), { timeout: 15000 }).toBe(0);
         await B.keyboard.press("Escape");
-
-        // A: no screenshot badge any more
-        await gotoJournal(A);
+        await A.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
         await expect(countInList(A)).toHaveCount(0, { timeout: 15000 });
       } finally {
         await browser.close();
@@ -133,41 +145,15 @@ test.describe("Number of screenshots follows deletions on another device", () =>
     });
 
     test(`${engine}: the trade still lists a screenshot deleted elsewhere (its own update waits, e.g. a conflict) → the list counts only live screenshots`, async ({ request, baseURL }) => {
-      const browser: Browser = await (engine === "webkit" ? webkit : chromium).launch();
+      const browser = await (engine === "webkit" ? webkit : chromium).launch();
       try {
-        const email = `Counts2_${engine}_${Date.now()}@example.com`;
-        const A = await (await browser.newContext({ baseURL, viewport: { width: 1440, height: 900 } })).newPage();
-        await signIn(A, email);
-        await completeOnboarding(A, `Cnt${Date.now() % 100000}`);
-        const userId = (await (await request.get(`${FAKE_SUPABASE}/__test/profile?email=${encodeURIComponent(email)}`)).json()).id as string;
-        await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${encodeURIComponent(email)}&on=1`);
-        await markFirstSyncDone(A, userId);
-        await gotoJournal(A);
-        await A.getByRole("button", { name: "Добавить сделку" }).first().click();
-        const drawer = A.getByTestId("add-trade-drawer");
-        await drawer.getByPlaceholder("Название счёта").fill("Main");
-        await drawer.getByRole("button", { name: "Создать счёт" }).click();
-        await A.getByTestId("instrument-input").fill("us30");
-        await A.fill("input[placeholder='150 / -50']", "40");
-        await A.getByTestId("instrument-input").press("Control+Enter");
-        await expect(drawer).toBeHidden();
-        await openTrade(A);
-        const input = A.getByTestId("trade-quick-view").locator("input[type='file'][accept='image/*']");
-        await input.setInputFiles({ name: "a.png", mimeType: "image/png", buffer: solidPng(120, 80, [80, 52, 143]) });
-        await expect(A.getByTestId("trade-quick-view").getByTestId("screenshot-thumb")).toHaveCount(1, { timeout: 15000 });
-        await input.setInputFiles({ name: "b.png", mimeType: "image/png", buffer: solidPng(120, 80, [214, 169, 74]) });
-        await expect.poll(() => liveShots(request, email), { timeout: 15000 }).toBe(2);
-        await gotoJournal(A);
-        await expect(countInList(A)).toHaveText("2", { timeout: 15000 });
-
+        const { A, email } = await accountWithTrade(browser, request, baseURL, 2);
         // another device deleted one screenshot; its update of the trade has not arrived (the trade still lists 2)
         const shot = (await cloudRows(request, email)).find((r) => r.table === "journal_attachments")!;
         const at = new Date(Date.now() + 1000).toISOString();
         await request.post(`${FAKE_SUPABASE}/__test/cloud-put?email=${encodeURIComponent(email)}&table=journal_attachments`, { data: { ...shot.data, updatedAt: at, deletedAt: at } });
-        // the page stays open; returning to the tab exchanges (as on the laptop)
         await A.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
         await expect(countInList(A)).toHaveText("1", { timeout: 15000 });
-        // the trade card and the «with screenshots» dashboard figure agree; the trade itself was not edited
         expect(((await cloudRows(request, email)).find((r) => r.table === "journal_trades")!.data.attachmentIds as string[]).length).toBe(2);
         await openTrade(A);
         await expect(A.getByTestId("trade-quick-view").getByTestId("screenshot-thumb")).toHaveCount(1, { timeout: 15000 });
