@@ -414,7 +414,7 @@ export function TradesTable({ trades, accounts, strategies, tz, unit, dict, lang
                           <span className="inline-flex items-center gap-1.5">
                             {x.instrument}
                             {x.attachmentIds && x.attachmentIds.length > 0 && (
-                              <span className="inline-flex items-center gap-0.5 rounded bg-vi/15 px-1.5 py-0.5 text-[11px] font-medium text-vi">
+                              <span className="inline-flex items-center gap-0.5 rounded bg-vi/15 px-1.5 py-0.5 text-[11px] font-medium text-vi" data-testid="trade-shots-count">
                                 <Camera size={11} aria-hidden="true" />
                                 {x.attachmentIds.length}
                               </span>
