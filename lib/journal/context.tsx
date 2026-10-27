@@ -37,6 +37,12 @@ export interface CloudStatusView {
   noSpace?: number;
 }
 
+/** Trades without the ids of deleted screenshots (the record itself is not changed). */
+export function withLiveScreenshots(trades: Trade[], deleted: Set<string>): Trade[] {
+  if (!deleted.size) return trades;
+  return trades.map((t) => (t.attachmentIds?.some((id) => deleted.has(id)) ? { ...t, attachmentIds: t.attachmentIds.filter((id) => !deleted.has(id)) } : t));
+}
+
 const LOCAL_STATUS: CloudStatusView = { state: "local", pending: 0, blocked: 0, conflicts: 0 };
 
 interface JournalContextType {
@@ -175,13 +181,16 @@ export function JournalProvider({
     setPrimaryPropAccountIdState(repository.getPrimaryPropAccountId());
     setPreferencesState(repository.getPreferences());
     setAccounts(repository.getAccounts());
-    setTrades(repository.getTrades());
+    // A trade lists its screenshots; a screenshot deleted elsewhere may arrive before (or without) the new version of
+    // the trade (its update waits: a conflict, an interrupted exchange). Count and show only live screenshots.
+    const shotRows = repository.getAttachmentRecords?.(true) ?? [];
+    setTrades(withLiveScreenshots(repository.getTrades(), new Set(shotRows.filter((a) => a.deletedAt).map((a) => a.id))));
     setStrategies(repository.getStrategies());
     setNoTrades(repository.getNoTrades());
     setPlans(repository.getTradingPlans());
     setWeekPlans(repository.getWeekPlans());
     setNotes(repository.getNotes());
-    const shots = repository.getAttachmentRecords?.(true) ?? [];
+    const shots = shotRows;
     setAttachments(shots.filter((a) => !a.deletedAt));
     setDeletedAttachmentIds(new Set(shots.filter((a) => a.deletedAt).map((a) => a.id)));
     setStorageUsage(repository.getStorageUsage());
