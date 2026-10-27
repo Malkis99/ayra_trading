@@ -24,21 +24,16 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # Playwright's own image: Chromium and WebKit (iPhone browsers are WebKit) with their system packages already
+    # installed. Installing them with apt on the runner hung (twice, 30 min). Keep the tag equal to @playwright/test.
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      options: --ipc=host
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: npm }
       - run: npm ci
-      # WebKit too: iPhone browsers are WebKit (e2e-supabase/screenshots-webkit.spec.ts). Installing the system packages
-      # sometimes hangs on the CI machine: at most 8 minutes per attempt, up to 3 attempts
-      - name: Install browsers
-        run: |
-          for attempt in 1 2 3; do
-            timeout 480 npx playwright install --with-deps chromium webkit && exit 0
-            echo "browser install attempt $attempt failed or hung, retrying"
-            sleep 10
-          done
-          exit 1
       - name: e2e (mock auth)
         run: npx playwright test
       - name: e2e (fake Supabase)
