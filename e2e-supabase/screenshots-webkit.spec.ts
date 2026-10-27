@@ -116,7 +116,11 @@ test.describe("Screenshots in the cloud on WebKit (0005-B)", () => {
       await markFirstSyncDone(B, userId);
 
       const openTrade = async () => {
-        await B.goto("/journal");
+        // right after a reload the app may pass through its sign-in check (/auth/continue) and come back by itself
+        await B.goto("/journal").catch((e: unknown) => {
+          if (!/interrupted by another navigation/.test(String(e))) throw e;
+        });
+        await B.waitForURL((url) => url.pathname === "/journal", { timeout: 15000 });
         await B.getByText("NAS100").locator("visible=true").first().click();
         await expect(B.getByTestId("trade-quick-view")).toBeVisible();
       };
