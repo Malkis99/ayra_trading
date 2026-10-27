@@ -232,6 +232,8 @@ export function JournalProvider({
     await run;
     setScreenshotsCloud(repository.getScreenshotsCloudStatus?.() ?? null);
   }, [repository]);
+  // progress: each uploaded file
+  useEffect(() => setScreenshotsCloud(repository.getScreenshotsCloudStatus?.() ?? null), [repository, attachmentFilesVersion]);
 
   // ---- One-time reward for the first action of a kind on this account (docs/economy-coins-plan.md) ----
   // Only what a person creates here comes through these functions: records from the cloud, the guest copy, «Undo»

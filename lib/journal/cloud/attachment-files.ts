@@ -209,7 +209,6 @@ export class AttachmentFiles {
     // Space already taken in the cloud (live screenshots whose file is there); the server checks it again
     let used = rows.filter((a) => isLive(a) && this.isInCloud(userId, a.id)).reduce((s, a) => s + (a.bytes || 0), 0);
     const store = this.files(userId);
-    const paused = readUploadsPaused(userId);
     const base = readBase(userId);
     let uploads = 0;
     for (const e of entries) {
@@ -219,7 +218,8 @@ export class AttachmentFiles {
         result.ready.add(e.id);
         continue;
       }
-      if (paused) {
+      if (readUploadsPaused(userId)) {
+        // read for each file: «Stop» pressed during a batch stops it after the file being uploaded
         result.deferred!.push({ id: e.id, reason: "paused" });
         continue;
       }
