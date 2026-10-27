@@ -116,6 +116,24 @@ export interface GameState {
   lastSeenAt?: number;
   /** First actions already rewarded on this device (kind → ISO time). */
   firstActions?: Partial<Record<FirstActionKind, string>>;
+  /** Coins earned on this device, newest first (the «Coins» tab). Kept since `coinLogSince`: earlier coins are only in the balance. */
+  coinLog?: CoinLogEntry[];
+  /** When this device started keeping the coin history (ISO). */
+  coinLogSince?: string;
+}
+
+/** One coin credit: what gave it, when, how much. */
+export type CoinLogEntry =
+  | { at: string; source: "quest"; amount: number; questId: string; title: string }
+  | { at: string; source: "dailyReward"; amount: number }
+  | { at: string; source: "firstAction"; amount: number; kind: FirstActionKind };
+
+export const COIN_LOG_LIMIT = 500;
+
+/** Adds a credit to the coin history (nothing for 0 coins). */
+export function withCoinLog(state: GameState, entry: CoinLogEntry): GameState {
+  if (entry.amount <= 0) return state;
+  return { ...state, coinLog: [entry, ...(state.coinLog || [])].slice(0, COIN_LOG_LIMIT) };
 }
 
 /* ---------------------------------------------------------- economy on this device (until 0007) */
@@ -146,11 +164,8 @@ export function grantFirstAction(state: GameState, kind: FirstActionKind, curren
     level++;
     chronicle = addChronicleEvent(chronicle, { type: "levelUp", level });
   }
-  return {
-    state: { ...state, xp: newXp, level, coins: state.coins + coins, chronicle, firstActions: { ...state.firstActions, [kind]: currentDate.toISOString() } },
-    coins,
-    xp,
-  };
+  const next = { ...state, xp: newXp, level, coins: state.coins + coins, chronicle, firstActions: { ...state.firstActions, [kind]: currentDate.toISOString() } };
+  return { state: withCoinLog(next, { at: currentDate.toISOString(), source: "firstAction", amount: coins, kind }), coins, xp };
 }
 
 export function getIsoDateString(date: Date): string {
@@ -376,6 +391,9 @@ export function migrateState(rawState: any): GameState {
     onboarding,
     profile,
     aiConsent,
+    coinLog: Array.isArray(rawState.coinLog) ? rawState.coinLog : [],
+    // the history starts when this version first runs on the device (earlier coins are in the balance only)
+    coinLogSince: typeof rawState.coinLogSince === "string" ? rawState.coinLogSince : new Date().toISOString(),
   };
 }
 
@@ -1191,17 +1209,20 @@ export function completeQuest(
     coins: coinsAmount,
   });
 
-  newState = {
-    ...newState,
-    completedQuestsToday: updatedCompletedToday,
-    xp: newXp,
-    coins: newCoins,
-    level: newLevel,
-    weeklyQuestCount: newState.weeklyQuestCount + 1,
-    chronicle,
-    history: newHistory,
-    dailyStats: updatedDailyStats,
-  };
+  newState = withCoinLog(
+    {
+      ...newState,
+      completedQuestsToday: updatedCompletedToday,
+      xp: newXp,
+      coins: newCoins,
+      level: newLevel,
+      weeklyQuestCount: newState.weeklyQuestCount + 1,
+      chronicle,
+      history: newHistory,
+      dailyStats: updatedDailyStats,
+    },
+    { at: currentDate.toISOString(), source: "quest", amount: coinsAmount, questId, title: questTitle }
+  );
 
   const { state: finalState, newlyUnlocked } = checkAchievements(newState);
 
@@ -1314,14 +1335,17 @@ export function claimDailyReward(
     coins: claimedCoins,
   });
 
-  newState = {
-    ...newState,
-    coins: newState.coins + claimedCoins,
-    dailyRewardIndex: newState.dailyRewardIndex + 1,
-    lastRewardClaimDate: todayStr,
-    chronicle,
-    dailyStats: updatedDailyStats,
-  };
+  newState = withCoinLog(
+    {
+      ...newState,
+      coins: newState.coins + claimedCoins,
+      dailyRewardIndex: newState.dailyRewardIndex + 1,
+      lastRewardClaimDate: todayStr,
+      chronicle,
+      dailyStats: updatedDailyStats,
+    },
+    { at: currentDate.toISOString(), source: "dailyReward", amount: claimedCoins }
+  );
 
   return { state: newState, claimedCoins };
 }

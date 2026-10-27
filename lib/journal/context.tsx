@@ -30,6 +30,7 @@ import { useOptionalApp } from "@/lib/context";
 import { formatString } from "@/lib/i18n";
 import type { FirstActionKind } from "@/lib/game";
 import { listImportBatches } from "./import/batches";
+import { hasRecordsOfKind } from "./first-actions";
 
 export interface CloudStatusView {
   state: "local" | "waitingInitialSync" | "syncing" | "synced" | "offline" | "error" | "manual";
@@ -222,22 +223,7 @@ export function JournalProvider({
   const rewardRef = React.useRef({ game, app });
   rewardRef.current = { game, app };
   const noRecordsYet = useCallback(
-    (kind: FirstActionKind): boolean => {
-      const all = repository.getAllRecords();
-      const lists: Record<FirstActionKind, unknown[]> = {
-        trade: all.trades,
-        account: all.accounts,
-        strategy: all.strategies,
-        import: listImportBatches(),
-        dayPlan: all.plans,
-        weekPlan: all.weekPlans,
-        note: all.notes,
-        noTrade: all.noTrades,
-        // screenshots from before 0005 are listed by their trade only
-        screenshot: [...(all.attachments || []), ...all.trades.filter((t) => t.attachmentIds?.length)],
-      };
-      return (lists[kind] || []).length === 0;
-    },
+    (kind: FirstActionKind): boolean => !hasRecordsOfKind(repository.getAllRecords(), listImportBatches(), kind),
     [repository]
   );
   const rewardFirstAction = useCallback((kind: FirstActionKind, isFirst: boolean) => {

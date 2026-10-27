@@ -60,7 +60,7 @@ export const GAME_CONFIG = {
 
   // ---- Economy on this device until the server economy (0007), docs/economy-coins-plan.md (owner 2026-10-27) ----
   /**
-   * Coins per day from daily quests and the daily reward together. PLACEHOLDER proposed by the developer: the honest
+   * Coins per day from daily quests and the daily reward together (confirmed by the owner 2026-10-27): the honest
    * maximum today is 50 (day 7 of the reward) + 40 (quests the app checks) = 90. One-time rewards are not counted.
    */
   DAILY_COIN_CAP: 100,
@@ -68,18 +68,18 @@ export const GAME_CONFIG = {
   CLOCK_BACK_TOLERANCE_MS: 10 * 60 * 1000,
   /**
    * One-time reward per account for the first action of each kind (created in the app; not edits, sync, undo or the
-   * guest copy). PLACEHOLDER amounts — the owner has not set them yet.
+   * guest copy). Coins: owner decision 2026-10-27. XP: kept as before (PLACEHOLDER values set with 0005 economy).
    */
   FIRST_ACTION_REWARDS: {
     trade: { coins: 20, xp: 20 },
     account: { coins: 10, xp: 10 },
     strategy: { coins: 10, xp: 10 },
-    import: { coins: 10, xp: 10 },
-    dayPlan: { coins: 10, xp: 10 },
-    weekPlan: { coins: 10, xp: 10 },
-    note: { coins: 10, xp: 10 },
-    noTrade: { coins: 10, xp: 10 },
-    screenshot: { coins: 10, xp: 10 },
+    import: { coins: 20, xp: 10 },
+    dayPlan: { coins: 5, xp: 10 },
+    weekPlan: { coins: 5, xp: 10 },
+    note: { coins: 5, xp: 10 },
+    noTrade: { coins: 5, xp: 10 },
+    screenshot: { coins: 5, xp: 10 },
   } as Record<"trade" | "account" | "strategy" | "import" | "dayPlan" | "weekPlan" | "note" | "noTrade" | "screenshot", { coins: number; xp: number }>,
 
   // Screenshot & Attachments Config (T6c-2b)
