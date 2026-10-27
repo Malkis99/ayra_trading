@@ -74,3 +74,10 @@ export const ATTACHMENT_QUOTA_BYTES = 200 * 1024 * 1024;
  * (technical pause, not a business number; in the cloud the file stays 30 days — server rule, 0005).
  */
 export const ATTACHMENT_LOCAL_GRACE_MS = 2 * 60 * 1000;
+
+/** Files of a screenshot deleted this long ago may leave the cloud (journal_limits.attachment_delete_after_days). */
+export const ATTACHMENT_DELETE_AFTER_DAYS = 30;
+/** A file without a screenshot row (interrupted upload) may leave the cloud after this (journal_limits.orphan_min_age_hours). */
+export const ATTACHMENT_ORPHAN_MIN_AGE_HOURS = 24;
+/** Background upload in «Automatic»: files per exchange, so the journal keeps going between them (0005-C). */
+export const ATTACHMENT_UPLOADS_PER_RUN = 3;

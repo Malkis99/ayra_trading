@@ -18,6 +18,8 @@ export interface OutboxEntry {
   lastError?: string;
   /** The server would reject this record (too large / time from the future): kept, but not retried until it changes. */
   blocked?: EncodeSkipReason;
+  /** A screenshot whose upload waits for «Continue» (0005-C): queued, not an error, not tried. */
+  deferred?: "paused";
 }
 
 export const OUTBOX_KEY = "ayra_sync_outbox";
@@ -65,7 +67,7 @@ export class SyncOutbox {
         index.set(outboxKey(it), list.length);
         list.push({ table: it.table, id: it.id, version: it.version, enqueuedAt: now, attempts: 0, nextAttemptAt: dueAt });
       } else {
-        list[i] = { ...list[i], version: it.version, attempts: 0, nextAttemptAt: dueAt, blocked: undefined, lastError: undefined };
+        list[i] = { ...list[i], version: it.version, attempts: 0, nextAttemptAt: dueAt, blocked: undefined, lastError: undefined, deferred: undefined };
       }
     }
     this.save(list);
@@ -98,6 +100,18 @@ export class SyncOutbox {
         return { ...e, attempts, lastError: error, nextAttemptAt: now + retryDelayMs(attempts, random) };
       })
     );
+  }
+
+  /** Not tried now and not a failure: due again at `until` (attempts unchanged); «paused» waits for «Continue». */
+  defer(keys: { table: JournalCloudTable; id: string }[], until: number, reason?: "paused"): void {
+    if (!keys.length) return;
+    const set = new Set(keys.map(outboxKey));
+    this.save(this.list().map((e) => (set.has(outboxKey(e)) ? { ...e, nextAttemptAt: until, deferred: reason } : e)));
+  }
+
+  /** «Continue» / «Retry»: these entries are due now, with a fresh count of attempts. */
+  release(match: (e: OutboxEntry) => boolean, now: number): void {
+    this.save(this.list().map((e) => (match(e) ? { ...e, nextAttemptAt: now, attempts: 0, lastError: undefined, deferred: undefined } : e)));
   }
 
   markBlocked(key: { table: JournalCloudTable; id: string }, reason: EncodeSkipReason): void {

@@ -4,7 +4,14 @@ import { IndexedDBAttachmentRepository, readBlobBytes } from "@/lib/storage/inde
 import type { AttachmentRepository } from "../attachments/types";
 import type { JournalAttachment } from "../types";
 import { makePreviewBlob } from "../attachments/image-processor";
-import { ATTACHMENT_LOCAL_GRACE_MS, ATTACHMENT_QUOTA_BYTES, ATTACHMENTS_BUCKET } from "./config";
+import {
+  ATTACHMENT_DELETE_AFTER_DAYS,
+  ATTACHMENT_LOCAL_GRACE_MS,
+  ATTACHMENT_ORPHAN_MIN_AGE_HOURS,
+  ATTACHMENT_QUOTA_BYTES,
+  ATTACHMENTS_BUCKET,
+} from "./config";
+import type { AttachmentMetadata } from "../attachments/types";
 import { readBase } from "./sync-merge";
 import { entryKey, type CloudEntry } from "./records";
 import type { LocalJournal } from "./sync-engine";
@@ -40,6 +47,10 @@ export class AttachmentFileError extends Error {
 export interface AttachmentFileRemote {
   upload(path: string, blob: Blob, mime: string): Promise<void>;
   download(path: string): Promise<Blob>;
+  /** Files in one folder (the user's own: the server shows nothing else). */
+  list?(folder: string): Promise<{ path: string; createdAt: string }[]>;
+  /** Removes what the server's rules allow; returns the paths actually removed. */
+  remove?(paths: string[]): Promise<string[]>;
 }
 
 const EXT: Record<string, string> = { "image/webp": "webp", "image/png": "png", "image/jpeg": "jpg" };
@@ -63,6 +74,24 @@ export class SupabaseAttachmentFiles implements AttachmentFileRemote {
     // Raw bytes with their type (not a form): the bucket checks the type and the size before taking the file
     const { error } = await this.bucket().upload(path, await readBlobBytes(blob), { contentType: mime, upsert: false });
     if (error) throw classify(error);
+  }
+
+  async list(folder: string): Promise<{ path: string; createdAt: string }[]> {
+    const out: { path: string; createdAt: string }[] = [];
+    for (let offset = 0; ; offset += 1000) {
+      const { data, error } = await this.bucket().list(folder, { limit: 1000, offset, sortBy: { column: "name", order: "asc" } });
+      if (error) throw classify(error);
+      const page = (data || []).filter((f) => f.id); // folders have no id
+      out.push(...page.map((f) => ({ path: `${folder}/${f.name}`, createdAt: f.created_at ?? new Date().toISOString() })));
+      if ((data || []).length < 1000) return out;
+    }
+  }
+
+  async remove(paths: string[]): Promise<string[]> {
+    if (!paths.length) return [];
+    const { data, error } = await this.bucket().remove(paths);
+    if (error) throw classify(error);
+    return (data || []).map((f) => f.name);
   }
 
   async download(path: string): Promise<Blob> {
@@ -98,6 +127,17 @@ function readInCloud(userId: string): Set<string> {
   }
 }
 
+/** «Stop» on the upload of screenshots (this device, this account): kept until «Continue». */
+const PAUSED_KEY = "ayra_attachments_paused";
+export const readUploadsPaused = (userId: string) => AppStorage.getItem(PAUSED_KEY, userId) === "1";
+export function writeUploadsPaused(userId: string, paused: boolean): void {
+  if (paused) AppStorage.setItem(PAUSED_KEY, "1", userId);
+  else AppStorage.removeItem(PAUSED_KEY, userId);
+}
+
+/** Last day this device cleaned the account's folder in the cloud (once a day). */
+const CLEANUP_KEY = "ayra_attachments_cleanup_day";
+
 function addInCloud(userId: string, ids: string[]): void {
   if (!ids.length) return;
   const set = readInCloud(userId);
@@ -121,6 +161,8 @@ export interface AttachmentFilesDeps {
 export interface PrepareResult {
   ready: Set<string>;
   failed: { id: string; reason: FileFailure }[];
+  /** Not tried now: «later» = the next exchange (only a few files per exchange), «paused» = «Stop» was pressed. */
+  deferred?: { id: string; reason: "later" | "paused" }[];
 }
 
 export class AttachmentFiles {
@@ -160,17 +202,29 @@ export class AttachmentFiles {
    * Ready = the row may be sent now. Not ready stay queued and are retried (no space, file missing here, error).
    * Throws on network errors (the engine retries the whole send).
    */
-  async prepare(userId: string, entries: CloudEntry[]): Promise<PrepareResult> {
-    const result: PrepareResult = { ready: new Set(), failed: [] };
+  async prepare(userId: string, entries: CloudEntry[], opts: { limit?: number } = {}): Promise<PrepareResult> {
+    const result: PrepareResult = { ready: new Set(), failed: [], deferred: [] };
     const journal = this.deps.readJournal(userId);
     const rows = (journal.snapshot.attachments || []) as JournalAttachment[];
     // Space already taken in the cloud (live screenshots whose file is there); the server checks it again
     let used = rows.filter((a) => isLive(a) && this.isInCloud(userId, a.id)).reduce((s, a) => s + (a.bytes || 0), 0);
     const store = this.files(userId);
+    const base = readBase(userId);
+    let uploads = 0;
     for (const e of entries) {
       const meta = e.record as unknown as JournalAttachment;
-      if (!isLive(meta) || this.isInCloud(userId, e.id)) {
-        result.ready.add(e.id); // a deletion needs no file; a file already in the cloud is never sent again
+      // a deletion needs no file; a row the cloud already confirmed means its file is there
+      if (!isLive(meta) || base[entryKey({ table: ATTACHMENTS_TABLE, id: e.id })] !== undefined) {
+        result.ready.add(e.id);
+        continue;
+      }
+      if (readUploadsPaused(userId)) {
+        // read for each file: «Stop» pressed during a batch stops it after the file being uploaded
+        result.deferred!.push({ id: e.id, reason: "paused" });
+        continue;
+      }
+      if (opts.limit !== undefined && uploads >= opts.limit) {
+        result.deferred!.push({ id: e.id, reason: "later" });
         continue;
       }
       if (used + (meta.bytes || 0) > ATTACHMENT_QUOTA_BYTES) {
@@ -183,6 +237,9 @@ export class AttachmentFiles {
         continue;
       }
       if (AppStorage.getUserId() !== userId) break; // the account changed: send nothing more
+      // Uploaded before but the row never confirmed (it failed, or the device was offline): try again — the server
+      // answers «already there», or takes it again if the daily cleanup removed it after 24 hours without a row.
+      uploads++;
       try {
         await this.deps.remote!.upload(attachmentPath(userId, e.id, meta.mime), local.originalBlob, meta.mime);
       } catch (err) {
@@ -197,8 +254,47 @@ export class AttachmentFiles {
       addInCloud(userId, [e.id]);
       used += meta.bytes || 0;
       result.ready.add(e.id);
+      this.notify(); // progress
     }
     return result;
+  }
+
+  /**
+   * Screenshots in this browser that the journal does not describe yet (added before 0005, or copied from the guest
+   * before it): their trade is live. They become rows and go up like new ones.
+   */
+  async undescribed(userId: string): Promise<AttachmentMetadata[]> {
+    const journal = this.deps.readJournal(userId);
+    const described = new Set(((journal.snapshot.attachments || []) as JournalAttachment[]).map((a) => a.id));
+    const liveTrades = new Set(journal.snapshot.trades.filter(isLive).map((t) => t.id));
+    const here = await this.files(userId).getAllMetadata().catch(() => [] as AttachmentMetadata[]);
+    return here.filter((m) => !described.has(m.id) && liveTrades.has(m.tradeId));
+  }
+
+  /**
+   * Once a day: files in this account's folder that may go — of screenshots deleted 30+ days ago, and files without
+   * a screenshot row older than 24 hours. The server decides again by its own clock and rules (0005); a refused file
+   * simply stays. Returns how many were removed.
+   */
+  async cleanup(userId: string, opts: { force?: boolean } = {}): Promise<number> {
+    const remote = this.deps.remote;
+    if (!remote?.list || !remote.remove) return 0;
+    const now = this.now();
+    const day = new Date(now).toISOString().slice(0, 10);
+    if (!opts.force && AppStorage.getItem(CLEANUP_KEY, userId) === day) return 0;
+    const files = await remote.list(userId);
+    if (AppStorage.getUserId() !== userId) return 0;
+    const rows = (this.deps.readJournal(userId).snapshot.attachments || []) as JournalAttachment[];
+    const byPath = new Map(rows.map((a) => [attachmentPath(userId, a.id, a.mime), a]));
+    const DAY = 24 * 3600 * 1000;
+    const gone = files.filter((f) => {
+      const row = byPath.get(f.path);
+      if (row) return !isLive(row) && now - Date.parse(String(row.deletedAt)) >= ATTACHMENT_DELETE_AFTER_DAYS * DAY;
+      return now - Date.parse(f.createdAt) >= ATTACHMENT_ORPHAN_MIN_AGE_HOURS * 3600 * 1000;
+    });
+    const removed = gone.length ? await remote.remove(gone.map((f) => f.path)) : [];
+    AppStorage.setItem(CLEANUP_KEY, day, userId);
+    return removed.length;
   }
 
   /**

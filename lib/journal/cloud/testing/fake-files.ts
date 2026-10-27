@@ -12,6 +12,9 @@ import type {
  */
 export class FakeFiles implements AttachmentFileRemote {
   files = new Map<string, Blob>();
+  /** When each file was uploaded (ISO); tests move it back. */
+  createdAt = new Map<string, string>();
+  removed: string[] = [];
   noSpace = false;
   down = false;
   log: string[] = [];
@@ -22,6 +25,18 @@ export class FakeFiles implements AttachmentFileRemote {
     if (this.noSpace) throw new AttachmentFileError("noSpace", "new row violates row-level security policy");
     if (this.files.has(path)) throw new AttachmentFileError("exists", "The resource already exists");
     this.files.set(path, blob);
+    this.createdAt.set(path, new Date().toISOString());
+  }
+
+  async list(folder: string) {
+    return [...this.files.keys()].filter((p) => p.startsWith(`${folder}/`)).map((p) => ({ path: p, createdAt: this.createdAt.get(p) ?? new Date().toISOString() }));
+  }
+
+  /** The server's own rules are checked in the 0005 SQL tests; here everything asked for is removed. */
+  async remove(paths: string[]) {
+    const out = paths.filter((p) => this.files.delete(p));
+    this.removed.push(...out);
+    return out;
   }
 
   async download(path: string): Promise<Blob> {

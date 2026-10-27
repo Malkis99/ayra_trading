@@ -1,5 +1,6 @@
 import { test, expect, webkit, chromium, type Page, type APIRequestContext, type Browser } from "@playwright/test";
 import { signIn } from "../e2e/helpers/auth";
+import { completeOnboarding } from "../e2e/helpers/onboarding";
 import { solidPng } from "../e2e/helpers/png";
 
 const FAKE_SUPABASE = "http://127.0.0.1:54329";
@@ -7,27 +8,6 @@ const FAKE_SUPABASE = "http://127.0.0.1:54329";
 // Owner's report 2026-10-27: a screenshot of the US30 trade deleted on the phone; on the laptop the trade list kept
 // «📷 2» until the trade was edited and saved. The number of screenshots shown for a trade (list, dashboard, filter)
 // must follow the live screenshots after every exchange, without editing the trade. Chromium and WebKit.
-
-async function completeOnboarding(page: Page, nickname: string) {
-  await page.waitForURL("**/awakening**", { timeout: 15000 });
-  await page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]').fill(nickname);
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("18–24 года")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Пропустить шаг целиком")');
-  await page.click('button:has-text("1–2 года")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Крипто")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Дисциплина")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Пропустить необязательные вопросы")');
-  await page.click('button:has-text("Пропустить шаг целиком")');
-  await page.click('button:has-text("Начать")');
-  await page.waitForURL((url) => url.pathname === "/", { timeout: 15000 });
-}
 
 type Row = { table: string; id: string; data: Record<string, unknown> };
 const cloudRows = async (request: APIRequestContext, email: string) =>

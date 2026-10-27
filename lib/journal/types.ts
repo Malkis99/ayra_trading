@@ -483,6 +483,10 @@ export interface JournalRepository {
   downloadAttachment?(id: string, opts?: { byUser?: boolean }): Promise<boolean>;
   /** Cloud journal: the copy here does not open — replace it with a fresh one from the cloud. */
   repairAttachment?(id: string, opts?: { byUser?: boolean }): Promise<boolean>;
+  /** Cloud journal: screenshots in the cloud — counts, upload running / stopped (Settings → Cloud and data). */
+  getScreenshotsCloudStatus?(): import("./cloud/cloud-repository").ScreenshotsCloudStatus | null;
+  pauseScreenshotUploads?(): void;
+  resumeScreenshotUploads?(): Promise<void>;
   /** Cloud journal: files arrived or left this browser. Returns unsubscribe. */
   subscribeAttachmentFiles?(listener: () => void): () => void;
 

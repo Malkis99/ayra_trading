@@ -20,6 +20,7 @@ import {
 } from "./types";
 import type { AttachmentMetadata } from "./attachments/types";
 import { cleanupFiles } from "./cloud/attachment-files";
+import type { ScreenshotsCloudStatus } from "./cloud/cloud-repository";
 import type { InitialSyncPlan, InitialSyncResult } from "./cloud/sync-engine";
 import { journalRepository } from "./cloud";
 import { defaultAttachmentRepository } from "./attachments/indexeddb-repository";
@@ -80,6 +81,12 @@ interface JournalContextType {
   repairAttachment: (id: string, opts?: { byUser?: boolean }) => Promise<boolean>;
   /** Bumped when screenshot files arrive in or leave this browser (the screenshot list reloads). */
   attachmentFilesVersion: number;
+  /** Screenshots and the cloud: counts, upload running / stopped (cloud journal only). */
+  screenshotsCloud: ScreenshotsCloudStatus | null;
+  /** «Stop» the upload of screenshots (what is uploaded stays). */
+  pauseScreenshotUploads: () => void;
+  /** «Continue» / «Retry»: the waiting screenshots go up now. */
+  resumeScreenshotUploads: () => Promise<void>;
   storageUsage: StorageUsage;
   lastSelectedAccountId: string | null;
   lastSelectedInstrument: string | null;
@@ -213,6 +220,20 @@ export function JournalProvider({
       .catch(() => {});
   }, [repository, attachments]);
   useEffect(() => repository.subscribeAttachmentFiles?.(() => setAttachmentFilesVersion((n) => n + 1)), [repository]);
+  // Screenshots and the cloud (Settings → Cloud and data): read again with every exchange and every file
+  const [screenshotsCloud, setScreenshotsCloud] = useState<ScreenshotsCloudStatus | null>(null);
+  const pauseScreenshotUploads = useCallback(() => {
+    repository.pauseScreenshotUploads?.();
+    setScreenshotsCloud(repository.getScreenshotsCloudStatus?.() ?? null);
+  }, [repository]);
+  const resumeScreenshotUploads = useCallback(async () => {
+    const run = repository.resumeScreenshotUploads?.();
+    setScreenshotsCloud(repository.getScreenshotsCloudStatus?.() ?? null);
+    await run;
+    setScreenshotsCloud(repository.getScreenshotsCloudStatus?.() ?? null);
+  }, [repository]);
+  // progress: each uploaded file
+  useEffect(() => setScreenshotsCloud(repository.getScreenshotsCloudStatus?.() ?? null), [repository, attachmentFilesVersion]);
 
   // ---- One-time reward for the first action of a kind on this account (docs/economy-coins-plan.md) ----
   // Only what a person creates here comes through these functions: records from the cloud, the guest copy, «Undo»
@@ -324,6 +345,7 @@ export function JournalProvider({
   const [cloudFlagKnown, setCloudFlagKnown] = useState(false);
   const [conflictDialogRequest, setConflictDialogRequest] = useState(0);
   const refreshSync = useCallback(() => {
+    setScreenshotsCloud(repository.getScreenshotsCloudStatus?.() ?? null);
     const status = repository.getCloudStatus?.();
     setCloudStatus(status ? { ...status, blocked: status.blocked.length } : LOCAL_STATUS);
     const active = repository.isCloudActive?.() ?? false;
@@ -783,6 +805,9 @@ export function JournalProvider({
         downloadAttachment,
         repairAttachment,
         attachmentFilesVersion,
+        screenshotsCloud,
+        pauseScreenshotUploads,
+        resumeScreenshotUploads,
         storageUsage,
         primaryPropAccountId,
         setPrimaryPropAccountId,

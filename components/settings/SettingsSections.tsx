@@ -14,6 +14,7 @@ import { OwnerDiagnosticsBlock } from "@/components/OwnerDiagnosticsBlock";
 import { DeviceDataCard } from "@/components/DeviceDataCard";
 import { JournalSettingsCard } from "@/components/JournalSettingsCard";
 import { CloudSyncCard } from "@/components/settings/CloudSyncCard";
+import { ScreenshotsCloudCard } from "@/components/settings/ScreenshotsCloudCard";
 
 /* ------------------------------------------------------------------ Profile */
 
@@ -194,6 +195,7 @@ function CloudSection() {
   return (
     <>
       <CloudSyncCard />
+      <ScreenshotsCloudCard />
       <DeviceDataCard />
       <StorageCard />
     </>
