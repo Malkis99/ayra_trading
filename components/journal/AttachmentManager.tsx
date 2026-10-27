@@ -518,7 +518,8 @@ function AttachmentThumbnailCard({
         <img
           src={thumbUrl}
           alt={record.caption || record.kind}
-          className="absolute inset-0 w-full h-full object-cover transition-transform group-hover:scale-105"
+          className="absolute inset-0 w-full h-full object-contain bg-black/40"
+          data-testid="screenshot-thumb"
           loading="lazy"
           onError={() => onBroken?.(record.id)}
         />
