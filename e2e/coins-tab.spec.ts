@@ -1,8 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 import { GAME_CONFIG } from "../lib/game-config";
 
-// «Coins» tab in the profile (docs/economy-coins-plan.md, section 3): balance, how to earn, history since it is kept,
-// filter by type. 1440 and 360 wide.
+// «Coins» tab in the profile: only the balance (with a «?» hint) and the history of credits with a filter by type and
+// a one-line «kept since» (owner decision 2026-10-27). 1440 and 360 wide.
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
@@ -41,7 +41,7 @@ for (const size of [
   { name: "1440", viewport: { width: 1440, height: 900 } },
   { name: "360", viewport: { width: 360, height: 800 } },
 ]) {
-  test(`${size.name}: balance, how to earn, history of credits with a filter and the «kept since» note`, async ({ page }) => {
+  test(`${size.name}: balance with a «?» hint, history of credits with a filter and a one-line «kept since»`, async ({ page }) => {
     await page.setViewportSize(size.viewport);
     await seed(page);
 
@@ -58,18 +58,20 @@ for (const size of [
     const firstTrade = GAME_CONFIG.FIRST_ACTION_REWARDS.trade.coins;
     await expect(page.getByTestId("coins-balance-value")).toHaveText(String(40 + firstTrade + GAME_CONFIG.QUEST_COINS));
 
-    // how to earn: the real amounts; first actions: trade received, account existed before
-    const how = page.getByTestId("coins-how");
-    await expect(how).toContainText(GAME_CONFIG.DAILY_REWARD_VALUES.map((v) => `+${v}`).join(" · "));
-    await expect(how).toContainText(`Не больше ${GAME_CONFIG.DAILY_COIN_CAP} монет в день`);
-    await expect(page.locator('[data-kind="trade"]')).toHaveAttribute("data-status", "got");
-    await expect(page.locator('[data-kind="account"]')).toHaveAttribute("data-status", "past");
-    await expect(page.locator('[data-kind="note"]')).toContainText(`+${GAME_CONFIG.FIRST_ACTION_REWARDS.note.coins}`);
+    // only the balance and the history: no «how to earn» and no notes (they wait in docs/faq-coins-draft.md)
+    await expect(page.getByText("Как получить")).toHaveCount(0);
+    await expect(page.getByText(/монет в день/)).toHaveCount(0);
+    // the «?» next to the balance tells where coins are kept
+    const hint = page.getByTestId("coins-balance-hint");
+    await expect(page.getByText("Монеты пока хранятся на этом устройстве")).toBeHidden();
+    await hint.click();
+    await expect(page.getByText("Монеты пока хранятся на этом устройстве")).toBeVisible();
+    await hint.click();
 
     // history: two credits, newest first; the 40 coins from before are not listed (the note says so)
     const items = page.getByTestId("coins-history-item");
     await expect(items).toHaveCount(2);
-    await expect(page.getByTestId("coins-history-since")).toContainText("Более ранние начисления в ней не показаны");
+    await expect(page.getByTestId("coins-history-since")).toHaveText(/^История ведётся с \d{1,2} \S+ \d{4}/);
     await expect(items.filter({ hasText: "Впервые: сделка" })).toContainText(`+${firstTrade}`);
     await expect(items.filter({ hasText: "Задание:" })).toContainText(`+${GAME_CONFIG.QUEST_COINS}`);
 
