@@ -49,6 +49,16 @@ export function createFakeSupabase() {
   const storageFiles = new Map(); // path -> { bytes: Buffer, mime, created_at }
   const signTokens = new Map(); // token -> { path, expires }
   const storageLog = []; // "upload:<path>" | "sign:<path>" | "download:<path>" | "delete:<path>"
+  let storageDelayMs = 0; // every upload waits this long (lets a test see the progress and press «Stop»)
+  // 0005 rule for removing a file: when the server first saw its screenshot row deleted (server time, like
+  // journal_attachments.deleted_server_at). Key `${userId}:${attachmentId}`.
+  const attachmentDeletedAt = new Map();
+  const DAY = 24 * 3600 * 1000;
+  const trackDeletion = (userId, data) => {
+    const key = `${userId}:${data.id}`;
+    if (!data.deletedAt) attachmentDeletedAt.delete(key);
+    else if (!attachmentDeletedAt.has(key)) attachmentDeletedAt.set(key, Date.now());
+  };
   const liveAttachmentBytes = (userId, exceptId) =>
     [...journalRows.values()]
       .filter((r) => r.user_id === userId && r.table === "journal_attachments" && !r.data.deletedAt && r.id !== exceptId)
@@ -183,6 +193,7 @@ export function createFakeSupabase() {
       const data = await readBody(req);
       journalClock = Math.max(journalClock + 1, Date.now());
       journalRows.set(`${user.id}:${table}:${data.id}`, { user_id: user.id, table, id: data.id, data, updated_at: new Date(journalClock).toISOString() });
+      if (table === "journal_attachments") trackDeletion(user.id, data);
       return send(200, { ok: true });
     }
     if (path === "/__test/journal-write-delay") {
@@ -197,6 +208,25 @@ export function createFakeSupabase() {
       const user = usersByEmail.get(url.searchParams.get("email"));
       const rows = user ? [...journalRows.values()].filter((r) => r.user_id === user.id) : [];
       return send(200, rows.map(({ table, id, data, updated_at }) => ({ table, id, data, updated_at })));
+    }
+    if (path === "/__test/storage-delay") {
+      storageDelayMs = Number(url.searchParams.get("ms") || 0);
+      return send(200, { storageDelayMs });
+    }
+    if (path === "/__test/storage-age") {
+      // a file uploaded `hours` ago (the 24-hour rule for files without a row)
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      const file = user && storageFiles.get(`${user.id}/${url.searchParams.get("name")}`);
+      if (!file) return send(404, { error: "no file" });
+      file.created_at = new Date(Date.now() - Number(url.searchParams.get("hours")) * 3600 * 1000).toISOString();
+      return send(200, { created_at: file.created_at });
+    }
+    if (path === "/__test/attachment-deleted-days") {
+      // the screenshot row was deleted `days` ago by server time (the 30-day rule)
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      if (!user) return send(404, { error: "no user" });
+      attachmentDeletedAt.set(`${user.id}:${url.searchParams.get("id")}`, Date.now() - Number(url.searchParams.get("days")) * DAY);
+      return send(200, { ok: true });
     }
     if (path === "/__test/attachment-quota") {
       attachmentQuota = Number(url.searchParams.get("bytes") || 200 * 1024 * 1024);
@@ -494,6 +524,7 @@ export function createFakeSupabase() {
           if (old && changedAt < Date.parse(old.data.updatedAt || old.data.createdAt)) continue; // last-write-wins: not returned
           journalClock = Math.max(journalClock + 1, Date.now());
           journalRows.set(key, { user_id: user.id, table, id: r.id, data: r.data, updated_at: new Date(journalClock).toISOString() });
+          if (table === "journal_attachments") trackDeletion(user.id, r.data);
           written.push({ id: r.id });
         }
         return (req.headers.prefer || "").includes("return=representation") ? send(201, written) : send(201);
@@ -529,6 +560,7 @@ export function createFakeSupabase() {
       const objectPath = decodeURIComponent(path.slice(`/storage/v1/object/${BUCKET}/`.length));
       const mime = String(req.headers["content-type"] || "").split(";")[0];
       const bytes = await readRaw(req);
+      if (storageDelayMs > 0) await new Promise((r) => setTimeout(r, storageDelayMs));
       storageLog.push(`upload:${objectPath}`);
       if (!user) return send(400, { statusCode: "403", error: "Unauthorized", message: "new row violates row-level security policy" });
       // bucket limits first (checked by the Storage server before the file is taken)
@@ -544,8 +576,45 @@ export function createFakeSupabase() {
       storageFiles.set(objectPath, { bytes, mime, created_at: new Date().toISOString() });
       return send(200, { Key: `${BUCKET}/${objectPath}`, Id: crypto.randomUUID() });
     }
+    if (path === `/storage/v1/object/list/${BUCKET}` && req.method === "POST") {
+      // SELECT rule: own folder only
+      const user = userFromAuthHeader(req);
+      const body = await readBody(req);
+      const prefix = String(body.prefix || "").replace(/\/$/, "");
+      if (!user || prefix !== user.id) return send(200, []);
+      const offset = Number(body.offset || 0);
+      const limit = Number(body.limit || 100);
+      const items = [...storageFiles.entries()]
+        .filter(([p]) => p.startsWith(`${user.id}/`))
+        .sort(([a], [b]) => a.localeCompare(b))
+        .slice(offset, offset + limit)
+        .map(([p, f]) => ({ name: p.slice(user.id.length + 1), id: p, created_at: f.created_at, updated_at: f.created_at, metadata: { size: f.bytes.length, mimetype: f.mime } }));
+      return send(200, items);
+    }
+    if (path === `/storage/v1/object/${BUCKET}` && req.method === "DELETE") {
+      // DELETE rule of 0005: own folder; the row deleted 30+ days ago (server time), or no row and the file 24+ hours old.
+      // Refused files are simply not removed (the real server answers the same way).
+      const user = userFromAuthHeader(req);
+      const body = await readBody(req);
+      const removed = [];
+      for (const p of Array.isArray(body.prefixes) ? body.prefixes : []) {
+        const file = storageFiles.get(p);
+        if (!user || !file || !p.startsWith(`${user.id}/`)) continue;
+        const id = p.slice(user.id.length + 1).replace(/\.(webp|png|jpg)$/, "");
+        const row = journalRows.get(`${user.id}:journal_attachments:${id}`);
+        const deletedAt = attachmentDeletedAt.get(`${user.id}:${id}`);
+        const allowed = row
+          ? Boolean(row.data.deletedAt) && deletedAt !== undefined && deletedAt <= Date.now() - 30 * DAY
+          : Date.parse(file.created_at) <= Date.now() - DAY;
+        if (!allowed) continue;
+        storageFiles.delete(p);
+        storageLog.push(`delete:${p}`);
+        removed.push({ name: p });
+      }
+      return send(200, removed);
+    }
     if (path.startsWith("/storage/v1/")) {
-      // no UPDATE rule (a file is never replaced); removal is the cleanup of 0005-C
+      // no UPDATE rule (a file is never replaced)
       return send(400, { statusCode: "403", error: "Unauthorized", message: "new row violates row-level security policy" });
     }
 

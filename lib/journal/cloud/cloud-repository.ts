@@ -37,7 +37,32 @@ import { readSyncMode, writeSyncMode, type SyncMode } from "./sync-mode";
 import type { StoredConflict } from "./sync-merge";
 import type { OutboxEntry } from "./outbox";
 import type { AttachmentMetadata } from "../attachments/types";
-import { ATTACHMENTS_TABLE, AttachmentFiles, type AttachmentFileRemote, type AttachmentFilesDeps } from "./attachment-files";
+import {
+  ATTACHMENTS_TABLE,
+  AttachmentFiles,
+  readUploadsPaused,
+  writeUploadsPaused,
+  type AttachmentFileRemote,
+  type AttachmentFilesDeps,
+} from "./attachment-files";
+
+/** Screenshots of the account and the cloud, for Settings → Cloud and data (0005-C). */
+export interface ScreenshotsCloudStatus {
+  /** Screenshots of live trades described by the journal. */
+  total: number;
+  /** Of them, with the file in the cloud. */
+  inCloud: number;
+  /** Waiting to go up (queued). */
+  waiting: number;
+  /** «Stop» was pressed. */
+  paused: boolean;
+  /** The upload is running by itself («Automatic», not stopped, something to send). */
+  uploading: boolean;
+  /** Tried several times and failed (not counting no space). */
+  failed: number;
+  /** Waiting because the cloud has no space. */
+  noSpace: number;
+}
 
 /**
  * - local: cloud not used (guest, flag off, not configured)
@@ -258,9 +283,8 @@ export class CloudJournalRepository implements JournalRepository {
         now: () => this.now().getTime(),
         onChange: this.notifyStatus,
         isManual: () => readSyncMode(userId) === "manual",
-        prepareFiles: (uid, entries) => this.attachmentFiles.prepare(uid, entries),
-        // Files of screenshots from other devices: by themselves only in automatic mode (manual: «Download»)
-        onExchanged: (uid) => void this.track(this.attachmentFiles.reconcile(uid, { download: readSyncMode(uid) !== "manual" })),
+        prepareFiles: (uid, entries, opts) => this.attachmentFiles.prepare(uid, entries, opts),
+        onExchanged: (uid, { byUser }) => void this.track(this.afterExchange(uid, byUser)),
       });
       this.engines.set(userId, engine);
       engine.start();
@@ -576,6 +600,72 @@ export class CloudJournalRepository implements JournalRepository {
   }
   deleteNote(id: string): boolean {
     return this.write(() => this.local.deleteNote(id));
+  }
+
+  /**
+   * After an exchange (0005-B/C): screenshots this browser has but the journal does not describe yet become rows and
+   * go up like new ones; files from other devices come down (by themselves only in «Automatic», «Download» in
+   * «Manual»); once a day the account's folder in the cloud is cleaned (in «Manual» only on «Synchronise»).
+   */
+  private async afterExchange(userId: string, byUser: boolean): Promise<void> {
+    const manual = readSyncMode(userId) === "manual";
+    await this.adoptUndescribedScreenshots(userId);
+    await this.attachmentFiles.reconcile(userId, { download: !manual });
+    if (!manual || byUser) await this.attachmentFiles.cleanup(userId).catch(() => 0);
+  }
+
+  /** Screenshots added before 0005 (or copied from the guest before it): rows for them, queued — no rewards. */
+  private async adoptUndescribedScreenshots(userId: string): Promise<number> {
+    const metas = await this.attachmentFiles.undescribed(userId);
+    if (!metas.length || AppStorage.getUserId() !== userId) return 0;
+    const repo = new LocalStorageJournalRepository(undefined, userId);
+    const entries: CloudEntry[] = metas.map((m) => ({ table: ATTACHMENTS_TABLE, id: m.id, record: repo.saveAttachmentRecord(m) as unknown as CloudEntry["record"] }));
+    this.engineFor(userId).enqueue(entries);
+    this.notifyData();
+    return entries.length;
+  }
+
+  /**
+   * Screenshots of the account and the cloud (Settings → Cloud and data): how many are in the cloud, whether the
+   * upload runs or is stopped, how many failed or wait for space.
+   */
+  getScreenshotsCloudStatus(): ScreenshotsCloudStatus | null {
+    const userId = AppStorage.getUserId();
+    if (!userId || !this.isCloudActive()) return null;
+    const liveTrades = new Set(this.local.getTrades().map((t) => t.id));
+    const rows = this.local.getAttachmentRecords().filter((a) => liveTrades.has(a.tradeId));
+    const queued = (this.engines.get(userId)?.outbox.list() ?? []).filter((e) => e.table === ATTACHMENTS_TABLE && rows.some((a) => a.id === e.id));
+    const paused = readUploadsPaused(userId);
+    const failed = queued.filter((e) => e.lastError && e.lastError !== "noSpace" && e.attempts >= 3).length;
+    const noSpace = queued.filter((e) => e.lastError === "noSpace").length;
+    return {
+      total: rows.length,
+      inCloud: rows.filter((a) => this.attachmentFiles.isInCloud(userId, a.id)).length,
+      waiting: queued.length,
+      paused,
+      uploading: !paused && queued.length > failed + noSpace && readSyncMode(userId) === "auto",
+      failed,
+      noSpace,
+    };
+  }
+
+  /** «Stop»: what is uploaded stays; nothing more goes up until «Continue» (a file being uploaded finishes). */
+  pauseScreenshotUploads(): void {
+    const userId = AppStorage.getUserId();
+    if (!userId) return;
+    writeUploadsPaused(userId, true);
+    this.notifyStatus();
+  }
+
+  /** «Continue» (and «Retry» for the ones that failed): the waiting screenshots go up now. */
+  resumeScreenshotUploads(): Promise<void> {
+    const userId = AppStorage.getUserId();
+    if (!userId) return Promise.resolve();
+    writeUploadsPaused(userId, false);
+    const engine = this.engineFor(userId);
+    engine.outbox.release((e) => e.table === ATTACHMENTS_TABLE, this.now().getTime());
+    this.notifyStatus();
+    return this.track(engine.flush(true, true));
   }
 
   attachmentCloudState(id: string): AttachmentCloudState {
