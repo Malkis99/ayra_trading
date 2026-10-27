@@ -34,9 +34,6 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: npm }
       - run: npm ci
-      # TEMPORARY for the PR «stable WebKit screenshot-count test»: this spec 10 times in a row. Removed before merge.
-      - name: "TEMP: screenshot-counts x10"
-        run: npx playwright test -c playwright.supabase.config.ts e2e-supabase/screenshot-counts.spec.ts --repeat-each=10
       - name: e2e (mock auth)
         run: npx playwright test
       - name: e2e (fake Supabase)
