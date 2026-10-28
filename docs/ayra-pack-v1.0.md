@@ -21,10 +21,10 @@
 | D-07 | Кейсы за внутреннюю валюту, валюта только зарабатывается; партнёрские награды — на будущее | G + C |
 | D-08 | Журнал: Dashboard, Trades, Reports, Trading Plan, Strategies, Accounts, **Notes** | G |
 | D-09 | Трекер дисциплины живёт в **профиле**, не в журнале | G |
-| D-10 | Бэктесты — в **Academy** | G |
+| D-10 | Бэктест и Replay — на **Рынке** (вкладки «График», «Бэктест», раздел «Тренировка»); Academy использует их как учебный инструмент. Переписано 2026-10-28, `docs/market-plan.md` | G |
 | D-11 | Импорт: MT5, cTrader, Match-Trader | G |
 | D-12 | Market Center: Overview → Calendar → News Intelligence → Scanner | G |
-| D-13 | Micro-раздела нет. Macro остаётся | G |
+| D-13 | Micro-раздела нет. Macro остаётся (вкладка на Рынке называется «Экономика», 2026-10-28) | G |
 | D-14 | Overview ядро: DXY, S&P 500, Nasdaq, Gold, Oil, BTC; лишнее не добавляем | G |
 | D-15 | Каталог инструментов: все основные рынки + крипто | G |
 | D-16 | Данные в реальном времени — цель | G ⚠ см. 8.5 |
@@ -213,7 +213,7 @@ Process Score и матрица Process × Outcome; журнал «не вошё
 
 ## 9. Academy
 
-Trading, Market Structure, Price Action, Risk Management, Psychology, Macro, Discipline, Decision Making; уроки, тесты, чек-листы; **бэктесты/replay как учебный инструмент** (D-10); прогресс даёт XP Knowledge. Только отметки о прохождении, без сертификатов трейдера.
+Trading, Market Structure, Price Action, Risk Management, Psychology, Macro, Discipline, Decision Making; уроки, тесты, чек-листы; **бэктест и replay с Рынка как учебный инструмент** (D-10); прогресс даёт XP Knowledge. Только отметки о прохождении, без сертификатов трейдера.
 
 ---
 
