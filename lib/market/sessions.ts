@@ -246,3 +246,61 @@ export function gapBackToUsual(ms: number, maxDays = 60): number | null {
   }
   return null;
 }
+
+// ---- Live view (PR 1.1b): cards and «What is next». Only presentation; the hours above are unchanged ----
+
+const HOUR = 3600_000;
+
+/** The occurrence open now, or the next one. */
+export function currentOrNext(list: Occurrence[], now: number): Occurrence | null {
+  return list.find((o) => o.start <= now && now < o.end) ?? list.find((o) => o.start > now) ?? null;
+}
+
+/** Days from the user's today to the day of `ms` on the user's clock (0 today, 1 tomorrow, −1 yesterday). */
+export function dayOffset(ms: number, now: number, zone: string): number {
+  const a = wallAt(now, zone);
+  const b = wallAt(ms, zone);
+  return Math.round((Date.UTC(b.y, b.mo - 1, b.d) - Date.UTC(a.y, a.mo - 1, a.d)) / (24 * HOUR));
+}
+
+/** «16:00–01:00 (+1)» counted from the occurrence's own start day. */
+export function hoursOf(o: Occurrence, zone: string): string {
+  const days = dayOffset(o.end - 1, o.start, zone);
+  return `${clockOf(o.start, zone)}–${clockOf(o.end, zone)}${days > 0 ? ` (+${days})` : ""}`;
+}
+
+/** A countdown: days and «HH:MM:SS» (rounded up to the second, never negative). */
+export function countdown(ms: number): { d: number; hms: string } {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const d = Math.floor(total / 86400);
+  const rest = total % 86400;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return { d, hms: `${pad(Math.floor(rest / 3600))}:${pad(Math.floor((rest % 3600) / 60))}:${pad(rest % 60)}` };
+}
+
+/** Share of the occurrence already passed at `now` (0…1); 0 before it starts. */
+export function progressOf(o: Occurrence, now: number): number {
+  if (now <= o.start) return 0;
+  if (now >= o.end) return 1;
+  return (now - o.start) / (o.end - o.start);
+}
+
+export interface UpcomingEvent {
+  id: WindowId;
+  kind: "session" | "killzone";
+  edge: "start" | "end";
+  at: number;
+}
+
+/** The next `limit` openings / closings of sessions and starts / ends of killzones after `now`, in order. */
+export function upcomingEvents(defs: WindowDef[], now: number, limit = 5): UpcomingEvent[] {
+  const out: UpcomingEvent[] = [];
+  for (const d of defs)
+    for (const o of occurrences(d, now)) {
+      if (o.start > now) out.push({ id: d.id, kind: d.kind, edge: "start", at: o.start });
+      if (o.end > now) out.push({ id: d.id, kind: d.kind, edge: "end", at: o.end });
+    }
+  // at the same minute a closing comes before an opening; otherwise the order of `defs` stays
+  const rank = (e: UpcomingEvent) => (e.edge === "end" ? 0 : 1);
+  return out.sort((a, b) => a.at - b.at || rank(a) - rank(b)).slice(0, limit);
+}
