@@ -1,4 +1,5 @@
 import { test, expect, type Page, type APIRequestContext, type Browser } from "@playwright/test";
+import { completeOnboarding } from "../e2e/helpers/onboarding";
 import { signIn } from "../e2e/helpers/auth";
 
 const FAKE_SUPABASE = "http://127.0.0.1:54329";
@@ -6,15 +7,6 @@ const FAKE_SUPABASE = "http://127.0.0.1:54329";
 // Time zone in the cloud profile (profiles.timezone, no migration): it follows the cloud exchange of the journal —
 // «Automatic» by itself, «Manual» on «Synchronise»; two devices of one account; guests and accounts without the cloud
 // are not touched. Fake Supabase only.
-
-async function completeOnboarding(page: Page, nickname: string) {
-  await page.waitForURL("**/awakening**", { timeout: 10000 });
-  await page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]').fill(nickname);
-  for (const b of ["Продолжить", "Продолжить", "Продолжить", "18–24 года", "Продолжить", "Пропустить шаг целиком", "1–2 года", "Продолжить", "Крипто", "Продолжить", "Дисциплина", "Продолжить", "Пропустить необязательные вопросы", "Пропустить шаг целиком", "Начать"]) {
-    await page.click(`button:has-text("${b}")`);
-  }
-  await page.waitForURL((url) => url.pathname !== "/awakening", { timeout: 10000 });
-}
 
 /** Opens the time zone picker, searches the city (English name, as in the zone id) and takes the match. */
 async function pickTimezone(page: Page, city: string) {
@@ -39,7 +31,7 @@ async function accountWithCloud(browser: Browser, request: APIRequestContext, ta
   const A = await device(browser);
   const email = `${tag}_${Date.now()}@example.com`;
   await signIn(A.page, email);
-  await completeOnboarding(A.page, `${tag}${Date.now() % 100000}`);
+  await completeOnboarding(A.page, `${tag}${Date.now() % 100000}`, { after: "left" });
   const userId = ((await (await request.get(`${FAKE_SUPABASE}/__test/profile?email=${q(email)}`)).json()).id) as string;
   await A.page.evaluate((id) => localStorage.setItem(`ayra:${id}:ayra_sync_state`, JSON.stringify({ initialSyncAt: new Date().toISOString() })), userId);
   expect(await cloudTz(request, email)).toBe("UTC"); // the cloud default
@@ -113,7 +105,7 @@ test.describe("Time zone in the cloud profile", () => {
     const { ctx, page } = await device(browser);
     const email = `TzOff_${Date.now()}@example.com`;
     await signIn(page, email);
-    await completeOnboarding(page, `TzOff${Date.now() % 100000}`);
+    await completeOnboarding(page, `TzOff${Date.now() % 100000}`, { after: "left" });
     await page.goto("/settings/journal");
     await expect(page.getByTestId("journal-settings-timezone-note")).toHaveText("Часовой пояс хранится на этом устройстве.");
     await pickTimezone(page, "Berlin");

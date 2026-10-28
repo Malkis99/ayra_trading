@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { completeOnboarding } from "../e2e/helpers/onboarding";
 import { submitRegistration } from "../e2e/helpers/auth";
 
 const FAKE_SUPABASE = "http://127.0.0.1:54329";
@@ -14,25 +15,6 @@ async function requestMagicLink(page: Page, email: string): Promise<string> {
   return (await res.json()).link;
 }
 
-async function completeOnboarding(page: Page, nickname: string) {
-  await page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]').fill(nickname);
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("18–24 года")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Пропустить шаг целиком")');
-  await page.click('button:has-text("1–2 года")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Крипто")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Дисциплина")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Пропустить необязательные вопросы")');
-  await page.click('button:has-text("Пропустить шаг целиком")');
-  await page.click('button:has-text("Начать")');
-}
-
 test.describe("Cloud journal with the sync flag off", () => {
   test.use({ reducedMotion: "reduce" });
 
@@ -42,7 +24,7 @@ test.describe("Cloud journal with the sync flag off", () => {
     const email = `cloudoff_${Date.now()}@example.com`;
     await page.goto(await requestMagicLink(page, email));
     await page.waitForURL("**/awakening**", { timeout: 10000 });
-    await completeOnboarding(page, `Off${Date.now() % 100000}`);
+    await completeOnboarding(page, `Off${Date.now() % 100000}`, { after: "none" });
     await page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
 
     await page.goto("/journal");

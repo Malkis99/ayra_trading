@@ -1,4 +1,5 @@
 import { test, expect, type BrowserContext, type Page } from "@playwright/test";
+import { completeOnboarding } from "../e2e/helpers/onboarding";
 import { submitPasswordSignIn, submitRegistration } from "../e2e/helpers/auth";
 
 const FAKE_SUPABASE = "http://127.0.0.1:54329";
@@ -86,26 +87,6 @@ for (const variant of VARIANTS) test.describe(`Magic link opened in a new tab (r
   });
 });
 
-async function completeOnboarding(page: Page, nickname: string) {
-  const nick = page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]');
-  await nick.fill(nickname);
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("18–24 года")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Пропустить шаг целиком")');
-  await page.click('button:has-text("1–2 года")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Крипто")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Дисциплина")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Пропустить необязательные вопросы")');
-  await page.click('button:has-text("Пропустить шаг целиком")');
-  await page.click('button:has-text("Начать")');
-}
-
 test.describe("After onboarding: optional guest transfer, existing accounts", () => {
   test("new account finishes its own onboarding, then /profile-select offers the guest transfer", async ({ context }) => {
     await seedGuestWithData(context);
@@ -117,7 +98,7 @@ test.describe("After onboarding: optional guest transfer, existing accounts", ()
     const tabB = await context.newPage();
     await tabB.goto(link);
     await tabB.waitForURL("**/awakening**", { timeout: 10000 });
-    await completeOnboarding(tabB, `Acc${Date.now() % 100000}`);
+    await completeOnboarding(tabB, `Acc${Date.now() % 100000}`, { after: "none" });
 
     await tabB.waitForURL("**/profile-select**", { timeout: 10000 });
     await expect(tabB.locator("main")).toContainText("GuestZed");
@@ -142,7 +123,7 @@ test.describe("After onboarding: optional guest transfer, existing accounts", ()
     const first = await context.newPage();
     await first.goto(await requestMagicLink(tabA, email));
     await first.waitForURL("**/awakening**", { timeout: 10000 });
-    await completeOnboarding(first, `Old${Date.now() % 100000}`);
+    await completeOnboarding(first, `Old${Date.now() % 100000}`, { after: "none" });
     await first.waitForURL("**/profile-select**", { timeout: 10000 });
     await first.click("button:has-text('Не переносить')");
     await first.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
