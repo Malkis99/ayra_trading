@@ -1,70 +1,151 @@
 /**
- * Trading sessions and killzones (Market → Overview, plan `docs/market-plan.md`, PR 1.1). No market data: only
- * clocks. Each window is defined in the wall time of its own city, so summer time of Europe and of the USA (switching
- * on different dates) is followed by itself; the user sees it in their own time zone.
+ * Trading sessions and killzones (Market → Overview, plan `docs/market-plan.md`, PR 1.1 / 1.1b). No market data:
+ * only clocks. Each window is defined in the wall time of its own city, so summer time of every country (switching
+ * on different dates) is followed by itself; the user sees it in the time zone chosen for display.
  *
- * The forex week: opens Sunday 17:00 New York time, closes Friday 17:00 New York time. A window that falls outside
- * it (e.g. Tokyo on Saturday morning) does not happen.
+ * The forex week: opens Sunday 17:00 New York time, closes Friday 17:00 New York time. A window is cut to it: it is
+ * never shown open while the forex market is closed (e.g. New York on Friday closes at 17:00, not at 18:00).
  */
 
-export type SessionId = "asia" | "london" | "newyork";
+export type MainSessionId = "asia" | "london" | "newyork";
+export type SubSessionId = "sydney" | "wellington" | "hongkong" | "frankfurt" | "chicago";
+export type SessionId = MainSessionId | SubSessionId;
 export type KillzoneId = "londonKz" | "newyorkKz";
 export type WindowId = SessionId | KillzoneId;
+/** Region of a session, for its short description. */
+export type SessionGroup = "pacific" | "asia" | "europe" | "america";
 
-/** "HH:MM" in the wall time of `zone`. */
+/** "HH:MM" in the wall time of `zone`; an end before the start means the next day. */
 export interface WindowDef {
   id: WindowId;
   kind: "session" | "killzone";
   zone: string;
   start: string;
   end: string;
+  group?: SessionGroup;
 }
 
 export const NEW_YORK = "America/New_York";
 
-/**
- * Default hours — common conventions of the forex market, not business numbers: Tokyo 09:00–18:00, London and
- * New York 08:00–17:00 local time. Killzones are counted in New York time (as they are usually described):
- * London 02:00–05:00, New York 07:00–10:00; the user can change both.
- */
-export const SESSIONS: WindowDef[] = [
-  { id: "asia", kind: "session", zone: "Asia/Tokyo", start: "09:00", end: "18:00" },
-  { id: "london", kind: "session", zone: "Europe/London", start: "08:00", end: "17:00" },
-  { id: "newyork", kind: "session", zone: NEW_YORK, start: "08:00", end: "17:00" },
-];
+export const MAIN_SESSIONS: MainSessionId[] = ["asia", "london", "newyork"];
+export const SUB_SESSIONS: SubSessionId[] = ["sydney", "wellington", "hongkong", "frankfurt", "chicago"];
+export const ALL_SESSIONS: SessionId[] = [...MAIN_SESSIONS, ...SUB_SESSIONS];
 
-export const DEFAULT_KILLZONES: Record<KillzoneId, { start: string; end: string }> = {
+/**
+ * Default hours in each city's own time (owner's table 2026-10-28, given in UTC+3 for the northern summer):
+ * Tokyo, Hong Kong, Frankfurt, London, Wellington, Sydney 08:00–17:00; New York 09:30–18:00; Chicago 09:00–18:00.
+ */
+export const SESSION_DEFAULTS: Record<SessionId, { zone: string; group: SessionGroup; start: string; end: string }> = {
+  asia: { zone: "Asia/Tokyo", group: "asia", start: "08:00", end: "17:00" },
+  london: { zone: "Europe/London", group: "europe", start: "08:00", end: "17:00" },
+  newyork: { zone: NEW_YORK, group: "america", start: "09:30", end: "18:00" },
+  sydney: { zone: "Australia/Sydney", group: "pacific", start: "08:00", end: "17:00" },
+  wellington: { zone: "Pacific/Auckland", group: "pacific", start: "08:00", end: "17:00" },
+  hongkong: { zone: "Asia/Hong_Kong", group: "asia", start: "08:00", end: "17:00" },
+  frankfurt: { zone: "Europe/Berlin", group: "europe", start: "08:00", end: "17:00" },
+  chicago: { zone: "America/Chicago", group: "america", start: "09:00", end: "18:00" },
+};
+
+export type Hours = { start: string; end: string };
+export type SessionSettings = Record<SessionId, Hours>;
+export type KillzoneSettings = Record<KillzoneId, Hours>;
+
+export const DEFAULT_KILLZONES: KillzoneSettings = {
   londonKz: { start: "02:00", end: "05:00" },
   newyorkKz: { start: "07:00", end: "10:00" },
 };
 
-export type KillzoneSettings = Record<KillzoneId, { start: string; end: string }>;
+export function defaultSessionHours(): SessionSettings {
+  return Object.fromEntries(ALL_SESSIONS.map((id) => [id, { start: SESSION_DEFAULTS[id].start, end: SESSION_DEFAULTS[id].end }])) as SessionSettings;
+}
 
+/** Session windows with the user's hours (city local time). */
+export function sessionDefs(hours: SessionSettings = defaultSessionHours()): Record<SessionId, WindowDef> {
+  return Object.fromEntries(
+    ALL_SESSIONS.map((id) => [id, { id, kind: "session", zone: SESSION_DEFAULTS[id].zone, group: SESSION_DEFAULTS[id].group, start: hours[id].start, end: hours[id].end }])
+  ) as Record<SessionId, WindowDef>;
+}
+
+/** The three main sessions with the default hours (Tokyo, London, New York). */
+export const SESSIONS: WindowDef[] = MAIN_SESSIONS.map((id) => sessionDefs()[id]);
+
+/** Killzones are kept in New York time (as they are usually described). */
 export function killzoneDefs(settings: KillzoneSettings = DEFAULT_KILLZONES): WindowDef[] {
   return (["londonKz", "newyorkKz"] as const).map((id) => ({ id, kind: "killzone", zone: NEW_YORK, start: settings[id].start, end: settings[id].end }));
 }
 
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
 export const isValidTime = (v: string) => HHMM.test(v);
-const minutesOf = (v: string) => {
-  const m = HHMM.exec(v);
-  return m ? Number(m[1]) * 60 + Number(m[2]) : NaN;
-};
 
-/** A killzone of the user: both times valid, start before end (a window does not cross midnight). */
+/** Hours of a window: both «HH:MM», start ≠ end; an end before the start crosses midnight. */
 export function isValidWindow(start: string, end: string): boolean {
-  return isValidTime(start) && isValidTime(end) && minutesOf(start) < minutesOf(end);
+  return isValidTime(start) && isValidTime(end) && start !== end;
 }
 
-/** Settings read back from storage: anything broken falls back to the default of that killzone. */
-export function normalizeKillzones(raw: unknown): KillzoneSettings {
-  const out: KillzoneSettings = { londonKz: { ...DEFAULT_KILLZONES.londonKz }, newyorkKz: { ...DEFAULT_KILLZONES.newyorkKz } };
+function normalizeHours<K extends string>(raw: unknown, defaults: Record<K, Hours>): Record<K, Hours> {
+  const out = Object.fromEntries(Object.entries(defaults).map(([k, v]) => [k, { ...(v as Hours) }])) as Record<K, Hours>;
   if (!raw || typeof raw !== "object") return out;
-  for (const id of ["londonKz", "newyorkKz"] as const) {
+  for (const id of Object.keys(defaults) as K[]) {
     const v = (raw as Record<string, unknown>)[id] as { start?: unknown; end?: unknown } | undefined;
     if (v && typeof v.start === "string" && typeof v.end === "string" && isValidWindow(v.start, v.end)) out[id] = { start: v.start, end: v.end };
   }
   return out;
+}
+
+/** Settings read back from storage: anything broken falls back to the default of that killzone. */
+export function normalizeKillzones(raw: unknown): KillzoneSettings {
+  return normalizeHours(raw, DEFAULT_KILLZONES);
+}
+
+export function normalizeSessionHours(raw: unknown): SessionSettings {
+  return normalizeHours(raw, defaultSessionHours());
+}
+
+// ---- Display time zone ----
+
+/** New York (default), the profile's zone, UTC, or any zone from the list. No fixed «UTC+N» choices. */
+export type DisplayChoice = { kind: "newyork" } | { kind: "profile" } | { kind: "utc" } | { kind: "zone"; zone: string };
+export const DEFAULT_DISPLAY: DisplayChoice = { kind: "newyork" };
+
+export function displayZoneOf(choice: DisplayChoice, profileZone: string): string {
+  if (choice.kind === "profile") return profileZone;
+  if (choice.kind === "utc") return "UTC";
+  if (choice.kind === "zone") return choice.zone;
+  return NEW_YORK;
+}
+
+const isZone = (z: unknown): z is string => {
+  if (typeof z !== "string" || !z) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: z });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export function normalizeDisplay(raw: unknown): DisplayChoice {
+  const v = raw as { kind?: unknown; zone?: unknown } | null;
+  if (v && (v.kind === "newyork" || v.kind === "profile" || v.kind === "utc")) return { kind: v.kind };
+  if (v && v.kind === "zone" && isZone(v.zone)) return { kind: "zone", zone: v.zone };
+  return DEFAULT_DISPLAY;
+}
+
+/** Everything the sessions block keeps on the device. */
+export interface MarketSessionsSettings {
+  display: DisplayChoice;
+  sessions: SessionSettings;
+  killzones: KillzoneSettings;
+}
+
+/** Read back: the new settings, or the killzones saved before 1.1b (kept, not lost). */
+export function normalizeSettings(raw: unknown, legacyKillzones?: unknown): MarketSessionsSettings {
+  const v = (raw && typeof raw === "object" ? raw : {}) as Partial<Record<keyof MarketSessionsSettings, unknown>>;
+  return {
+    display: normalizeDisplay(v.display),
+    sessions: normalizeSessionHours(v.sessions),
+    killzones: normalizeKillzones(v.killzones ?? legacyKillzones),
+  };
 }
 
 // ---- Time zone arithmetic (Intl only) ----
@@ -108,6 +189,13 @@ export function instantOf(y: number, mo: number, d: number, h: number, mi: numbe
   return guess;
 }
 
+/** «HH:MM» of one zone at the reference day → the same instant in another zone (today's offsets). */
+export function convertClock(hhmm: string, fromZone: string, toZone: string, refMs: number): string {
+  const [h, m] = hhmm.split(":").map(Number);
+  const day = wallAt(refMs, fromZone);
+  return clockOf(instantOf(day.y, day.mo, day.d, h, m, fromZone), toZone);
+}
+
 // ---- Forex week ----
 
 /** Is the forex market open at `ms` (Sunday 17:00 – Friday 17:00 New York time)? */
@@ -120,6 +208,20 @@ export function isForexOpen(ms: number): boolean {
   return true;
 }
 
+/** The first New York 17:00 on weekday `wd` (0 Sunday, 5 Friday) at or after `ms`. */
+function nextNewYork17(ms: number, wd: number): number {
+  const w = wallAt(ms, NEW_YORK);
+  let days = (wd - w.wd + 7) % 7;
+  if (days === 0 && w.h * 60 + w.mi >= 17 * 60) days = 7;
+  const day = new Date(Date.UTC(w.y, w.mo - 1, w.d + days));
+  return instantOf(day.getUTCFullYear(), day.getUTCMonth() + 1, day.getUTCDate(), 17, 0, NEW_YORK);
+}
+
+/** The forex week opens (Sunday 17:00 New York) — next time after `ms`. */
+export const nextForexOpen = (ms: number) => nextNewYork17(ms, 0);
+/** The forex week closes (Friday 17:00 New York) — next time after `ms`. */
+export const nextForexClose = (ms: number) => nextNewYork17(ms, 5);
+
 // ---- Occurrences of a window ----
 
 export interface Occurrence {
@@ -128,21 +230,30 @@ export interface Occurrence {
   end: number;
 }
 
-/** Occurrences of a window around `ms` (from a day before to `days` after), only inside the forex week. */
+/**
+ * Occurrences of a window around `ms` (from a day before to `days` after). Two rules for the weekend:
+ * - a window happens only on the working days of its own city (Monday–Friday local): no New York «session» on
+ *   Sunday evening just because the market opens at 17:00 New York;
+ * - it is cut to the forex week: one that starts while the market is closed begins when it opens (Sunday 17:00
+ *   New York, e.g. Sydney's or Wellington's Monday morning), one that runs past Friday 17:00 New York ends there.
+ */
 export function occurrences(def: WindowDef, ms: number, days = 8): Occurrence[] {
   const [sh, sm] = def.start.split(":").map(Number);
   const [eh, em] = def.end.split(":").map(Number);
+  const overnight = eh * 60 + em <= sh * 60 + sm;
   const out: Occurrence[] = [];
   const today = wallAt(ms, def.zone);
   for (let i = -1; i <= days; i++) {
     // calendar day in the window's own city (Date.UTC normalises the overflow of the day)
     const day = new Date(Date.UTC(today.y, today.mo - 1, today.d + i));
-    const y = day.getUTCFullYear();
-    const mo = day.getUTCMonth() + 1;
-    const d = day.getUTCDate();
-    const start = instantOf(y, mo, d, sh, sm, def.zone);
-    const end = instantOf(y, mo, d, eh, em, def.zone);
-    if (!isForexOpen(start) && !isForexOpen(end - 60_000)) continue;
+    const weekday = day.getUTCDay();
+    if (weekday === 0 || weekday === 6) continue;
+    const endDay = new Date(Date.UTC(today.y, today.mo - 1, today.d + i + (overnight ? 1 : 0)));
+    let start = instantOf(day.getUTCFullYear(), day.getUTCMonth() + 1, day.getUTCDate(), sh, sm, def.zone);
+    let end = instantOf(endDay.getUTCFullYear(), endDay.getUTCMonth() + 1, endDay.getUTCDate(), eh, em, def.zone);
+    if (!isForexOpen(start)) start = nextForexOpen(start);
+    if (start >= end) continue;
+    end = Math.min(end, nextForexClose(start));
     out.push({ id: def.id, start, end });
   }
   return out;
@@ -197,12 +308,12 @@ export function splitDuration(ms: number): { d: number; h: number; m: number } {
 
 // ---- Readability helpers (PR 1.1a): overlap, one interval per window, the London–New York gap ----
 
-/** When London and New York are open at the same time (intersections of their occurrences). */
-export function londonNewYorkOverlap(ms: number, days = 8): Occurrence[] {
-  const london = occurrences(SESSIONS[1], ms, days);
-  const ny = occurrences(SESSIONS[2], ms, days);
+/** When London and New York are open at the same time (intersections of their occurrences), with the user's hours. */
+export function londonNewYorkOverlap(ms: number, days = 8, london: WindowDef = SESSIONS[1], newYork: WindowDef = SESSIONS[2]): Occurrence[] {
+  const lon = occurrences(london, ms, days);
+  const ny = occurrences(newYork, ms, days);
   const out: Occurrence[] = [];
-  for (const a of london)
+  for (const a of lon)
     for (const b of ny) {
       const start = Math.max(a.start, b.start);
       const end = Math.min(a.end, b.end);

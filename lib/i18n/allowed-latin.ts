@@ -100,4 +100,13 @@ export const ALLOWED_LATIN_WORDS = [
   "Killzones",
   "TradingView",
   "Replay",
+  // currency codes in the session descriptions (Market → sessions «?»)
+  "AUD",
+  "NZD",
+  "JPY",
+  "EUR",
+  "USD",
+  "GBP",
+  "CHF",
+  "CAD",
 ] as const;

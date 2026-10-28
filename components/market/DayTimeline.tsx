@@ -5,7 +5,6 @@ import { useApp } from "@/lib/context";
 import { formatString } from "@/lib/i18n";
 import { Chip, cn } from "@/components/ui";
 import {
-  SESSIONS,
   clockOf,
   dayBounds,
   intervalLabel,
@@ -22,10 +21,10 @@ import {
 type Row = { id: StatusId; name: string; kind: "session" | "killzone" | "overlap"; list: Occurrence[] };
 
 /**
- * The day bar from PR #110 (00–24 on the user's clock), now folded under «Show 24 h». Follows the minute clock of
+ * The day bar from PR #110 (00–24 in the display time), now folded under «Show 24 h». Follows the minute clock of
  * the page; the live countdowns are in the cards above.
  */
-export function DayTimeline({ now, zone, killzones }: { now: number; zone: string; killzones: WindowDef[] }) {
+export function DayTimeline({ now, zone, sessions, killzones }: { now: number; zone: string; sessions: WindowDef[]; killzones: WindowDef[] }) {
   const { dict } = useApp();
   const t = dict.market.sessions;
   const d = t.day;
@@ -40,9 +39,9 @@ export function DayTimeline({ now, zone, killzones }: { now: number; zone: strin
   const pct = (ms: number) => ((ms - from) / span) * 100;
   const clip = (list: Occurrence[]) => list.filter((o) => o.end > from && o.start < to).map((o) => ({ ...o, start: Math.max(o.start, from), end: Math.min(o.end, to) }));
 
-  const overlap = londonNewYorkOverlap(now);
+  const overlap = londonNewYorkOverlap(now, 8, sessions[1], sessions[2]);
   const sessionRows: Row[] = [
-    ...SESSIONS.map((s) => ({ id: s.id, name: s.id === "asia" ? d.asia : t.names[s.id], kind: "session" as const, list: occurrences(s, now) })),
+    ...sessions.map((s) => ({ id: s.id, name: t.names[s.id], kind: "session" as const, list: occurrences(s, now) })),
     { id: "overlap", name: d.overlapName, kind: "overlap", list: overlap },
   ];
   const killzoneRows: Row[] = killzones.map((k) => ({ id: k.id, name: t.names[k.id], kind: "killzone" as const, list: occurrences(k, now) }));
