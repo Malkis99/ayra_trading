@@ -1,19 +1,11 @@
 import { test, expect, type Page, type APIRequestContext, type Browser } from "@playwright/test";
+import { completeOnboarding } from "../e2e/helpers/onboarding";
 import { signIn } from "../e2e/helpers/auth";
 
 const FAKE_SUPABASE = "http://127.0.0.1:54329";
 
 // Variant A (owner decision 2026-10-25): the guest JOURNAL moves into the account and goes to the cloud like any
 // other change; the cloud badge tells the truth; the guest's level, XP and Coins are not moved. Fake Supabase only.
-
-async function completeOnboarding(page: Page, nickname: string) {
-  await page.waitForURL("**/awakening**", { timeout: 10000 });
-  await page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]').fill(nickname);
-  for (const b of ["Продолжить", "Продолжить", "Продолжить", "18–24 года", "Продолжить", "Пропустить шаг целиком", "1–2 года", "Продолжить", "Крипто", "Продолжить", "Дисциплина", "Продолжить", "Пропустить необязательные вопросы", "Пропустить шаг целиком", "Начать"]) {
-    await page.click(`button:has-text("${b}")`);
-  }
-  await page.waitForURL((url) => url.pathname !== "/awakening", { timeout: 10000 });
-}
 
 /** A device with guest data: level 3, 40 XP, 25 Coins and a journal of one account and two trades. */
 async function guestDevice(browser: Browser) {
@@ -58,7 +50,7 @@ test.describe("Guest journal into the account (variant A)", () => {
     const email = `GMove_${Date.now()}@example.com`;
     await signIn(page, email);
     await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${q(email)}&on=1`);
-    await completeOnboarding(page, `GMv${Date.now() % 100000}`);
+    await completeOnboarding(page, `GMv${Date.now() % 100000}`, { after: "left" });
     await page.waitForURL("**/profile-select**", { timeout: 10000 });
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Перенести журнал гостя?");
     await expect(page.locator("main")).toContainText("Уровень, XP и монеты гостя не переносятся");
@@ -85,7 +77,7 @@ test.describe("Guest journal into the account (variant A)", () => {
     const email = `GCopy_${Date.now()}@example.com`;
     await signIn(page, email);
     await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${q(email)}&on=1`);
-    await completeOnboarding(page, `GCp${Date.now() % 100000}`);
+    await completeOnboarding(page, `GCp${Date.now() % 100000}`, { after: "left" });
     await page.waitForURL("**/profile-select**", { timeout: 10000 });
     await page.click("button:has-text('Решить позже')");
     await page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
@@ -106,7 +98,7 @@ test.describe("Guest journal into the account (variant A)", () => {
     const email = `GMan_${Date.now()}@example.com`;
     await signIn(page, email);
     await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${q(email)}&on=1`);
-    await completeOnboarding(page, `GMn${Date.now() % 100000}`);
+    await completeOnboarding(page, `GMn${Date.now() % 100000}`, { after: "left" });
     await page.waitForURL("**/profile-select**", { timeout: 10000 });
     await page.click("button:has-text('Решить позже')");
     await page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });

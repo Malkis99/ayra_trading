@@ -1,4 +1,5 @@
 import { test, expect, type Page, type APIRequestContext, type Browser, type BrowserContext } from "@playwright/test";
+import { completeOnboarding } from "../e2e/helpers/onboarding";
 import { GAME_CONFIG } from "../lib/game-config";
 import fs from "node:fs";
 import path from "node:path";
@@ -11,27 +12,6 @@ const SCREENSHOT = path.join(process.cwd(), "e2e/fixtures/test-screenshot.png");
 // T7b-4f «day in the life»: the owner's manual checklist (docs/t7b-4f-plan.md, section 5) run end to end on the fake
 // Supabase. Device A = desktop, device B = phone-sized browser, both signed in to one account. The flag is turned on
 // ONLY for test users of the fake server; nothing here touches a real project.
-
-async function completeOnboarding(page: Page, nickname: string) {
-  await page.waitForURL("**/awakening**", { timeout: 10000 });
-  await page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]').fill(nickname);
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("18–24 года")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Пропустить шаг целиком")');
-  await page.click('button:has-text("1–2 года")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Крипто")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Дисциплина")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Пропустить необязательные вопросы")');
-  await page.click('button:has-text("Пропустить шаг целиком")');
-  await page.click('button:has-text("Начать")');
-  await page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
-}
 
 async function addTrade(page: Page, instrument: string, opts: { firstAccount?: string; navigate?: boolean } = {}) {
   // offline a page cannot be loaded: then the trade is added on the already open journal

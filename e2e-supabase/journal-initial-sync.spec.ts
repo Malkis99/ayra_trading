@@ -1,31 +1,11 @@
 import { test, expect, type Page, type APIRequestContext, type BrowserContext, type Browser } from "@playwright/test";
+import { completeOnboarding } from "../e2e/helpers/onboarding";
 import { signIn } from "../e2e/helpers/auth";
 
 const FAKE_SUPABASE = "http://127.0.0.1:54329";
 
 // T7b-4d: the first upload (button) and the automatic download on an empty device, against the fake Supabase.
 // The flag is on ONLY for test users of the fake server; nothing here touches a real project.
-
-async function completeOnboarding(page: Page, nickname: string) {
-  await page.waitForURL("**/awakening**", { timeout: 10000 });
-  await page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]').fill(nickname);
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("18–24 года")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Пропустить шаг целиком")');
-  await page.click('button:has-text("1–2 года")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Крипто")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Дисциплина")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Пропустить необязательные вопросы")');
-  await page.click('button:has-text("Пропустить шаг целиком")');
-  await page.click('button:has-text("Начать")');
-  await page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
-}
 
 type Row = { table: string; id: string; data: Record<string, unknown> };
 const cloudRows = async (request: APIRequestContext, email: string) =>

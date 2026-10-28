@@ -1,4 +1,5 @@
 import { test, expect, type Page, type APIRequestContext, type Browser } from "@playwright/test";
+import { completeOnboarding } from "../e2e/helpers/onboarding";
 import path from "node:path";
 import { signIn } from "../e2e/helpers/auth";
 
@@ -7,27 +8,6 @@ const SCREENSHOT = path.join(process.cwd(), "e2e/fixtures/test-screenshot.png");
 
 // 0005-B: screenshots in the cloud, two devices of one account (two browser contexts) against the fake Supabase with
 // its Storage stand-in (same rules as migration 0005). The flag is on ONLY for test users of the fake server.
-
-async function completeOnboarding(page: Page, nickname: string) {
-  await page.waitForURL("**/awakening**", { timeout: 10000 });
-  await page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]').fill(nickname);
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("18–24 года")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Пропустить шаг целиком")');
-  await page.click('button:has-text("1–2 года")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Крипто")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Дисциплина")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Пропустить необязательные вопросы")');
-  await page.click('button:has-text("Пропустить шаг целиком")');
-  await page.click('button:has-text("Начать")');
-  await page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
-}
 
 async function addTrade(page: Page, instrument: string, firstAccount = false) {
   await page.goto("/journal");

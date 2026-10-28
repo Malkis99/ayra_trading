@@ -1,19 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
+import { completeOnboarding } from "../e2e/helpers/onboarding";
 import { signIn } from "../e2e/helpers/auth";
 
 const FAKE_SUPABASE = "http://127.0.0.1:54329";
 
 // Settings by sections (docs/settings-sections-plan.md): /settings/<section>; desktop menu on the left; phone list,
 // a section screen with «← Settings»; direct links (cloud badge → Cloud and data). Fake Supabase only.
-
-async function completeOnboarding(page: Page, nickname: string) {
-  await page.waitForURL("**/awakening**", { timeout: 10000 });
-  await page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]').fill(nickname);
-  for (const b of ["Продолжить", "Продолжить", "Продолжить", "18–24 года", "Продолжить", "Пропустить шаг целиком", "1–2 года", "Продолжить", "Крипто", "Продолжить", "Дисциплина", "Продолжить", "Пропустить необязательные вопросы", "Пропустить шаг целиком", "Начать"]) {
-    await page.click(`button:has-text("${b}")`);
-  }
-  await page.waitForURL((url) => url.pathname !== "/awakening", { timeout: 10000 });
-}
 
 const SECTIONS = [
   ["profile", "Профиль"],
@@ -40,7 +32,7 @@ test.describe("Settings by sections", () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const email = `SetD_${Date.now()}@example.com`;
     await signIn(page, email);
-    await completeOnboarding(page, `SetD${Date.now() % 100000}`);
+    await completeOnboarding(page, `SetD${Date.now() % 100000}`, { after: "left" });
     await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${encodeURIComponent(email)}&on=1`);
 
     await page.goto("/settings");
@@ -93,7 +85,7 @@ test.describe("Settings by sections", () => {
     await page.setViewportSize({ width: 360, height: 740 });
     const email = `SetM_${Date.now()}@example.com`;
     await signIn(page, email);
-    await completeOnboarding(page, `SetM${Date.now() % 100000}`);
+    await completeOnboarding(page, `SetM${Date.now() % 100000}`, { after: "left" });
     await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${encodeURIComponent(email)}&on=1`);
 
     await page.goto("/settings");

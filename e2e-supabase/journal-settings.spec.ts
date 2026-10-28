@@ -1,4 +1,5 @@
 import { test, expect, type Page, type APIRequestContext, type BrowserContext } from "@playwright/test";
+import { completeOnboarding } from "../e2e/helpers/onboarding";
 import { signIn } from "../e2e/helpers/auth";
 import { pickOption } from "../e2e/helpers/forms";
 
@@ -7,27 +8,6 @@ const FAKE_SUPABASE = "http://127.0.0.1:54329";
 // Setup plan PR 1 (docs/journal-setup-plan.md): «Settings → Journal» with «?» hints — default unit, main account,
 // default session, time zone — applied to the Journal and the new-trade form, synced through the cloud settings row;
 // and the «Guest on this device» block. The flag is on only for test users of the fake server.
-
-async function completeOnboarding(page: Page, nickname: string) {
-  await page.waitForURL("**/awakening**", { timeout: 10000 });
-  await page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]').fill(nickname);
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("18–24 года")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Пропустить шаг целиком")');
-  await page.click('button:has-text("1–2 года")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Крипто")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Дисциплина")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Пропустить необязательные вопросы")');
-  await page.click('button:has-text("Пропустить шаг целиком")');
-  await page.click('button:has-text("Начать")');
-  await page.waitForURL((url) => url.pathname !== "/awakening", { timeout: 10000 });
-}
 
 const q = (email: string) => encodeURIComponent(email);
 const settingsRow = async (request: APIRequestContext, email: string) =>
@@ -57,7 +37,7 @@ test.describe("Settings → Journal", () => {
     const ctxA = await browser.newContext();
     const A = await openDevice(ctxA);
     await signIn(A, email);
-    await completeOnboarding(A, `JSet${Date.now() % 100000}`);
+    await completeOnboarding(A, `JSet${Date.now() % 100000}`, { after: "left" });
     const userId = ((await (await request.get(`${FAKE_SUPABASE}/__test/profile?email=${q(email)}`)).json()).id) as string;
 
     // two trading accounts on this device, then cloud on and the usual first upload (so the second device gets them)
@@ -151,7 +131,7 @@ test.describe("Settings → Journal", () => {
     const ctx = await browser.newContext();
     const page = await openDevice(ctx);
     await signIn(page, email);
-    await completeOnboarding(page, `JMod${Date.now() % 100000}`);
+    await completeOnboarding(page, `JMod${Date.now() % 100000}`, { after: "left" });
     const userId = ((await (await request.get(`${FAKE_SUPABASE}/__test/profile?email=${q(email)}`)).json()).id) as string;
     await page.evaluate((id) => localStorage.setItem(`ayra:${id}:ayra_sync_state`, JSON.stringify({ initialSyncAt: new Date().toISOString() })), userId);
     await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${q(email)}&on=1`);
@@ -251,7 +231,7 @@ test.describe("Settings → Journal", () => {
 
     const email = `JGuest_${Date.now()}@example.com`;
     await signIn(page, email);
-    await completeOnboarding(page, `JGst${Date.now() % 100000}`);
+    await completeOnboarding(page, `JGst${Date.now() % 100000}`, { after: "left" });
     if (new URL(page.url()).pathname.startsWith("/profile-select")) {
       await page.click("button:has-text('Не переносить')");
       await page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });

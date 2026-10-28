@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { completeOnboarding } from "./helpers/onboarding";
 import { submitRegistration } from "./helpers/auth";
 
 const GUEST_STATE = {
@@ -25,25 +26,6 @@ async function signIn(page: Page, email: string) {
   await page.click("button[type='submit']");
 }
 
-async function completeOnboarding(page: Page, nickname: string) {
-  await page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]').fill(nickname);
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("18–24 года")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Пропустить шаг целиком")');
-  await page.click('button:has-text("1–2 года")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Крипто")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Дисциплина")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Пропустить необязательные вопросы")');
-  await page.click('button:has-text("Пропустить шаг целиком")');
-  await page.click('button:has-text("Начать")');
-}
-
 async function accountGameState(page: Page) {
   return page.evaluate(() => {
     const key = Object.keys(localStorage).find((k) => /^ayra:.+:ayra_demo_v1$/.test(k));
@@ -56,7 +38,7 @@ async function signInAndOnboard(page: Page, email: string, nickname: string) {
   // A new account always starts with its own onboarding, regardless of guest data on the device
   await page.waitForURL("**/awakening**", { timeout: 5000 });
   await expect(page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]')).not.toHaveValue("GuestZed");
-  await completeOnboarding(page, nickname);
+  await completeOnboarding(page, nickname, { after: "none" });
 }
 
 test.describe("C1 /profile-select after onboarding", () => {

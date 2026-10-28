@@ -1,4 +1,5 @@
 import { test, expect, type Page, type APIRequestContext, type Browser, type BrowserContext } from "@playwright/test";
+import { completeOnboarding } from "../e2e/helpers/onboarding";
 import { signIn } from "../e2e/helpers/auth";
 import { pickOption } from "../e2e/helpers/forms";
 
@@ -6,15 +7,6 @@ const FAKE_SUPABASE = "http://127.0.0.1:54329";
 
 // Setup plan PR 2: the first-run window of the Journal (docs/journal-setup-plan.md). e2e builds hide it unless a test
 // asks for it (ayra_e2e_setup_window), so this file opts in for every page. Fake Supabase only.
-
-async function completeOnboarding(page: Page, nickname: string) {
-  await page.waitForURL("**/awakening**", { timeout: 10000 });
-  await page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]').fill(nickname);
-  for (const b of ["Продолжить", "Продолжить", "Продолжить", "18–24 года", "Продолжить", "Пропустить шаг целиком", "1–2 года", "Продолжить", "Крипто", "Продолжить", "Дисциплина", "Продолжить", "Пропустить необязательные вопросы", "Пропустить шаг целиком", "Начать"]) {
-    await page.click(`button:has-text("${b}")`);
-  }
-  await page.waitForURL((url) => url.pathname !== "/awakening", { timeout: 10000 });
-}
 
 async function device(browser: Browser, width = 1440, height = 900): Promise<{ ctx: BrowserContext; page: Page }> {
   const ctx = await browser.newContext();
@@ -58,7 +50,7 @@ test.describe("Journal first-run setup window", () => {
     const { ctx, page } = await device(browser);
     const email = `Setup1_${Date.now()}@example.com`;
     await signIn(page, email);
-    await completeOnboarding(page, `Su1${Date.now() % 100000}`);
+    await completeOnboarding(page, `Su1${Date.now() % 100000}`, { after: "left" });
     await page.goto("/journal");
     const win = page.getByTestId("journal-setup");
     await expect(win).toBeVisible({ timeout: 15000 });
@@ -90,7 +82,7 @@ test.describe("Journal first-run setup window", () => {
     const { ctx, page } = await device(browser);
     const email = `Setup2_${Date.now()}@example.com`;
     await signIn(page, email);
-    await completeOnboarding(page, `Su2${Date.now() % 100000}`);
+    await completeOnboarding(page, `Su2${Date.now() % 100000}`, { after: "left" });
     await page.goto("/journal");
     await expect(page.getByTestId("journal-setup")).toBeVisible({ timeout: 15000 });
     await page.getByTestId("journal-setup-skip").click();
@@ -106,7 +98,7 @@ test.describe("Journal first-run setup window", () => {
     const { ctx, page } = await device(browser);
     const email = `Setup3_${Date.now()}@example.com`;
     await signIn(page, email);
-    await completeOnboarding(page, `Su3${Date.now() % 100000}`);
+    await completeOnboarding(page, `Su3${Date.now() % 100000}`, { after: "left" });
     await seedJournal(page, await userIdOf(request, email));
     await page.goto("/journal");
     await expect(page.getByTestId("trades-table")).toContainText("EURUSD");
@@ -130,7 +122,7 @@ test.describe("Journal first-run setup window", () => {
       const { ctx, page } = await device(browser);
       const email = `Setup4a_${Date.now()}@example.com`;
       await signIn(page, email);
-      await completeOnboarding(page, `Su4a${Date.now() % 100000}`);
+      await completeOnboarding(page, `Su4a${Date.now() % 100000}`, { after: "left" });
       await seedJournal(page, await userIdOf(request, email));
       await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${q(email)}&on=1`);
       await page.goto("/journal");
@@ -151,7 +143,7 @@ test.describe("Journal first-run setup window", () => {
       const { ctx, page } = await device(browser);
       const email = `Setup4m_${Date.now()}@example.com`;
       await signIn(page, email);
-      await completeOnboarding(page, `Su4m${Date.now() % 100000}`);
+      await completeOnboarding(page, `Su4m${Date.now() % 100000}`, { after: "left" });
       await seedJournal(page, await userIdOf(request, email));
       await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${q(email)}&on=1`);
       await page.goto("/journal");
@@ -174,7 +166,7 @@ test.describe("Journal first-run setup window", () => {
     const A = await device(browser);
     const email = `Setup5_${Date.now()}@example.com`;
     await signIn(A.page, email);
-    await completeOnboarding(A.page, `Su5${Date.now() % 100000}`);
+    await completeOnboarding(A.page, `Su5${Date.now() % 100000}`, { after: "left" });
     await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${q(email)}&on=1`);
     await A.page.goto("/journal");
     await expect(A.page.getByTestId("journal-setup")).toBeVisible({ timeout: 15000 });

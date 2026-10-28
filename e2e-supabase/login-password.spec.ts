@@ -1,31 +1,11 @@
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
+import { completeOnboarding } from "../e2e/helpers/onboarding";
 import { TEST_PASSWORD, submitPasswordSignIn, submitRegistration } from "../e2e/helpers/auth";
 
 const FAKE_SUPABASE = "http://127.0.0.1:54329";
 
 // Auth plan PR C: «Sign in / Sign up» screen. Sign-in is by e-mail + password (no letter); the code comes only for
 // sign-up and «Forgot password». Runs against the fake Supabase only; no real project is touched.
-
-async function completeOnboarding(page: Page, nickname: string) {
-  await page.waitForURL("**/awakening**", { timeout: 10000 });
-  await page.locator('input[placeholder="A-Z a-z 0-9 _ . -"]').fill(nickname);
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("18–24 года")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Пропустить шаг целиком")');
-  await page.click('button:has-text("1–2 года")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Крипто")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Дисциплина")');
-  await page.click('button:has-text("Продолжить")');
-  await page.click('button:has-text("Пропустить необязательные вопросы")');
-  await page.click('button:has-text("Пропустить шаг целиком")');
-  await page.click('button:has-text("Начать")');
-  await page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
-}
 
 const q = (email: string) => encodeURIComponent(email);
 const lastCode = async (request: APIRequestContext, email: string) => (await (await request.get(`${FAKE_SUPABASE}/__test/last-code?email=${q(email)}`)).json()).code as string | null;
