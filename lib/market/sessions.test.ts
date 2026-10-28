@@ -10,6 +10,11 @@ import {
   normalizeKillzones,
   occurrences,
   splitDuration,
+  londonNewYorkOverlap,
+  primaryOccurrence,
+  intervalLabel,
+  londonNewYorkGapHours,
+  gapBackToUsual,
   windowStatus,
   windowsInRange,
   type WindowDef,
@@ -157,5 +162,40 @@ describe("helpers", () => {
     expect(splitDuration(80 * 60_000)).toEqual({ d: 0, h: 1, m: 20 });
     expect(splitDuration(80 * 60_000 + 1)).toEqual({ d: 0, h: 1, m: 21 });
     expect(splitDuration(26 * 3600_000)).toEqual({ d: 1, h: 2, m: 0 });
+  });
+});
+
+describe("readability helpers", () => {
+  it("London + New York overlap: 4 hours in summer, 5 hours while only the USA is on summer time", () => {
+    const apr = londonNewYorkOverlap(utc("2026-04-06T06:00:00Z")).find((o) => iso(o.start).startsWith("2026-04-06"))!;
+    expect([iso(apr.start), iso(apr.end)]).toEqual(["2026-04-06T12:00", "2026-04-06T16:00"]);
+    const mar = londonNewYorkOverlap(utc("2026-03-16T06:00:00Z")).find((o) => iso(o.start).startsWith("2026-03-16"))!;
+    expect([iso(mar.start), iso(mar.end)]).toEqual(["2026-03-16T12:00", "2026-03-16T17:00"]);
+  });
+
+  it("one interval across the user's midnight: «16:00–01:00 (+1)»", () => {
+    const zone = "Asia/Tbilisi";
+    const ms = utc("2026-04-07T08:00:00Z"); // Tuesday: yesterday's New York tail and today's start
+    const { from, to } = dayBounds(ms, zone);
+    const o = primaryOccurrence(occurrences(def("newyork"), ms), from, to)!;
+    expect(intervalLabel(o, zone, from, to)).toBe("16:00–01:00 (+1)");
+  });
+
+  it("a window that started the day before: «17:00 (−1)–02:00»", () => {
+    const zone = "Asia/Tbilisi";
+    const ms = utc("2026-03-07T08:00:00Z"); // Saturday: only Friday's New York session reaches into it
+    const { from, to } = dayBounds(ms, zone);
+    const o = primaryOccurrence(occurrences(def("newyork"), ms), from, to)!;
+    expect(intervalLabel(o, zone, from, to)).toBe("17:00 (−1)–02:00");
+    expect(primaryOccurrence(occurrences(def("london"), ms), from, to)).toBeNull();
+  });
+
+  it("the London–New York gap: 5 hours usually, 4 when the clocks moved on different dates — and until when", () => {
+    expect(londonNewYorkGapHours(utc("2026-04-06T12:00:00Z"))).toBe(5);
+    expect(londonNewYorkGapHours(utc("2026-03-16T12:00:00Z"))).toBe(4);
+    expect(londonNewYorkGapHours(utc("2026-10-28T12:00:00Z"))).toBe(4);
+    expect(gapBackToUsual(utc("2026-04-06T12:00:00Z"))).toBeNull();
+    expect(iso(gapBackToUsual(utc("2026-03-16T12:00:00Z"))!).slice(0, 10)).toBe("2026-03-29");
+    expect(iso(gapBackToUsual(utc("2026-10-28T12:00:00Z"))!).slice(0, 10)).toBe("2026-11-01");
   });
 });
