@@ -148,16 +148,23 @@ export function occurrences(def: WindowDef, ms: number, days = 8): Occurrence[] 
   return out;
 }
 
+/** A window, or the London + New York overlap. */
+export type StatusId = WindowId | "overlap";
+
 export type WindowStatus =
-  | { state: "open"; id: WindowId; start: number; end: number }
-  | { state: "closed"; id: WindowId; next: Occurrence | null; weekend: boolean };
+  | { state: "open"; id: StatusId; start: number; end: number }
+  | { state: "closed"; id: StatusId; next: Occurrence | null; weekend: boolean };
+
+/** Open now, or the next opening, from a list of occurrences (sorted by start). */
+export function statusFromList(id: StatusId, list: Occurrence[], ms: number): WindowStatus {
+  const now = list.find((o) => o.start <= ms && ms < o.end);
+  if (now) return { state: "open", id, start: now.start, end: now.end };
+  return { state: "closed", id, next: list.find((o) => o.start > ms) ?? null, weekend: !isForexOpen(ms) };
+}
 
 /** Open now (until when) or closed (next opening, whether it is the weekend). */
 export function windowStatus(def: WindowDef, ms: number): WindowStatus {
-  const list = occurrences(def, ms);
-  const now = list.find((o) => o.start <= ms && ms < o.end);
-  if (now) return { state: "open", id: def.id, start: now.start, end: now.end };
-  return { state: "closed", id: def.id, next: list.find((o) => o.start > ms) ?? null, weekend: !isForexOpen(ms) };
+  return statusFromList(def.id, occurrences(def, ms), ms);
 }
 
 /** Pieces of the occurrences that fall into [from, to) — for the bar of the user's day. */
@@ -186,4 +193,56 @@ export function clockOf(ms: number, zone: string): string {
 export function splitDuration(ms: number): { d: number; h: number; m: number } {
   const total = Math.max(0, Math.ceil(ms / 60_000));
   return { d: Math.floor(total / 1440), h: Math.floor((total % 1440) / 60), m: total % 60 };
+}
+
+// ---- Readability helpers (PR 1.1a): overlap, one interval per window, the London–New York gap ----
+
+/** When London and New York are open at the same time (intersections of their occurrences). */
+export function londonNewYorkOverlap(ms: number, days = 8): Occurrence[] {
+  const london = occurrences(SESSIONS[1], ms, days);
+  const ny = occurrences(SESSIONS[2], ms, days);
+  const out: Occurrence[] = [];
+  for (const a of london)
+    for (const b of ny) {
+      const start = Math.max(a.start, b.start);
+      const end = Math.min(a.end, b.end);
+      if (start < end) out.push({ id: "london", start, end });
+    }
+  return out.sort((x, y) => x.start - y.start);
+}
+
+/**
+ * The occurrence to name for the user's day [from, to): the one starting that day, otherwise the one still running
+ * from the day before. Null when the window does not touch the day.
+ */
+export function primaryOccurrence(list: Occurrence[], from: number, to: number): Occurrence | null {
+  return list.find((o) => o.start >= from && o.start < to) ?? list.find((o) => o.end > from && o.start < to) ?? null;
+}
+
+/** One interval on the user's clock, «16:00–01:00 (+1)»; a start on the day before gets «(−1)». */
+export function intervalLabel(o: Occurrence, zone: string, from: number, to: number): string {
+  const start = `${clockOf(o.start, zone)}${o.start < from ? " (−1)" : ""}`;
+  const end = `${clockOf(o.end, zone)}${o.end > to ? " (+1)" : ""}`;
+  return `${start}–${end}`;
+}
+
+/** Hours between the London and New York openings on this calendar date (London's date): 5, or 4 when only one side moved its clocks. */
+export function londonNewYorkGapHours(ms: number): number {
+  const w = wallAt(ms, "Europe/London");
+  const london = instantOf(w.y, w.mo, w.d, 8, 0, "Europe/London");
+  const ny = instantOf(w.y, w.mo, w.d, 8, 0, NEW_YORK);
+  return Math.round((ny - london) / 3600_000);
+}
+
+/** The first date (an instant on that day) when the gap is back to the usual 5 hours; null if it already is. */
+export function gapBackToUsual(ms: number, maxDays = 60): number | null {
+  if (londonNewYorkGapHours(ms) === 5) return null;
+  for (let i = 1; i <= maxDays; i++) {
+    const t = ms + i * 24 * 3600_000;
+    if (londonNewYorkGapHours(t) === 5) {
+      const w = wallAt(t, "Europe/London");
+      return instantOf(w.y, w.mo, w.d, 12, 0, "Europe/London");
+    }
+  }
+  return null;
 }
