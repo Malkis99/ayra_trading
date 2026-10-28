@@ -91,4 +91,13 @@ export const ALLOWED_LATIN_WORDS = [
   "alex",
   "cookies",
   "Supabase",
+  // market terms and names (Market → sessions, plan docs/market-plan.md): S&P 500, Nasdaq, killzones, TradingView, Replay
+  "S",
+  "P",
+  "Nasdaq",
+  "Killzone",
+  "killzones",
+  "Killzones",
+  "TradingView",
+  "Replay",
 ] as const;
