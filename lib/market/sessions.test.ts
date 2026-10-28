@@ -15,6 +15,12 @@ import {
   intervalLabel,
   londonNewYorkGapHours,
   gapBackToUsual,
+  progressOf,
+  upcomingEvents,
+  currentOrNext,
+  hoursOf,
+  dayOffset,
+  countdown,
   windowStatus,
   windowsInRange,
   type WindowDef,
@@ -197,5 +203,39 @@ describe("readability helpers", () => {
     expect(gapBackToUsual(utc("2026-04-06T12:00:00Z"))).toBeNull();
     expect(iso(gapBackToUsual(utc("2026-03-16T12:00:00Z"))!).slice(0, 10)).toBe("2026-03-29");
     expect(iso(gapBackToUsual(utc("2026-10-28T12:00:00Z"))!).slice(0, 10)).toBe("2026-11-01");
+  });
+});
+
+
+describe("live view: cards and «What is next»", () => {
+  it("progress of a session: 0 before, a share during, 1 after", () => {
+    const o = { id: "london" as const, start: 1000, end: 5000 };
+    expect(progressOf(o, 500)).toBe(0);
+    expect(progressOf(o, 2000)).toBe(0.25);
+    expect(progressOf(o, 9000)).toBe(1);
+  });
+
+  it("card hours from the occurrence's own day: «16:00–01:00 (+1)»; day offsets; the countdown", () => {
+    const now = utc("2026-04-06T08:30:00Z");
+    const ny = currentOrNext(occurrences(def("newyork"), now), now)!;
+    expect(hoursOf(ny, "Asia/Tbilisi")).toBe("16:00–01:00 (+1)");
+    expect(hoursOf(ny, "Europe/London")).toBe("13:00–22:00");
+    expect(dayOffset(ny.start, now, "Asia/Tbilisi")).toBe(0);
+    expect(dayOffset(ny.end, now, "Asia/Tbilisi")).toBe(1);
+    expect(countdown(2 * 3600_000 + 14 * 60_000 + 9_000)).toEqual({ d: 0, hms: "02:14:09" });
+    expect(countdown(1)).toEqual({ d: 0, hms: "00:00:01" });
+    expect(countdown(-5)).toEqual({ d: 0, hms: "00:00:00" });
+    expect(countdown(44 * 3600_000)).toEqual({ d: 1, hms: "20:00:00" });
+  });
+
+  it("the next 5 events in order: closings, openings, killzone starts and ends", () => {
+    const now = utc("2026-04-06T08:30:00Z");
+    const events = upcomingEvents([...SESSIONS, ...killzoneDefs()], now, 5).map((e) => `${e.id}:${e.edge}@${iso(e.at).slice(11)}`);
+    expect(events).toEqual(["asia:end@09:00", "londonKz:end@09:00", "newyorkKz:start@11:00", "newyork:start@12:00", "newyorkKz:end@14:00"]);
+  });
+
+  it("at the weekend the next events are on Monday", () => {
+    const [first] = upcomingEvents([...SESSIONS, ...killzoneDefs()], utc("2026-03-07T12:00:00Z"), 5);
+    expect(`${first.id}:${first.edge}@${iso(first.at)}`).toBe("asia:start@2026-03-09T00:00");
   });
 });

@@ -1,14 +1,17 @@
 import { test, expect, webkit, chromium, type Browser, type Page } from "@playwright/test";
 
-// PR 1.1 (docs/market-plan.md section 9): Market shell with seven sections and the sessions / killzones clock.
-// No market data: only clocks. The clock is frozen; the user's zone is Tbilisi (UTC+4, no summer time).
+// Market sessions (PR 1.1 and the live cards): seven sections; Tokyo, London and New York cards with live countdowns,
+// killzones inside their cards, the overlap, «What is next», the 24-hour bar under «Show 24 h». No market data: only
+// clocks. The browser clock is controlled (clock.install); the user's zone is Tbilisi (UTC+4, no summer time).
 
 const ZONE = "Asia/Tbilisi";
 
 async function guestPage(browser: Browser, width: number, now: string): Promise<Page> {
   const context = await browser.newContext({ viewport: { width, height: 900 }, timezoneId: ZONE, reducedMotion: "reduce" });
   const page = await context.newPage();
-  await page.clock.setFixedTime(new Date(now));
+  await page.clock.install({ time: new Date(now) });
+  // time moves only by clock.runFor (no real seconds slipping in between the checks)
+  await page.clock.pauseAt(new Date(now));
   await page.addInitScript((zone) => {
     if (sessionStorage.getItem("e2e_seeded")) return;
     sessionStorage.setItem("e2e_seeded", "1");
@@ -31,8 +34,8 @@ async function guestPage(browser: Browser, width: number, now: string): Promise<
   return page;
 }
 
-const status = (page: Page, id: string) => page.getByTestId(`market-window-${id}-status`);
-const hours = (page: Page, id: string) => page.getByTestId(`market-window-${id}-hours`);
+const el = (page: Page, id: string) => page.getByTestId(id);
+const noSideScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
 
 for (const engine of ["chromium", "webkit"] as const) {
   test.describe(`${engine}: Market — sections and sessions`, () => {
@@ -45,69 +48,139 @@ for (const engine of ["chromium", "webkit"] as const) {
     });
 
     for (const width of [1440, 360]) {
-      test(`${width}: a weekday — open sessions and killzones, hours on the user's clock`, async () => {
+      test(`${width}: a weekday — three session cards with live countdowns, killzones inside, the overlap, what is next`, async () => {
         // Monday 6 April 2026, 08:30 UTC = 12:30 in Tbilisi; Europe and the USA in summer time
         const page = await guestPage(browser, width, "2026-04-06T08:30:00Z");
         await page.goto("/market");
-        await expect(page.getByTestId("market-disclaimer")).toContainText("Не является финансовой рекомендацией");
-        await expect(page.getByTestId("market-sessions-now")).toContainText("12:30");
+        await expect(el(page, "market-disclaimer")).toContainText("Не является финансовой рекомендацией");
+        await expect(el(page, "market-sessions-now")).toContainText("12:30");
 
-        await expect(hours(page, "asia")).toHaveText("04:00–13:00");
-        await expect(status(page, "asia")).toHaveText("Открыта · закроется через 30 мин");
-        await expect(hours(page, "london")).toHaveText("11:00–20:00");
-        await expect(status(page, "london")).toHaveText("Открыта · закроется через 7 ч 30 мин");
-        // across the user's midnight: one interval
-        await expect(hours(page, "newyork")).toHaveText("16:00–01:00 (+1)");
-        await expect(status(page, "newyork")).toHaveText("Откроется через 3 ч 30 мин");
-        // killzones in New York time: London 02:00–05:00 EDT = 10:00–13:00 here
-        await expect(hours(page, "londonKz")).toHaveText("10:00–13:00");
-        await expect(status(page, "londonKz")).toHaveText("Открыта · закроется через 30 мин");
-        await expect(hours(page, "newyorkKz")).toHaveText("15:00–18:00");
-        await expect(status(page, "newyorkKz")).toHaveText("Откроется через 2 ч 30 мин");
-        await expect(page.getByTestId("market-weekend")).toHaveCount(0);
+        await expect(el(page, "market-asia-status")).toHaveText("Открыта");
+        await expect(el(page, "market-asia-hours")).toHaveText("Сегодня · 04:00–13:00");
+        await expect(el(page, "market-london-status")).toHaveText("Открыта");
+        await expect(el(page, "market-london-hours")).toHaveText("Сегодня · 11:00–20:00");
+        await expect(el(page, "market-london-timer")).toHaveText("07:30:00");
+        await expect(el(page, "market-newyork-status")).toHaveText("Закрыта");
+        await expect(el(page, "market-newyork-hours")).toHaveText("Сегодня · 16:00–01:00 (+1)");
+        await expect(el(page, "market-newyork-timer")).toHaveText("03:30:00");
+        // killzones inside the London and New York cards (New York time 02:00–05:00 and 07:00–10:00)
+        await expect(el(page, "market-card-london").getByTestId("market-londonKz-status")).toHaveText("Открыта");
+        await expect(el(page, "market-londonKz-hours")).toHaveText("Сегодня · 10:00–13:00");
+        await expect(el(page, "market-londonKz-timer")).toHaveText("00:30:00");
+        await expect(el(page, "market-card-newyork").getByTestId("market-newyorkKz-status")).toHaveText("Закрыта");
+        await expect(el(page, "market-newyorkKz-hours")).toHaveText("Сегодня · 15:00–18:00");
+        // the overlap in one line
+        await expect(el(page, "market-overlap-status")).toHaveText("Закрыта");
+        await expect(el(page, "market-overlap-hours")).toHaveText("Сегодня · 16:00–20:00");
+        await expect(el(page, "market-overlap-timer")).toHaveText("03:30:00");
+        // what is next: 5 events in order
+        const next = page.getByTestId("market-next-item");
+        await expect(next).toHaveCount(5);
+        await expect(next.nth(0)).toContainText("Закрывается Токио");
+        await expect(next.nth(1)).toContainText("Заканчивается Killzone Лондона");
+        await expect(next.nth(2)).toContainText("Начинается Killzone Нью-Йорка");
+        await expect(next.nth(3)).toContainText("Открывается Нью-Йорк");
+        await expect(el(page, "market-active-now")).toHaveText("Сейчас активно: Токио, Лондон, Killzone Лондона");
+        // the 24-hour bar is folded; no «4 hours» hint in a usual week
+        await expect(el(page, "market-timeline")).toHaveCount(0);
+        await expect(el(page, "market-gap")).toHaveCount(0);
 
-        // London + New York overlap: 12:00–16:00 UTC = 16:00–20:00 here
-        await expect(hours(page, "overlap")).toHaveText("16:00–20:00");
-        await expect(status(page, "overlap")).toHaveText("Откроется через 3 ч 30 мин");
-        await expect(page.getByTestId("market-active-now")).toHaveText("Сейчас активно: Азия (Токио), Лондон, Killzone Лондона");
-        await expect(page.getByTestId("market-now-mark")).toHaveText("сейчас 12:30");
-        // usual 5 hours between London and New York: no hint
-        await expect(page.getByTestId("market-gap")).toHaveCount(0);
-        // the «now» line runs through every row, from the first track to the last
-        const line = (await page.getByTestId("market-now-line").boundingBox())!;
-        const first = (await page.getByTestId("market-window-asia").boundingBox())!;
-        const last = (await page.getByTestId("market-window-newyorkKz").boundingBox())!;
-        expect(line.y).toBeLessThanOrEqual(first.y);
-        expect(line.y + line.height).toBeGreaterThanOrEqual(last.y + last.height - 1);
-        expect(line.height).toBeGreaterThan(0);
+        // the seconds tick
+        await page.clock.runFor(2000);
+        await expect(el(page, "market-london-timer")).toHaveText("07:29:58");
+        await expect(el(page, "market-londonKz-timer")).toHaveText("00:29:58");
 
-        // no horizontal scroll of the page
-        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        expect(await noSideScroll(page)).toBe(true);
         await page.screenshot({ path: `test-results/market-sessions-${engine}-${width}.png`, fullPage: true });
       });
     }
+
+    test("«Show 24 h» unfolds the day bar of #110", async () => {
+      const page = await guestPage(browser, 1440, "2026-04-06T08:30:00Z");
+      await page.goto("/market");
+      await el(page, "market-day-toggle").click();
+      await expect(el(page, "market-day-toggle")).toHaveAttribute("aria-expanded", "true");
+      await expect(el(page, "market-timeline")).toBeVisible();
+      await expect(el(page, "market-window-newyork-hours")).toHaveText("16:00–01:00 (+1)");
+      await expect(el(page, "market-now-mark")).toHaveText("сейчас 12:30");
+      await el(page, "market-day-toggle").click();
+      await expect(el(page, "market-timeline")).toHaveCount(0);
+    });
+
+    test("a background tab: the countdown pauses and is right at once on return", async () => {
+      const page = await guestPage(browser, 1440, "2026-04-06T08:30:00Z");
+      await page.goto("/market");
+      await expect(el(page, "market-london-timer")).toHaveText("07:30:00");
+      await page.evaluate(() => {
+        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await page.clock.runFor(10_000);
+      await expect(el(page, "market-london-timer")).toHaveText("07:30:00");
+      await page.evaluate(() => {
+        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await expect(el(page, "market-london-timer")).toHaveText("07:29:50");
+    });
+
+    test("across the user's midnight New York stays one session", async () => {
+      // 23:59:58 in Tbilisi
+      const page = await guestPage(browser, 1440, "2026-04-06T19:59:58Z");
+      await page.goto("/market");
+      await expect(el(page, "market-newyork-hours")).toHaveText("Сегодня · 16:00–01:00 (+1)");
+      await page.clock.runFor(3000);
+      await expect(el(page, "market-newyork-status")).toHaveText("Открыта");
+      await expect(el(page, "market-newyork-hours")).toHaveText("Вчера · 16:00–01:00 (+1)");
+      await expect(el(page, "market-newyork-timer")).toHaveText("00:59:59");
+    });
 
     test("winter in both: New York and its killzone an hour later on the user's clock", async () => {
       // Monday 2 March 2026, 10:00 UTC = 14:00 in Tbilisi
       const page = await guestPage(browser, 1440, "2026-03-02T10:00:00Z");
       await page.goto("/market");
-      await expect(hours(page, "london")).toHaveText("12:00–21:00");
-      await expect(hours(page, "newyork")).toHaveText("17:00–02:00 (+1)");
-      await expect(hours(page, "londonKz")).toHaveText("11:00–14:00");
+      await expect(el(page, "market-london-hours")).toHaveText("Сегодня · 12:00–21:00");
+      await expect(el(page, "market-newyork-hours")).toHaveText("Сегодня · 17:00–02:00 (+1)");
+      await expect(el(page, "market-londonKz-hours")).toHaveText("Завтра · 11:00–14:00");
     });
 
-    test("the weekend: the forex market is closed, the next openings are on Monday", async () => {
+    test("the weekend: closed, opens on Sunday evening, the next events are on Monday", async () => {
       // Saturday 7 March 2026, 12:00 UTC
       const page = await guestPage(browser, 1440, "2026-03-07T12:00:00Z");
       await page.goto("/market");
-      await expect(page.getByTestId("market-weekend")).toContainText("валютный рынок закрыт");
-      for (const id of ["asia", "london", "newyork", "londonKz", "newyorkKz"]) {
-        await expect(page.getByTestId(`market-window-${id}`)).toHaveAttribute("data-state", "closed");
+      for (const id of ["asia", "london", "newyork"]) {
+        await expect(el(page, `market-${id}-status`)).toHaveText("Выходные");
+        await expect(el(page, `market-card-${id}`)).toHaveAttribute("data-state", "weekend");
       }
+      await expect(el(page, "market-weekend")).toContainText("Рынок закрыт, откроется");
+      await expect(el(page, "market-active-now")).toHaveText("Сейчас ничего не открыто: выходные");
+      await expect(page.getByTestId("market-next-item").nth(0)).toContainText("Открывается Токио");
       // Monday 08:00 GMT is 1 day 20 hours away
-      await expect(status(page, "london")).toHaveText("Откроется через 1 д 20 ч");
-      await expect(hours(page, "london")).toHaveText("Сегодня нет");
-      await expect(page.getByTestId("market-active-now")).toHaveText("Сейчас ничего не открыто: выходные");
+      await expect(el(page, "market-london-timer")).toHaveText("1 д 20:00:00");
+    });
+
+    test("killzone hours can be changed, are kept after a reload, wrong hours are not saved", async () => {
+      const page = await guestPage(browser, 1440, "2026-04-06T08:30:00Z");
+      await page.goto("/market");
+      await el(page, "market-killzones-edit").click();
+      await el(page, "market-londonKz-start").fill("03:00");
+      await el(page, "market-londonKz-end").fill("06:00");
+      await expect(el(page, "market-londonKz-local")).toHaveText("У тебя: 11:00–14:00");
+      await expect(el(page, "market-londonKz-hours")).toHaveText("Сегодня · 11:00–14:00");
+      await el(page, "market-sessions").screenshot({ path: `test-results/market-killzones-${engine}-1440.png` });
+
+      // end before start: an error, the saved hours stay
+      await el(page, "market-newyorkKz-end").fill("06:00");
+      await expect(el(page, "market-newyorkKz-local")).toHaveText("Начало должно быть раньше конца, в пределах одних суток.");
+      await expect(el(page, "market-newyorkKz-hours")).toHaveText("Сегодня · 15:00–18:00");
+
+      await page.reload();
+      await expect(el(page, "market-londonKz-hours")).toHaveText("Сегодня · 11:00–14:00");
+      await expect(el(page, "market-newyorkKz-hours")).toHaveText("Сегодня · 15:00–18:00");
+
+      await el(page, "market-killzones-edit").click();
+      await el(page, "market-killzones-reset").click();
+      await expect(el(page, "market-londonKz-hours")).toHaveText("Сегодня · 10:00–13:00");
     });
 
     for (const width of [1440, 360]) {
@@ -115,44 +188,18 @@ for (const engine of ["chromium", "webkit"] as const) {
         // Wednesday 28 October 2026, 08:00 UTC = 12:00 in Tbilisi
         const page = await guestPage(browser, width, "2026-10-28T08:00:00Z");
         await page.goto("/market");
-        await expect(hours(page, "london")).toHaveText("12:00–21:00");
-        await expect(hours(page, "newyork")).toHaveText("16:00–01:00 (+1)");
-        await expect(hours(page, "overlap")).toHaveText("16:00–21:00");
-        // whole hours without «0 min»
-        await expect(status(page, "asia")).toHaveText("Открыта · закроется через 1 ч");
-        const gap = page.getByTestId("market-gap");
+        await expect(el(page, "market-london-hours")).toHaveText("Сегодня · 12:00–21:00");
+        await expect(el(page, "market-newyork-hours")).toHaveText("Сегодня · 16:00–01:00 (+1)");
+        await expect(el(page, "market-overlap-hours")).toHaveText("Сегодня · 16:00–21:00");
+        const gap = el(page, "market-gap");
         await expect(gap).toContainText("Между открытием Лондона и Нью-Йорка сейчас 4 ч");
-        await page.getByTestId("market-gap-hint").click();
+        await el(page, "market-gap-hint").click();
         await expect(gap).toContainText("Обычно разница 5 часов");
         await expect(gap).toContainText("до 1 ноября");
-        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-        await page.getByTestId("market-sessions").screenshot({ path: `test-results/market-sessions-gap-${engine}-${width}.png` });
+        expect(await noSideScroll(page)).toBe(true);
+        await el(page, "market-sessions").screenshot({ path: `test-results/market-sessions-gap-${engine}-${width}.png` });
       });
     }
-
-    test("killzone hours can be changed, are kept after a reload, wrong hours are not saved", async () => {
-      const page = await guestPage(browser, 1440, "2026-04-06T08:30:00Z");
-      await page.goto("/market");
-      await page.getByTestId("market-killzones-edit").click();
-      await page.getByTestId("market-londonKz-start").fill("03:00");
-      await page.getByTestId("market-londonKz-end").fill("06:00");
-      await expect(page.getByTestId("market-londonKz-local")).toHaveText("У тебя: 11:00–14:00");
-      await expect(hours(page, "londonKz")).toHaveText("11:00–14:00");
-      await page.getByTestId("market-sessions").screenshot({ path: `test-results/market-killzones-${engine}-1440.png` });
-
-      // end before start: an error, the saved hours stay
-      await page.getByTestId("market-newyorkKz-end").fill("06:00");
-      await expect(page.getByTestId("market-newyorkKz-local")).toHaveText("Начало должно быть раньше конца, в пределах одних суток.");
-      await expect(hours(page, "newyorkKz")).toHaveText("15:00–18:00");
-
-      await page.reload();
-      await expect(hours(page, "londonKz")).toHaveText("11:00–14:00");
-      await expect(hours(page, "newyorkKz")).toHaveText("15:00–18:00");
-
-      await page.getByTestId("market-killzones-edit").click();
-      await page.getByTestId("market-killzones-reset").click();
-      await expect(hours(page, "londonKz")).toHaveText("10:00–13:00");
-    });
 
     test("seven sections, «Soon» where nothing is there yet, the section is kept in the address", async () => {
       const page = await guestPage(browser, 360, "2026-04-06T08:30:00Z");
