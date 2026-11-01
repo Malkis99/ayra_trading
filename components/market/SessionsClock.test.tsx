@@ -54,7 +54,8 @@ describe("Sessions: live cards in the display time (New York by default)", () =>
     render(<SessionsClock />);
     expect(text("market-london-timer")).toBe("07:30:00");
     expect(text("market-newyork-timer")).toBe("05:00:00");
-    expect(text("market-londonKz-timer")).toBe("00:30:00");
+    // seconds only on the main cards; the killzone counts minutes
+    expect(text("market-londonKz-timer")).toBe("30 мин");
     const renders = gapCalls.n;
     act(() => vi.advanceTimersByTime(1000));
     expect(text("market-london-timer")).toBe("07:29:59");
@@ -68,39 +69,43 @@ describe("Sessions: live cards in the display time (New York by default)", () =>
     render(<SessionsClock />);
     expect(text("market-sessions-now")).toContain("04:30");
     expect(text("market-london-status")).toBe("Открыта");
-    expect(screen.getByTestId("market-london-status").querySelector("svg")).not.toBeNull();
-    expect(text("market-london-hours")).toBe("Сегодня · 03:00–12:00");
+    // a dot and a word
+    expect(screen.getByTestId("market-london-status").querySelector("span[aria-hidden]")).not.toBeNull();
+    expect(text("market-london-hours")).toBe("03:00–12:00");
     expect(text("market-london-mine")).toBe("У тебя: 11:00–20:00");
     // London 07:00–16:00 UTC: 1 h 30 of 9 h passed
     expect(screen.getByTestId("market-london-ring").getAttribute("data-progress")).toBe("16");
     expect(text("market-newyork-status")).toBe("Закрыта");
-    expect(text("market-newyork-hours")).toBe("Сегодня · 09:30–18:00");
-    expect(text("market-asia-hours")).toBe("Сегодня · 19:00–04:00 (+1)");
-    expect(text("market-overlap-hours")).toBe("Сегодня · 09:30–12:00");
-    expect(text("market-londonKz-hours")).toBe("Сегодня · 02:00–05:00");
+    expect(text("market-newyork-hours")).toBe("09:30–18:00");
+    expect(text("market-asia-hours")).toBe("19:00–04:00 (+1)");
+    expect(text("market-overlap-hours")).toBe("09:30–12:00");
+    expect(text("market-londonKz-hours")).toBe("02:00–05:00");
   });
 
   it("sub-sessions: a compact list with hours, status, countdown and a «?»", () => {
     at(MONDAY);
     render(<SessionsClock />);
     const list = screen.getByTestId("market-subsessions");
-    expect(within(list).getAllByRole("listitem")).toHaveLength(5);
+    // the overlap and the five sub-sessions, one row each
+    expect(within(list).getAllByRole("listitem")).toHaveLength(6);
     expect(text("market-frankfurt-status")).toBe("Открыта");
-    expect(text("market-frankfurt-hours")).toBe("Сегодня · 02:00–11:00");
+    expect(text("market-frankfurt-hours")).toBe("02:00–11:00");
     expect(text("market-sydney-status")).toBe("Закрыта");
-    expect(screen.getByTestId("market-sydney-about").hidden).toBe(true);
+    expect(screen.queryByTestId("market-sydney-about")).toBeNull();
     fireEvent.click(screen.getByTestId("market-sydney-hint"));
-    expect(screen.getByTestId("market-sydney-about").hidden).toBe(false);
     expect(text("market-sydney-about")).toContain("Тихоокеанская сессия");
+    // one hint at a time
+    fireEvent.pointerDown(screen.getByTestId("market-london-hint"));
     fireEvent.click(screen.getByTestId("market-london-hint"));
+    expect(screen.queryByTestId("market-sydney-about")).toBeNull();
     expect(text("market-london-about")).toContain("Европейская сессия");
-    expect(text("market-about-note")).toBe("Общее описание, не является финансовой рекомендацией.");
+    expect(text("market-london-about")).toContain("Общее описание, не является финансовой рекомендацией.");
   });
 
   it("across midnight of the display time: Tokyo stays one session, «Yesterday · 19:00–04:00 (+1)» after 00:00", () => {
     at("2026-04-07T03:59:58.000Z"); // 23:59:58 in New York
     render(<SessionsClock />);
-    expect(text("market-asia-hours")).toBe("Сегодня · 19:00–04:00 (+1)");
+    expect(text("market-asia-hours")).toBe("19:00–04:00 (+1)");
     act(() => vi.advanceTimersByTime(3000));
     expect(text("market-asia-status")).toBe("Открыта");
     expect(text("market-asia-timer")).toBe("03:59:59");
@@ -129,16 +134,16 @@ describe("Sessions: live cards in the display time (New York by default)", () =>
     at(MONDAY);
     const { unmount } = render(<SessionsClock />);
     fireEvent.click(screen.getByTestId("market-display-profile"));
-    expect(text("market-london-hours")).toBe("Сегодня · 11:00–20:00");
+    expect(text("market-london-hours")).toBe("11:00–20:00");
     expect(screen.queryByTestId("market-london-mine")).toBeNull();
     expect(text("market-sessions-now")).toContain("12:30");
     fireEvent.click(screen.getByTestId("market-display-utc"));
-    expect(text("market-london-hours")).toBe("Сегодня · 07:00–16:00");
-    expect(text("market-newyorkKz-hours")).toBe("Сегодня · 11:00–14:00");
+    expect(text("market-london-hours")).toBe("07:00–16:00");
+    expect(text("market-newyorkKz-hours")).toBe("11:00–14:00");
     expect(screen.getAllByTestId("market-next-item")[0].textContent).toContain("09:00");
     unmount();
     render(<SessionsClock />);
-    expect(text("market-london-hours")).toBe("Сегодня · 07:00–16:00");
+    expect(text("market-london-hours")).toBe("07:00–16:00");
     expect(JSON.parse(AppStorage.getItem("ayra_market_sessions") || "{}").display).toEqual({ kind: "utc" });
   });
 
@@ -146,10 +151,11 @@ describe("Sessions: live cards in the display time (New York by default)", () =>
     at("2026-10-28T08:00:00.000Z");
     AppStorage.setItem("ayra_market_sessions", JSON.stringify({ display: { kind: "profile" } }));
     const { rerender } = render(<SessionsClock />);
-    expect(text("market-london-hours")).toBe("Сегодня · 12:00–21:00");
+    expect(text("market-london-hours")).toBe("12:00–21:00");
     game.gameState.profile.timezone = "Europe/London";
     rerender(<SessionsClock />);
-    expect(text("market-london-hours")).toBe("Сегодня · 08:00–17:00");
+    expect(text("market-london-hours")).toBe("08:00–17:00");
+    fireEvent.click(screen.getByTestId("market-block-hint"));
     expect(text("market-gap")).toContain("сейчас 4 ч");
   });
 
@@ -162,14 +168,14 @@ describe("Sessions: live cards in the display time (New York by default)", () =>
     expect(text("market-hours-london-local")).toBe("= 08:00–17:00 по местному времени Лондона");
     fireEvent.change(screen.getByTestId("market-hours-london-start"), { target: { value: "02:00" } });
     expect(text("market-hours-london-local")).toBe("= 07:00–17:00 по местному времени Лондона");
-    expect(text("market-london-hours")).toBe("Сегодня · 02:00–12:00");
+    expect(text("market-london-hours")).toBe("02:00–12:00");
     expect(JSON.parse(AppStorage.getItem("ayra_market_sessions") || "{}").sessions.london).toEqual({ start: "07:00", end: "17:00" });
     // start = end: an error, nothing saved
     fireEvent.change(screen.getByTestId("market-hours-london-end"), { target: { value: "02:00" } });
     expect(text("market-hours-london-local")).toBe("Нужен формат ЧЧ:ММ, начало и конец не должны совпадать.");
-    expect(text("market-london-hours")).toBe("Сегодня · 02:00–12:00");
+    expect(text("market-london-hours")).toBe("02:00–12:00");
     fireEvent.click(screen.getByTestId("market-hours-london-reset"));
-    expect(text("market-london-hours")).toBe("Сегодня · 03:00–12:00");
+    expect(text("market-london-hours")).toBe("03:00–12:00");
     // across midnight is allowed
     fireEvent.change(screen.getByTestId("market-hours-chicago-end"), { target: { value: "01:00" } });
     expect(text("market-hours-chicago-local")).toBe("= 09:00–00:00 по местному времени Чикаго");
@@ -181,11 +187,59 @@ describe("Sessions: live cards in the display time (New York by default)", () =>
     at(MONDAY);
     AppStorage.setItem("ayra_market_killzones", JSON.stringify({ londonKz: { start: "03:00", end: "06:00" } }));
     render(<SessionsClock />);
-    expect(text("market-londonKz-hours")).toBe("Сегодня · 03:00–06:00");
+    expect(text("market-londonKz-hours")).toBe("03:00–06:00");
     fireEvent.click(screen.getByTestId("market-display-utc"));
     fireEvent.click(screen.getByTestId("market-settings-open"));
     fireEvent.click(screen.getByRole("tab", { name: "Killzones" }));
     expect((screen.getByTestId("market-hours-londonKz-start") as HTMLInputElement).value).toBe("07:00");
     expect(text("market-hours-londonKz-local")).toBe("= 03:00–06:00 по местному времени Нью-Йорка");
+  });
+
+  it("a hint closes on a tap outside and on Esc", () => {
+    at(MONDAY);
+    render(<SessionsClock />);
+    fireEvent.click(screen.getByTestId("market-london-hint"));
+    expect(screen.getByTestId("market-london-about")).toBeTruthy();
+    fireEvent.pointerDown(screen.getByTestId("market-active-now"));
+    expect(screen.queryByTestId("market-london-about")).toBeNull();
+    fireEvent.click(screen.getByTestId("market-london-hint"));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByTestId("market-london-about")).toBeNull();
+  });
+
+  it("why the hours move: London in winter and in summer, on my clock (Tbilisi)", () => {
+    at("2026-11-04T12:00:00.000Z");
+    AppStorage.setItem("ayra_market_sessions", JSON.stringify({ display: { kind: "profile" } }));
+    const { unmount } = render(<SessionsClock />);
+    fireEvent.click(screen.getByTestId("market-london-hint"));
+    expect(text("market-london-season")).toBe(
+      "Местные часы: 08:00–17:00 (UTC+0). Сейчас в Лондоне зимнее время, поэтому по твоему времени сессия на 1 ч позже, чем летом."
+    );
+    unmount();
+    at("2026-07-15T12:00:00.000Z");
+    render(<SessionsClock />);
+    fireEvent.click(screen.getByTestId("market-london-hint"));
+    expect(text("market-london-season")).toBe(
+      "Местные часы: 08:00–17:00 (UTC+1). Сейчас в Лондоне летнее время, поэтому по твоему времени сессия на 1 ч раньше, чем зимой."
+    );
+  });
+
+  it("why the hours move: Sydney (southern summer in November) and Tokyo (no summer time) in New York time", () => {
+    at("2026-11-04T12:00:00.000Z");
+    render(<SessionsClock />);
+    fireEvent.click(screen.getByTestId("market-asia-hint"));
+    expect(text("market-asia-season")).toBe(
+      "Местные часы: 08:00–17:00 (UTC+9). В Токио нет перехода на летнее время, а по времени показа часы переводят, поэтому сейчас сессия на 1 ч раньше, чем в другую половину года."
+    );
+    fireEvent.pointerDown(screen.getByTestId("market-sydney-hint"));
+    fireEvent.click(screen.getByTestId("market-sydney-hint"));
+    expect(text("market-sydney-season")).toBe(
+      "Местные часы: 08:00–17:00 (UTC+11). Сейчас в Сиднее летнее время, поэтому по времени показа сессия на 2 ч раньше, чем зимой."
+    );
+    fireEvent.pointerDown(screen.getByTestId("market-london-hint"));
+    fireEvent.click(screen.getByTestId("market-london-hint"));
+    expect(text("market-london-season")).toBe(
+      "Местные часы: 08:00–17:00 (UTC+0). Сейчас в Лондоне зимнее время, но по времени показа часы сессии весь год одинаковы: этот пояс тоже переводит часы."
+    );
   });
 });

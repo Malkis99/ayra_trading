@@ -63,36 +63,34 @@ for (const engine of ["chromium", "webkit"] as const) {
         await expect(el(page, "market-display-newyork")).toHaveAttribute("aria-checked", "true");
 
         await expect(el(page, "market-asia-status")).toHaveText("Закрыта");
-        await expect(el(page, "market-asia-hours")).toHaveText("Сегодня · 19:00–04:00 (+1)");
+        await expect(el(page, "market-asia-hours")).toHaveText("19:00–04:00 (+1)");
         await expect(el(page, "market-asia-timer")).toHaveText("14:30:00");
         await expect(el(page, "market-london-status")).toHaveText("Открыта");
-        await expect(el(page, "market-london-hours")).toHaveText("Сегодня · 03:00–12:00");
+        await expect(el(page, "market-london-hours")).toHaveText("03:00–12:00");
         await expect(el(page, "market-london-timer")).toHaveText("07:30:00");
         await expect(el(page, "market-london-mine")).toHaveText("У тебя: 11:00–20:00");
         await expect(el(page, "market-newyork-status")).toHaveText("Закрыта");
-        await expect(el(page, "market-newyork-hours")).toHaveText("Сегодня · 09:30–18:00");
+        await expect(el(page, "market-newyork-hours")).toHaveText("09:30–18:00");
         await expect(el(page, "market-newyork-timer")).toHaveText("05:00:00");
         await expect(el(page, "market-card-london").getByTestId("market-londonKz-status")).toHaveText("Открыта");
-        await expect(el(page, "market-londonKz-hours")).toHaveText("Сегодня · 02:00–05:00");
-        await expect(el(page, "market-londonKz-timer")).toHaveText("00:30:00");
-        await expect(el(page, "market-newyorkKz-hours")).toHaveText("Сегодня · 07:00–10:00");
-        await expect(el(page, "market-overlap-hours")).toHaveText("Сегодня · 09:30–12:00");
-        await expect(el(page, "market-overlap-timer")).toHaveText("05:00:00");
+        await expect(el(page, "market-londonKz-hours")).toHaveText("02:00–05:00");
+        await expect(el(page, "market-londonKz-timer")).toHaveText("30 мин");
+        await expect(el(page, "market-newyorkKz-hours")).toHaveText("07:00–10:00");
+        await expect(el(page, "market-overlap-hours")).toHaveText("09:30–12:00");
+        await expect(el(page, "market-overlap-timer")).toHaveText("5 ч");
         // sub-sessions
-        await expect(el(page, "market-subsessions").getByRole("listitem")).toHaveCount(5);
+        await expect(el(page, "market-subsessions").getByRole("listitem")).toHaveCount(6);
         await expect(el(page, "market-frankfurt-status")).toHaveText("Открыта");
-        await expect(el(page, "market-frankfurt-hours")).toHaveText("Сегодня · 02:00–11:00");
-        await expect(el(page, "market-chicago-hours")).toHaveText("Сегодня · 10:00–19:00");
+        await expect(el(page, "market-frankfurt-hours")).toHaveText("02:00–11:00");
+        await expect(el(page, "market-chicago-hours")).toHaveText("10:00–19:00");
         await expect(el(page, "market-sydney-status")).toHaveText("Закрыта");
-        await expect(el(page, "market-about-note")).toHaveText("Общее описание, не является финансовой рекомендацией.");
         await expect(el(page, "market-active-now")).toHaveText("Сейчас активно: Лондон, Гонконг, Франкфурт, Killzone Лондона");
         // what is next: 5 events in order
         const next = page.getByTestId("market-next-item");
-        await expect(next).toHaveCount(5);
+        await expect(next).toHaveCount(3);
         await expect(next.nth(0)).toContainText("Закрывается Гонконг");
         await expect(next.nth(1)).toContainText("Заканчивается Killzone Лондона");
         await expect(next.nth(2)).toContainText("Начинается Killzone Нью-Йорка");
-        await expect(next.nth(3)).toContainText("Открывается Нью-Йорк");
         // the seconds tick
         await page.clock.runFor(2000);
         await expect(el(page, "market-london-timer")).toHaveText("07:29:58");
@@ -101,33 +99,65 @@ for (const engine of ["chromium", "webkit"] as const) {
       });
     }
 
-    test("«?» on a session: a short description on tap, with the general note", async () => {
-      const page = await guestPage(browser, 360, MONDAY);
-      await page.goto("/market");
-      await expect(el(page, "market-london-about")).toBeHidden();
-      await el(page, "market-london-hint").click();
-      await expect(el(page, "market-london-about")).toContainText("Европейская сессия");
-      await el(page, "market-wellington-hint").click();
-      await expect(el(page, "market-wellington-about")).toContainText("Тихоокеанская сессия");
-      await el(page, "market-overlap-hint").click();
-      await expect(el(page, "market-overlap-about")).toContainText("самой высокой ликвидности");
-      await el(page, "market-london-hint").click();
-      await expect(el(page, "market-london-about")).toBeHidden();
-    });
+    for (const width of [1440, 360]) {
+      test(`${width}: «?» opens over the page — nothing moves; one at a time; a tap outside or Esc closes it`, async () => {
+        const page = await guestPage(browser, width, "2026-11-04T12:00:00Z", { display: { kind: "profile" } });
+        await page.goto("/market");
+        const watched = ["market-card-newyork", "market-subsessions", "market-sub-sydney", "market-next", "market-day-toggle"];
+        // positions inside the sessions block (a tap may scroll the page on a phone), after the fonts are in
+        await expect(el(page, "market-card-newyork")).toBeVisible();
+        await page.evaluate(() => document.fonts.ready);
+        const boxes = () =>
+          page.evaluate((ids) => {
+            const base = document.querySelector('[data-testid="market-sessions"]')!.getBoundingClientRect();
+            return ids.map((id) => {
+              const r = document.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect();
+              return { x: r.left - base.left, y: r.top - base.top, w: r.width, h: r.height };
+            });
+          }, watched);
+        const before = await boxes();
+
+        await el(page, "market-london-hint").click();
+        await expect(el(page, "market-london-about")).toBeVisible();
+        await expect(el(page, "market-london-about")).toContainText("Европейская сессия");
+        await expect(el(page, "market-london-season")).toHaveText(
+          "Местные часы: 08:00–17:00 (UTC+0). Сейчас в Лондоне зимнее время, поэтому по твоему времени сессия на 1 ч позже, чем летом."
+        );
+        await expect(el(page, "market-london-about")).toContainText("Общее описание, не является финансовой рекомендацией.");
+        expect(await boxes()).toEqual(before);
+        await page.screenshot({ path: `test-results/market-hint-${engine}-${width}.png` });
+
+        // another hint: the first one closes
+        await el(page, "market-sydney-hint").click();
+        await expect(el(page, "market-sydney-about")).toContainText("Тихоокеанская сессия");
+        await expect(el(page, "market-london-about")).toHaveCount(0);
+        expect(await boxes()).toEqual(before);
+
+        // a tap outside
+        await page.mouse.click(5, 5);
+        await expect(el(page, "market-sydney-about")).toHaveCount(0);
+        // Esc
+        await el(page, "market-overlap-hint").click();
+        await expect(el(page, "market-overlap-about")).toContainText("самой высокой ликвидности");
+        await page.keyboard.press("Escape");
+        await expect(el(page, "market-overlap-about")).toHaveCount(0);
+        expect(await boxes()).toEqual(before);
+      });
+    }
 
     test("the display time: my zone or UTC — everything follows and is kept after a reload", async () => {
       const page = await guestPage(browser, 1440, MONDAY);
       await page.goto("/market");
       await el(page, "market-display-profile").click();
-      await expect(el(page, "market-london-hours")).toHaveText("Сегодня · 11:00–20:00");
-      await expect(el(page, "market-newyork-hours")).toHaveText("Сегодня · 17:30–02:00 (+1)");
+      await expect(el(page, "market-london-hours")).toHaveText("11:00–20:00");
+      await expect(el(page, "market-newyork-hours")).toHaveText("17:30–02:00 (+1)");
       await expect(el(page, "market-london-mine")).toHaveCount(0);
       await el(page, "market-display-utc").click();
-      await expect(el(page, "market-london-hours")).toHaveText("Сегодня · 07:00–16:00");
+      await expect(el(page, "market-london-hours")).toHaveText("07:00–16:00");
       await expect(el(page, "market-london-mine")).toHaveText("У тебя: 11:00–20:00");
       await page.reload();
       await expect(el(page, "market-display-utc")).toHaveAttribute("aria-checked", "true");
-      await expect(el(page, "market-london-hours")).toHaveText("Сегодня · 07:00–16:00");
+      await expect(el(page, "market-london-hours")).toHaveText("07:00–16:00");
       await el(page, "market-display-zone").click();
       await expect(page.locator("#market-display-zone")).toBeVisible();
     });
@@ -141,26 +171,26 @@ for (const engine of ["chromium", "webkit"] as const) {
       await expect(el(page, "market-hours-london-local")).toHaveText("= 08:00–17:00 по местному времени Лондона");
       await el(page, "market-hours-london-start").fill("02:00");
       await expect(el(page, "market-hours-london-local")).toHaveText("= 07:00–17:00 по местному времени Лондона");
-      await expect(el(page, "market-london-hours")).toHaveText("Сегодня · 02:00–12:00");
+      await expect(el(page, "market-london-hours")).toHaveText("02:00–12:00");
       await el(page, "market-settings").screenshot({ path: `test-results/market-settings-${engine}-1440.png` });
       // start = end: an error, the saved hours stay
       await el(page, "market-hours-london-end").fill("02:00");
       await expect(el(page, "market-hours-london-local")).toHaveText("Нужен формат ЧЧ:ММ, начало и конец не должны совпадать.");
       await el(page, "market-settings-done").click();
       await page.reload();
-      await expect(el(page, "market-london-hours")).toHaveText("Сегодня · 02:00–12:00");
+      await expect(el(page, "market-london-hours")).toHaveText("02:00–12:00");
       // killzones
       await el(page, "market-settings-open").click();
       await page.getByRole("tab", { name: "Killzones" }).click();
       await el(page, "market-hours-londonKz-start").fill("01:30");
-      await expect(el(page, "market-londonKz-hours")).toHaveText("Сегодня · 01:30–05:00");
+      await expect(el(page, "market-londonKz-hours")).toHaveText("01:30–05:00");
       // reset
       await page.getByRole("tab", { name: "Сессии" }).click();
       await el(page, "market-hours-london-reset").click();
-      await expect(el(page, "market-london-hours")).toHaveText("Сегодня · 03:00–12:00");
+      await expect(el(page, "market-london-hours")).toHaveText("03:00–12:00");
       await page.getByRole("tab", { name: "Killzones" }).click();
       await el(page, "market-settings-reset-all").click();
-      await expect(el(page, "market-londonKz-hours")).toHaveText("Сегодня · 02:00–05:00");
+      await expect(el(page, "market-londonKz-hours")).toHaveText("02:00–05:00");
     });
 
     test("killzones saved before this change are kept", async () => {
@@ -176,8 +206,8 @@ for (const engine of ["chromium", "webkit"] as const) {
         localStorage.setItem("ayra_market_killzones", JSON.stringify({ londonKz: { start: "03:00", end: "06:00" }, newyorkKz: { start: "08:30", end: "11:00" } }));
       });
       await page.goto("/market");
-      await expect(el(page, "market-londonKz-hours")).toHaveText("Сегодня · 03:00–06:00");
-      await expect(el(page, "market-newyorkKz-hours")).toHaveText("Сегодня · 08:30–11:00");
+      await expect(el(page, "market-londonKz-hours")).toHaveText("03:00–06:00");
+      await expect(el(page, "market-newyorkKz-hours")).toHaveText("08:30–11:00");
     });
 
     test("«Show 24 h» unfolds the day bar", async () => {
@@ -210,7 +240,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       // 23:59:58 in New York
       const page = await guestPage(browser, 1440, "2026-04-07T03:59:58Z");
       await page.goto("/market");
-      await expect(el(page, "market-asia-hours")).toHaveText("Сегодня · 19:00–04:00 (+1)");
+      await expect(el(page, "market-asia-hours")).toHaveText("19:00–04:00 (+1)");
       await page.clock.runFor(3000);
       await expect(el(page, "market-asia-status")).toHaveText("Открыта");
       await expect(el(page, "market-asia-hours")).toHaveText("Вчера · 19:00–04:00 (+1)");
@@ -221,8 +251,8 @@ for (const engine of ["chromium", "webkit"] as const) {
       // Monday 2 March 2026, 10:00 UTC = 14:00 in Tbilisi
       const page = await guestPage(browser, 1440, "2026-03-02T10:00:00Z", { display: { kind: "profile" } });
       await page.goto("/market");
-      await expect(el(page, "market-london-hours")).toHaveText("Сегодня · 12:00–21:00");
-      await expect(el(page, "market-newyork-hours")).toHaveText("Сегодня · 18:30–03:00 (+1)");
+      await expect(el(page, "market-london-hours")).toHaveText("12:00–21:00");
+      await expect(el(page, "market-newyork-hours")).toHaveText("18:30–03:00 (+1)");
     });
 
     test("the weekend: closed, opens on Sunday evening, Sydney first", async () => {
@@ -246,14 +276,13 @@ for (const engine of ["chromium", "webkit"] as const) {
         // Wednesday 28 October 2026, 08:00 UTC = 04:00 in New York
         const page = await guestPage(browser, width, "2026-10-28T08:00:00Z");
         await page.goto("/market");
-        await expect(el(page, "market-london-hours")).toHaveText("Сегодня · 04:00–13:00");
-        await expect(el(page, "market-newyork-hours")).toHaveText("Сегодня · 09:30–18:00");
-        await expect(el(page, "market-overlap-hours")).toHaveText("Сегодня · 09:30–13:00");
+        await expect(el(page, "market-london-hours")).toHaveText("04:00–13:00");
+        await expect(el(page, "market-newyork-hours")).toHaveText("09:30–18:00");
+        await expect(el(page, "market-overlap-hours")).toHaveText("09:30–13:00");
+        await el(page, "market-block-hint").click();
         const gap = el(page, "market-gap");
         await expect(gap).toContainText("Между открытием Лондона и Нью-Йорка сейчас 4 ч");
-        await el(page, "market-gap-hint").click();
         await expect(gap).toContainText("до 1 ноября");
-        await el(page, "market-london-hint").click();
         expect(await noSideScroll(page)).toBe(true);
         await el(page, "market-sessions").screenshot({ path: `test-results/market-sessions-gap-${engine}-${width}.png` });
       });
