@@ -6,6 +6,7 @@ import {
   type ChartInterval,
   type InstrumentId,
 } from "./instruments";
+import { normalizeFavorites } from "./chart-workspace";
 
 /**
  * The Watchlist (PR 1.3): catalog instruments in the user's order, on this device. Owner's decision 2026-11-01: at
@@ -52,10 +53,11 @@ export function move(w: Watchlist, id: InstrumentId, step: -1 | 1): Watchlist {
   return { ...w, ids };
 }
 
-/** The Chart's last instrument and timeframe on this device. */
+/** The Chart's last instrument, timeframe and favourite timeframes on this device. */
 export interface ChartPrefs {
   instrument: InstrumentId;
   interval: ChartInterval;
+  favorites: ChartInterval[];
 }
 
 export function normalizeChartPrefs(raw: unknown): ChartPrefs {
@@ -63,5 +65,6 @@ export function normalizeChartPrefs(raw: unknown): ChartPrefs {
   return {
     instrument: isInstrumentId(r.instrument) ? r.instrument : DEFAULT_CHART_INSTRUMENT,
     interval: isChartInterval(r.interval) ? r.interval : DEFAULT_CHART_INTERVAL,
+    favorites: normalizeFavorites(r.favorites),
   };
 }

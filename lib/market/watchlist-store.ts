@@ -3,11 +3,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { AppStorage } from "@/lib/storage";
 import { emptyWatchlist, normalizeChartPrefs, normalizeWatchlist, type ChartPrefs, type Watchlist } from "./watchlist";
+import { normalizeChartView, normalizeNotes, type ChartNotes, type ChartView } from "./chart-workspace";
 
 /** The Watchlist of this space (account or guest), on this device. */
 export const MARKET_WATCHLIST_KEY = "ayra_market_watchlist";
-/** The Chart's last instrument and timeframe. */
+/** The Chart's last instrument, timeframe and favourite timeframes. */
 export const MARKET_CHART_KEY = "ayra_market_chart";
+/** How the Chart page is laid out (PR 1.3b). */
+export const MARKET_CHART_VIEW_KEY = "ayra_market_chart_view";
+/** Notes per instrument (PR 1.3b). */
+export const MARKET_NOTES_KEY = "ayra_market_notes";
 
 function read<T>(key: string, normalize: (raw: unknown) => T): T {
   try {
@@ -46,3 +51,5 @@ function useStored<T>(key: string, normalize: (raw: unknown) => T, initial: () =
 
 export const useWatchlist = () => useStored<Watchlist>(MARKET_WATCHLIST_KEY, normalizeWatchlist, emptyWatchlist);
 export const useChartPrefs = () => useStored<ChartPrefs>(MARKET_CHART_KEY, normalizeChartPrefs, () => normalizeChartPrefs(null));
+export const useChartView = () => useStored<ChartView>(MARKET_CHART_VIEW_KEY, normalizeChartView, () => normalizeChartView(null));
+export const useChartNotes = () => useStored<ChartNotes>(MARKET_NOTES_KEY, normalizeNotes, () => ({}));
