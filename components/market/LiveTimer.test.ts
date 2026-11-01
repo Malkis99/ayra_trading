@@ -14,8 +14,8 @@ describe("countdownText (PR 1.1d): one format everywhere", () => {
     expect(countdownText(-5 * S, "clock", ru)).toBe("00:00:00");
   });
 
-  it("«clock» over a day: days, hours and minutes, no seconds", () => {
-    expect(countdownText(24 * H + 52 * M + 21 * S, "clock", ru)).toBe("1 д 0 ч 52 мин");
+  it("«clock» over a day: days, hours and minutes, no seconds; minutes round up as in «human»", () => {
+    expect(countdownText(24 * H + 52 * M + 21 * S, "clock", ru)).toBe("1 д 0 ч 53 мин");
     expect(countdownText(24 * H + 52 * M + 21 * S, "human", ru)).toBe("1 д 0 ч 53 мин");
     expect(countdownText(24 * H + 52 * M, "clock", ru)).toBe("1 д 0 ч 52 мин");
     expect(countdownText(2 * 24 * H + 3 * H + 5 * M, "clock", ru)).toBe("2 д 3 ч 5 мин");
