@@ -109,4 +109,6 @@ export const ALLOWED_LATIN_WORDS = [
   "GBP",
   "CHF",
   "CAD",
+  // Overview card names (PR 1.2): the WTI crude oil grade
+  "WTI",
 ] as const;
