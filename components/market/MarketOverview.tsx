@@ -1,10 +1,12 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { BarChart3 } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { Tabs } from "@/components/ui";
-import { CATEGORIES, CORE_INSTRUMENTS, isCategoryId, type CategoryId, type DataDelay } from "@/lib/market/instruments";
-import { TRADINGVIEW_HOME, TradingViewWidget, widgetConfig } from "@/components/market/TradingViewWidget";
+import { CATEGORIES, CORE_INSTRUMENTS, isCategoryId, symbolsOf, type CategoryId, type InstrumentId } from "@/lib/market/instruments";
+import { TradingViewWidget, widgetConfig } from "@/components/market/TradingViewWidget";
+import { SourceLine } from "./SourceLine";
 
 const CORE_HEIGHT = 200;
 const ROW_HEIGHT = 36;
@@ -13,11 +15,13 @@ const CATEGORY_KEY = "cat";
 
 /**
  * Market cards (PR 1.2): the D-14 core (DXY, S&P 500, Nasdaq, gold, oil, BTC) as small TradingView cards, then the
- * five categories — one table at a time. Every block names its source and how fresh the data is.
+ * five categories — one table at a time. Every block names its source and how fresh the data is. «Chart» buttons
+ * (PR 1.3) open the Chart of that instrument in the same browser tab.
  */
-export function MarketOverview() {
+export function MarketOverview({ onOpenChart }: { onOpenChart: (id: InstrumentId) => void }) {
   const { dict, lang } = useApp();
   const t = dict.market.overview;
+  const names = dict.market.instruments;
   const locale = lang === "en" ? "en" : "ru";
   const [origin, setOrigin] = useState("");
   const [category, setCategoryState] = useState<CategoryId>("forex");
@@ -34,17 +38,9 @@ export function MarketOverview() {
     window.history.replaceState(window.history.state, "", url.toString());
   };
 
-  const source = (delay: DataDelay, testId: string) => (
-    <p className="text-[11px] text-mu" data-testid={testId}>
-      {t.sourcePrefix}{" "}
-      <a href={TRADINGVIEW_HOME} target="_blank" rel="noopener noreferrer nofollow" className="text-vi hover:underline">
-        {t.sourceName}
-      </a>{" "}
-      · {t.delay[delay]}
-    </p>
-  );
   const widgetTexts = { loadingText: t.loading, errorText: t.unavailable, retryLabel: t.retry };
   const active = CATEGORIES.find((c) => c.id === category) ?? CATEGORIES[0];
+  const chartLabel = dict.market.watchlist.openChart;
 
   // Widgets wait for the address of the page (clicks on a symbol lead back here)
   if (!origin) return null;
@@ -58,16 +54,28 @@ export function MarketOverview() {
         <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="market-core">
           {CORE_INSTRUMENTS.map((inst) => (
             <li key={inst.id} className="min-w-0 rounded-xl border border-line bg-s1 p-3" data-testid={`market-core-${inst.id}`}>
-              <h3 className="text-sm font-semibold text-tx">{t.core[inst.id]}</h3>
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="min-w-0 truncate text-sm font-semibold text-tx">{names[inst.id]}</h3>
+                <button
+                  type="button"
+                  onClick={() => onOpenChart(inst.id)}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-vi hover:bg-s2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
+                  aria-label={`${chartLabel}: ${names[inst.id]}`}
+                  data-testid={`market-core-${inst.id}-chart`}
+                >
+                  <BarChart3 size={14} aria-hidden="true" />
+                  {chartLabel}
+                </button>
+              </div>
               <TradingViewWidget
                 widget="mini-symbol-overview"
                 config={widgetConfig({ symbol: inst.symbol, width: "100%", height: CORE_HEIGHT, dateRange: "1D", trendLineColor: "rgba(163, 138, 209, 1)", underLineColor: "rgba(80, 52, 143, 0.3)" }, locale, origin)}
                 height={CORE_HEIGHT}
-                label={t.core[inst.id]}
+                label={names[inst.id]}
                 testId={`market-core-${inst.id}-widget`}
                 {...widgetTexts}
               />
-              {source(inst.delay, `market-core-${inst.id}-source`)}
+              <SourceLine delay={inst.delay} testId={`market-core-${inst.id}-source`} />
             </li>
           ))}
         </ul>
@@ -94,16 +102,32 @@ export function MarketOverview() {
             key={active.id}
             widget="market-quotes"
             config={widgetConfig(
-              { width: "100%", height: QUOTES_HEAD + ROW_HEIGHT * active.symbols.length, showSymbolLogo: true, symbolsGroups: [{ name: t.categories[active.id], symbols: active.symbols.map((name) => ({ name })) }] },
+              { width: "100%", height: QUOTES_HEAD + ROW_HEIGHT * active.ids.length, showSymbolLogo: true, symbolsGroups: [{ name: t.categories[active.id], symbols: symbolsOf(active.ids).map((name) => ({ name })) }] },
               locale,
               origin
             )}
-            height={QUOTES_HEAD + ROW_HEIGHT * active.symbols.length}
+            height={QUOTES_HEAD + ROW_HEIGHT * active.ids.length}
             label={t.categories[active.id]}
             testId={`market-category-${active.id}-widget`}
             {...widgetTexts}
           />
-          {source(active.delay, `market-category-${active.id}-source`)}
+          <SourceLine delay={active.delay} testId={`market-category-${active.id}-source`} />
+          {/* the table rows are TradingView's: our own buttons open the Chart in this tab */}
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-line pt-2" data-testid={`market-category-${active.id}-charts`}>
+            <span className="text-[11px] text-mu">{t.openChart}</span>
+            {active.ids.map((id) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => onOpenChart(id)}
+                className="rounded-md bg-s2/60 px-2 py-1 text-[11px] font-semibold text-tx hover:bg-s2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
+                aria-label={`${chartLabel}: ${names[id]}`}
+                data-testid={`market-category-chart-${id}`}
+              >
+                {names[id]}
+              </button>
+            ))}
+          </div>
         </div>
       </section>
     </div>
