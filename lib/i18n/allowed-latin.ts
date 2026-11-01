@@ -111,4 +111,14 @@ export const ALLOWED_LATIN_WORDS = [
   "CAD",
   // Overview card names (PR 1.2): the WTI crude oil grade
   "WTI",
+  // Chart and Watchlist catalog names (PR 1.3)
+  "Dow",
+  "Jones",
+  "DAX",
+  "FTSE",
+  "Nikkei",
+  "ETH",
+  "Solana",
+  "SOL",
+  "Brent",
 ] as const;

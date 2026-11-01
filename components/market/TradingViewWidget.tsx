@@ -8,7 +8,7 @@ import { cn } from "@/components/ui";
  * The free TradingView widgets used on the Market (PR 1.2). «Technical analysis» is not here on purpose: it shows a
  * «buy / sell» rating, which looks like a signal (`docs/market-plan.md` section 9).
  */
-export type TradingViewWidgetName = "mini-symbol-overview" | "market-quotes";
+export type TradingViewWidgetName = "mini-symbol-overview" | "market-quotes" | "advanced-chart";
 
 export const TRADINGVIEW_SCRIPT_BASE = "https://s3.tradingview.com/external-embedding/embed-widget-";
 export const TRADINGVIEW_HOME = "https://www.tradingview.com/";
@@ -24,6 +24,7 @@ export function widgetConfig(options: Record<string, unknown>, locale: "ru" | "e
   return {
     ...options,
     colorTheme: "dark",
+    theme: "dark",
     isTransparent: true,
     locale,
     largeChartUrl: `${origin}/market`,
@@ -104,6 +105,7 @@ export function TradingViewWidget({
 
     const inner = document.createElement("div");
     inner.className = "tradingview-widget-container__widget";
+    inner.style.height = "100%";
     const script = document.createElement("script");
     script.type = "text/javascript";
     script.async = true;

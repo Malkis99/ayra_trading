@@ -2,7 +2,7 @@ import React from "react";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { TRADINGVIEW_SCRIPT_BASE, TradingViewWidget, WIDGET_LOAD_TIMEOUT_MS, widgetConfig } from "./TradingViewWidget";
-import { CATEGORIES, CORE_INSTRUMENTS } from "@/lib/market/instruments";
+import { CATEGORIES, CORE_INSTRUMENTS, symbolsOf } from "@/lib/market/instruments";
 
 const texts = { loadingText: "loading", errorText: "TradingView is not responding", retryLabel: "Try again" };
 
@@ -23,10 +23,10 @@ describe("instruments", () => {
   it("the D-14 core in the Pack order and the five categories", () => {
     expect(CORE_INSTRUMENTS.map((i) => i.id)).toEqual(["dxy", "spx", "ndx", "gold", "oil", "btc"]);
     expect(CATEGORIES.map((c) => c.id)).toEqual(["forex", "indices", "crypto", "commodities", "bonds"]);
-    for (const c of CATEGORIES) expect(c.symbols.length).toBeGreaterThan(0);
+    for (const c of CATEGORIES) expect(c.ids.length).toBeGreaterThan(0);
   });
   it("only symbols that the widgets show (checked 2026-11-01)", () => {
-    const all = [...CORE_INSTRUMENTS.map((i) => i.symbol), ...CATEGORIES.flatMap((c) => c.symbols)];
+    const all = [...CORE_INSTRUMENTS.map((i) => i.symbol), ...CATEGORIES.flatMap((c) => symbolsOf(c.ids))];
     for (const blocked of ["TVC:DXY", "SP:SPX", "NASDAQ:NDX", "TVC:US10Y", "TVC:US02Y"]) expect(all).not.toContain(blocked);
   });
 });
