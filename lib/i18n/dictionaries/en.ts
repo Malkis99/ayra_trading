@@ -1893,6 +1893,7 @@ export const en: Dictionary = {
         utc: "UTC",
         other: "Another zone",
         pick: "City or time zone",
+        elsewhere: "Display time: {zone}, changed in the settings",
       },
       day: {
         show: "Show 24 h",

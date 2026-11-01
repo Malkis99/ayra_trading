@@ -293,3 +293,18 @@ describe("why the hours move during the year (built from the real offsets)", () 
     expect(seasonNote(S.asia, "America/New_York", utc("2026-11-04T12:00:00Z"))).toEqual({ hasDst: false, season: null, shiftMinutes: -60 });
   });
 });
+
+describe("owner's check: on my clock (Tbilisi, UTC+4 all year)", () => {
+  const TB = "Asia/Tbilisi";
+  const startTb = (def: WindowDef, day: string) => clockOf(occurrences(def, utc(`${day}T12:00:00Z`)).find((o) => wallAt(o.start, def.zone).d === Number(day.slice(8)))!.start, TB);
+  it("New York opens at 17:30 before 1 November 2026 and at 18:30 after it", () => {
+    expect(startTb(S.newyork, "2026-10-30")).toBe("17:30"); // Friday, EDT
+    // Sunday 1 November: no New York session (the city's day off, and the market opens at 17:00 New York)
+    expect(occurrences(S.newyork, utc("2026-11-01T12:00:00Z")).some((o) => wallAt(o.start, S.newyork.zone).d === 1 && wallAt(o.start, S.newyork.zone).mo === 11)).toBe(false);
+    expect(startTb(S.newyork, "2026-11-02")).toBe("18:30"); // Monday, EST
+  });
+  it("London opens at 12:00 from 25 October 2026 (11:00 before)", () => {
+    expect(startTb(S.london, "2026-10-23")).toBe("11:00"); // Friday, BST
+    expect(startTb(S.london, "2026-10-26")).toBe("12:00"); // Monday, GMT
+  });
+});
