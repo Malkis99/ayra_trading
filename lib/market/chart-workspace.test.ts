@@ -50,7 +50,7 @@ describe("notes per instrument (PR 1.3b)", () => {
     expect(withNote({}, "btc", "x".repeat(NOTE_LIMIT + 50), now).btc?.text).toHaveLength(NOTE_LIMIT);
   });
   it("stored data: only catalog instruments and real text", () => {
-    expect(normalizeNotes({ btc: { text: "ok", updatedAt: "2026-11-01T10:00:00Z" }, aapl: { text: "no" }, gold: { text: "" }, eth: "x" })).toEqual({
+    expect(normalizeNotes({ btc: { text: "ok", updatedAt: "2026-11-01T10:00:00Z" }, zzzz: { text: "no" }, gold: { text: "" }, eth: "x" })).toEqual({
       btc: { text: "ok", updatedAt: "2026-11-01T10:00:00Z" },
     });
     expect(normalizeNotes(null)).toEqual({});

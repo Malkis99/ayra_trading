@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from "lucide-react"
 import { useApp } from "@/lib/context";
 import { formatString } from "@/lib/i18n";
 import { cn } from "@/components/ui";
-import { INSTRUMENTS, type InstrumentId } from "@/lib/market/instruments";
+import { INSTRUMENTS, type InstrumentId, instrumentName } from "@/lib/market/instruments";
 import { WATCHLIST_LIMIT } from "@/lib/market/watchlist";
 import type { PanelSide } from "@/lib/market/chart-workspace";
 
@@ -89,7 +89,7 @@ export function ChartWatchlistPanel({
                     )}
                     data-testid={`market-chart-panel-${id}`}
                   >
-                    <span className="min-w-0 truncate text-sm font-semibold text-tx">{t.instruments[id]}</span>
+                    <span className="min-w-0 truncate text-sm font-semibold text-tx">{instrumentName(id, t.instruments)}</span>
                     <span className="shrink-0 text-[11px] text-mu">{INSTRUMENTS[id].ticker}</span>
                   </button>
                 </li>

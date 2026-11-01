@@ -8,7 +8,7 @@ import { formatString } from "@/lib/i18n";
 import { browserTimeZone } from "@/lib/timezones";
 import { cn } from "@/components/ui";
 import { useOutsideClose } from "@/components/ui/forms/popover";
-import { CATEGORIES, INSTRUMENTS, instrumentBySymbol, type ChartInterval, type InstrumentId } from "@/lib/market/instruments";
+import { categoryOf, INSTRUMENTS, instrumentBySymbol, type ChartInterval, type InstrumentId, instrumentName } from "@/lib/market/instruments";
 import { displayZoneOf } from "@/lib/market/sessions";
 import { useMarketSettings } from "@/lib/market/settings-store";
 import { addTo, isFull, removeFrom } from "@/lib/market/watchlist";
@@ -117,7 +117,7 @@ export function MarketChart() {
     setOrigin(window.location.origin);
     const fromUrl = symbolFromUrl();
     const id = fromUrl.id ?? prefs.instrument;
-    if (fromUrl.unknown) setNotice(formatString(t.chart.notInCatalog, { symbol: fromUrl.unknown, name: t.instruments[id] }));
+    if (fromUrl.unknown) setNotice(formatString(t.chart.notInCatalog, { symbol: fromUrl.unknown, name: instrumentName(id, t.instruments) }));
     if (id !== prefs.instrument) setPrefs({ ...prefs, instrument: id });
     keepInUrl(id);
     setReady(true);
@@ -139,7 +139,7 @@ export function MarketChart() {
 
   const id = prefs.instrument;
   const inst = INSTRUMENTS[id];
-  const name = t.instruments[id];
+  const name = instrumentName(id, t.instruments);
   const inList = watchlist.ids.includes(id);
   const listFull = !inList && isFull(watchlist);
   const zone = displayZoneOf(settings.display, game?.gameState.profile.timezone || browserTimeZone());
@@ -231,7 +231,7 @@ export function MarketChart() {
 
         {picking && (
           <div ref={pickerPanel} id="market-chart-picker-panel" className="rounded-xl border border-line bg-s1 p-3 shadow-float">
-            <InstrumentPicker idPrefix="market-chart" selected={(x) => x === id} onPick={pick} initialCategory={CATEGORIES.find((c) => c.ids.includes(id))?.id} />
+            <InstrumentPicker idPrefix="market-chart" selected={(x) => x === id} onPick={pick} initialCategory={categoryOf(id)} />
           </div>
         )}
         {notice && (

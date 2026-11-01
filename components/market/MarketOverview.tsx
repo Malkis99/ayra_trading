@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { BarChart3 } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { Tabs } from "@/components/ui";
-import { CATEGORIES, CORE_INSTRUMENTS, isCategoryId, symbolsOf, type CategoryId, type InstrumentId } from "@/lib/market/instruments";
+import { CATEGORIES, CORE_INSTRUMENTS, isCategoryId, symbolsOf, type CategoryId, type InstrumentId, instrumentName } from "@/lib/market/instruments";
 import { TradingViewWidget, widgetConfig } from "@/components/market/TradingViewWidget";
 import { SourceLine } from "./SourceLine";
 
@@ -55,12 +55,12 @@ export function MarketOverview({ onOpenChart }: { onOpenChart: (id: InstrumentId
           {CORE_INSTRUMENTS.map((inst) => (
             <li key={inst.id} className="min-w-0 rounded-xl border border-line bg-s1 p-3" data-testid={`market-core-${inst.id}`}>
               <div className="flex items-center justify-between gap-2">
-                <h3 className="min-w-0 truncate text-sm font-semibold text-tx">{names[inst.id]}</h3>
+                <h3 className="min-w-0 truncate text-sm font-semibold text-tx">{instrumentName(inst.id, names)}</h3>
                 <button
                   type="button"
                   onClick={() => onOpenChart(inst.id)}
                   className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-vi hover:bg-s2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
-                  aria-label={`${chartLabel}: ${names[inst.id]}`}
+                  aria-label={`${chartLabel}: ${instrumentName(inst.id, names)}`}
                   data-testid={`market-core-${inst.id}-chart`}
                 >
                   <BarChart3 size={14} aria-hidden="true" />
@@ -71,7 +71,7 @@ export function MarketOverview({ onOpenChart }: { onOpenChart: (id: InstrumentId
                 widget="mini-symbol-overview"
                 config={widgetConfig({ symbol: inst.symbol, width: "100%", height: CORE_HEIGHT, dateRange: "1D", trendLineColor: "rgba(163, 138, 209, 1)", underLineColor: "rgba(80, 52, 143, 0.3)" }, locale, origin)}
                 height={CORE_HEIGHT}
-                label={names[inst.id]}
+                label={instrumentName(inst.id, names)}
                 testId={`market-core-${inst.id}-widget`}
                 {...widgetTexts}
               />
@@ -102,11 +102,11 @@ export function MarketOverview({ onOpenChart }: { onOpenChart: (id: InstrumentId
             key={active.id}
             widget="market-quotes"
             config={widgetConfig(
-              { width: "100%", height: QUOTES_HEAD + ROW_HEIGHT * active.ids.length, showSymbolLogo: true, symbolsGroups: [{ name: t.categories[active.id], symbols: symbolsOf(active.ids).map((name) => ({ name })) }] },
+              { width: "100%", height: QUOTES_HEAD + ROW_HEIGHT * active.featured.length, showSymbolLogo: true, symbolsGroups: [{ name: t.categories[active.id], symbols: symbolsOf(active.featured).map((name) => ({ name })) }] },
               locale,
               origin
             )}
-            height={QUOTES_HEAD + ROW_HEIGHT * active.ids.length}
+            height={QUOTES_HEAD + ROW_HEIGHT * active.featured.length}
             label={t.categories[active.id]}
             testId={`market-category-${active.id}-widget`}
             {...widgetTexts}
@@ -115,16 +115,16 @@ export function MarketOverview({ onOpenChart }: { onOpenChart: (id: InstrumentId
           {/* the table rows are TradingView's: our own buttons open the Chart in this tab */}
           <div className="flex flex-wrap items-center gap-1.5 border-t border-line pt-2" data-testid={`market-category-${active.id}-charts`}>
             <span className="text-[11px] text-mu">{t.openChart}</span>
-            {active.ids.map((id) => (
+            {active.featured.map((id) => (
               <button
                 key={id}
                 type="button"
                 onClick={() => onOpenChart(id)}
                 className="rounded-md bg-s2/60 px-2 py-1 text-[11px] font-semibold text-tx hover:bg-s2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
-                aria-label={`${chartLabel}: ${names[id]}`}
+                aria-label={`${chartLabel}: ${instrumentName(id, names)}`}
                 data-testid={`market-category-chart-${id}`}
               >
-                {names[id]}
+                {instrumentName(id, names)}
               </button>
             ))}
           </div>

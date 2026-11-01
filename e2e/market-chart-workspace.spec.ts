@@ -39,14 +39,15 @@ for (const engine of ["chromium", "webkit"] as const) {
         await expect(el(page, "market-chart-widget")).toHaveAttribute("data-status", "ready");
 
         // the chart row fills the page's scroll area (its height minus padding and the toolbar)
-        const fill = await page.evaluate(() => {
+        // the height follows a ResizeObserver: poll until it settles
+        const gap = () => page.evaluate(() => {
           const main = document.querySelector("main")!;
           const s = getComputedStyle(main);
           const toolbar = (document.querySelector("[data-testid=market-chart-row]")!.previousElementSibling as HTMLElement).offsetHeight;
           const free = main.clientHeight - parseFloat(s.paddingTop) - parseFloat(s.paddingBottom) - toolbar - 12;
-          return { row: document.querySelector("[data-testid=market-chart-row]")!.getBoundingClientRect().height, free };
+          return Math.abs(document.querySelector("[data-testid=market-chart-row]")!.getBoundingClientRect().height - Math.max(380, free));
         });
-        expect(Math.abs(fill.row - Math.max(380, fill.free))).toBeLessThanOrEqual(2);
+        await expect.poll(gap).toBeLessThanOrEqual(2);
 
         const chart = await box(page, "market-chart-widget");
         const panel = await box(page, "market-chart-panel");

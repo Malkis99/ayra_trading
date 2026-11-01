@@ -111,8 +111,33 @@ for (const engine of ["chromium", "webkit"] as const) {
       await el(page, "market-chart-change").click();
       await el(page, "market-chart-search").fill("btc");
       await expect(el(page, "market-chart-pick-btc")).toBeVisible();
-      await el(page, "market-chart-search").fill("aapl");
+      await el(page, "market-chart-search").fill("zzzz");
       await expect(el(page, "market-chart-empty")).toHaveText("В каталоге нет такого инструмента.");
+    });
+
+    test("the wide catalog: six categories in the picker, US stocks delayed, search only in the catalog; the Overview keeps five", async () => {
+      const { page } = await guestPage(browser, 1440);
+      await page.goto("/market?tab=chart");
+      await el(page, "market-chart-change").click();
+      await expect(page.getByRole("tablist", { name: "Инструмент" }).getByRole("tab")).toHaveText(["Валюты", "Индексы", "Крипта", "Сырьё и металлы", "Облигации и доходности", "Акции США"]);
+      await page.locator("#market-chart-cat-tab-forex").click();
+      await expect(el(page, "market-chart-list").getByRole("button")).toHaveCount(28);
+      await page.locator("#market-chart-cat-tab-crypto").click();
+      await expect(el(page, "market-chart-list").getByRole("button")).toHaveCount(19);
+      await el(page, "market-chart-search").fill("EURGBP");
+      await expect(el(page, "market-chart-list").getByRole("button")).toHaveText(["EUR/GBPEURGBP"]);
+      await el(page, "market-chart-search").fill("TONUSDT");
+      await expect(el(page, "market-chart-empty")).toHaveText("В каталоге нет такого инструмента.");
+      await el(page, "market-chart-search").fill("aapl");
+      await el(page, "market-chart-pick-aapl").click();
+      await expect(el(page, "market-chart-name")).toHaveText("Apple");
+      await expect(page).toHaveURL(/symbol=NASDAQ%3AAAPL/);
+      await expect(el(page, "market-chart-source")).toHaveText("Источник: TradingView · с задержкой");
+      await el(page, "market-chart-change").click();
+      await expect(page.locator("#market-chart-cat-tab-stocks")).toHaveAttribute("aria-selected", "true");
+      // the Overview: still the five categories
+      await page.getByRole("tab", { name: "Обзор" }).click();
+      await expect(page.getByRole("tablist", { name: "Категории" }).getByRole("tab")).toHaveCount(5);
     });
 
     test("«Chart» in the Overview opens the Chart of that instrument in this browser tab", async () => {
@@ -136,8 +161,8 @@ for (const engine of ["chromium", "webkit"] as const) {
       await page.goto("/market?tvwidgetsymbol=FX%3AGBPUSD");
       await expect(el(page, "market-chart-name")).toHaveText("GBP/USD");
       await expect(el(page, "market-chart-notice")).toHaveCount(0);
-      await page.goto("/market?tab=chart&symbol=NASDAQ%3AAAPL");
-      await expect(el(page, "market-chart-notice")).toHaveText("Инструмента «NASDAQ:AAPL» нет в каталоге Рынка, поэтому показан GBP/USD.");
+      await page.goto("/market?tab=chart&symbol=NASDAQ%3AZZZZ");
+      await expect(el(page, "market-chart-notice")).toHaveText("Инструмента «NASDAQ:ZZZZ» нет в каталоге Рынка, поэтому показан GBP/USD.");
       await expect(page).toHaveURL(/symbol=FX%3AGBPUSD/);
     });
 
