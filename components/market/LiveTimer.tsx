@@ -32,7 +32,7 @@ export function Countdown({ to, format = "clock", className, "data-testid": test
 }
 
 /** How much of the session has passed: a ring that fills during the session; empty while it is closed. */
-export function ProgressRing({ start, end, open, children, "data-testid": testId }: { start: number; end: number; open: boolean; children?: React.ReactNode; "data-testid"?: string }) {
+export function ProgressRing({ start, end, open, size = 64, children, "data-testid": testId }: { start: number; end: number; open: boolean; size?: number; children?: React.ReactNode; "data-testid"?: string }) {
   const { dict } = useApp();
   const now = useClock("second");
   const p = open && now ? progressOf({ id: "london", start, end }, now) : 0;
@@ -41,7 +41,8 @@ export function ProgressRing({ start, end, open, children, "data-testid": testId
   const percent = Math.floor(p * 100);
   return (
     <div
-      className="relative grid h-16 w-16 shrink-0 place-items-center"
+      className="relative grid shrink-0 place-items-center"
+      style={{ width: size, height: size }}
       role={open ? "progressbar" : undefined}
       aria-valuemin={open ? 0 : undefined}
       aria-valuemax={open ? 100 : undefined}

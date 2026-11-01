@@ -30,6 +30,7 @@ import {
   statusFromList,
   upcomingEvents,
   wallAt,
+  seasonNote,
   type SessionId,
   type WindowDef,
 } from "./sessions";
@@ -271,5 +272,24 @@ describe("status, labels and the day", () => {
     expect(iso(instantOf(2026, 3, 8, 2, 30, "America/New_York"))).toBe("2026-03-08T07:30");
     expect(splitDuration(80 * 60_000)).toEqual({ d: 0, h: 1, m: 20 });
     expect(splitDuration(80 * 60_000 + 1)).toEqual({ d: 0, h: 1, m: 21 });
+  });
+});
+
+describe("why the hours move during the year (built from the real offsets)", () => {
+  it("London in winter, shown in Tbilisi (no summer time): an hour later than in summer", () => {
+    expect(seasonNote(S.london, "Asia/Tbilisi", utc("2026-11-04T12:00:00Z"))).toEqual({ hasDst: true, season: "winter", shiftMinutes: 60 });
+  });
+  it("London in summer, shown in Tbilisi: an hour earlier than in winter", () => {
+    expect(seasonNote(S.london, "Asia/Tbilisi", utc("2026-07-15T12:00:00Z"))).toEqual({ hasDst: true, season: "summer", shiftMinutes: -60 });
+  });
+  it("London shown in New York time: both change clocks, so the same hours all year", () => {
+    expect(seasonNote(S.london, "America/New_York", utc("2026-11-04T12:00:00Z")).shiftMinutes).toBe(0);
+  });
+  it("Sydney: summer time in November (southern hemisphere)", () => {
+    expect(seasonNote(S.sydney, "Asia/Tbilisi", utc("2026-11-04T12:00:00Z"))).toEqual({ hasDst: true, season: "summer", shiftMinutes: -60 });
+  });
+  it("Tokyo has no summer time: same hours in Tbilisi, but in New York time they move with the USA", () => {
+    expect(seasonNote(S.asia, "Asia/Tbilisi", utc("2026-11-04T12:00:00Z"))).toEqual({ hasDst: false, season: null, shiftMinutes: 0 });
+    expect(seasonNote(S.asia, "America/New_York", utc("2026-11-04T12:00:00Z"))).toEqual({ hasDst: false, season: null, shiftMinutes: -60 });
   });
 });

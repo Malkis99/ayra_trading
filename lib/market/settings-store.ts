@@ -34,13 +34,20 @@ export function writeMarketSettings(value: MarketSessionsSettings): void {
   }
 }
 
-/** The settings and a setter that keeps them on the device. Defaults until read in the browser. */
-export function useMarketSettings(): [MarketSessionsSettings, (next: MarketSessionsSettings) => void] {
+/**
+ * The settings, a setter that keeps them on the device, and whether they were read yet (the block waits for it, so
+ * it never draws with the defaults first and then jumps).
+ */
+export function useMarketSettings(): [MarketSessionsSettings, (next: MarketSessionsSettings) => void, boolean] {
   const [value, setValue] = useState<MarketSessionsSettings>(() => normalizeSettings(null));
-  useEffect(() => setValue(readMarketSettings()), []);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    setValue(readMarketSettings());
+    setLoaded(true);
+  }, []);
   const update = useCallback((next: MarketSessionsSettings) => {
     setValue(next);
     writeMarketSettings(next);
   }, []);
-  return [value, update];
+  return [value, update, loaded];
 }

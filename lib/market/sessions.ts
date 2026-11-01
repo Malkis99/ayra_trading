@@ -415,3 +415,47 @@ export function upcomingEvents(defs: WindowDef[], now: number, limit = 5): Upcom
   const rank = (e: UpcomingEvent) => (e.edge === "end" ? 0 : 1);
   return out.sort((a, b) => a.at - b.at || rank(a) - rank(b)).slice(0, limit);
 }
+
+// ---- Why the hours move during the year (PR 1.1c): built from the real offsets, no fixed table ----
+
+/** Offset of `zone` from UTC at `ms`, in minutes. */
+export function offsetMinutesAt(ms: number, zone: string): number {
+  const w = wallAt(ms, zone);
+  return Math.round((Date.UTC(w.y, w.mo - 1, w.d, w.h, w.mi) - Math.floor(ms / 60_000) * 60_000) / 60_000);
+}
+
+export interface SeasonNote {
+  /** The city changes its clocks during the year. */
+  hasDst: boolean;
+  /** Summer or winter time in the city now (null when the city does not change clocks). */
+  season: "summer" | "winter" | null;
+  /**
+   * Minutes the session starts later (+) or earlier (−) in the display time now than half a year from now.
+   * 0 when the hours in the display time are the same in both halves of the year.
+   */
+  shiftMinutes: number;
+}
+
+/** How the season moves a session in the display time: city's summer / winter time against the other half year. */
+export function seasonNote(def: WindowDef, displayZone: string, now: number): SeasonNote {
+  const year = wallAt(now, def.zone).y;
+  const jan = offsetMinutesAt(Date.UTC(year, 0, 15, 12), def.zone);
+  const jul = offsetMinutesAt(Date.UTC(year, 6, 15, 12), def.zone);
+  const hasDst = jan !== jul;
+  const current = offsetMinutesAt(now, def.zone);
+  const season = hasDst ? (current === Math.max(jan, jul) ? "summer" : "winter") : null;
+
+  const [h, m] = def.start.split(":").map(Number);
+  const startOn = (ms: number) => {
+    const d = wallAt(ms, def.zone);
+    return instantOf(d.y, d.mo, d.d, h, m, def.zone);
+  };
+  const minuteOfDay = (ms: number) => {
+    const w = wallAt(ms, displayZone);
+    return w.h * 60 + w.mi;
+  };
+  let shift = minuteOfDay(startOn(now)) - minuteOfDay(startOn(now + 182 * 24 * 3600_000));
+  if (shift > 720) shift -= 1440;
+  if (shift < -720) shift += 1440;
+  return { hasDst, season, shiftMinutes: shift };
+}
