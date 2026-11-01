@@ -79,7 +79,7 @@ for (const engine of ["chromium", "webkit"] as const) {
         await expect(el(page, "market-londonKz-timer")).toHaveText("30 мин");
         await expect(el(page, "market-newyorkKz-hours")).toHaveText("07:00–10:00");
         await expect(el(page, "market-overlap-hours")).toHaveText("09:30–12:00");
-        await expect(el(page, "market-overlap-timer")).toHaveText("5 ч");
+        await expect(el(page, "market-overlap-timer")).toHaveText("5 ч 0 мин");
         // sub-sessions
         await expect(el(page, "market-subsessions").getByRole("listitem")).toHaveCount(6);
         await expect(el(page, "market-frankfurt-status")).toHaveText("Открыта");
@@ -309,11 +309,11 @@ for (const engine of ["chromium", "webkit"] as const) {
         await expect(el(page, `market-card-${id}`)).toHaveAttribute("data-state", "weekend");
       }
       await expect(el(page, "market-sub-sydney")).toHaveAttribute("data-state", "weekend");
-      await expect(el(page, "market-weekend")).toContainText("Рынок закрыт, откроется");
-      await expect(el(page, "market-active-now")).toHaveText("Сейчас ничего не открыто: выходные");
+      await expect(el(page, "market-weekend")).toHaveText("Выходные: рынок закрыт, откроется в воскресенье 17:00");
+      await expect(el(page, "market-active-now")).toHaveCount(0);
       await expect(page.getByTestId("market-next-item").nth(0)).toContainText("Открывается Сидней");
-      // Monday 08:00 GMT is 1 day 20 hours away
-      await expect(el(page, "market-london-timer")).toHaveText("1 д 20:00:00");
+      // Monday 08:00 GMT is 1 day 20 hours away: days, hours and minutes, no seconds
+      await expect(el(page, "market-london-timer")).toHaveText("1 д 20 ч 0 мин");
     });
 
     for (const width of [1440, 360]) {
@@ -346,5 +346,98 @@ for (const engine of ["chromium", "webkit"] as const) {
       await expect(page.getByRole("tab", { name: "Бэктест" })).toHaveAttribute("aria-selected", "true");
       expect(await noSideScroll(page)).toBe(true);
     });
+  });
+}
+
+// PR 1.1d: a tidy block on phones. Timers and captions never wrap (checked by the element's height against its line
+// height), the ring's timer stays inside the ring, the killzone timer stays on its row on the right, the table's timers
+// line up on the right, «Weekend» is said once. Screenshots of a weekday, the weekend and «more than a day to the
+// opening» at 1440, 390 and 360.
+const SCENARIOS = [
+  { name: "weekday", now: MONDAY },
+  // Sunday 5 April 2026, 10:00 UTC: the weekend, Sydney opens in the evening
+  { name: "weekend", now: "2026-04-05T10:00:00Z" },
+  // Saturday 4 April 2026, 12:00 UTC: more than a day to every opening
+  { name: "day-plus", now: "2026-04-04T12:00:00Z" },
+] as const;
+
+/** Elements that must stay on one line: every countdown, «in …» and the time in «What is next», the killzone hours. */
+const oneLiners = (page: Page) =>
+  page.evaluate(() => {
+    const root = document.querySelector("[data-testid=market-sessions]")!;
+    const els = [
+      ...root.querySelectorAll<HTMLElement>("[role=timer], [data-testid=market-next-left], [data-testid=market-next-time], [data-testid$=Kz-hours]"),
+    ];
+    return els.map((el) => {
+      const style = getComputedStyle(el);
+      const line = style.lineHeight === "normal" ? parseFloat(style.fontSize) * 1.3 : parseFloat(style.lineHeight);
+      return { id: el.dataset.testid ?? el.textContent ?? "", text: el.textContent ?? "", height: el.getBoundingClientRect().height, line };
+    });
+  });
+
+for (const engine of ["chromium", "webkit"] as const) {
+  test.describe(`${engine}: Market — the sessions block on phones (1.1d)`, () => {
+    let browser: Browser;
+    test.beforeAll(async () => {
+      browser = await (engine === "webkit" ? webkit : chromium).launch();
+    });
+    test.afterAll(async () => {
+      await browser.close();
+    });
+
+    for (const scenario of SCENARIOS) {
+      for (const width of [1440, 390, 360]) {
+        test(`${width}, ${scenario.name}: nothing wraps, the timers keep their places`, async () => {
+          const page = await guestPage(browser, width, scenario.now);
+          await page.goto("/market");
+          await expect(el(page, "market-london-timer")).toBeVisible();
+          await page.evaluate(() => document.fonts.ready);
+
+          const lines = await oneLiners(page);
+          expect(lines.length).toBeGreaterThan(10);
+          for (const l of lines) expect({ id: l.id, text: l.text, wraps: l.height > l.line * 1.5 }).toEqual({ id: l.id, text: l.text, wraps: false });
+
+          for (const id of ["asia", "london", "newyork"]) {
+            // the ring's timer is inside the ring
+            const ring = (await el(page, `market-${id}-ring`).boundingBox())!;
+            const timer = (await el(page, `market-${id}-timer`).boundingBox())!;
+            expect(timer.x >= ring.x && timer.x + timer.width <= ring.x + ring.width).toBe(true);
+          }
+          for (const kz of ["londonKz", "newyorkKz"]) {
+            // the killzone timer: on the same row as «Killzone · hours», at the right edge
+            const row = (await el(page, `market-card-${kz}`).boundingBox())!;
+            const hours = (await el(page, `market-${kz}-hours`).boundingBox())!;
+            const timer = (await el(page, `market-${kz}-timer`).boundingBox())!;
+            expect(timer.x).toBeGreaterThan(hours.x);
+            expect(Math.abs(row.x + row.width - (timer.x + timer.width))).toBeLessThan(16);
+            expect(timer.y >= row.y && timer.y + timer.height <= row.y + row.height).toBe(true);
+          }
+          // the table: every timer ends at the same right edge
+          const rights = await el(page, "market-subsessions").locator("[role=timer]").evaluateAll((ts) => ts.map((t) => Math.round(t.getBoundingClientRect().right)));
+          expect(rights).toHaveLength(6);
+          expect(Math.max(...rights) - Math.min(...rights)).toBeLessThanOrEqual(1);
+
+          if (scenario.name === "weekday") {
+            await expect(el(page, "market-weekend")).toHaveCount(0);
+          } else {
+            // «Weekend» once, at the top; grey dots in the rows
+            await expect(el(page, "market-weekend")).toHaveText(/^Выходные: рынок закрыт, откроется в (понедельник|воскресенье) \d\d:\d\d$/);
+            const visibleWeekend = await el(page, "market-sessions").evaluate((root) => {
+              const copy = root.cloneNode(true) as HTMLElement;
+              copy.querySelectorAll(".sr-only").forEach((n) => n.remove());
+              return (copy.textContent ?? "").split("Выходные").length - 1;
+            });
+            expect(visibleWeekend).toBe(1);
+          }
+          if (scenario.name === "day-plus") {
+            for (const id of ["asia", "london", "newyork"]) await expect(el(page, `market-${id}-timer`)).toHaveText(/^\d+ д \d+ ч \d+ мин$/);
+          }
+          expect(await noSideScroll(page)).toBe(true);
+          // the page scrolls inside its own container: a tall window shows the whole block
+          await page.setViewportSize({ width, height: 3600 });
+          await el(page, "market-sessions").screenshot({ path: `test-results/market-phone-${scenario.name}-${engine}-${width}.png` });
+        });
+      }
+    }
   });
 }
