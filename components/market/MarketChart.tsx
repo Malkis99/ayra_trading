@@ -1,22 +1,31 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { Star } from "lucide-react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronDown, Info, SlidersHorizontal, Star } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useOptionalGame } from "@/lib/game-context";
 import { formatString } from "@/lib/i18n";
 import { browserTimeZone } from "@/lib/timezones";
 import { cn } from "@/components/ui";
-import { CATEGORIES, CHART_INTERVALS, INSTRUMENTS, instrumentBySymbol, type ChartInterval, type InstrumentId } from "@/lib/market/instruments";
+import { useOutsideClose } from "@/components/ui/forms/popover";
+import { CATEGORIES, INSTRUMENTS, instrumentBySymbol, type ChartInterval, type InstrumentId } from "@/lib/market/instruments";
 import { displayZoneOf } from "@/lib/market/sessions";
 import { useMarketSettings } from "@/lib/market/settings-store";
 import { addTo, isFull, removeFrom } from "@/lib/market/watchlist";
-import { useChartPrefs, useWatchlist } from "@/lib/market/watchlist-store";
+import { useChartNotes, useChartPrefs, useChartView, useWatchlist } from "@/lib/market/watchlist-store";
+import { ChartNotes } from "./ChartNotes";
+import { ChartViewSettings } from "./ChartViewSettings";
+import { ChartWatchlistPanel } from "./ChartWatchlistPanel";
 import { InstrumentPicker } from "./InstrumentPicker";
+import { IntervalBar } from "./IntervalBar";
 import { SourceLine } from "./SourceLine";
 import { TradingViewWidget, widgetConfig } from "./TradingViewWidget";
 
-const CHART_HEIGHT = 460;
+/** The site's surfaces for TradingView's `backgroundColor` and `gridColor` (candle colours cannot be set there). */
+const CHART_BACKGROUND = "#18171f";
+const CHART_GRID = "rgba(163, 138, 209, 0.07)";
+const MIN_HEIGHT = 380;
+const WIDE_QUERY = "(min-width: 1024px)";
 
 /** The instrument in the address: `?symbol=` (our links) or `?tvwidgetsymbol=` (a click inside a widget). */
 function symbolFromUrl(): { id?: InstrumentId; unknown?: string } {
@@ -34,10 +43,50 @@ function keepInUrl(id: InstrumentId) {
   window.history.replaceState(window.history.state, "", url.toString());
 }
 
+function useWide(): boolean {
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia(WIDE_QUERY);
+    const update = () => setWide(mq.matches);
+    update();
+    mq.addEventListener?.("change", update);
+    return () => mq.removeEventListener?.("change", update);
+  }, []);
+  return wide;
+}
+
+/** The chart row takes the height of the page's scroll area (minus its padding and the toolbar above the chart). */
+function useFillHeight(row: React.RefObject<HTMLElement>, toolbar: React.RefObject<HTMLElement>, shown: boolean): number {
+  const [height, setHeight] = useState(MIN_HEIGHT);
+  const measure = useCallback(() => {
+    const main = row.current?.closest("main");
+    if (!main) return;
+    const style = getComputedStyle(main);
+    const free = main.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom) - (toolbar.current?.offsetHeight ?? 0) - 12;
+    setHeight(Math.max(MIN_HEIGHT, Math.round(free)));
+  }, [row, toolbar]);
+  useEffect(() => {
+    if (!shown) return;
+    measure();
+    const main = row.current?.closest("main");
+    if (!main || typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const ro = new ResizeObserver(measure);
+    ro.observe(main);
+    if (toolbar.current) ro.observe(toolbar.current);
+    return () => ro.disconnect();
+  }, [measure, row, toolbar, shown]);
+  return height;
+}
+
 /**
- * Market → Chart (PR 1.3): TradingView's chart of an instrument from our catalog only, opened on the latest data.
- * The widget's own toolbar is hidden (its «Indicators» menu has «buy / sell» ratings); the timeframe is our buttons,
- * 1 hour by default, the chosen one is remembered. Times in the display time of the sessions block.
+ * Market → Chart (PR 1.3, 1.3b): a workspace as tall as the window — TradingView's chart of a catalog instrument with
+ * the site's background and grid, our timeframe bar with favourites, the Watchlist panel beside it (a click switches
+ * the chart), notes per instrument, and «Set up the view». The widget's top toolbar stays hidden (its «Indicators»
+ * menu has «buy / sell» ratings); its left drawing toolbar is on by default — drawings are not saved by the widget.
  */
 export function MarketChart() {
   const { dict, lang } = useApp();
@@ -45,10 +94,22 @@ export function MarketChart() {
   const game = useOptionalGame();
   const [prefs, setPrefs, prefsLoaded] = useChartPrefs();
   const [watchlist, setWatchlist, listLoaded] = useWatchlist();
+  const [view, setView, viewLoaded] = useChartView();
+  const [notes, setNotes, notesLoaded] = useChartNotes();
   const [settings, , settingsLoaded] = useMarketSettings();
   const [origin, setOrigin] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [editingView, setEditingView] = useState(false);
+  const wide = useWide();
+  const row = useRef<HTMLDivElement>(null);
+  const toolbar = useRef<HTMLDivElement>(null);
+  const pickerButton = useRef<HTMLButtonElement>(null);
+  const pickerPanel = useRef<HTMLDivElement>(null);
+  useOutsideClose([pickerButton, pickerPanel], picking, () => setPicking(false));
+  const loaded = ready && listLoaded && viewLoaded && notesLoaded && settingsLoaded && !!origin;
+  const height = useFillHeight(row, toolbar, loaded);
 
   // The address wins over the last instrument on this device
   useEffect(() => {
@@ -62,7 +123,19 @@ export function MarketChart() {
     setReady(true);
   }, [prefsLoaded, ready, prefs, setPrefs, t]);
 
-  if (!ready || !listLoaded || !settingsLoaded || !origin) return <section className="card min-h-[480px]" data-testid="market-chart" aria-busy="true" />;
+  useEffect(() => {
+    if (!picking) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setPicking(false);
+        pickerButton.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [picking]);
+
+  if (!loaded) return <section className="min-h-[480px]" data-testid="market-chart" aria-busy="true" />;
 
   const id = prefs.instrument;
   const inst = INSTRUMENTS[id];
@@ -73,105 +146,156 @@ export function MarketChart() {
 
   const pick = (next: InstrumentId) => {
     setNotice(null);
+    setPicking(false);
     setPrefs({ ...prefs, instrument: next });
     keepInUrl(next);
   };
   const chooseInterval = (interval: ChartInterval) => setPrefs({ ...prefs, interval });
 
+  const panel = view.watchlist && (
+    <ChartWatchlistPanel
+      ids={watchlist.ids}
+      current={id}
+      onPick={pick}
+      folded={view.watchlistFolded}
+      onFold={(watchlistFolded) => setView({ ...view, watchlistFolded })}
+      side={view.watchlistSide}
+      wide={wide}
+    />
+  );
+  const notesBlock = (className?: string) => view.notes && <ChartNotes key={id} id={id} notes={notes} onChange={setNotes} className={className} />;
+  // Beside the chart only on wide screens; on phones everything goes under it
+  const notesBeside = wide && view.notes && view.notesPlace === "side" && view.watchlist && !view.watchlistFolded;
+  const side = wide && (panel || notesBeside) && (
+    <div className="flex min-h-0 shrink-0 flex-col gap-3" data-testid="market-chart-side">
+      {panel}
+      {notesBeside && notesBlock("w-60 max-h-[45%]")}
+    </div>
+  );
+
   return (
-    <section className="card space-y-3" data-testid="market-chart" aria-labelledby="market-chart-title">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <h2 id="market-chart-title" className="font-serif text-lg font-bold text-tx" data-testid="market-chart-name">
-            {name}
-          </h2>
-          <p className="text-[11px] text-mu">{inst.ticker}</p>
+    <section className="space-y-2" data-testid="market-chart" aria-labelledby="market-chart-title">
+      <div ref={toolbar} className="space-y-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div className="relative min-w-0">
+            <button
+              ref={pickerButton}
+              type="button"
+              onClick={() => setPicking((v) => !v)}
+              aria-expanded={picking}
+              aria-controls="market-chart-picker-panel"
+              aria-label={`${t.chart.change}: ${name}`}
+              className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-s2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
+              data-testid="market-chart-change"
+            >
+              <span className="min-w-0">
+                <span id="market-chart-title" className="block truncate font-serif text-lg font-bold leading-tight text-tx" data-testid="market-chart-name">
+                  {name}
+                </span>
+                <span className="block text-[11px] text-mu">{inst.ticker}</span>
+              </span>
+              <ChevronDown size={16} aria-hidden="true" className={cn("shrink-0 text-mu transition-transform motion-reduce:transition-none", picking && "rotate-180")} />
+            </button>
+          </div>
+          <IntervalBar value={prefs.interval} favorites={prefs.favorites} onChange={chooseInterval} onFavorites={(favorites) => setPrefs({ ...prefs, favorites })} />
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setWatchlist(inList ? removeFrom(watchlist, id) : addTo(watchlist, id))}
+              disabled={listFull}
+              aria-pressed={inList}
+              title={listFull ? formatString(t.watchlist.full, { n: watchlist.ids.length }) : undefined}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi",
+                inList ? "border-vi/70 bg-pri/25 text-tx" : "border-line text-tx hover:border-vi/50",
+                listFull && "cursor-not-allowed opacity-50"
+              )}
+              data-testid="market-chart-watch"
+            >
+              <Star size={14} aria-hidden="true" className={inList ? "fill-current text-vi" : undefined} />
+              {inList ? t.chart.inList : t.chart.addToList}
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditingView(true)}
+              aria-haspopup="dialog"
+              aria-label={t.chart.view.open}
+              title={t.chart.view.open}
+              className="grid h-8 w-8 place-items-center rounded-md border border-line text-mu hover:border-vi/50 hover:text-tx focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
+              data-testid="market-chart-view-open"
+            >
+              <SlidersHorizontal size={15} aria-hidden="true" />
+            </button>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setWatchlist(inList ? removeFrom(watchlist, id) : addTo(watchlist, id))}
-          disabled={listFull}
-          aria-pressed={inList}
-          title={listFull ? formatString(t.watchlist.full, { n: watchlist.ids.length }) : undefined}
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi",
-            inList ? "border-vi/70 bg-pri/25 text-tx" : "border-line text-tx hover:border-vi/50",
-            listFull && "cursor-not-allowed opacity-50"
-          )}
-          data-testid="market-chart-watch"
-        >
-          <Star size={14} aria-hidden="true" className={inList ? "fill-current text-vi" : undefined} />
-          {inList ? t.chart.inList : t.chart.addToList}
-        </button>
-      </div>
-      {listFull && (
-        <p className="text-xs text-mu" data-testid="market-chart-full">
-          {formatString(t.watchlist.full, { n: watchlist.ids.length })}
-        </p>
-      )}
 
-      <div role="radiogroup" aria-label={t.chart.intervalsLabel} className="flex flex-wrap gap-1" data-testid="market-chart-intervals">
-        {CHART_INTERVALS.map((interval) => (
-          <button
-            key={interval}
-            type="button"
-            role="radio"
-            aria-checked={prefs.interval === interval}
-            onClick={() => chooseInterval(interval)}
-            className={cn(
-              "min-w-[2.75rem] rounded-md px-2.5 py-1.5 text-xs font-semibold tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi",
-              prefs.interval === interval ? "bg-pri text-tx" : "bg-s2/60 text-mu hover:text-tx"
-            )}
-            data-testid={`market-chart-interval-${interval}`}
-          >
-            {t.chart.intervals[interval]}
-          </button>
-        ))}
-      </div>
-
-      {notice && (
-        <p className="rounded-md bg-s2/50 px-3 py-2 text-xs text-tx" role="status" data-testid="market-chart-notice">
-          {notice}
-        </p>
-      )}
-
-      <TradingViewWidget
-        key={`${inst.symbol}-${prefs.interval}-${zone}-${lang}`}
-        widget="advanced-chart"
-        config={widgetConfig(
-          {
-            autosize: true,
-            symbol: inst.symbol,
-            interval: prefs.interval,
-            timezone: zone === "UTC" ? "Etc/UTC" : zone,
-            style: "1",
-            hide_top_toolbar: true,
-            hide_side_toolbar: true,
-            hide_volume: true,
-            allow_symbol_change: false,
-            save_image: false,
-            calendar: false,
-            details: false,
-            hotlist: false,
-            withdateranges: false,
-            support_host: "https://www.tradingview.com",
-          },
-          lang === "en" ? "en" : "ru",
-          origin
+        {picking && (
+          <div ref={pickerPanel} id="market-chart-picker-panel" className="rounded-xl border border-line bg-s1 p-3 shadow-float">
+            <InstrumentPicker idPrefix="market-chart" selected={(x) => x === id} onPick={pick} initialCategory={CATEGORIES.find((c) => c.ids.includes(id))?.id} />
+          </div>
         )}
-        height={CHART_HEIGHT}
-        label={formatString(t.chart.label, { name })}
-        loadingText={t.overview.loading}
-        errorText={t.overview.unavailable}
-        retryLabel={t.overview.retry}
-        testId="market-chart-widget"
-      />
-      <SourceLine delay={inst.delay} testId="market-chart-source" />
-
-      <div className="space-y-2 border-t border-line pt-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-mu">{t.chart.picker}</h3>
-        <InstrumentPicker idPrefix="market-chart" selected={(x) => x === id} onPick={pick} initialCategory={CATEGORIES.find((c) => c.ids.includes(id))?.id} />
+        {notice && (
+          <p className="rounded-md bg-s2/50 px-3 py-2 text-xs text-tx" role="status" data-testid="market-chart-notice">
+            {notice}
+          </p>
+        )}
       </div>
+
+      <div ref={row} className={cn("flex gap-3", view.watchlistSide === "left" && "flex-row-reverse")} style={{ height }} data-testid="market-chart-row">
+        <div className="min-w-0 flex-1 overflow-hidden rounded-xl border border-line bg-s1">
+          <TradingViewWidget
+            key={`${inst.symbol}-${prefs.interval}-${zone}-${lang}-${view.drawing}`}
+            widget="advanced-chart"
+            config={widgetConfig(
+              {
+                autosize: true,
+                width: "100%",
+                height: "100%",
+                symbol: inst.symbol,
+                interval: prefs.interval,
+                timezone: zone === "UTC" ? "Etc/UTC" : zone,
+                style: "1",
+                backgroundColor: CHART_BACKGROUND,
+                gridColor: CHART_GRID,
+                hide_top_toolbar: true,
+                hide_side_toolbar: !view.drawing,
+                hide_volume: true,
+                allow_symbol_change: false,
+                save_image: false,
+                calendar: false,
+                details: false,
+                hotlist: false,
+                withdateranges: false,
+                support_host: "https://www.tradingview.com",
+              },
+              lang === "en" ? "en" : "ru",
+              origin
+            )}
+            height={height - 2}
+            label={formatString(t.chart.label, { name })}
+            loadingText={t.overview.loading}
+            errorText={t.overview.unavailable}
+            retryLabel={t.overview.retry}
+            testId="market-chart-widget"
+          />
+        </div>
+        {side}
+      </div>
+
+      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+        <SourceLine delay={inst.delay} testId="market-chart-source" />
+        {view.drawing && (
+          <p className="flex items-start gap-1.5 text-[11px] text-mu" data-testid="market-chart-drawing-note">
+            <Info size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <span>{t.chart.drawingNote}</span>
+          </p>
+        )}
+      </div>
+
+      {!wide && panel}
+      {view.notes && !notesBeside && notesBlock()}
+
+      <ChartViewSettings open={editingView} onClose={() => setEditingView(false)} value={view} onChange={setView} />
     </section>
   );
 }

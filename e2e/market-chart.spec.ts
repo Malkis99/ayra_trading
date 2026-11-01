@@ -75,11 +75,13 @@ for (const engine of ["chromium", "webkit"] as const) {
         });
 
         // the picker opens on the category of the shown instrument (DXY: indices)
+        await el(page, "market-chart-change").click();
         await expect(page.locator("#market-chart-cat-tab-indices")).toHaveAttribute("aria-selected", "true");
         await page.locator("#market-chart-cat-tab-forex").click();
         await el(page, "market-chart-pick-eurusd").click();
         await expect(el(page, "market-chart-name")).toHaveText("EUR/USD");
-        await expect(el(page, "market-chart-pick-eurusd")).toHaveAttribute("aria-pressed", "true");
+        // the picker closes after a pick
+        await expect(el(page, "market-chart-picker")).toHaveCount(0);
         await expect(page).toHaveURL(/symbol=FX%3AEURUSD/);
         await expect(stubText(page, "market-chart-widget")).toContainText("FX:EURUSD");
         await expect(el(page, "market-chart-source")).toHaveText("Источник: TradingView · в реальном времени");
@@ -101,10 +103,12 @@ for (const engine of ["chromium", "webkit"] as const) {
     test("the catalog search: by name or ticker; nothing found says so", async () => {
       const { page } = await guestPage(browser, 360);
       await page.goto("/market?tab=chart");
+      await el(page, "market-chart-change").click();
       await el(page, "market-chart-search").fill("золото");
       await expect(el(page, "market-chart-picker").getByRole("button")).toHaveCount(1);
       await el(page, "market-chart-pick-gold").click();
       await expect(el(page, "market-chart-name")).toHaveText("Золото");
+      await el(page, "market-chart-change").click();
       await el(page, "market-chart-search").fill("btc");
       await expect(el(page, "market-chart-pick-btc")).toBeVisible();
       await el(page, "market-chart-search").fill("aapl");
@@ -178,6 +182,8 @@ for (const engine of ["chromium", "webkit"] as const) {
         await expect(el(page, "market-chart-name")).toHaveText("EUR/USD");
         await expect(el(page, "market-chart-watch")).toHaveAttribute("aria-pressed", "true");
         await expect(el(page, "market-chart-watch")).toHaveText("В списке");
+        await el(page, "market-chart-change").click();
+        await expect(page.locator("#market-chart-cat-tab-forex")).toHaveAttribute("aria-selected", "true");
         await page.locator("#market-chart-cat-tab-commodities").click();
         await el(page, "market-chart-pick-oil").click();
         await expect(el(page, "market-chart-watch")).toHaveText("В список");

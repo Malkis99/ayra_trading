@@ -53,8 +53,8 @@ describe("the Watchlist (PR 1.3)", () => {
   });
 
   it("chart prefs: DXY and 1 hour by default, wrong values ignored", () => {
-    expect(normalizeChartPrefs(null)).toEqual({ instrument: "dxy", interval: "60" });
-    expect(normalizeChartPrefs({ instrument: "gold", interval: "240" })).toEqual({ instrument: "gold", interval: "240" });
-    expect(normalizeChartPrefs({ instrument: "aapl", interval: "1" })).toEqual({ instrument: "dxy", interval: "60" });
+    expect(normalizeChartPrefs(null)).toMatchObject({ instrument: "dxy", interval: "60" });
+    expect(normalizeChartPrefs({ instrument: "gold", interval: "240" })).toMatchObject({ instrument: "gold", interval: "240" });
+    expect(normalizeChartPrefs({ instrument: "aapl", interval: "2" })).toMatchObject({ instrument: "dxy", interval: "60" });
   });
 });

@@ -115,10 +115,12 @@ export const symbolsOf = (ids: readonly InstrumentId[]) => ids.map((id) => INSTR
 
 export const isCategoryId = (v: string | null): v is CategoryId => !!v && CATEGORIES.some((c) => c.id === v);
 
-/** Chart timeframes (PR 1.3): our own buttons — the widget's toolbar, with its «Indicators» menu, is hidden. */
-export const CHART_INTERVALS = ["5", "15", "60", "240", "D", "W"] as const;
+/** Chart timeframes (PR 1.3, 1.3b): our own buttons — the widget's top toolbar, with its «Indicators» menu, is hidden. */
+export const CHART_INTERVALS = ["1", "3", "5", "15", "30", "60", "120", "240", "D", "W", "M"] as const;
 export type ChartInterval = (typeof CHART_INTERVALS)[number];
 export const isChartInterval = (v: unknown): v is ChartInterval => typeof v === "string" && (CHART_INTERVALS as readonly string[]).includes(v);
 /** Owner's decision 2026-11-01: 1 hour by default, the chosen one is remembered. */
 export const DEFAULT_CHART_INTERVAL: ChartInterval = "60";
+/** The standard bar (owner 2026-11-01): 1m, 5m, 15m, 1h, 4h, 1D; «+» adds or removes favourites. */
+export const DEFAULT_FAVORITE_INTERVALS: readonly ChartInterval[] = ["1", "5", "15", "60", "240", "D"];
 export const DEFAULT_CHART_INSTRUMENT: InstrumentId = "dxy";
