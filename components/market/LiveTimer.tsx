@@ -21,8 +21,8 @@ export function countdownText(ms: number, format: "clock" | "human", words: Dura
     const pad = (n: number) => String(n).padStart(2, "0");
     return `${pad(Math.floor(seconds / 3600))}:${pad(Math.floor((seconds % 3600) / 60))}:${pad(seconds % 60)}`;
   }
-  // «clock» drops the seconds of HH:MM:SS (24:52:21 → 1 д 0 ч 52 мин); «human» rounds up, as before
-  const { d, h, m } = format === "clock" ? splitDuration(Math.floor(seconds / 60) * 60_000) : splitDuration(ms);
+  // one rule everywhere (owner 2026-11-01): the minutes round up, in the ring as in «in …» (24:52:21 → 1 д 0 ч 53 мин)
+  const { d, h, m } = splitDuration(ms);
   const parts: string[] = [];
   if (d) parts.push(formatString(words.d, { n: d }));
   if (d || h) parts.push(formatString(words.h, { n: h }));
