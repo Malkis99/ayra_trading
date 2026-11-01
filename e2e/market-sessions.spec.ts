@@ -145,22 +145,65 @@ for (const engine of ["chromium", "webkit"] as const) {
       });
     }
 
-    test("the display time: my zone or UTC — everything follows and is kept after a reload", async () => {
+    test("the display time: New York and my zone in the block, UTC or any zone in the settings; kept after a reload", async () => {
       const page = await guestPage(browser, 1440, MONDAY);
       await page.goto("/market");
+      await expect(el(page, "market-display-utc")).toHaveCount(0);
+      await expect(el(page, "market-display-profile")).toHaveText("Мой пояс · UTC+4");
       await el(page, "market-display-profile").click();
       await expect(el(page, "market-london-hours")).toHaveText("11:00–20:00");
       await expect(el(page, "market-newyork-hours")).toHaveText("17:30–02:00 (+1)");
       await expect(el(page, "market-london-mine")).toHaveCount(0);
-      await el(page, "market-display-utc").click();
+      // UTC from «Set up» → General
+      await el(page, "market-settings-open").click();
+      await el(page, "market-settings-display-utc").click();
+      await el(page, "market-settings-done").click();
       await expect(el(page, "market-london-hours")).toHaveText("07:00–16:00");
       await expect(el(page, "market-london-mine")).toHaveText("У тебя: 11:00–20:00");
+      await expect(el(page, "market-display-newyork")).toHaveAttribute("aria-checked", "false");
+      await expect(el(page, "market-display-profile")).toHaveAttribute("aria-checked", "false");
+      await expect(el(page, "market-display-elsewhere")).toHaveText("Время показа: UTC, меняется в настройках");
       await page.reload();
-      await expect(el(page, "market-display-utc")).toHaveAttribute("aria-checked", "true");
       await expect(el(page, "market-london-hours")).toHaveText("07:00–16:00");
-      await el(page, "market-display-zone").click();
-      await expect(page.locator("#market-display-zone")).toBeVisible();
+      await expect(el(page, "market-display-elsewhere")).toBeVisible();
+      // any zone from the list (search by city) is in the settings
+      await el(page, "market-settings-open").click();
+      await el(page, "market-settings-display-zone").click();
+      await expect(page.locator("#market-settings-display-zone")).toBeVisible();
     });
+
+    for (const width of [1440, 360]) {
+      test(`${width}: three main cards — one row of equal columns on a wide screen, one under another on a phone; «What is next» under the table`, async () => {
+        const page = await guestPage(browser, width, MONDAY);
+        await page.goto("/market");
+        const box = async (id: string) => (await el(page, id).boundingBox())!;
+        const [a, l, n] = [await box("market-card-asia"), await box("market-card-london"), await box("market-card-newyork")];
+        const block = await box("market-sessions");
+        if (width === 1440) {
+          expect(Math.abs(a.y - l.y)).toBeLessThan(1);
+          expect(Math.abs(l.y - n.y)).toBeLessThan(1);
+          expect(Math.abs(a.width - l.width)).toBeLessThan(1);
+          expect(Math.abs(l.width - n.width)).toBeLessThan(1);
+          // together they span the block
+          expect(n.x + n.width - a.x).toBeGreaterThan(block.width - 60);
+        } else {
+          expect(l.y).toBeGreaterThan(a.y + a.height - 1);
+          expect(n.y).toBeGreaterThan(l.y + l.height - 1);
+          expect(a.width).toBeGreaterThan(block.width - 60);
+        }
+        const table = await box("market-subsessions");
+        const next = await box("market-next");
+        expect(table.y).toBeGreaterThan(Math.max(a.y + a.height, n.y + n.height) - 1);
+        expect(next.y).toBeGreaterThan(table.y + table.height - 1);
+        expect(next.width).toBeGreaterThan(block.width - 60);
+        // the ring is large and the countdown sits inside it
+        const ring = await box("market-london-ring");
+        const timer = await box("market-london-timer");
+        expect(ring.width).toBeGreaterThan(140);
+        expect(timer.x).toBeGreaterThan(ring.x);
+        expect(timer.x + timer.width).toBeLessThan(ring.x + ring.width);
+      });
+    }
 
     test("«Set up»: session hours typed in New York time, kept in the city's time; wrong ones not saved; reset", async () => {
       const page = await guestPage(browser, 1440, MONDAY);

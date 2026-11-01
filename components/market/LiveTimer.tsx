@@ -32,11 +32,28 @@ export function Countdown({ to, format = "clock", className, "data-testid": test
 }
 
 /** How much of the session has passed: a ring that fills during the session; empty while it is closed. */
-export function ProgressRing({ start, end, open, size = 64, children, "data-testid": testId }: { start: number; end: number; open: boolean; size?: number; children?: React.ReactNode; "data-testid"?: string }) {
+export function ProgressRing({
+  start,
+  end,
+  open,
+  size = 64,
+  stroke = 6,
+  children,
+  "data-testid": testId,
+}: {
+  start: number;
+  end: number;
+  open: boolean;
+  size?: number;
+  /** Line width in the ring's own 64-unit box. */
+  stroke?: number;
+  children?: React.ReactNode;
+  "data-testid"?: string;
+}) {
   const { dict } = useApp();
   const now = useClock("second");
   const p = open && now ? progressOf({ id: "london", start, end }, now) : 0;
-  const r = 26;
+  const r = 32 - stroke / 2 - 1;
   const c = 2 * Math.PI * r;
   const percent = Math.floor(p * 100);
   return (
@@ -52,8 +69,8 @@ export function ProgressRing({ start, end, open, size = 64, children, "data-test
       data-progress={percent}
     >
       <svg viewBox="0 0 64 64" className="absolute inset-0 h-full w-full -rotate-90" aria-hidden="true">
-        <circle cx="32" cy="32" r={r} fill="none" strokeWidth="6" className="stroke-s2" />
-        {open && <circle cx="32" cy="32" r={r} fill="none" strokeWidth="6" strokeLinecap="round" className="stroke-vi" strokeDasharray={`${c * p} ${c}`} />}
+        <circle cx="32" cy="32" r={r} fill="none" strokeWidth={stroke} className="stroke-s2" />
+        {open && <circle cx="32" cy="32" r={r} fill="none" strokeWidth={stroke} strokeLinecap="round" className="stroke-vi" strokeDasharray={`${c * p} ${c}`} />}
       </svg>
       <span className="relative text-vi">{children}</span>
     </div>

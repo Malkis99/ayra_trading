@@ -154,40 +154,70 @@ export function SessionsClock() {
 
   const killzoneOf: Partial<Record<StatusId, WindowDef>> = { london: kzDefs[0], newyork: kzDefs[1] };
 
+  /**
+   * A main session card (PR 1.1c, owner's correction): noticeable — a soft gradient and a border / glow by status —
+   * a large filling ring in the middle with the HH:MM:SS countdown inside, the name and status on top, the hours and
+   * the group under the ring, its killzone as a compact block. Only these countdowns tick every second.
+   */
   const card = (id: MainSessionId) => {
     const state = stateOf(id);
     const occ = currentOrNext(listOf(id), now);
     const target = targetOf(id);
     const kz = killzoneOf[id];
     const kzTarget = kz ? targetOf(kz.id) : undefined;
+    const group = defs[id].group as SessionGroup;
+    const open = state === "open";
     return (
-      <li key={id} className={cn("rounded-lg p-3", state === "open" ? "bg-pri/15 ring-1 ring-vi/40" : "bg-s2/50")} data-testid={`market-card-${id}`} data-state={state}>
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="font-serif text-base font-bold text-tx">{nameOf(id)}</h3>
+      <li
+        key={id}
+        className={cn(
+          "flex flex-col rounded-xl border p-4 transition-shadow motion-reduce:transition-none",
+          open
+            ? "border-vi/60 bg-gradient-to-b from-pri/35 via-pri/10 to-s1 shadow-[0_0_28px_-6px_rgba(163,138,209,0.45)]"
+            : "border-line bg-gradient-to-b from-s2/80 to-s1"
+        )}
+        data-testid={`market-card-${id}`}
+        data-state={state}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h3 className="font-serif text-lg font-bold text-tx">{nameOf(id)}</h3>
+            <Status state={state} testId={`market-${id}-status`} />
+          </div>
           {hint(id, sessionHint(id))}
         </div>
-        <div className="mt-1 flex items-center gap-3">
-          <ProgressRing start={occ?.start ?? 0} end={occ?.end ?? 1} open={state === "open"} size={44} data-testid={`market-${id}-ring`} />
-          <div className="min-w-0 space-y-0.5">
-            <Status state={state} testId={`market-${id}-status`} />
+
+        <div className="my-3 flex justify-center">
+          <ProgressRing start={occ?.start ?? 0} end={occ?.end ?? 1} open={open} size={148} stroke={3.5} data-testid={`market-${id}-ring`}>
             {target !== undefined && (
-              <p className="leading-tight">
-                <span className="block text-[11px] text-mu">{state === "open" ? t.status.closesIn : t.status.opensIn}</span>
-                <Countdown to={target} className="font-mono text-lg font-semibold tabular-nums text-tx" data-testid={`market-${id}-timer`} />
-              </p>
+              <span className="flex flex-col items-center leading-tight">
+                <span className="text-[11px] text-mu">{open ? t.status.closesIn : t.status.opensIn}</span>
+                <Countdown to={target} className="font-mono text-xl font-semibold tabular-nums text-tx" data-testid={`market-${id}-timer`} />
+              </span>
             )}
-          </div>
+          </ProgressRing>
         </div>
-        <p className="text-xs tabular-nums text-mu" data-testid={`market-${id}-hours`}>
-          {hoursLine(id)}
-        </p>
-        {showMine && (
-          <p className="text-[11px] tabular-nums text-mu" data-testid={`market-${id}-mine`}>
-            {mineLine(id)}
+
+        <div className="text-center">
+          <p className="text-sm tabular-nums text-tx" data-testid={`market-${id}-hours`}>
+            {hoursLine(id)}
           </p>
-        )}
+          {showMine && (
+            <p className="text-[11px] tabular-nums text-mu" data-testid={`market-${id}-mine`}>
+              {mineLine(id)}
+            </p>
+          )}
+          <p className="text-[11px] text-mu" data-testid={`market-${id}-group`}>
+            {t.groups[group]}
+          </p>
+        </div>
+
         {kz && (
-          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-line/60 pt-2 text-xs" data-testid={`market-card-${kz.id}`} data-state={stateOf(kz.id)}>
+          <div
+            className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md bg-s1/60 px-3 py-2 text-xs"
+            data-testid={`market-card-${kz.id}`}
+            data-state={stateOf(kz.id)}
+          >
             <span className="font-semibold text-tx">{t.killzone}</span>
             <span className="tabular-nums text-mu" data-testid={`market-${kz.id}-hours`}>
               {hoursLine(kz.id)}
@@ -275,37 +305,20 @@ export function SessionsClock() {
         </Button>
       </div>
 
-      <DisplayZonePicker idPrefix="market" value={settings.display} profileZone={profileZone} onChange={(display) => setSettings({ ...settings, display })} />
+      <DisplayZonePicker
+        idPrefix="market"
+        quick
+        zoneName={zone === "UTC" ? "UTC" : timeZoneLabel(zone, lang, new Date(now))}
+        value={settings.display}
+        profileZone={profileZone}
+        onChange={(display) => setSettings({ ...settings, display })}
+      />
 
       <p className="text-sm text-tx" data-testid="market-active-now">
         {active.length ? formatString(t.activeNow, { list: active.join(", ") }) : weekend ? t.activeWeekend : t.activeNone}
       </p>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_16rem]">
-        <ul className="grid gap-2 sm:grid-cols-3">{MAIN_SESSIONS.map(card)}</ul>
-
-        <div className="space-y-2 lg:order-none" data-testid="market-next">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-mu">{t.next.title}</h3>
-          {weekend && (
-            <p className="text-xs text-tx" role="status" data-testid="market-weekend">
-              {formatString(t.next.weekend, {
-                local: formatDate(lang, nextForexOpen(now), { timeZone: zone, weekday: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }),
-              })}
-            </p>
-          )}
-          <ol className="space-y-1.5">
-            {data.events.map((e) => (
-              <li key={`${e.id}-${e.edge}-${e.at}`} className="rounded-md bg-s2/50 px-3 py-2" data-testid="market-next-item">
-                <span className="block text-sm text-tx">{eventText(e)}</span>
-                <span className="text-xs tabular-nums text-mu">
-                  {dayPrefix(e.at)}
-                  {clockOf(e.at, zone)} · {formatString(t.next.in, { left: "" }).trim()} <Countdown to={e.at} format="human" className="font-semibold text-tx" />
-                </span>
-              </li>
-            ))}
-          </ol>
-        </div>
-      </div>
+      <ul className="grid gap-3 md:grid-cols-3">{MAIN_SESSIONS.map(card)}</ul>
 
       <div className="space-y-1">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-mu">{t.subTitle}</h3>
@@ -313,6 +326,28 @@ export function SessionsClock() {
           {tableRow("overlap")}
           {SUB_SESSIONS.map(tableRow)}
         </ul>
+      </div>
+
+      <div className="space-y-2" data-testid="market-next">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-mu">{t.next.title}</h3>
+        {weekend && (
+          <p className="text-xs text-tx" role="status" data-testid="market-weekend">
+            {formatString(t.next.weekend, {
+              local: formatDate(lang, nextForexOpen(now), { timeZone: zone, weekday: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }),
+            })}
+          </p>
+        )}
+        <ol className="grid gap-2 md:grid-cols-3">
+          {data.events.map((e) => (
+            <li key={`${e.id}-${e.edge}-${e.at}`} className="rounded-md bg-s2/50 px-3 py-2" data-testid="market-next-item">
+              <span className="block text-sm text-tx">{eventText(e)}</span>
+              <span className="text-xs tabular-nums text-mu">
+                {dayPrefix(e.at)}
+                {clockOf(e.at, zone)} · {formatString(t.next.in, { left: "" }).trim()} <Countdown to={e.at} format="human" className="font-semibold text-tx" />
+              </span>
+            </li>
+          ))}
+        </ol>
       </div>
 
       <div>

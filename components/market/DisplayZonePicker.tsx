@@ -10,16 +10,36 @@ import { NEW_YORK, type DisplayChoice } from "@/lib/market/sessions";
 /**
  * Display time of the sessions block: New York (default), my zone from the profile, UTC, or another zone from the
  * list (search by city). No fixed «UTC+N» choices.
+ *
+ * `quick` (the block itself): only New York and my zone; when the settings chose UTC or another zone, neither is
+ * marked and a line says where it is changed.
  */
-export function DisplayZonePicker({ value, profileZone, onChange, idPrefix }: { value: DisplayChoice; profileZone: string; onChange: (v: DisplayChoice) => void; idPrefix: string }) {
+export function DisplayZonePicker({
+  value,
+  profileZone,
+  onChange,
+  idPrefix,
+  quick = false,
+  zoneName,
+}: {
+  value: DisplayChoice;
+  profileZone: string;
+  onChange: (v: DisplayChoice) => void;
+  idPrefix: string;
+  quick?: boolean;
+  /** Name of the display zone, for the line shown when it is set in the settings. */
+  zoneName?: string;
+}) {
   const { dict } = useApp();
   const t = dict.market.sessions.display;
-  const options: { kind: DisplayChoice["kind"]; label: string }[] = [
+  const all: { kind: DisplayChoice["kind"]; label: string }[] = [
     { kind: "newyork", label: t.newyork },
     { kind: "profile", label: `${t.profile} · ${timeZoneOffsetLabel(profileZone)}` },
     { kind: "utc", label: t.utc },
     { kind: "zone", label: t.other },
   ];
+  const options = quick ? all.slice(0, 2) : all;
+  const elsewhere = quick && (value.kind === "utc" || value.kind === "zone");
   return (
     <div className="space-y-2" data-testid={`${idPrefix}-display`}>
       <div role="radiogroup" aria-label={t.label} className="flex flex-wrap gap-1.5">
@@ -43,7 +63,12 @@ export function DisplayZonePicker({ value, profileZone, onChange, idPrefix }: { 
           );
         })}
       </div>
-      {value.kind === "zone" && (
+      {elsewhere && (
+        <p className="text-xs text-mu" data-testid={`${idPrefix}-display-elsewhere`}>
+          {t.elsewhere.replace("{zone}", zoneName ?? "")}
+        </p>
+      )}
+      {!quick && value.kind === "zone" && (
         <TimezoneSelect id={`${idPrefix}-display-zone`} label={t.pick} value={value.zone} onChange={(zone) => onChange({ kind: "zone", zone })} />
       )}
     </div>

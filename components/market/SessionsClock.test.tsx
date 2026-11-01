@@ -130,15 +130,24 @@ describe("Sessions: live cards in the display time (New York by default)", () =>
     expect(text("market-london-timer")).toBe("07:28:55");
   });
 
-  it("the display time: my zone, UTC — everything follows; kept on the device", () => {
+  it("the display time: only New York and my zone in the block; UTC from the settings — everything follows; kept", () => {
     at(MONDAY);
     const { unmount } = render(<SessionsClock />);
+    expect(screen.queryByTestId("market-display-utc")).toBeNull();
+    expect(screen.queryByTestId("market-display-zone")).toBeNull();
+    expect(text("market-display-profile")).toBe("Мой пояс · UTC+4");
     fireEvent.click(screen.getByTestId("market-display-profile"));
     expect(text("market-london-hours")).toBe("11:00–20:00");
     expect(screen.queryByTestId("market-london-mine")).toBeNull();
     expect(text("market-sessions-now")).toContain("12:30");
-    fireEvent.click(screen.getByTestId("market-display-utc"));
+    fireEvent.click(screen.getByTestId("market-settings-open"));
+    fireEvent.click(screen.getByTestId("market-settings-display-utc"));
+    fireEvent.click(screen.getByTestId("market-settings-done"));
     expect(text("market-london-hours")).toBe("07:00–16:00");
+    // neither quick choice is marked; a line says where it is changed
+    expect(screen.getByTestId("market-display-newyork").getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByTestId("market-display-profile").getAttribute("aria-checked")).toBe("false");
+    expect(text("market-display-elsewhere")).toBe("Время показа: UTC, меняется в настройках");
     expect(text("market-newyorkKz-hours")).toBe("11:00–14:00");
     expect(screen.getAllByTestId("market-next-item")[0].textContent).toContain("09:00");
     unmount();
@@ -188,8 +197,8 @@ describe("Sessions: live cards in the display time (New York by default)", () =>
     AppStorage.setItem("ayra_market_killzones", JSON.stringify({ londonKz: { start: "03:00", end: "06:00" } }));
     render(<SessionsClock />);
     expect(text("market-londonKz-hours")).toBe("03:00–06:00");
-    fireEvent.click(screen.getByTestId("market-display-utc"));
     fireEvent.click(screen.getByTestId("market-settings-open"));
+    fireEvent.click(screen.getByTestId("market-settings-display-utc"));
     fireEvent.click(screen.getByRole("tab", { name: "Killzones" }));
     expect((screen.getByTestId("market-hours-londonKz-start") as HTMLInputElement).value).toBe("07:00");
     expect(text("market-hours-londonKz-local")).toBe("= 03:00–06:00 по местному времени Нью-Йорка");
