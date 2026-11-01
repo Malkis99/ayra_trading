@@ -5,6 +5,7 @@ import { BarChart3, CalendarDays, Eye, FlaskConical, Info, Landmark, LayoutGrid,
 import { useApp } from "@/lib/context";
 import { Chip, EmptyState, Tabs } from "@/components/ui";
 import { SessionsClock } from "@/components/market/SessionsClock";
+import { MarketOverview } from "@/components/market/MarketOverview";
 
 /** Market sections (owner's decision 2026-10-28, `docs/market-plan.md` section 8); Scanner comes later. */
 const MARKET_TABS = ["overview", "chart", "calendar", "news", "economy", "backtest", "watchlist"] as const;
@@ -26,10 +27,13 @@ export default function MarketPage() {
   const t = dict.market;
   const [tab, setTabState] = useState<MarketTab>("overview");
 
-  // The section is kept in the address (?tab=…): a link or a reload opens the same one
+  // The section is kept in the address (?tab=…): a link or a reload opens the same one.
+  // A click on a symbol in a TradingView widget comes back as ?tvwidgetsymbol=… and opens the Chart.
   useEffect(() => {
-    const fromUrl = new URLSearchParams(window.location.search).get("tab");
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get("tab");
     if (isMarketTab(fromUrl)) setTabState(fromUrl);
+    else if (params.has("tvwidgetsymbol")) setTabState("chart");
   }, []);
   const setTab = (next: MarketTab) => {
     setTabState(next);
@@ -69,7 +73,7 @@ export default function MarketPage() {
         {tab === "overview" ? (
           <>
             <SessionsClock />
-            {soon("overview")}
+            <MarketOverview />
           </>
         ) : (
           soon(tab)

@@ -1,4 +1,5 @@
 import { test, expect, webkit, chromium, type Browser, type Page } from "@playwright/test";
+import { stubTradingView } from "./helpers/tradingview";
 
 // Market sessions (PR 1.1, the live cards, 1.1b): seven sections; Asia (Tokyo), London and New York cards with live
 // countdowns and their killzones, the overlap, the sub-sessions, «What is next», the 24-hour bar, «Set up». Shown in
@@ -9,6 +10,7 @@ const ZONE = "Asia/Tbilisi";
 
 async function guestPage(browser: Browser, width: number, now: string, settings?: object): Promise<Page> {
   const context = await browser.newContext({ viewport: { width, height: 900 }, timezoneId: ZONE, reducedMotion: "reduce" });
+  await stubTradingView(context);
   const page = await context.newPage();
   await page.clock.install({ time: new Date(now) });
   // time moves only by clock.runFor (no real seconds slipping in between the checks)
@@ -334,7 +336,7 @@ for (const engine of ["chromium", "webkit"] as const) {
     test("seven sections, «Soon» where nothing is there yet, the section is kept in the address", async () => {
       const page = await guestPage(browser, 360, MONDAY);
       await page.goto("/market");
-      const tabs = page.getByRole("tab");
+      const tabs = page.getByRole("tablist", { name: "Разделы рынка" }).getByRole("tab");
       await expect(tabs).toHaveText(["Обзор", "График", "Календарь", "Новости", "Экономика", "Бэктест", "Список наблюдения"]);
       await page.getByRole("tab", { name: "Бэктест" }).click();
       await expect(page).toHaveURL(/tab=backtest/);
