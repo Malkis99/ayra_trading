@@ -115,9 +115,17 @@ describe("Sessions: live cards in the display time (New York by default)", () =>
   it("the weekend: «Выходные», the market opens on Sunday evening, Sydney opens first", () => {
     at("2026-03-07T12:00:00.000Z"); // Saturday
     render(<SessionsClock />);
+    // the word stays for screen readers only; the block says it once, at the top
     for (const id of ["asia", "london", "newyork", "sydney", "chicago"]) expect(text(`market-${id}-status`)).toBe("Выходные");
-    expect(text("market-weekend")).toContain("Рынок закрыт, откроется");
+    expect(text("market-weekend")).toBe("Выходные: рынок закрыт, откроется в воскресенье 17:00");
+    const visible = screen.getByTestId("market-sessions").cloneNode(true) as HTMLElement;
+    visible.querySelectorAll(".sr-only").forEach((n) => n.remove());
+    expect(visible.textContent?.match(/Выходные/g)).toHaveLength(1);
+    expect(screen.queryByTestId("market-active-now")).toBeNull();
     expect(screen.getAllByTestId("market-next-item")[0].textContent).toContain("Открывается Сидней");
+    // more than a day to the opening: days, hours and minutes, no seconds
+    expect(text("market-asia-timer")).toMatch(/^1 д \d{1,2} ч \d{1,2} мин$/);
+    expect(screen.getByTestId("market-asia-timer").getAttribute("data-long")).toBe("true");
   });
 
   it("a background tab: nothing ticks; on return the countdown is right at once", () => {

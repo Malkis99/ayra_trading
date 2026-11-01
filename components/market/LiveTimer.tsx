@@ -4,29 +4,61 @@ import React from "react";
 import { useApp } from "@/lib/context";
 import { formatString } from "@/lib/i18n";
 import { useClock } from "@/lib/market/live-clock";
-import { countdown, progressOf, splitDuration } from "@/lib/market/sessions";
+import { cn } from "@/components/ui";
+import { progressOf, splitDuration } from "@/lib/market/sessions";
+
+const DAY_SECONDS = 86_400;
+type DurationWords = { d: string; h: string; m: string };
+
+/**
+ * The text of a countdown (PR 1.1d), one format everywhere:
+ * - «clock» (the main cards): up to a day «HH:MM:SS», longer «1 д 0 ч 52 мин» (no seconds);
+ * - «human» (killzones, the table, «What is next»): «1 д 0 ч 52 мин», «7 ч 33 мин», «30 мин».
+ */
+export function countdownText(ms: number, format: "clock" | "human", words: DurationWords): string {
+  const seconds = Math.max(0, Math.ceil(ms / 1000));
+  if (format === "clock" && seconds <= DAY_SECONDS) {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(Math.floor(seconds / 3600))}:${pad(Math.floor((seconds % 3600) / 60))}:${pad(seconds % 60)}`;
+  }
+  // «clock» drops the seconds of HH:MM:SS (24:52:21 → 1 д 0 ч 52 мин); «human» rounds up, as before
+  const { d, h, m } = format === "clock" ? splitDuration(Math.floor(seconds / 60) * 60_000) : splitDuration(ms);
+  const parts: string[] = [];
+  if (d) parts.push(formatString(words.d, { n: d }));
+  if (d || h) parts.push(formatString(words.h, { n: h }));
+  parts.push(formatString(words.m, { n: m }));
+  return parts.join(" ");
+}
+
+/** More than a day left: the long form, which needs a smaller font inside the ring. */
+export const isLongCountdown = (ms: number) => Math.ceil(ms / 1000) > DAY_SECONDS;
 
 /**
  * A countdown to `to` that ticks every second. Only this element re-renders with the seconds (the page around it
- * follows the minute clock). «clock»: 07:29:59 / 1 д 20:00:00; «human»: 1 ч 20 мин.
+ * follows the minute clock). Never wraps; digits keep their width.
  */
-export function Countdown({ to, format = "clock", className, "data-testid": testId }: { to: number; format?: "clock" | "human"; className?: string; "data-testid"?: string }) {
+export function Countdown({
+  to,
+  format = "clock",
+  className,
+  longClassName,
+  "data-testid": testId,
+}: {
+  to: number;
+  format?: "clock" | "human";
+  className?: string;
+  /** Used instead of `className` when more than a day is left. */
+  longClassName?: string;
+  "data-testid"?: string;
+}) {
   const { dict } = useApp();
-  const t = dict.market.sessions;
   const now = useClock("second");
   if (!now) return null;
   const left = to - now;
-  let text: string;
-  if (format === "clock") {
-    const { d, hms } = countdown(left);
-    text = d ? formatString(t.days, { d, hms }) : hms;
-  } else {
-    const { d, h, m } = splitDuration(left);
-    text = [d ? formatString(t.duration.d, { n: d }) : "", h ? formatString(t.duration.h, { n: h }) : "", !d && (m || !h) ? formatString(t.duration.m, { n: m }) : ""].filter(Boolean).join(" ");
-  }
+  const long = isLongCountdown(left);
   return (
-    <span className={className} role="timer" aria-live="off" data-testid={testId}>
-      {text}
+    <span className={cn("whitespace-nowrap tabular-nums", long && longClassName ? longClassName : className)} role="timer" aria-live="off" data-testid={testId} data-long={long || undefined}>
+      {countdownText(left, format, dict.market.sessions.duration)}
     </span>
   );
 }

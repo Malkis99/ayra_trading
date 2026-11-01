@@ -34,6 +34,7 @@ import {
   sessionDefs,
   statusFromList,
   upcomingEvents,
+  wallAt,
   type MainSessionId,
   type Occurrence,
   type SessionGroup,
@@ -45,13 +46,17 @@ import {
 
 type State = "open" | "closed" | "weekend";
 
-/** One status style everywhere: a dot and a word (the colour is never the only sign). */
-function Status({ state, testId }: { state: State; testId: string }) {
+/**
+ * One status style everywhere: a dot and a word (the colour is never the only sign). The word is only for screen
+ * readers in compact rows and at the weekend: the block says «Weekend» once at the top (PR 1.1d), the dot turns grey.
+ */
+function Status({ state, testId, compact = false }: { state: State; testId: string; compact?: boolean }) {
   const { dict } = useApp();
+  const wordHidden = compact || state === "weekend";
   return (
-    <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold", state === "open" ? "text-tx" : "text-mu")} data-testid={testId}>
-      <span aria-hidden="true" className={cn("h-2 w-2 shrink-0 rounded-full", state === "open" ? "bg-vi" : "border border-mu/70")} />
-      {dict.market.sessions.status[state]}
+    <span className={cn("inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs font-semibold", state === "open" ? "text-tx" : "text-mu")} data-testid={testId}>
+      <span aria-hidden="true" className={cn("h-2 w-2 shrink-0 rounded-full", state === "open" ? "bg-vi" : state === "weekend" ? "bg-mu/50" : "border border-mu/70")} />
+      <span className={wordHidden ? "sr-only" : undefined}>{dict.market.sessions.status[state]}</span>
     </span>
   );
 }
@@ -102,12 +107,16 @@ export function SessionsClock() {
   };
 
   /** A day word only when it is not today. */
-  const dayPrefix = (ms: number) => {
+  const dayWord = (ms: number) => {
     const off = dayOffset(ms, now, zone);
     if (off === 0) return "";
-    if (off < 0) return `${t.yesterday} · `;
-    if (off === 1) return `${t.tomorrow} · `;
-    return `${formatDate(lang, ms, { timeZone: zone, weekday: "short" })} · `;
+    if (off < 0) return t.yesterday;
+    if (off === 1) return t.tomorrow;
+    return formatDate(lang, ms, { timeZone: zone, weekday: "short" });
+  };
+  const dayPrefix = (ms: number) => {
+    const word = dayWord(ms);
+    return word ? `${word} · ` : "";
   };
   const hoursLine = (id: StatusId) => {
     const occ = currentOrNext(listOf(id), now);
@@ -165,6 +174,7 @@ export function SessionsClock() {
     const target = targetOf(id);
     const kz = killzoneOf[id];
     const kzTarget = kz ? targetOf(kz.id) : undefined;
+    const kzOcc = kz ? currentOrNext(listOf(kz.id), now) : undefined;
     const group = defs[id].group as SessionGroup;
     const open = state === "open";
     return (
@@ -190,9 +200,14 @@ export function SessionsClock() {
         <div className="my-3 flex justify-center">
           <ProgressRing start={occ?.start ?? 0} end={occ?.end ?? 1} open={open} size={148} stroke={3.5} data-testid={`market-${id}-ring`}>
             {target !== undefined && (
-              <span className="flex flex-col items-center leading-tight">
-                <span className="text-[11px] text-mu">{open ? t.status.closesIn : t.status.opensIn}</span>
-                <Countdown to={target} className="font-mono text-xl font-semibold tabular-nums text-tx" data-testid={`market-${id}-timer`} />
+              <span className="flex max-w-[124px] flex-col items-center leading-tight">
+                <span className="whitespace-nowrap text-[11px] text-mu">{open ? t.status.closesIn : t.status.opensIn}</span>
+                <Countdown
+                  to={target}
+                  className="font-mono text-xl font-semibold text-tx"
+                  longClassName="text-[15px] font-semibold text-tx"
+                  data-testid={`market-${id}-timer`}
+                />
               </span>
             )}
           </ProgressRing>
@@ -214,50 +229,73 @@ export function SessionsClock() {
 
         {kz && (
           <div
-            className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md bg-s1/60 px-3 py-2 text-xs"
+            className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-md bg-s1/60 px-3 py-2 text-xs"
             data-testid={`market-card-${kz.id}`}
             data-state={stateOf(kz.id)}
           >
-            <span className="font-semibold text-tx">{t.killzone}</span>
-            <span className="tabular-nums text-mu" data-testid={`market-${kz.id}-hours`}>
-              {hoursLine(kz.id)}
+            <span className="flex min-w-0 items-center gap-1.5">
+              <Status state={stateOf(kz.id)} testId={`market-${kz.id}-status`} compact />
+              <span className="flex min-w-0 flex-col leading-tight">
+                <span className="whitespace-nowrap">
+                  <span className="font-semibold text-tx">{t.killzone}</span>
+                  <span className="text-mu"> · </span>
+                  <span className="tabular-nums text-mu" data-testid={`market-${kz.id}-hours`}>
+                    {kzOcc ? hoursOf(kzOcc, zone) : ""}
+                  </span>
+                </span>
+                {/* the day under the hours, small, as in «What is next» — the row never wraps in the middle */}
+                {kzOcc && dayWord(kzOcc.start) && (
+                  <span className="text-[10px] text-mu" data-testid={`market-${kz.id}-day`}>
+                    {dayWord(kzOcc.start)}
+                  </span>
+                )}
+              </span>
             </span>
-            <Status state={stateOf(kz.id)} testId={`market-${kz.id}-status`} />
-            {kzTarget !== undefined && <Countdown to={kzTarget} format="human" className="ml-auto tabular-nums text-tx" data-testid={`market-${kz.id}-timer`} />}
+            <span className="text-right">{kzTarget !== undefined && <Countdown to={kzTarget} format="human" className="font-semibold text-tx" data-testid={`market-${kz.id}-timer`} />}</span>
           </div>
         )}
       </li>
     );
   };
 
-  /** One row of the table: name and group, hours, status, countdown without seconds, «?». */
+  /**
+   * One row of the table (PR 1.1d): the same columns in every row — the status dot, the name and the hours (two lines)
+   * on the left, the countdown on the right (one line, one format in all rows), then «?».
+   */
   const tableRow = (id: SubSessionId | "overlap") => {
     const target = targetOf(id);
     const group = id === "overlap" ? null : (defs[id].group as SessionGroup);
     return (
       <li
         key={id}
-        className="grid grid-cols-[minmax(0,1fr)_auto_auto_2rem] items-center gap-x-3 px-3 py-2 md:grid-cols-[11rem_12rem_7rem_7rem_2rem] md:justify-start"
+        className="grid grid-cols-[minmax(0,1fr)_auto_2rem] items-center gap-x-3 px-3 py-2"
         data-testid={id === "overlap" ? "market-card-overlap" : `market-sub-${id}`}
         data-state={stateOf(id)}
       >
-        <span className="min-w-0">
-          <span className="block truncate text-sm font-semibold text-tx">{id === "overlap" ? t.day.overlapName : nameOf(id)}</span>
-          <span className="block truncate text-[11px] text-mu md:hidden" data-testid={`market-${id}-hours-narrow`}>
-            {hoursLine(id)}
+        <span className="flex min-w-0 items-start gap-2">
+          <span className="pt-1.5">
+            <Status state={stateOf(id)} testId={`market-${id}-status`} compact />
           </span>
-          {group && <span className="hidden text-[11px] text-mu md:block">{t.groups[group]}</span>}
-        </span>
-        <span className="hidden text-xs tabular-nums text-mu md:block">
-          <span data-testid={`market-${id}-hours`}>{hoursLine(id)}</span>
-          {showMine && (
-            <span className="block text-[11px]" data-testid={`market-${id}-mine`}>
-              {mineLine(id)}
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold leading-snug text-tx">
+              {id === "overlap" ? t.day.overlapName : nameOf(id)}
+              {group && <span className="hidden font-normal text-mu md:inline"> · {t.groups[group]}</span>}
             </span>
-          )}
+            <span className="block text-[11px] tabular-nums text-mu">
+              <span className="whitespace-nowrap" data-testid={`market-${id}-hours`}>
+                {hoursLine(id)}
+              </span>
+              {/* «For you: …» gets its own line on phones instead of being cut */}
+              {showMine && (
+                <span className="block whitespace-nowrap md:inline" data-testid={`market-${id}-mine`}>
+                  <span className="hidden md:inline"> · </span>
+                  {mineLine(id)}
+                </span>
+              )}
+            </span>
+          </span>
         </span>
-        <Status state={stateOf(id)} testId={`market-${id}-status`} />
-        <span className="text-right text-xs tabular-nums text-tx">{target !== undefined && <Countdown to={target} format="human" data-testid={`market-${id}-timer`} />}</span>
+        <span className="text-right text-xs text-tx">{target !== undefined && <Countdown to={target} format="human" className="font-semibold" data-testid={`market-${id}-timer`} />}</span>
         {hint(id, id === "overlap" ? <><p className="text-tx">{t.about.overlap}</p><p className="text-[11px]">{t.aboutNote}</p></> : sessionHint(id))}
       </li>
     );
@@ -314,9 +352,15 @@ export function SessionsClock() {
         onChange={(display) => setSettings({ ...settings, display })}
       />
 
-      <p className="text-sm text-tx" data-testid="market-active-now">
-        {active.length ? formatString(t.activeNow, { list: active.join(", ") }) : weekend ? t.activeWeekend : t.activeNone}
-      </p>
+      {weekend ? (
+        <p className="rounded-md bg-s2/50 px-3 py-2 text-sm text-tx" role="status" data-testid="market-weekend">
+          {formatString(t.weekendLine, { day: t.weekdayAt[wallAt(nextForexOpen(now), zone).wd], time: clockOf(nextForexOpen(now), zone) })}
+        </p>
+      ) : (
+        <p className="text-sm text-tx" data-testid="market-active-now">
+          {active.length ? formatString(t.activeNow, { list: active.join(", ") }) : t.activeNone}
+        </p>
+      )}
 
       <ul className="grid gap-3 md:grid-cols-3">{MAIN_SESSIONS.map(card)}</ul>
 
@@ -330,23 +374,25 @@ export function SessionsClock() {
 
       <div className="space-y-2" data-testid="market-next">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-mu">{t.next.title}</h3>
-        {weekend && (
-          <p className="text-xs text-tx" role="status" data-testid="market-weekend">
-            {formatString(t.next.weekend, {
-              local: formatDate(lang, nextForexOpen(now), { timeZone: zone, weekday: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }),
-            })}
-          </p>
-        )}
-        <ol className="grid gap-2 md:grid-cols-3">
-          {data.events.map((e) => (
-            <li key={`${e.id}-${e.edge}-${e.at}`} className="rounded-md bg-s2/50 px-3 py-2" data-testid="market-next-item">
-              <span className="block text-sm text-tx">{eventText(e)}</span>
-              <span className="text-xs tabular-nums text-mu">
-                {dayPrefix(e.at)}
-                {clockOf(e.at, zone)} · {formatString(t.next.in, { left: "" }).trim()} <Countdown to={e.at} format="human" className="font-semibold text-tx" />
-              </span>
-            </li>
-          ))}
+        {/* A list with thin dividers (PR 1.1d): the time on the left with the day under it, the event, «in …» */}
+        <ol className="divide-y divide-line/60">
+          {data.events.map((e) => {
+            const word = dayWord(e.at);
+            return (
+              <li key={`${e.id}-${e.edge}-${e.at}`} className="grid grid-cols-[3.5rem_minmax(0,1fr)_auto] items-center gap-x-3 py-2.5" data-testid="market-next-item">
+                <span className="flex flex-col leading-tight">
+                  <span className="whitespace-nowrap text-sm font-semibold tabular-nums text-tx" data-testid="market-next-time">
+                    {clockOf(e.at, zone)}
+                  </span>
+                  {word && <span className="whitespace-nowrap text-[10px] text-mu">{word}</span>}
+                </span>
+                <span className="min-w-0 text-sm text-tx">{eventText(e)}</span>
+                <span className="whitespace-nowrap text-right text-xs font-semibold text-vi" data-testid="market-next-left">
+                  {formatString(t.next.in, { left: "" }).trim()} <Countdown to={e.at} format="human" />
+                </span>
+              </li>
+            );
+          })}
         </ol>
       </div>
 
