@@ -5,7 +5,7 @@ import { useApp } from "@/lib/context";
 import { formatDate, formatString } from "@/lib/i18n";
 import { cn } from "@/components/ui";
 import { NOTE_LIMIT, withNote, type ChartNotes as Notes } from "@/lib/market/chart-workspace";
-import type { InstrumentId } from "@/lib/market/instruments";
+import { instrumentName, type InstrumentId } from "@/lib/market/instruments";
 
 /**
  * A note on the instrument under (or beside) the chart (PR 1.3b). Saved on this device as it is typed; one note per
@@ -16,7 +16,7 @@ export function ChartNotes({ id, notes, onChange, className }: { id: InstrumentI
   const t = dict.market;
   const note = notes[id];
   const text = note?.text ?? "";
-  const label = formatString(t.chart.notes.title, { name: t.instruments[id] });
+  const label = formatString(t.chart.notes.title, { name: instrumentName(id, t.instruments) });
 
   return (
     <section className={cn("flex min-h-0 flex-col gap-1.5 rounded-xl border border-line bg-s1 p-3", className)} aria-label={label} data-testid="market-chart-notes">

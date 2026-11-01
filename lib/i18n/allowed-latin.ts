@@ -121,4 +121,7 @@ export const ALLOWED_LATIN_WORDS = [
   "Solana",
   "SOL",
   "Brent",
+  // the Volatility Index and Hong Kong 50 (PR «Instruments»)
+  "VIX",
+  "HK",
 ] as const;

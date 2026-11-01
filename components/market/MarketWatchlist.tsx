@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, BarChart3, Eye, Plus, X } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { formatString } from "@/lib/i18n";
 import { Button, EmptyState } from "@/components/ui";
-import { INSTRUMENTS, symbolsOf, type InstrumentId } from "@/lib/market/instruments";
+import { INSTRUMENTS, symbolsOf, type InstrumentId, instrumentName } from "@/lib/market/instruments";
 import { WATCHLIST_LIMIT, addTo, isFull, move, removeFrom } from "@/lib/market/watchlist";
 import { useWatchlist } from "@/lib/market/watchlist-store";
 import { InstrumentPicker } from "./InstrumentPicker";
@@ -33,7 +33,8 @@ export function MarketWatchlist({ onOpenChart }: { onOpenChart: (id: InstrumentI
   const full = isFull(list);
   const toggle = (id: InstrumentId) => setList(list.ids.includes(id) ? removeFrom(list, id) : addTo(list, id));
   // the delay of the strictest instrument in the list
-  const delay = list.ids.some((id) => INSTRUMENTS[id].delay === "mayDelay") ? "mayDelay" : "realtime";
+  const delays = list.ids.map((id) => INSTRUMENTS[id].delay);
+  const delay = delays.includes("delayed") ? "delayed" : delays.includes("mayDelay") ? "mayDelay" : "realtime";
 
   return (
     <section className="card space-y-3" data-testid="market-watchlist" aria-labelledby="market-watchlist-title">
@@ -92,7 +93,7 @@ export function MarketWatchlist({ onOpenChart }: { onOpenChart: (id: InstrumentI
 
           <ol className="divide-y divide-line/60" data-testid="market-watchlist-rows">
             {list.ids.map((id, i) => {
-              const name = t.instruments[id];
+              const name = instrumentName(id, t.instruments);
               const iconButton = "grid h-9 w-9 shrink-0 place-items-center rounded-md text-mu hover:bg-s2 hover:text-tx focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi disabled:opacity-30 disabled:hover:bg-transparent";
               return (
                 <li key={id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 py-1.5" data-testid={`market-watchlist-row-${id}`}>

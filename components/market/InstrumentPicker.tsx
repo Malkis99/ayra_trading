@@ -4,11 +4,11 @@ import React, { useState } from "react";
 import { Search } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { Tabs, cn } from "@/components/ui";
-import { CATEGORIES, INSTRUMENT_IDS, INSTRUMENTS, type CategoryId, type InstrumentId } from "@/lib/market/instruments";
+import { PICKER_CATEGORIES, INSTRUMENT_IDS, INSTRUMENTS, type CategoryId, type InstrumentId, instrumentName } from "@/lib/market/instruments";
 
 /**
- * Picks instruments from the Market catalog only (owner's decision 2026-11-01): the five categories as tabs and a
- * search over names and tickers. `selected` instruments are shown pressed; `disabled` ones cannot be picked.
+ * Picks instruments from the Market catalog only (owner's decision 2026-11-01, kept for the wide catalog): the
+ * categories (the five of the Overview and US stocks) as tabs and a search over names and tickers of the catalog. `selected` instruments are shown pressed; `disabled` ones cannot be picked.
  */
 export function InstrumentPicker({
   idPrefix,
@@ -29,8 +29,8 @@ export function InstrumentPicker({
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const ids: readonly InstrumentId[] = q
-    ? INSTRUMENT_IDS.filter((id) => t.instruments[id].toLowerCase().includes(q) || INSTRUMENTS[id].ticker.toLowerCase().includes(q))
-    : (CATEGORIES.find((c) => c.id === category) ?? CATEGORIES[0]).ids;
+    ? INSTRUMENT_IDS.filter((id) => instrumentName(id, t.instruments).toLowerCase().includes(q) || INSTRUMENTS[id].ticker.toLowerCase().includes(q))
+    : (PICKER_CATEGORIES.find((c) => c.id === category) ?? PICKER_CATEGORIES[0]).ids;
 
   return (
     <div className="space-y-2" data-testid={`${idPrefix}-picker`}>
@@ -48,7 +48,7 @@ export function InstrumentPicker({
       </label>
       {!q && (
         <Tabs<CategoryId>
-          items={CATEGORIES.map((c) => ({ id: c.id, label: t.overview.categories[c.id] }))}
+          items={PICKER_CATEGORIES.map((c) => ({ id: c.id, label: t.overview.categories[c.id] }))}
           value={category}
           onChange={setCategory}
           label={t.chart.picker}
@@ -60,7 +60,7 @@ export function InstrumentPicker({
           {t.chart.searchEmpty}
         </p>
       ) : (
-        <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+        <ul className="grid max-h-80 grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-4" data-testid={`${idPrefix}-list`}>
           {ids.map((id) => {
             const on = selected(id);
             const off = !on && disabled(id);
@@ -78,7 +78,7 @@ export function InstrumentPicker({
                   )}
                   data-testid={`${idPrefix}-pick-${id}`}
                 >
-                  <span className="truncate text-sm font-semibold text-tx">{t.instruments[id]}</span>
+                  <span className="truncate text-sm font-semibold text-tx">{instrumentName(id, t.instruments)}</span>
                   <span className="truncate text-[11px] text-mu">{INSTRUMENTS[id].ticker}</span>
                 </button>
               </li>
