@@ -7,6 +7,7 @@ import {
   type InstrumentId,
 } from "./instruments";
 import { normalizeFavorites } from "./chart-workspace";
+import { DEFAULT_CHART_STYLE, isChartStyle, normalizeIndicators, type ChartStyle, type IndicatorId } from "./chart-tools";
 
 /**
  * The Watchlist (PR 1.3): catalog instruments in the user's order, on this device. Owner's decision 2026-11-01: at
@@ -61,6 +62,10 @@ export interface ChartPrefs {
   instrument: InstrumentId;
   interval: ChartInterval;
   favorites: ChartInterval[];
+  /** «Chart type»: TradingView style (candles by default). */
+  style: ChartStyle;
+  /** «Indicators» from our list. */
+  indicators: IndicatorId[];
 }
 
 export function normalizeChartPrefs(raw: unknown): ChartPrefs {
@@ -69,5 +74,7 @@ export function normalizeChartPrefs(raw: unknown): ChartPrefs {
     instrument: isInstrumentId(r.instrument) ? r.instrument : DEFAULT_CHART_INSTRUMENT,
     interval: isChartInterval(r.interval) ? r.interval : DEFAULT_CHART_INTERVAL,
     favorites: normalizeFavorites(r.favorites),
+    style: isChartStyle(r.style) ? r.style : DEFAULT_CHART_STYLE,
+    indicators: normalizeIndicators(r.indicators),
   };
 }

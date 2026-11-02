@@ -126,4 +126,14 @@ export const ALLOWED_LATIN_WORDS = [
   "HK",
   // the New York Stock Exchange in «Market open / closed» (PR «Fullscreen + time and session»)
   "NYSE",
+  // indicator names (PR «Indicators and Chart type»)
+  "SMA",
+  "EMA",
+  "VWAP",
+  "RSI",
+  "MACD",
+  "ATR",
+  "CCI",
+  "DMI",
+  "HLC",
 ] as const;
