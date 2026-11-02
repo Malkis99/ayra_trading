@@ -96,7 +96,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       await expect(el(page, "market-chart-clock-zone")).toContainText("UTC+4");
       await expect(el(page, "market-chart-clock-session")).toHaveText(/^Сессия: Лондон$/);
       await expect(el(page, "market-chart-clock-market")).toContainText("Рынок открыт");
-      await expect(el(page, "market-chart-clock-note")).toHaveText(" (по неделе форекса, без дневных перерывов и праздников)");
+      await expect(el(page, "market-chart-clock-note")).toHaveText("по неделе форекса, без дневных перерывов и праздников");
       await page.clock.runFor(2000);
       await expect(el(page, "market-chart-clock-time")).toHaveText("12:30:02");
       await page.screenshot({ path: `test-results/market-chart-clock-${engine}-1440.png` });
@@ -107,15 +107,16 @@ for (const engine of ["chromium", "webkit"] as const) {
       // 04:30 New York: NYSE opens at 09:30
       await expect(el(page, "market-chart-clock-market")).toHaveAttribute("data-open", "false");
       await expect(el(page, "market-chart-clock-market")).toContainText("Рынок закрыт · откроется через 5 ч 0 мин");
-      await expect(el(page, "market-chart-clock-note")).toHaveText(" (по расписанию NYSE, без учёта праздников)");
+      await expect(el(page, "market-chart-clock-note")).toHaveText("по расписанию NYSE, без учёта праздников");
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       await page.screenshot({ path: `test-results/market-chart-clock-stocks-${engine}-360.png` });
 
       await page.goto("/market?tab=chart&symbol=BITSTAMP%3ABTCUSD");
-      await expect(el(page, "market-chart-clock-market")).toHaveText(/^Крипта торгуется круглосуточно$/);
+      await expect(el(page, "market-chart-clock-market")).toHaveText(/^Рынок открыт$/);
+      await expect(el(page, "market-chart-clock-note")).toHaveText("Крипта торгуется круглосуточно, без выходных");
       await page.goto("/market?tab=chart&symbol=FX%3AEURUSD");
       await expect(el(page, "market-chart-clock-market")).toContainText("Рынок открыт");
-      await expect(el(page, "market-chart-clock-note")).toHaveCount(0);
+      await expect(el(page, "market-chart-clock-note")).toHaveText("по неделе форекса: вс 17:00 – пт 17:00 по Нью-Йорку");
     });
 
     test("between sessions and the weekend", async () => {

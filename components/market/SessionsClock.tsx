@@ -259,43 +259,53 @@ export function SessionsClock() {
   };
 
   /**
-   * One row of the table (PR 1.1d): the same columns in every row — the status dot, the name and the hours (two lines)
-   * on the left, the countdown on the right (one line, one format in all rows), then «?».
+   * One row of the table (PR 1.1d, then owner 2026-11-02): the name, the hours and the status in words and colour —
+   * «Open · closes in 2 h 14 min» (green dot) or «Closed · opens in 5 h 40 min» (grey dot) — then «?».
    */
   const tableRow = (id: SubSessionId | "overlap") => {
     const target = targetOf(id);
     const group = id === "overlap" ? null : (defs[id].group as SessionGroup);
+    const open = stateOf(id) === "open";
     return (
       <li
         key={id}
-        className="grid grid-cols-[minmax(0,1fr)_auto_2rem] items-center gap-x-3 px-3 py-2"
+        className="grid grid-cols-[minmax(0,1fr)_2rem] items-start gap-x-3 px-3 py-2"
         data-testid={id === "overlap" ? "market-card-overlap" : `market-sub-${id}`}
         data-state={stateOf(id)}
       >
-        <span className="flex min-w-0 items-start gap-2">
-          <span className="pt-1.5">
-            <Status state={stateOf(id)} testId={`market-${id}-status`} compact />
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold leading-snug text-tx">
+            {id === "overlap" ? t.day.overlapName : nameOf(id)}
+            {group && <span className="hidden font-normal text-mu md:inline"> · {t.groups[group]}</span>}
           </span>
-          <span className="min-w-0">
-            <span className="block text-sm font-semibold leading-snug text-tx">
-              {id === "overlap" ? t.day.overlapName : nameOf(id)}
-              {group && <span className="hidden font-normal text-mu md:inline"> · {t.groups[group]}</span>}
+          <span className="block text-[11px] tabular-nums text-mu">
+            <span className="whitespace-nowrap" data-testid={`market-${id}-hours`}>
+              {hoursLine(id)}
             </span>
-            <span className="block text-[11px] tabular-nums text-mu">
-              <span className="whitespace-nowrap" data-testid={`market-${id}-hours`}>
-                {hoursLine(id)}
+            {/* «For you: …» gets its own line on phones instead of being cut */}
+            {showMine && (
+              <span className="block whitespace-nowrap md:inline" data-testid={`market-${id}-mine`}>
+                <span className="hidden md:inline"> · </span>
+                {mineLine(id)}
               </span>
-              {/* «For you: …» gets its own line on phones instead of being cut */}
-              {showMine && (
-                <span className="block whitespace-nowrap md:inline" data-testid={`market-${id}-mine`}>
-                  <span className="hidden md:inline"> · </span>
-                  {mineLine(id)}
+            )}
+          </span>
+          {/* the status in words and colour (owner 2026-11-02): «Open · closes in 2 h 14 min» / «Closed · opens in …» */}
+          <span className="mt-1 flex items-start gap-1.5 text-xs" data-testid={`market-${id}-row-status`}>
+            <span aria-hidden="true" className={cn("mt-1 h-2 w-2 shrink-0 rounded-full", open ? "bg-long" : "bg-mu/50")} />
+            <span className="min-w-0">
+              <span className={open ? "font-semibold text-tx" : "font-semibold text-mu"} data-testid={`market-${id}-status`}>
+                {open ? t.status.open : t.status.closed}
+              </span>
+              {target !== undefined && (
+                <span className="text-mu">
+                  {" · "}
+                  {open ? t.row.closesIn : t.row.opensIn} <Countdown to={target} format="human" className="font-semibold text-tx" data-testid={`market-${id}-timer`} />
                 </span>
               )}
             </span>
           </span>
         </span>
-        <span className="text-right text-xs text-tx">{target !== undefined && <Countdown to={target} format="human" className="font-semibold" data-testid={`market-${id}-timer`} />}</span>
         {hint(id, id === "overlap" ? <><p className="text-tx">{t.about.overlap}</p><p className="text-[11px]">{t.aboutNote}</p></> : sessionHint(id))}
       </li>
     );

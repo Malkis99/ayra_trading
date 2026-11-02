@@ -21,7 +21,11 @@ describe("favourite timeframes (PR 1.3b)", () => {
 describe("the view (PR 1.3b)", () => {
   it("all on, list on the right, notes under the chart by default", () => {
     expect(normalizeChartView(null)).toEqual(DEFAULT_CHART_VIEW);
-    expect(DEFAULT_CHART_VIEW).toEqual({ watchlist: true, watchlistSide: "right", watchlistFolded: false, notes: true, notesPlace: "below", drawing: true });
+    expect(DEFAULT_CHART_VIEW).toEqual({ watchlist: true, watchlistSide: "right", watchlistFolded: false, notes: true, notesPlace: "below", drawing: true, clock: "top" });
+  });
+  it("the time and session card: right on top by default, the four places kept, anything else → the default", () => {
+    for (const clock of ["top", "bottom", "strip", "hidden"]) expect(normalizeChartView({ clock }).clock).toBe(clock);
+    expect(normalizeChartView({ clock: "left" }).clock).toBe("top");
   });
   it("stored values kept, wrong ones replaced", () => {
     expect(normalizeChartView({ watchlist: false, watchlistSide: "left", notesPlace: "side", drawing: false, notes: "yes" })).toEqual({
@@ -31,6 +35,7 @@ describe("the view (PR 1.3b)", () => {
       notes: true,
       notesPlace: "side",
       drawing: false,
+      clock: "top",
     });
     expect(normalizeChartView({ watchlistSide: "top", notesPlace: "top" })).toMatchObject({ watchlistSide: "right", notesPlace: "below" });
   });

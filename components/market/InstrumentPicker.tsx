@@ -53,6 +53,7 @@ export function InstrumentPicker({
           onChange={setCategory}
           label={t.chart.picker}
           idPrefix={`${idPrefix}-cat`}
+          snap
         />
       )}
       {ids.length === 0 ? (
@@ -60,7 +61,7 @@ export function InstrumentPicker({
           {t.chart.searchEmpty}
         </p>
       ) : (
-        <ul className="grid max-h-80 grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-4" data-testid={`${idPrefix}-list`}>
+        <ul className="grid max-h-80 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-4" data-testid={`${idPrefix}-list`}>
           {ids.map((id) => {
             const on = selected(id);
             const off = !on && disabled(id);
@@ -78,7 +79,7 @@ export function InstrumentPicker({
                   )}
                   data-testid={`${idPrefix}-pick-${id}`}
                 >
-                  <span className="truncate text-sm font-semibold text-tx">{instrumentName(id, t.instruments)}</span>
+                  <span className="break-words text-sm font-semibold leading-snug text-tx">{instrumentName(id, t.instruments)}</span>
                   <span className="truncate text-[11px] text-mu">{INSTRUMENTS[id].ticker}</span>
                 </button>
               </li>
