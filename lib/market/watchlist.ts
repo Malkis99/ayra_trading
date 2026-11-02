@@ -7,6 +7,7 @@ import {
   type InstrumentId,
 } from "./instruments";
 import { normalizeFavorites } from "./chart-workspace";
+import { isLayout, normalizePanes, type ChartLayout, type ChartPane } from "./chart-layout";
 import { DEFAULT_CHART_STYLE, isChartStyle, normalizeIndicators, type ChartStyle, type IndicatorId } from "./chart-tools";
 
 /**
@@ -66,6 +67,11 @@ export interface ChartPrefs {
   style: ChartStyle;
   /** «Indicators» from our list. */
   indicators: IndicatorId[];
+  /** Layout 1 / 2 / 4 and windows 2–4 (on the device). */
+  layout: ChartLayout;
+  panes: ChartPane[];
+  /** «One instrument in all windows» (off by default). */
+  link: boolean;
 }
 
 export function normalizeChartPrefs(raw: unknown): ChartPrefs {
@@ -76,5 +82,8 @@ export function normalizeChartPrefs(raw: unknown): ChartPrefs {
     favorites: normalizeFavorites(r.favorites),
     style: isChartStyle(r.style) ? r.style : DEFAULT_CHART_STYLE,
     indicators: normalizeIndicators(r.indicators),
+    layout: isLayout(r.layout) ? r.layout : 1,
+    panes: normalizePanes(r.panes),
+    link: r.link === true,
   };
 }

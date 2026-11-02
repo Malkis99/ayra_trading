@@ -20,6 +20,8 @@ import { ChartWatchlistPanel } from "./ChartWatchlistPanel";
 import { InstrumentPicker } from "./InstrumentPicker";
 import { IntervalBar } from "./IntervalBar";
 import { ChartTypeMenu, IndicatorsMenu } from "./ChartToolsMenus";
+import { LayoutMenu, PaneHeader } from "./ChartLayout";
+import { effectiveLayout, paneInstrument, withPane } from "@/lib/market/chart-layout";
 import { HOTKEY_COUNT, studiesOf } from "@/lib/market/chart-tools";
 import { SourceLine } from "./SourceLine";
 import { TradingViewWidget, widgetConfig } from "./TradingViewWidget";
@@ -29,6 +31,12 @@ const CHART_BACKGROUND = "#18171f";
 const CHART_GRID = "rgba(163, 138, 209, 0.07)";
 const MIN_HEIGHT = 380;
 const WIDE_QUERY = "(min-width: 1024px)";
+/** Phones: layouts 1 and 2 only (owner 2026-11-01). */
+const PHONE_QUERY = "(max-width: 767px)";
+/** A window's header in layouts 2 and 4, the gap between windows, the least height of a window on a phone. */
+const PANE_HEADER = 32;
+const PANE_GAP = 8;
+const PHONE_PANE_MIN = 360;
 
 /** The instrument in the address: `?symbol=` (our links) or `?tvwidgetsymbol=` (a click inside a widget). */
 function symbolFromUrl(): { id?: InstrumentId; unknown?: string } {
@@ -46,18 +54,19 @@ function keepInUrl(id: InstrumentId) {
   window.history.replaceState(window.history.state, "", url.toString());
 }
 
-function useWide(): boolean {
+function useMedia(query: string): boolean {
   const [wide, setWide] = useState(false);
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
-    const mq = window.matchMedia(WIDE_QUERY);
+    const mq = window.matchMedia(query);
     const update = () => setWide(mq.matches);
     update();
     mq.addEventListener?.("change", update);
     return () => mq.removeEventListener?.("change", update);
-  }, []);
+  }, [query]);
   return wide;
 }
+const useWide = () => useMedia(WIDE_QUERY);
 
 /** The chart row takes the height of the page's scroll area (minus its padding and the toolbar above the chart). */
 function useFillHeight(row: React.RefObject<HTMLElement>, toolbar: React.RefObject<HTMLElement>, shown: boolean, full: boolean): number {
@@ -161,6 +170,7 @@ export function MarketChart() {
   const [picking, setPicking] = useState(false);
   const [editingView, setEditingView] = useState(false);
   const wide = useWide();
+  const phone = useMedia(PHONE_QUERY);
   const row = useRef<HTMLDivElement>(null);
   const toolbar = useRef<HTMLDivElement>(null);
   const pickerButton = useRef<HTMLButtonElement>(null);
@@ -235,6 +245,39 @@ export function MarketChart() {
   };
   const chooseInterval = (interval: ChartInterval) => setPrefs({ ...prefs, interval });
 
+  // layouts: what is shown, the row height (two windows one under another on phones get room), each chart's height
+  const shown = effectiveLayout(prefs.layout, phone);
+  const stacked = shown === 4 || (shown === 2 && phone);
+  const rowHeight = shown === 2 && phone ? Math.max(height, 2 * PHONE_PANE_MIN + PANE_GAP) : height;
+  const paneHeight = shown === 1 ? height - 2 : Math.round((stacked ? (rowHeight - PANE_GAP) / 2 : rowHeight) - PANE_HEADER - 2);
+  const chartConfig = (symbol: string, interval: ChartInterval) =>
+    widgetConfig(
+      {
+        autosize: true,
+        width: "100%",
+        height: "100%",
+        symbol,
+        interval,
+        timezone: zone === "UTC" ? "Etc/UTC" : zone,
+        style: prefs.style,
+        studies: studiesOf(prefs.indicators),
+        backgroundColor: CHART_BACKGROUND,
+        gridColor: CHART_GRID,
+        hide_top_toolbar: true,
+        hide_side_toolbar: !view.drawing,
+        hide_volume: true,
+        allow_symbol_change: false,
+        save_image: false,
+        calendar: false,
+        details: false,
+        hotlist: false,
+        withdateranges: false,
+        support_host: "https://www.tradingview.com",
+      },
+      lang === "en" ? "en" : "ru",
+      origin
+    );
+
   const panel = view.watchlist && (
     <ChartWatchlistPanel
       ids={watchlist.ids}
@@ -295,6 +338,14 @@ export function MarketChart() {
           <div className="flex items-center gap-1">
             <ChartTypeMenu value={prefs.style} onChange={(style) => setPrefs({ ...prefs, style })} />
             <IndicatorsMenu value={prefs.indicators} onChange={(indicators) => setPrefs({ ...prefs, indicators })} />
+            <LayoutMenu
+              layout={prefs.layout}
+              shown={shown}
+              narrow={phone}
+              link={prefs.link}
+              onLayout={(layout) => setPrefs({ ...prefs, layout })}
+              onLink={(link) => setPrefs({ ...prefs, link })}
+            />
           </div>
           <div className="ml-auto flex items-center gap-1">
             <button
@@ -354,44 +405,48 @@ export function MarketChart() {
         )}
       </div>
 
-      <div ref={row} className={cn("flex gap-3", view.watchlistSide === "left" && "flex-row-reverse")} style={{ height }} data-testid="market-chart-row">
-        <div className="min-w-0 flex-1 overflow-hidden rounded-xl border border-line bg-s1">
-          <TradingViewWidget
-            key={`${inst.symbol}-${prefs.interval}-${prefs.style}-${prefs.indicators.join(",")}-${zone}-${lang}-${view.drawing}`}
-            widget="advanced-chart"
-            config={widgetConfig(
-              {
-                autosize: true,
-                width: "100%",
-                height: "100%",
-                symbol: inst.symbol,
-                interval: prefs.interval,
-                timezone: zone === "UTC" ? "Etc/UTC" : zone,
-                style: prefs.style,
-                studies: studiesOf(prefs.indicators),
-                backgroundColor: CHART_BACKGROUND,
-                gridColor: CHART_GRID,
-                hide_top_toolbar: true,
-                hide_side_toolbar: !view.drawing,
-                hide_volume: true,
-                allow_symbol_change: false,
-                save_image: false,
-                calendar: false,
-                details: false,
-                hotlist: false,
-                withdateranges: false,
-                support_host: "https://www.tradingview.com",
-              },
-              lang === "en" ? "en" : "ru",
-              origin
-            )}
-            height={height - 2}
-            label={formatString(t.chart.label, { name })}
-            loadingText={t.overview.loading}
-            errorText={t.overview.unavailable}
-            retryLabel={t.overview.retry}
-            testId="market-chart-widget"
-          />
+      <div ref={row} className={cn("flex gap-3", view.watchlistSide === "left" && "flex-row-reverse")} style={{ height: rowHeight }} data-testid="market-chart-row">
+        {/* layouts 1 / 2 / 4 (on phones 1 and 2): window 1 is the main chart, windows 2–4 have their own header */}
+        <div
+          className={cn(
+            "grid min-w-0 flex-1 gap-2",
+            shown === 2 && (phone ? "grid-rows-2" : "grid-cols-2"),
+            shown === 4 && "grid-cols-2 grid-rows-2"
+          )}
+          data-testid="market-chart-grid"
+          data-layout={shown}
+        >
+          {Array.from({ length: shown }, (_, i) => {
+            const paneId = paneInstrument(i, id, prefs.panes, prefs.link);
+            const paneInterval = i === 0 ? prefs.interval : prefs.panes[i - 1].interval;
+            const symbol = INSTRUMENTS[paneId].symbol;
+            return (
+              <div key={i} className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-s1" data-testid={`market-chart-pane-${i + 1}`}>
+                {shown > 1 && (
+                  <PaneHeader
+                    index={i}
+                    instrument={paneId}
+                    interval={paneInterval}
+                    favorites={prefs.favorites}
+                    locked={i === 0 || prefs.link}
+                    onInstrument={(next) => setPrefs({ ...prefs, panes: withPane(prefs.panes, i, { instrument: next }) })}
+                    onInterval={(next) => setPrefs({ ...prefs, panes: withPane(prefs.panes, i, { interval: next }) })}
+                  />
+                )}
+                <TradingViewWidget
+                  key={`${symbol}-${paneInterval}-${prefs.style}-${prefs.indicators.join(",")}-${zone}-${lang}-${view.drawing}`}
+                  widget="advanced-chart"
+                  config={chartConfig(symbol, paneInterval)}
+                  height={paneHeight}
+                  label={formatString(t.chart.label, { name: instrumentName(paneId, t.instruments) })}
+                  loadingText={t.overview.loading}
+                  errorText={t.overview.unavailable}
+                  retryLabel={t.overview.retry}
+                  testId={i === 0 ? "market-chart-widget" : `market-chart-widget-${i + 1}`}
+                />
+              </div>
+            );
+          })}
         </div>
         {side}
       </div>

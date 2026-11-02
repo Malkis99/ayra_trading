@@ -1821,6 +1821,16 @@ export const en: Dictionary = {
       favoritesHint: "Tick the timeframes to show in the bar. At least one stays.",
       change: "Change instrument",
       drawingNote: "Drawings on the TradingView chart are not saved: after a reload or another instrument they are gone.",
+      layout: {
+        label: "Layout",
+        options: { "1": "1 chart", "2": "2 charts", "4": "4 charts" },
+        phoneNote: "On phones, at most two charts.",
+        link: "One instrument in all windows",
+        linkHint: "Every window shows the first window's instrument, each with its own timeframe.",
+        window: "Window {n}",
+        change: "Change the instrument of window {n}",
+        interval: "Timeframe of window {n}",
+      },
       tools: {
         type: "Chart type",
         styles: { "1": "Candles", "9": "Hollow candles", "0": "Bars", "8": "Heikin Ashi", "2": "Line", "3": "Area", "10": "Baseline", "13": "Columns", "12": "High–low", "16": "HLC area" },
