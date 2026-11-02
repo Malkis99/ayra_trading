@@ -4,8 +4,9 @@ import React from "react";
 import { useApp } from "@/lib/context";
 import { formatDate, formatString } from "@/lib/i18n";
 import { cn } from "@/components/ui";
-import { NOTE_LIMIT, withNote, type ChartNotes as Notes } from "@/lib/market/chart-workspace";
+import { NOTE_LIMIT, noteText, withNote, type ChartNotes as Notes } from "@/lib/market/chart-workspace";
 import { instrumentName, type InstrumentId } from "@/lib/market/instruments";
+import { useMarketInAccount } from "@/lib/market/cloud-sync-engine";
 
 /**
  * A note on the instrument under (or beside) the chart (PR 1.3b). Saved on this device as it is typed; one note per
@@ -15,7 +16,8 @@ export function ChartNotes({ id, notes, onChange, className }: { id: InstrumentI
   const { dict, lang } = useApp();
   const t = dict.market;
   const note = notes[id];
-  const text = note?.text ?? "";
+  const text = noteText(notes, id);
+  const inAccount = useMarketInAccount();
   const label = formatString(t.chart.notes.title, { name: instrumentName(id, t.instruments) });
 
   return (
@@ -42,7 +44,7 @@ export function ChartNotes({ id, notes, onChange, className }: { id: InstrumentI
       />
       <div className="flex justify-between gap-2 text-[11px] text-mu">
         <span data-testid="market-chart-note-saved">
-          {note ? formatString(t.chart.notes.saved, { time: formatDate(lang, Date.parse(note.updatedAt), { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) }) : ""}
+          {note && text ? formatString(inAccount ? t.chart.notes.savedAccount : t.chart.notes.saved, { time: formatDate(lang, Date.parse(note.updatedAt), { hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) }) : ""}
         </span>
         <span className="tabular-nums">{formatString(t.chart.notes.counter, { n: text.length, max: NOTE_LIMIT })}</span>
       </div>

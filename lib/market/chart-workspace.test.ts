@@ -49,7 +49,8 @@ describe("notes per instrument (PR 1.3b)", () => {
     n = withNote(n, "gold", "Золото: жду новости", now);
     expect(Object.keys(n).sort()).toEqual(["btc", "gold"]);
     n = withNote(n, "btc", "   ", now);
-    expect(n.btc).toBeUndefined();
+    // a clearing leaves a tombstone (empty text), so it reaches the other devices (0008)
+    expect(n.btc).toEqual({ text: "", updatedAt: "2026-11-01T10:00:00.000Z", deletedAt: "2026-11-01T10:00:00.000Z" });
   });
   it(`at most ${NOTE_LIMIT} characters`, () => {
     expect(withNote({}, "btc", "x".repeat(NOTE_LIMIT + 50), now).btc?.text).toHaveLength(NOTE_LIMIT);

@@ -17,6 +17,8 @@ export const WATCHLIST_LIMIT = 30;
 export interface Watchlist {
   version: 1;
   ids: InstrumentId[];
+  /** ISO time of the last change (the account sync keeps the newest version, migration 0008). */
+  updatedAt?: string;
 }
 
 export const emptyWatchlist = (): Watchlist => ({ version: 1, ids: [] });
@@ -28,7 +30,8 @@ export function normalizeWatchlist(raw: unknown): Watchlist {
   for (const id of list) {
     if (isInstrumentId(id) && !ids.includes(id) && ids.length < WATCHLIST_LIMIT) ids.push(id);
   }
-  return { version: 1, ids };
+  const updatedAt = raw && typeof raw === "object" ? (raw as { updatedAt?: unknown }).updatedAt : undefined;
+  return typeof updatedAt === "string" ? { version: 1, ids, updatedAt } : { version: 1, ids };
 }
 
 export const isFull = (w: Watchlist) => w.ids.length >= WATCHLIST_LIMIT;

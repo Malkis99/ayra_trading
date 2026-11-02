@@ -8,6 +8,7 @@ import { Button, EmptyState } from "@/components/ui";
 import { INSTRUMENTS, symbolsOf, type InstrumentId, instrumentName } from "@/lib/market/instruments";
 import { WATCHLIST_LIMIT, addTo, isFull, move, removeFrom } from "@/lib/market/watchlist";
 import { useWatchlist } from "@/lib/market/watchlist-store";
+import { useMarketInAccount } from "@/lib/market/cloud-sync-engine";
 import { InstrumentPicker } from "./InstrumentPicker";
 import { SourceLine } from "./SourceLine";
 import { TradingViewWidget, widgetConfig } from "./TradingViewWidget";
@@ -24,6 +25,7 @@ export function MarketWatchlist({ onOpenChart }: { onOpenChart: (id: InstrumentI
   const { dict, lang } = useApp();
   const t = dict.market;
   const [list, setList, loaded] = useWatchlist();
+  const inAccount = useMarketInAccount();
   const [adding, setAdding] = useState(false);
   const [origin, setOrigin] = useState("");
   useEffect(() => setOrigin(window.location.origin), []);
@@ -44,7 +46,7 @@ export function MarketWatchlist({ onOpenChart }: { onOpenChart: (id: InstrumentI
             {t.watchlist.title}
           </h2>
           <p className="text-[11px] text-mu" data-testid="market-watchlist-count">
-            {formatString(t.watchlist.count, { n: list.ids.length, max: WATCHLIST_LIMIT })} · {t.watchlist.deviceNote}
+            {formatString(t.watchlist.count, { n: list.ids.length, max: WATCHLIST_LIMIT })} · {inAccount ? t.watchlist.accountNote : t.watchlist.deviceNote}
           </p>
         </div>
         <Button variant={adding ? "primary" : "secondary"} onClick={() => setAdding((v) => !v)} aria-expanded={adding} data-testid="market-watchlist-add">

@@ -1850,6 +1850,7 @@ export const en: Dictionary = {
         title: "Note: {name}",
         placeholder: "Levels, ideas, what you expect from the instrument…",
         saved: "Saved on this device · {time}",
+        savedAccount: "Saved in your account · {time}",
         counter: "{n} / {max}",
         clear: "Clear",
       },
@@ -1872,6 +1873,7 @@ export const en: Dictionary = {
         reset: "Defaults",
         close: "Close",
         deviceNote: "The view is kept on this device.",
+        accountNote: "The view is kept in your account.",
       },
       addToList: "Add to list",
       inList: "In the list",
@@ -1891,6 +1893,7 @@ export const en: Dictionary = {
       full: "The list already has {n} instruments, the maximum. Remove some to add new ones.",
       quotes: "Watchlist quotes",
       deviceNote: "The list is kept on this device.",
+      accountNote: "The list is kept in your account, on every device.",
     },
     overview: {
       coreTitle: "Key markets",

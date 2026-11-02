@@ -9,6 +9,7 @@ import { MarketOverview } from "@/components/market/MarketOverview";
 import { MarketChart } from "@/components/market/MarketChart";
 import { MarketWatchlist } from "@/components/market/MarketWatchlist";
 import { INSTRUMENTS, type InstrumentId } from "@/lib/market/instruments";
+import { useMarketCloudSync } from "@/lib/market/cloud-sync-engine";
 
 /** Market sections (owner's decision 2026-10-28, `docs/market-plan.md` section 8); Scanner comes later. */
 const MARKET_TABS = ["overview", "chart", "calendar", "news", "economy", "backtest", "watchlist"] as const;
@@ -29,6 +30,8 @@ export default function MarketPage() {
   const { dict } = useApp();
   const t = dict.market;
   const [tab, setTabState] = useState<MarketTab>("overview");
+  // the Watchlist, notes and the chart view in the account (0008), while the Market is open
+  useMarketCloudSync();
 
   // The section is kept in the address (?tab=…): a link or a reload opens the same one.
   // A click on a symbol in a TradingView widget comes back as ?tvwidgetsymbol=… and opens the Chart.

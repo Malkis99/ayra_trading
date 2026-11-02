@@ -1,0 +1,141 @@
+import { describe, expect, it } from "vitest";
+import { joinWatchlists, mergeMarket, type MarketCloudRow, type MarketLocal } from "./cloud-sync";
+import { syncMarketOnce, type MarketCloudRemote, type MarketLocalStore } from "./cloud-sync-engine";
+import { DEFAULT_CHART_VIEW, withNote, noteText } from "./chart-workspace";
+import type { Watchlist } from "./watchlist";
+
+const T = (h: number) => new Date(Date.UTC(2026, 10, 2, h)).toISOString();
+const list = (ids: string[], at?: string): Watchlist => ({ version: 1, ids: ids as Watchlist["ids"], ...(at ? { updatedAt: at } : {}) });
+const empty = (): MarketLocal => ({ watchlist: list([]), view: { ...DEFAULT_CHART_VIEW }, notes: {} });
+const now = new Date(T(12));
+
+describe("Market data in the account: merge (newest wins; the first time the Watchlists are joined)", () => {
+  it("the first sync joins the device's list with the account's, without duplicates, the account's first", () => {
+    expect(joinWatchlists(list(["btc", "gold"], T(1)), list(["gold", "eurusd"], T(2)), now)).toEqual(list(["btc", "gold", "eurusd"], T(12)));
+    // nothing new on the device: the account's list as it is (nothing to send)
+    expect(joinWatchlists(list(["btc"], T(1)), list(["btc"], T(5)), now)).toEqual(list(["btc"], T(1)));
+    const r = mergeMarket({ ...empty(), watchlist: list(["eurusd"], T(5)) }, [{ id: "watchlist", data: { id: "watchlist", ids: ["btc"], updatedAt: T(1) } }], true, now);
+    expect(r.local.watchlist.ids).toEqual(["btc", "eurusd"]);
+    expect(r.changed.watchlist).toBe(true);
+    expect(r.push.find((p) => p.id === "watchlist")?.data).toEqual({ id: "watchlist", ids: ["btc", "eurusd"], updatedAt: T(12) });
+  });
+
+  it("after the first sync: the newest list wins as a whole (removals reach the other device)", () => {
+    const cloud: MarketCloudRow[] = [{ id: "watchlist", data: { id: "watchlist", ids: ["btc", "gold"], updatedAt: T(3) } }];
+    const older = mergeMarket({ ...empty(), watchlist: list(["btc"], T(2)) }, cloud, false, now);
+    expect(older.local.watchlist.ids).toEqual(["btc", "gold"]);
+    expect(older.push).toEqual([]);
+    const newer = mergeMarket({ ...empty(), watchlist: list(["btc"], T(4)) }, cloud, false, now);
+    expect(newer.local.watchlist.ids).toEqual(["btc"]);
+    expect(newer.push.map((p) => p.id)).toEqual(["watchlist"]);
+  });
+
+  it("an empty cloud gets what the device has; an untouched device sends nothing", () => {
+    const r = mergeMarket({ ...empty(), watchlist: list(["btc"], T(1)), view: { ...DEFAULT_CHART_VIEW, clock: "bottom", updatedAt: T(1) } }, [], true, now);
+    expect(r.push.map((p) => p.id).sort()).toEqual(["chart_view", "watchlist"]);
+    expect(mergeMarket(empty(), [], true, now).push).toEqual([]);
+  });
+
+  it("the chart view: the newest wins", () => {
+    const cloud: MarketCloudRow[] = [{ id: "chart_view", data: { id: "chart_view", ...DEFAULT_CHART_VIEW, clock: "strip", updatedAt: T(5) } }];
+    expect(mergeMarket({ ...empty(), view: { ...DEFAULT_CHART_VIEW, clock: "hidden", updatedAt: T(4) } }, cloud, false, now).local.view.clock).toBe("strip");
+    const mine = mergeMarket({ ...empty(), view: { ...DEFAULT_CHART_VIEW, clock: "hidden", updatedAt: T(6) } }, cloud, false, now);
+    expect(mine.local.view.clock).toBe("hidden");
+    expect(mine.push.map((p) => p.id)).toEqual(["chart_view"]);
+  });
+
+  it("notes one by one; a cleared note (tombstone) reaches the other device", () => {
+    const local = { ...empty(), notes: { btc: { text: "76 000", updatedAt: T(2) }, gold: { text: "news", updatedAt: T(4) } } };
+    const cloud: MarketCloudRow[] = [
+      { id: "note:btc", data: { id: "note:btc", text: "", updatedAt: T(3), deletedAt: T(3) } },
+      { id: "note:eth", data: { id: "note:eth", text: "ETH", updatedAt: T(1) } },
+      { id: "note:gold", data: { id: "note:gold", text: "old", updatedAt: T(1) } },
+    ];
+    const r = mergeMarket(local, cloud, false, now);
+    expect(noteText(r.local.notes, "btc")).toBe("");
+    expect(noteText(r.local.notes, "eth")).toBe("ETH");
+    expect(noteText(r.local.notes, "gold")).toBe("news");
+    expect(r.push).toEqual([{ id: "note:gold", data: { id: "note:gold", text: "news", updatedAt: T(4) } }]);
+  });
+
+  it("clearing leaves a tombstone; writing again brings it back", () => {
+    const at = new Date(T(3));
+    const cleared = withNote({ btc: { text: "x", updatedAt: T(1) } }, "btc", "", at);
+    expect(cleared.btc).toEqual({ text: "", updatedAt: T(3), deletedAt: T(3) });
+    expect(withNote(cleared, "btc", "y", new Date(T(4))).btc).toEqual({ text: "y", updatedAt: T(4) });
+    // nothing to clear: no tombstone
+    expect(withNote({}, "btc", "", at)).toEqual({});
+  });
+});
+
+/** A cloud that keeps the newest version of every row, as the 0008 trigger does. */
+function fakeCloud(enabled = true) {
+  const rows = new Map<string, MarketCloudRow>();
+  const calls = { upsert: 0 };
+  const remote = (userId: string | null): MarketCloudRemote => ({
+    currentUserId: async () => userId,
+    isSyncEnabled: async () => enabled,
+    fetchAll: async () => [...rows.values()],
+    upsert: async (list) => {
+      calls.upsert++;
+      for (const r of list) {
+        const old = rows.get(r.id);
+        if (!old || Date.parse(String(r.data.updatedAt)) >= Date.parse(String(old.data.updatedAt))) rows.set(r.id, r);
+      }
+    },
+  });
+  return { rows, calls, remote };
+}
+
+function device(userId: string, start: MarketLocal = empty()): MarketLocalStore & { data: MarketLocal } {
+  let joined = false;
+  const d = {
+    data: structuredClone(start),
+    userId: () => userId,
+    read: () => structuredClone(d.data),
+    write: (next: MarketLocal) => {
+      d.data = structuredClone(next);
+    },
+    joined: () => joined,
+    markJoined: () => {
+      joined = true;
+    },
+  };
+  return d;
+}
+
+describe("Market data in the account: the exchange", () => {
+  it("two devices: a laptop's list reaches the phone; the phone's own list is joined, not lost", async () => {
+    const cloud = fakeCloud();
+    const laptop = device("u1", { ...empty(), watchlist: list(["btc", "gold"], T(1)), notes: { btc: { text: "76 000", updatedAt: T(1) } } });
+    expect(await syncMarketOnce(cloud.remote("u1"), laptop, () => now)).toBe("on");
+    const phone = device("u1", { ...empty(), watchlist: list(["eurusd"], T(2)) });
+    expect(await syncMarketOnce(cloud.remote("u1"), phone, () => now)).toBe("on");
+    expect(phone.data.watchlist.ids).toEqual(["btc", "gold", "eurusd"]);
+    expect(noteText(phone.data.notes, "btc")).toBe("76 000");
+    // the laptop gets the joined list on its next exchange
+    await syncMarketOnce(cloud.remote("u1"), laptop, () => now);
+    expect(laptop.data.watchlist.ids).toEqual(["btc", "gold", "eurusd"]);
+    // later the phone removes gold: the newest list wins on the laptop too
+    phone.data.watchlist = list(["btc", "eurusd"], T(13));
+    await syncMarketOnce(cloud.remote("u1"), phone, () => new Date(T(13)));
+    await syncMarketOnce(cloud.remote("u1"), laptop, () => new Date(T(13)));
+    expect(laptop.data.watchlist.ids).toEqual(["btc", "eurusd"]);
+  });
+
+  it("the switch off, a guest or another account: nothing is sent", async () => {
+    const off = fakeCloud(false);
+    expect(await syncMarketOnce(off.remote("u1"), device("u1", { ...empty(), watchlist: list(["btc"], T(1)) }))).toBe("off");
+    const on = fakeCloud();
+    expect(await syncMarketOnce(on.remote(null), device("u1", { ...empty(), watchlist: list(["btc"], T(1)) }))).toBe("off");
+    expect(await syncMarketOnce(on.remote("u2"), device("u1", { ...empty(), watchlist: list(["btc"], T(1)) }))).toBe("off");
+    expect(off.calls.upsert + on.calls.upsert).toBe(0);
+  });
+
+  it("a network error is reported, the device's data stays", async () => {
+    const d = device("u1", { ...empty(), watchlist: list(["btc"], T(1)) });
+    const broken: MarketCloudRemote = { currentUserId: async () => "u1", isSyncEnabled: async () => true, fetchAll: async () => Promise.reject(new Error("offline")), upsert: async () => {} };
+    expect(await syncMarketOnce(broken, d)).toBe("error");
+    expect(d.data.watchlist.ids).toEqual(["btc"]);
+  });
+});

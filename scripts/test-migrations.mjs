@@ -191,3 +191,23 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   const j = (await db.query(read("supabase/checks/0004_status.sql"))).rows[0];
   j.journal_tables === 9 && j.write_trigger_function && j.cloud_sync_function ? ok("G: rollback keeps 0001–0004") : fail("G: rollback touched 0004");
 }
+
+// H. 0008: Market data in the account (Watchlist, notes, chart view) — applied twice; RLS, last-write-wins, tombstones;
+//    rollback removes only the Market table
+{
+  const db = await fresh();
+  for (const f of ["0001_init", "0002_profile_defaults", "0003_nickname_cooldown", "0004_journal_sync"]) await db.exec(read(`supabase/migrations/${f}.sql`));
+  await db.exec(read("supabase/migrations/0008_market_sync.sql"));
+  await db.exec(read("supabase/migrations/0008_market_sync.sql")); ok("H: 0008 applied twice");
+  try { await db.exec(read("supabase/tests/market_sync_rls.sql")); ok("H: tests/market_sync_rls.sql passed"); } catch (e) { fail(`H: test script: ${e.message}`); }
+  const left = (await db.query(`SELECT count(*)::int n FROM public.market_user_data`)).rows[0].n;
+  left === 0 ? ok("H: test rolled back (no rows left)") : fail("H: rows left after test");
+  const chk = (await db.query(read("supabase/checks/0008_status.sql"))).rows[0];
+  console.log("   check:", JSON.stringify(chk));
+  (chk.market_table && chk.rls_enabled && chk.write_trigger_function && chk.client_delete_grants === 0 && chk.policies === 3) ? ok("H: check query") : fail("H: check query");
+  await db.exec(read("supabase/migrations/0008_market_sync.down.sql"));
+  const after = (await db.query(read("supabase/checks/0008_status.sql"))).rows[0];
+  (!after.market_table && !after.write_trigger_function) ? ok("H: rollback removes the Market table and its function") : fail(`H: rollback ${JSON.stringify(after)}`);
+  const j = (await db.query(read("supabase/checks/0004_status.sql"))).rows[0];
+  j.journal_tables === 9 && j.cloud_sync_function ? ok("H: rollback keeps 0004") : fail("H: rollback touched 0004");
+}
