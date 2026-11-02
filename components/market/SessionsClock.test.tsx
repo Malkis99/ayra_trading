@@ -116,7 +116,10 @@ describe("Sessions: live cards in the display time (New York by default)", () =>
     at("2026-03-07T12:00:00.000Z"); // Saturday
     render(<SessionsClock />);
     // the word stays for screen readers only; the block says it once, at the top
-    for (const id of ["asia", "london", "newyork", "sydney", "chicago"]) expect(text(`market-${id}-status`)).toBe("Выходные");
+    for (const id of ["asia", "london", "newyork"]) expect(text(`market-${id}-status`)).toBe("Выходные");
+    // the table rows say «Closed · opens in …» in words (owner 2026-11-02)
+    for (const id of ["sydney", "chicago"]) expect(text(`market-${id}-status`)).toBe("Закрыта");
+    expect(text("market-sydney-row-status")).toMatch(/^Закрыта · откроется через \d/);
     expect(text("market-weekend")).toBe("Выходные: рынок закрыт, откроется в воскресенье 17:00");
     const visible = screen.getByTestId("market-sessions").cloneNode(true) as HTMLElement;
     visible.querySelectorAll(".sr-only").forEach((n) => n.remove());

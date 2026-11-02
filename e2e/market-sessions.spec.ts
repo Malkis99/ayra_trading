@@ -412,10 +412,24 @@ for (const engine of ["chromium", "webkit"] as const) {
             expect(Math.abs(row.x + row.width - (timer.x + timer.width))).toBeLessThan(16);
             expect(timer.y >= row.y && timer.y + timer.height <= row.y + row.height).toBe(true);
           }
-          // the table: every timer ends at the same right edge
-          const rights = await el(page, "market-subsessions").locator("[role=timer]").evaluateAll((ts) => ts.map((t) => Math.round(t.getBoundingClientRect().right)));
-          expect(rights).toHaveLength(6);
-          expect(Math.max(...rights) - Math.min(...rights)).toBeLessThanOrEqual(1);
+          // the table (owner 2026-11-02): every row says «Open · closes in …» or «Closed · opens in …» in one or two
+          // lines, inside its row, the dot green when open
+          const rows = await el(page, "market-subsessions").locator("[data-testid$=-row-status]").evaluateAll((els) =>
+            els.map((e) => {
+              const r = e.getBoundingClientRect();
+              const row = e.closest("li")!.getBoundingClientRect();
+              const line = parseFloat(getComputedStyle(e).lineHeight) || 16;
+              const dot = e.querySelector("[aria-hidden]")!.className;
+              return { text: e.textContent ?? "", lines: Math.round(r.height / line), inside: r.left >= row.left && r.right <= row.right + 0.5, green: dot.includes("bg-long") };
+            })
+          );
+          expect(rows).toHaveLength(6);
+          for (const r of rows) {
+            expect(r.text).toMatch(/^(Открыта · закроется через|Закрыта · откроется через) \d/);
+            expect(r.lines).toBeLessThanOrEqual(2);
+            expect(r.inside).toBe(true);
+            expect(r.green).toBe(r.text.startsWith("Открыта"));
+          }
 
           if (scenario.name === "weekday") {
             await expect(el(page, "market-weekend")).toHaveCount(0);

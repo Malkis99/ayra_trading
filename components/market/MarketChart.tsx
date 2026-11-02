@@ -13,7 +13,7 @@ import { displayZoneOf, sessionDefs } from "@/lib/market/sessions";
 import { useMarketSettings } from "@/lib/market/settings-store";
 import { addTo, isFull, removeFrom } from "@/lib/market/watchlist";
 import { useChartNotes, useChartPrefs, useChartView, useWatchlist } from "@/lib/market/watchlist-store";
-import { ChartClockBar } from "./ChartClockBar";
+import { ChartClock } from "./ChartClock";
 import { ChartNotes } from "./ChartNotes";
 import { ChartViewSettings } from "./ChartViewSettings";
 import { ChartWatchlistPanel } from "./ChartWatchlistPanel";
@@ -225,10 +225,16 @@ export function MarketChart() {
   const notesBlock = (className?: string) => view.notes && <ChartNotes key={id} id={id} notes={notes} onChange={setNotes} className={className} />;
   // Beside the chart only on wide screens; on phones everything goes under it
   const notesBeside = wide && view.notes && view.notesPlace === "side" && view.watchlist && !view.watchlistFolded;
-  const side = wide && (panel || notesBeside) && (
-    <div className="flex min-h-0 shrink-0 flex-col gap-3" data-testid="market-chart-side">
+  // «time + session + market»: a card in the right column (on phones under the chart), a strip over it, or hidden
+  const clockCard = (view.clock === "top" || view.clock === "bottom") && (
+    <ChartClock instrument={id} zone={profileZone} defs={mainDefs} variant="card" className={wide ? "w-60 shrink-0" : undefined} />
+  );
+  const side = wide && (panel || notesBeside || clockCard) && (
+    <div className="flex min-h-0 shrink-0 flex-col gap-3 overflow-y-auto" data-testid="market-chart-side">
+      {view.clock === "top" && clockCard}
       {panel}
       {notesBeside && notesBlock("w-60 max-h-[45%]")}
+      {view.clock === "bottom" && clockCard}
     </div>
   );
 
@@ -312,7 +318,7 @@ export function MarketChart() {
             <InstrumentPicker idPrefix="market-chart" selected={(x) => x === id} onPick={pick} initialCategory={categoryOf(id)} />
           </div>
         )}
-        <ChartClockBar instrument={id} zone={profileZone} defs={mainDefs} />
+        {view.clock === "strip" && <ChartClock instrument={id} zone={profileZone} defs={mainDefs} variant="strip" />}
         {notice && (
           <p className="rounded-md bg-s2/50 px-3 py-2 text-xs text-tx" role="status" data-testid="market-chart-notice">
             {notice}
@@ -371,6 +377,7 @@ export function MarketChart() {
         )}
       </div>
 
+      {!wide && clockCard}
       {!wide && panel}
       {view.notes && !notesBeside && notesBlock()}
 

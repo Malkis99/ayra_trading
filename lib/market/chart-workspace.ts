@@ -21,6 +21,10 @@ export function toggleFavorite(list: readonly ChartInterval[], interval: ChartIn
 
 export type PanelSide = "right" | "left";
 export type NotesPlace = "below" | "side";
+/** The «time + session + market» card: in the right column on top (default) or under the note, a thin strip over
+ * the chart, or hidden. On phones the card stands under the chart, before the Watchlist. */
+export type ClockPlace = "top" | "bottom" | "strip" | "hidden";
+export const CLOCK_PLACES: readonly ClockPlace[] = ["top", "bottom", "strip", "hidden"];
 
 export interface ChartView {
   /** The Watchlist panel next to the chart. */
@@ -32,9 +36,10 @@ export interface ChartView {
   notesPlace: NotesPlace;
   /** TradingView's left drawing toolbar. */
   drawing: boolean;
+  clock: ClockPlace;
 }
 
-export const DEFAULT_CHART_VIEW: ChartView = { watchlist: true, watchlistSide: "right", watchlistFolded: false, notes: true, notesPlace: "below", drawing: true };
+export const DEFAULT_CHART_VIEW: ChartView = { watchlist: true, watchlistSide: "right", watchlistFolded: false, notes: true, notesPlace: "below", drawing: true, clock: "top" };
 
 export function normalizeChartView(raw: unknown): ChartView {
   const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
@@ -46,6 +51,7 @@ export function normalizeChartView(raw: unknown): ChartView {
     notes: bool("notes"),
     notesPlace: r.notesPlace === "side" ? "side" : "below",
     drawing: bool("drawing"),
+    clock: CLOCK_PLACES.includes(r.clock as ClockPlace) ? (r.clock as ClockPlace) : DEFAULT_CHART_VIEW.clock,
   };
 }
 

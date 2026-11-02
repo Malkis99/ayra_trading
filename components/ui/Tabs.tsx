@@ -13,6 +13,8 @@ type TabsProps<T extends string> = {
   className?: string;
   /** Prefix for tab/panel ids; panels should use id={`${idPrefix}-panel-${id}`}. */
   idPrefix?: string;
+  /** Scrolling snaps to the start of a tab: the left edge never shows a cut piece of the previous one. */
+  snap?: boolean;
 };
 
 /**
@@ -20,16 +22,25 @@ type TabsProps<T extends string> = {
  * scrollbar, the active tab is scrolled into view and soft edge gradients hint that there is more.
  * 44px tap targets, arrow-key navigation, a clearly highlighted active tab.
  */
-export function Tabs<T extends string>({ items, value, onChange, label, className, idPrefix = "tabs" }: TabsProps<T>) {
+export function Tabs<T extends string>({ items, value, onChange, label, className, idPrefix = "tabs", snap = false }: TabsProps<T>) {
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ left: false, right: false });
 
+  // With snapping, room after the last tab lets any tab come to the left edge (else the row stops at its end and the
+  // left edge shows a cut piece of a tab)
+  const [tail, setTail] = useState(8);
   const updateEdges = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
     setEdges({ left: el.scrollLeft > 2, right: el.scrollLeft + el.clientWidth < el.scrollWidth - 2 });
-  }, []);
+    if (!snap) return;
+    const last = refs.current[items.length - 1];
+    if (!last) return;
+    const overflows = last.offsetLeft + last.offsetWidth > el.clientWidth;
+    const next = overflows ? Math.max(8, el.clientWidth - last.offsetWidth) : 8;
+    setTail((prev) => (prev === next ? prev : next));
+  }, [snap, items.length]);
 
   useEffect(() => {
     updateEdges();
@@ -46,13 +57,20 @@ export function Tabs<T extends string>({ items, value, onChange, label, classNam
     const list = scrollRef.current;
     const tab = refs.current[activeIndex];
     if (!list || !tab || list.scrollWidth <= list.clientWidth) return;
+    if (snap) {
+      // snapping always lands on a tab's start: bring the active one to the left edge, so it is whole
+      const visible = tab.offsetLeft >= list.scrollLeft && tab.offsetLeft + tab.offsetWidth <= list.scrollLeft + list.clientWidth;
+      if (!visible) list.scrollLeft = tab.offsetLeft;
+      updateEdges();
+      return;
+    }
     const pad = 32;
     const left = tab.offsetLeft - pad;
     const right = tab.offsetLeft + tab.offsetWidth + pad;
     if (left < list.scrollLeft) list.scrollLeft = Math.max(0, left);
     else if (right > list.scrollLeft + list.clientWidth) list.scrollLeft = right - list.clientWidth;
     updateEdges();
-  }, [activeIndex, updateEdges]);
+  }, [activeIndex, updateEdges, snap]);
 
   const focusAt = (index: number) => {
     const next = (index + items.length) % items.length;
@@ -67,7 +85,7 @@ export function Tabs<T extends string>({ items, value, onChange, label, classNam
         role="tablist"
         aria-label={label}
         onScroll={updateEdges}
-        className="relative flex gap-1 overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className={cn("relative flex gap-1 overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", snap && "snap-x snap-mandatory")}
       >
         {items.map((item, index) => {
           const selected = item.id === value;
@@ -101,6 +119,7 @@ export function Tabs<T extends string>({ items, value, onChange, label, classNam
               }}
               className={cn(
                 "relative inline-flex min-h-[44px] shrink-0 items-center whitespace-nowrap rounded-t-md px-3.5 text-sm transition-colors",
+                snap && "snap-start",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-vi",
                 "after:absolute after:inset-x-2 after:-bottom-px after:h-[3px] after:rounded-full",
                 selected ? "bg-vi/10 font-semibold text-tx after:bg-vi" : "text-mu after:bg-transparent hover:bg-s2/60 hover:text-tx"
@@ -111,12 +130,12 @@ export function Tabs<T extends string>({ items, value, onChange, label, classNam
           );
         })}
         {/* end spacer: flex scroll containers ignore end padding, so the last tab could stay partly hidden */}
-        <span aria-hidden="true" className="w-2 shrink-0" />
+        <span aria-hidden="true" className="shrink-0" style={{ width: tail }} />
       </div>
       <span
         aria-hidden="true"
         data-edge="left"
-        className={cn("pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-ink to-transparent transition-opacity", edges.left ? "opacity-100" : "opacity-0")}
+        className={cn("pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-ink to-transparent transition-opacity", edges.left && !snap ? "opacity-100" : "opacity-0")}
       />
       <span
         aria-hidden="true"

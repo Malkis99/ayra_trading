@@ -53,7 +53,8 @@ for (const engine of ["chromium", "webkit"] as const) {
         const panel = await box(page, "market-chart-panel");
         if (width === 1440) {
           expect(panel.x).toBeGreaterThan(chart.x + chart.width - 1);
-          expect(Math.abs(panel.y - chart.y)).toBeLessThan(4);
+          // the right column starts level with the chart (the time card on top, then the list)
+          expect(Math.abs((await box(page, "market-chart-side")).y - chart.y)).toBeLessThan(4);
         } else {
           expect(panel.y).toBeGreaterThan(chart.y + chart.height - 1);
         }
