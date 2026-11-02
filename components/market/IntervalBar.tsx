@@ -7,6 +7,8 @@ import { Popover, useOutsideClose } from "@/components/ui/forms/popover";
 import { cn } from "@/components/ui";
 import { CHART_INTERVALS, type ChartInterval } from "@/lib/market/instruments";
 import { toggleFavorite } from "@/lib/market/chart-workspace";
+import { HOTKEY_COUNT } from "@/lib/market/chart-tools";
+import { formatString } from "@/lib/i18n";
 
 /**
  * Timeframes (PR 1.3b): the favourite ones as buttons (1m, 5m, 15m, 1h, 4h, 1D by default) and «+» with every
@@ -30,6 +32,11 @@ export function IntervalBar({
   const panel = useRef<HTMLDivElement>(null);
   useOutsideClose([plus, panel], open, () => setOpen(false));
   const shown = CHART_INTERVALS.filter((i) => favorites.includes(i) || i === value);
+  // keys 1–6 switch the first six favourites
+  const hotkeyOf = (interval: ChartInterval) => {
+    const i = favorites.indexOf(interval);
+    return i >= 0 && i < HOTKEY_COUNT ? i + 1 : null;
+  };
 
   return (
     <div className="flex min-w-0 items-center gap-1">
@@ -41,6 +48,8 @@ export function IntervalBar({
             role="radio"
             aria-checked={value === interval}
             onClick={() => onChange(interval)}
+            title={hotkeyOf(interval) ? formatString(dict.market.chart.tools.hotkey, { n: hotkeyOf(interval)! }) : undefined}
+            aria-keyshortcuts={hotkeyOf(interval) ? String(hotkeyOf(interval)) : undefined}
             className={cn(
               "min-w-[2.5rem] shrink-0 rounded-md px-2 py-1.5 text-xs font-semibold tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi",
               value === interval ? "bg-pri text-tx" : "text-mu hover:bg-s2 hover:text-tx"
@@ -67,6 +76,9 @@ export function IntervalBar({
         <Popover anchor={plus} open panelRef={panel} role="dialog" aria-label={t.moreIntervals} minWidth={220} preferredHeight={360} className="max-w-[16rem]">
           <div className="space-y-2 p-3" data-testid="market-chart-favorites">
             <p className="text-xs text-mu">{t.favoritesHint}</p>
+            <p className="hidden text-xs text-mu md:block" data-testid="market-chart-hotkeys-hint">
+              {dict.market.chart.tools.hotkeysHint}
+            </p>
             <ul className="grid grid-cols-3 gap-1">
               {CHART_INTERVALS.map((interval) => {
                 const on = favorites.includes(interval);

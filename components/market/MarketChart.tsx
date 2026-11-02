@@ -19,6 +19,8 @@ import { ChartViewSettings } from "./ChartViewSettings";
 import { ChartWatchlistPanel } from "./ChartWatchlistPanel";
 import { InstrumentPicker } from "./InstrumentPicker";
 import { IntervalBar } from "./IntervalBar";
+import { ChartTypeMenu, IndicatorsMenu } from "./ChartToolsMenus";
+import { HOTKEY_COUNT, studiesOf } from "@/lib/market/chart-tools";
 import { SourceLine } from "./SourceLine";
 import { TradingViewWidget, widgetConfig } from "./TradingViewWidget";
 
@@ -164,6 +166,28 @@ export function MarketChart() {
   const pickerButton = useRef<HTMLButtonElement>(null);
   const pickerPanel = useRef<HTMLDivElement>(null);
   useOutsideClose([pickerButton, pickerPanel], picking, () => setPicking(false));
+
+  // Keys 1–6: the first six timeframes of the bar (owner's idea 2026-11-01). Only on our page — inside TradingView's
+  // frame the keys belong to the widget — and never while typing or with a window open.
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
+  useEffect(() => {
+    if (!prefsLoaded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || picking || editingView) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
+      if (target?.closest("[role=dialog]")) return;
+      const n = Number(e.key);
+      if (!Number.isInteger(n) || n < 1 || n > HOTKEY_COUNT) return;
+      const next = prefsRef.current.favorites[n - 1];
+      if (!next || next === prefsRef.current.interval) return;
+      e.preventDefault();
+      setPrefs({ ...prefsRef.current, interval: next });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [prefsLoaded, picking, editingView, setPrefs]);
   const loaded = ready && listLoaded && viewLoaded && notesLoaded && settingsLoaded && !!origin;
   const [full, enterFull, leaveFull] = useFullScreen(!picking && !editingView);
   const height = useFillHeight(row, toolbar, loaded, full);
@@ -268,6 +292,10 @@ export function MarketChart() {
             </button>
           </div>
           <IntervalBar value={prefs.interval} favorites={prefs.favorites} onChange={chooseInterval} onFavorites={(favorites) => setPrefs({ ...prefs, favorites })} />
+          <div className="flex items-center gap-1">
+            <ChartTypeMenu value={prefs.style} onChange={(style) => setPrefs({ ...prefs, style })} />
+            <IndicatorsMenu value={prefs.indicators} onChange={(indicators) => setPrefs({ ...prefs, indicators })} />
+          </div>
           <div className="ml-auto flex items-center gap-1">
             <button
               type="button"
@@ -329,7 +357,7 @@ export function MarketChart() {
       <div ref={row} className={cn("flex gap-3", view.watchlistSide === "left" && "flex-row-reverse")} style={{ height }} data-testid="market-chart-row">
         <div className="min-w-0 flex-1 overflow-hidden rounded-xl border border-line bg-s1">
           <TradingViewWidget
-            key={`${inst.symbol}-${prefs.interval}-${zone}-${lang}-${view.drawing}`}
+            key={`${inst.symbol}-${prefs.interval}-${prefs.style}-${prefs.indicators.join(",")}-${zone}-${lang}-${view.drawing}`}
             widget="advanced-chart"
             config={widgetConfig(
               {
@@ -339,7 +367,8 @@ export function MarketChart() {
                 symbol: inst.symbol,
                 interval: prefs.interval,
                 timezone: zone === "UTC" ? "Etc/UTC" : zone,
-                style: "1",
+                style: prefs.style,
+                studies: studiesOf(prefs.indicators),
                 backgroundColor: CHART_BACKGROUND,
                 gridColor: CHART_GRID,
                 hide_top_toolbar: true,
