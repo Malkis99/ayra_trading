@@ -9,6 +9,7 @@ import { INSTRUMENTS, symbolsOf, type InstrumentId, instrumentName } from "@/lib
 import { WATCHLIST_LIMIT, addTo, isFull, move, removeFrom } from "@/lib/market/watchlist";
 import { useWatchlist } from "@/lib/market/watchlist-store";
 import { useMarketInAccount } from "@/lib/market/cloud-sync-engine";
+import { MarketSyncLine } from "./MarketSyncLine";
 import { InstrumentPicker } from "./InstrumentPicker";
 import { SourceLine } from "./SourceLine";
 import { TradingViewWidget, widgetConfig } from "./TradingViewWidget";
@@ -55,6 +56,7 @@ export function MarketWatchlist({ onOpenChart }: { onOpenChart: (id: InstrumentI
         </Button>
       </div>
 
+      <MarketSyncLine />
       {full && (
         <p className="rounded-md bg-s2/50 px-3 py-2 text-xs text-tx" role="status" data-testid="market-watchlist-full">
           {formatString(t.watchlist.full, { n: list.ids.length })}

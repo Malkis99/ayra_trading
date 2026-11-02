@@ -38,6 +38,7 @@ export function createFakeSupabase() {
   const cloudFlags = new Map(); // user id -> boolean
   const journalRows = new Map(); // `${userId}:${table}:${id}` -> { user_id, table, id, data, updated_at }
   let journalWriteFailuresLeft = 0; // next N journal writes fail with 500 (server trouble)
+  let marketTableMissing = false; // the Market table of 0008 is not in the project (migration not applied)
   let journalWriteDelayMs = 0; // every journal write waits this long (slow network: lets a test cancel mid-upload)
   let journalClock = Date.now();
   const JOURNAL_ID_KEY = { journal_day_plans: "date", journal_week_plans: "weekStartDate" };
@@ -178,6 +179,10 @@ export function createFakeSupabase() {
     if (path === "/__test/cloud-requests") {
       if (url.searchParams.has("reset")) Object.assign(cloudRequests, { userFeatures: 0, journal: 0 });
       return send(200, cloudRequests);
+    }
+    if (path === "/__test/market-table") {
+      marketTableMissing = url.searchParams.get("present") === "0";
+      return send(200, { present: !marketTableMissing });
     }
     if (path === "/__test/cloud-flag") {
       const user = usersByEmail.get(url.searchParams.get("email"));
@@ -471,6 +476,10 @@ export function createFakeSupabase() {
       return send(200, rows);
     }
     // the journal tables (0004, 0005) and the Market data (0008) share the same rules here
+    // like PostgREST when 0008 is not applied
+    if (path === "/rest/v1/market_user_data" && marketTableMissing) {
+      return send(404, { code: "PGRST205", message: "Could not find the table 'public.market_user_data' in the schema cache" });
+    }
     if (path.startsWith("/rest/v1/journal_") || path === "/rest/v1/market_user_data") {
       cloudRequests.journal++;
       const table = path.slice("/rest/v1/".length);

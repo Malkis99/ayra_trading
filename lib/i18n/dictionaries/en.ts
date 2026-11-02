@@ -1778,6 +1778,16 @@ export const en: Dictionary = {
       backtest: "Backtest",
       watchlist: "Watchlist",
     },
+    sync: {
+      on: "In your account · updated at {time}",
+      onNoTime: "In your account",
+      waiting: "Opening your account… Trying again in 30 seconds.",
+      flagOff: "The cloud is off for this account: the Watchlist, notes and chart settings are kept only on this device.",
+      noTable: "The Market table is not in the cloud (migration 0008 not applied): everything is kept on this device for now.",
+      offline: "No connection to the cloud: changes wait on this device. Trying again in 30 seconds.",
+      refused: "The cloud did not take the changes: {detail}",
+      now: "Sync now",
+    },
     instruments: {
       dxy: "US Dollar Index (DXY)",
       spx: "S&P 500",
