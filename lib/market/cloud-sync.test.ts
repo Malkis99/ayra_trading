@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { joinWatchlists, mergeMarket, type MarketCloudRow, type MarketLocal } from "./cloud-sync";
-import { syncMarketOnce, type MarketCloudRemote, type MarketLocalStore } from "./cloud-sync-engine";
+import { MarketCloudError, syncMarketOnce, type MarketCloudRemote, type MarketLocalStore } from "./cloud-sync-engine";
 import { DEFAULT_CHART_VIEW, withNote, noteText } from "./chart-workspace";
 import { normalizeChartPrefs, type Watchlist } from "./watchlist";
 
@@ -108,9 +108,9 @@ describe("Market data in the account: the exchange", () => {
   it("two devices: a laptop's list reaches the phone; the phone's own list is joined, not lost", async () => {
     const cloud = fakeCloud();
     const laptop = device("u1", { ...empty(), watchlist: list(["btc", "gold"], T(1)), notes: { btc: { text: "76 000", updatedAt: T(1) } } });
-    expect(await syncMarketOnce(cloud.remote("u1"), laptop, () => now)).toBe("on");
+    expect(await syncMarketOnce(cloud.remote("u1"), laptop, () => now)).toEqual({ kind: "on" });
     const phone = device("u1", { ...empty(), watchlist: list(["eurusd"], T(2)) });
-    expect(await syncMarketOnce(cloud.remote("u1"), phone, () => now)).toBe("on");
+    expect(await syncMarketOnce(cloud.remote("u1"), phone, () => now)).toEqual({ kind: "on" });
     expect(phone.data.watchlist.ids).toEqual(["btc", "gold", "eurusd"]);
     expect(noteText(phone.data.notes, "btc")).toBe("76 000");
     // the laptop gets the joined list on its next exchange
@@ -125,17 +125,17 @@ describe("Market data in the account: the exchange", () => {
 
   it("the switch off, a guest or another account: nothing is sent", async () => {
     const off = fakeCloud(false);
-    expect(await syncMarketOnce(off.remote("u1"), device("u1", { ...empty(), watchlist: list(["btc"], T(1)) }))).toBe("off");
+    expect(await syncMarketOnce(off.remote("u1"), device("u1", { ...empty(), watchlist: list(["btc"], T(1)) }))).toEqual({ kind: "flagOff" });
     const on = fakeCloud();
-    expect(await syncMarketOnce(on.remote(null), device("u1", { ...empty(), watchlist: list(["btc"], T(1)) }))).toBe("off");
-    expect(await syncMarketOnce(on.remote("u2"), device("u1", { ...empty(), watchlist: list(["btc"], T(1)) }))).toBe("off");
+    expect(await syncMarketOnce(on.remote(null), device("u1", { ...empty(), watchlist: list(["btc"], T(1)) }))).toEqual({ kind: "guest" });
+    expect(await syncMarketOnce(on.remote("u2"), device("u1", { ...empty(), watchlist: list(["btc"], T(1)) }))).toEqual({ kind: "waiting" });
     expect(off.calls.upsert + on.calls.upsert).toBe(0);
   });
 
   it("a network error is reported, the device's data stays", async () => {
     const d = device("u1", { ...empty(), watchlist: list(["btc"], T(1)) });
     const broken: MarketCloudRemote = { currentUserId: async () => "u1", isSyncEnabled: async () => true, fetchAll: async () => Promise.reject(new Error("offline")), upsert: async () => {} };
-    expect(await syncMarketOnce(broken, d)).toBe("error");
+    expect(await syncMarketOnce(broken, d)).toEqual({ kind: "offline" });
     expect(d.data.watchlist.ids).toEqual(["btc"]);
   });
 });
@@ -190,5 +190,27 @@ describe("the chart settings in the account (owner 2026-11-02): favourites, char
     const phone = device("u1", { ...empty(), prefs: prefs({ instrument: "btc", interval: "D" }) });
     await syncMarketOnce(cloud.remote("u1"), phone, () => now);
     expect(phone.data.prefs).toMatchObject({ instrument: "btc", interval: "D", style: "8", indicators: ["rsi", "bb"], layout: 4, favorites: ["5", "15", "60"] });
+  });
+});
+
+describe("the sync says what is wrong (owner 2026-11-02: it must not fail silently)", () => {
+  const remoteWith = (error: unknown): MarketCloudRemote => ({
+    currentUserId: async () => "u1",
+    isSyncEnabled: async () => true,
+    fetchAll: async () => Promise.reject(error),
+    upsert: async () => {},
+  });
+
+  it("the Market table missing in the cloud (0008 not applied) → «noTable»", async () => {
+    expect(await syncMarketOnce(remoteWith(new MarketCloudError("PGRST205", "Could not find the table 'public.market_user_data' in the schema cache")), device("u1"))).toEqual({ kind: "noTable" });
+    expect(await syncMarketOnce(remoteWith(new MarketCloudError("42P01", 'relation "public.market_user_data" does not exist')), device("u1"))).toEqual({ kind: "noTable" });
+  });
+
+  it("the cloud refused (rights, checks) → «refused» with its text; no answer → «offline»", async () => {
+    expect(await syncMarketOnce(remoteWith(new MarketCloudError("42501", "new row violates row-level security policy")), device("u1"))).toEqual({
+      kind: "refused",
+      detail: "42501: new row violates row-level security policy",
+    });
+    expect(await syncMarketOnce(remoteWith(new TypeError("Failed to fetch")), device("u1"))).toEqual({ kind: "offline" });
   });
 });

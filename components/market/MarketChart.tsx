@@ -14,6 +14,7 @@ import { useMarketSettings } from "@/lib/market/settings-store";
 import { addTo, isFull, removeFrom } from "@/lib/market/watchlist";
 import { useChartNotes, useChartPrefs, useChartView, useWatchlist } from "@/lib/market/watchlist-store";
 import { ChartClock } from "./ChartClock";
+import { MarketSyncLine } from "./MarketSyncLine";
 import { ChartNotes } from "./ChartNotes";
 import { ChartViewSettings } from "./ChartViewSettings";
 import { ChartWatchlistPanel } from "./ChartWatchlistPanel";
@@ -453,6 +454,7 @@ export function MarketChart() {
 
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
         <SourceLine delay={inst.delay} testId="market-chart-source" />
+        <MarketSyncLine />
         {view.drawing && (
           <p className="flex items-start gap-1.5 text-[11px] text-mu" data-testid="market-chart-drawing-note">
             <Info size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
