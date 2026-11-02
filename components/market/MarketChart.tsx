@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, Info, SlidersHorizontal, Star } from "lucide-react";
+import { ChevronDown, Info, Maximize2, Minimize2, SlidersHorizontal, Star } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useOptionalGame } from "@/lib/game-context";
 import { formatString } from "@/lib/i18n";
@@ -9,10 +9,11 @@ import { browserTimeZone } from "@/lib/timezones";
 import { cn } from "@/components/ui";
 import { useOutsideClose } from "@/components/ui/forms/popover";
 import { categoryOf, INSTRUMENTS, instrumentBySymbol, type ChartInterval, type InstrumentId, instrumentName } from "@/lib/market/instruments";
-import { displayZoneOf } from "@/lib/market/sessions";
+import { displayZoneOf, sessionDefs } from "@/lib/market/sessions";
 import { useMarketSettings } from "@/lib/market/settings-store";
 import { addTo, isFull, removeFrom } from "@/lib/market/watchlist";
 import { useChartNotes, useChartPrefs, useChartView, useWatchlist } from "@/lib/market/watchlist-store";
+import { ChartClockBar } from "./ChartClockBar";
 import { ChartNotes } from "./ChartNotes";
 import { ChartViewSettings } from "./ChartViewSettings";
 import { ChartWatchlistPanel } from "./ChartWatchlistPanel";
@@ -57,29 +58,84 @@ function useWide(): boolean {
 }
 
 /** The chart row takes the height of the page's scroll area (minus its padding and the toolbar above the chart). */
-function useFillHeight(row: React.RefObject<HTMLElement>, toolbar: React.RefObject<HTMLElement>, shown: boolean): number {
+function useFillHeight(row: React.RefObject<HTMLElement>, toolbar: React.RefObject<HTMLElement>, shown: boolean, full: boolean): number {
   const [height, setHeight] = useState(MIN_HEIGHT);
   const measure = useCallback(() => {
+    const bar = (toolbar.current?.offsetHeight ?? 0) + 12;
+    if (full) {
+      // full screen: the window minus the overlay's padding and the toolbar
+      setHeight(Math.max(MIN_HEIGHT, Math.round(window.innerHeight - FULL_PADDING - bar)));
+      return;
+    }
     const main = row.current?.closest("main");
     if (!main) return;
     const style = getComputedStyle(main);
-    const free = main.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom) - (toolbar.current?.offsetHeight ?? 0) - 12;
+    const free = main.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom) - bar;
     setHeight(Math.max(MIN_HEIGHT, Math.round(free)));
-  }, [row, toolbar]);
+  }, [row, toolbar, full]);
   useEffect(() => {
     if (!shown) return;
     measure();
+    window.addEventListener("resize", measure);
     const main = row.current?.closest("main");
-    if (!main || typeof ResizeObserver === "undefined") {
-      window.addEventListener("resize", measure);
-      return () => window.removeEventListener("resize", measure);
-    }
-    const ro = new ResizeObserver(measure);
-    ro.observe(main);
-    if (toolbar.current) ro.observe(toolbar.current);
-    return () => ro.disconnect();
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    if (ro && main) ro.observe(main);
+    if (ro && toolbar.current) ro.observe(toolbar.current);
+    return () => {
+      window.removeEventListener("resize", measure);
+      ro?.disconnect();
+    };
   }, [measure, row, toolbar, shown]);
   return height;
+}
+
+/** The overlay's padding, top and bottom (p-3). */
+const FULL_PADDING = 24;
+
+/**
+ * «Full screen» (PR «Fullscreen + time and session»): the workspace covers the whole site; the browser's own full
+ * screen is asked for the page too (so the dialogs and popovers still show). Esc or the button leaves it. Where the
+ * browser has no full screen (iPhone), the overlay alone covers the site.
+ */
+function useFullScreen(canLeaveByEsc: boolean): [boolean, () => void, () => void] {
+  const [full, setFull] = useState(false);
+  const enter = useCallback(() => {
+    // before the browser starts its own full screen, so the site never shows over the workspace
+    document.documentElement.setAttribute("data-market-fullscreen", "");
+    setFull(true);
+    const root = document.documentElement;
+    if (document.fullscreenEnabled && !document.fullscreenElement && root.requestFullscreen) root.requestFullscreen().catch(() => {});
+  }, []);
+  const leave = useCallback(() => {
+    setFull(false);
+    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+  }, []);
+  // the page's scroll area is its own layer under the header: lift it while the workspace covers the site
+  useEffect(() => {
+    document.documentElement.toggleAttribute("data-market-fullscreen", full);
+    return () => document.documentElement.removeAttribute("data-market-fullscreen");
+  }, [full]);
+  useEffect(() => {
+    if (!full) return;
+    // Esc in the browser's full screen leaves it first: follow it
+    const onChange = () => {
+      if (!document.fullscreenElement) setFull(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && canLeaveByEsc) leave();
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [full, leave, canLeaveByEsc]);
+  // leaving the tab or the page ends it
+  useEffect(() => () => {
+    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+  }, []);
+  return [full, enter, leave];
 }
 
 /**
@@ -109,7 +165,8 @@ export function MarketChart() {
   const pickerPanel = useRef<HTMLDivElement>(null);
   useOutsideClose([pickerButton, pickerPanel], picking, () => setPicking(false));
   const loaded = ready && listLoaded && viewLoaded && notesLoaded && settingsLoaded && !!origin;
-  const height = useFillHeight(row, toolbar, loaded);
+  const [full, enterFull, leaveFull] = useFullScreen(!picking && !editingView);
+  const height = useFillHeight(row, toolbar, loaded, full);
 
   // The address wins over the last instrument on this device
   useEffect(() => {
@@ -142,7 +199,9 @@ export function MarketChart() {
   const name = instrumentName(id, t.instruments);
   const inList = watchlist.ids.includes(id);
   const listFull = !inList && isFull(watchlist);
-  const zone = displayZoneOf(settings.display, game?.gameState.profile.timezone || browserTimeZone());
+  const profileZone = game?.gameState.profile.timezone || browserTimeZone();
+  const zone = displayZoneOf(settings.display, profileZone);
+  const mainDefs = sessionDefs(settings.sessions);
 
   const pick = (next: InstrumentId) => {
     setNotice(null);
@@ -174,7 +233,12 @@ export function MarketChart() {
   );
 
   return (
-    <section className="space-y-2" data-testid="market-chart" aria-labelledby="market-chart-title">
+    <section
+      className={cn("space-y-2", full && "fixed inset-0 z-[90] overflow-y-auto bg-ink p-3")}
+      data-testid="market-chart"
+      data-fullscreen={full ? "true" : "false"}
+      aria-labelledby="market-chart-title"
+    >
       <div ref={toolbar} className="space-y-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <div className="relative min-w-0">
@@ -226,6 +290,20 @@ export function MarketChart() {
             >
               <SlidersHorizontal size={15} aria-hidden="true" />
             </button>
+            <button
+              type="button"
+              onClick={full ? leaveFull : enterFull}
+              aria-pressed={full}
+              aria-label={full ? t.chart.fullscreen.exit : t.chart.fullscreen.enter}
+              title={full ? t.chart.fullscreen.exit : t.chart.fullscreen.enter}
+              className={cn(
+                "grid h-8 w-8 place-items-center rounded-md border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi",
+                full ? "border-vi/70 bg-pri/25 text-tx" : "border-line text-mu hover:border-vi/50 hover:text-tx"
+              )}
+              data-testid="market-chart-fullscreen"
+            >
+              {full ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}
+            </button>
           </div>
         </div>
 
@@ -234,6 +312,7 @@ export function MarketChart() {
             <InstrumentPicker idPrefix="market-chart" selected={(x) => x === id} onPick={pick} initialCategory={categoryOf(id)} />
           </div>
         )}
+        <ChartClockBar instrument={id} zone={profileZone} defs={mainDefs} />
         {notice && (
           <p className="rounded-md bg-s2/50 px-3 py-2 text-xs text-tx" role="status" data-testid="market-chart-notice">
             {notice}

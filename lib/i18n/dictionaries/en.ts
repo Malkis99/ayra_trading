@@ -1821,6 +1821,23 @@ export const en: Dictionary = {
       favoritesHint: "Tick the timeframes to show in the bar. At least one stays.",
       change: "Change instrument",
       drawingNote: "Drawings on the TradingView chart are not saved: after a reload or another instrument they are gone.",
+      clock: {
+        session: "Session: {name}",
+        between: "Between sessions",
+        weekend: "Weekend: no sessions",
+        next: "next {name} in",
+        open: "Market open",
+        closed: "Market closed",
+        closesIn: "closes in",
+        opensIn: "opens in",
+        allDay: "Crypto trades around the clock",
+        nyse: "regular NYSE hours, holidays not counted",
+        cfd: "forex week, daily breaks and holidays not counted",
+      },
+      fullscreen: {
+        enter: "Full screen",
+        exit: "Exit full screen",
+      },
       panel: {
         title: "Watchlist",
         fold: "Fold the list",

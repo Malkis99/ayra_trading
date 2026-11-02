@@ -124,4 +124,6 @@ export const ALLOWED_LATIN_WORDS = [
   // the Volatility Index and Hong Kong 50 (PR «Instruments»)
   "VIX",
   "HK",
+  // the New York Stock Exchange in «Market open / closed» (PR «Fullscreen + time and session»)
+  "NYSE",
 ] as const;
