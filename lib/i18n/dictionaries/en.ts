@@ -1875,6 +1875,23 @@ export const en: Dictionary = {
         nyse: "regular NYSE hours, holidays not counted",
         cfd: "forex week, daily breaks and holidays not counted",
       },
+      shot: {
+        button: "Chart screenshot",
+        hint: "Chart screenshot: the browser asks to share this tab — choose it. One frame is taken and the capture stops at once.",
+        phone: "On a phone, take an ordinary screenshot",
+        title: "Chart screenshot",
+        previewNote: "This is how the file will look. The picture stays with you: it is not sent anywhere.",
+        alt: "Chart screenshot: {name}",
+        download: "Download PNG",
+        again: "Take again",
+        close: "Close",
+        errors: {
+          denied: "The browser did not get permission to share the tab — no screenshot was taken.",
+          notTab: "Another window or the whole screen was chosen — the chart cannot be cut from that. Press «Take again» and choose the AYRA tab.",
+          blank: "The browser gave a frame without the chart (an empty area). Take an ordinary screenshot with your computer.",
+          failed: "The screenshot did not work in this browser. Take an ordinary screenshot with your computer.",
+        },
+      },
       fullscreen: {
         enter: "Full screen",
         exit: "Exit full screen",

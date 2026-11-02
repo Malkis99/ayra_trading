@@ -24,6 +24,7 @@ import { LayoutMenu, PaneHeader } from "./ChartLayout";
 import { effectiveLayout, paneInstrument, withPane } from "@/lib/market/chart-layout";
 import { HOTKEY_COUNT, studiesOf } from "@/lib/market/chart-tools";
 import { SourceLine } from "./SourceLine";
+import { ChartShot, useCanShoot } from "./ChartShot";
 import { TradingViewWidget, widgetConfig } from "./TradingViewWidget";
 
 /** The site's surfaces for TradingView's `backgroundColor` and `gridColor` (candle colours cannot be set there). */
@@ -108,7 +109,7 @@ const FULL_PADDING = 24;
  * screen is asked for the page too (so the dialogs and popovers still show). Esc or the button leaves it. Where the
  * browser has no full screen (iPhone), the overlay alone covers the site.
  */
-function useFullScreen(canLeaveByEsc: boolean): [boolean, () => void, () => void] {
+function useFullScreen(canLeaveByEsc: boolean, holding: React.RefObject<boolean>): [boolean, () => void, () => void] {
   const [full, setFull] = useState(false);
   const enter = useCallback(() => {
     // before the browser starts its own full screen, so the site never shows over the workspace
@@ -129,8 +130,9 @@ function useFullScreen(canLeaveByEsc: boolean): [boolean, () => void, () => void
   useEffect(() => {
     if (!full) return;
     // Esc in the browser's full screen leaves it first: follow it
+    // (not while the browser asks to film the tab for a screenshot: it may leave its own full screen for the prompt)
     const onChange = () => {
-      if (!document.fullscreenElement) setFull(false);
+      if (!document.fullscreenElement && !holding.current) setFull(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && canLeaveByEsc) leave();
@@ -141,7 +143,7 @@ function useFullScreen(canLeaveByEsc: boolean): [boolean, () => void, () => void
       document.removeEventListener("fullscreenchange", onChange);
       window.removeEventListener("keydown", onKey);
     };
-  }, [full, leave, canLeaveByEsc]);
+  }, [full, leave, canLeaveByEsc, holding]);
   // leaving the tab or the page ends it
   useEffect(() => () => {
     if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
@@ -169,8 +171,15 @@ export function MarketChart() {
   const [ready, setReady] = useState(false);
   const [picking, setPicking] = useState(false);
   const [editingView, setEditingView] = useState(false);
+  const [shotOpen, setShotOpen] = useState(false);
+  const shooting = useRef(false);
+  const onShotBusy = useCallback((busy: boolean) => {
+    shooting.current = busy;
+  }, []);
+  const section = useRef<HTMLElement>(null);
   const wide = useWide();
   const phone = useMedia(PHONE_QUERY);
+  const canShoot = useCanShoot(phone);
   const row = useRef<HTMLDivElement>(null);
   const toolbar = useRef<HTMLDivElement>(null);
   const pickerButton = useRef<HTMLButtonElement>(null);
@@ -184,7 +193,7 @@ export function MarketChart() {
   useEffect(() => {
     if (!prefsLoaded) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || picking || editingView) return;
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat || picking || editingView || shotOpen) return;
       const target = e.target as HTMLElement | null;
       if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
       if (target?.closest("[role=dialog]")) return;
@@ -197,9 +206,9 @@ export function MarketChart() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [prefsLoaded, picking, editingView, setPrefs]);
+  }, [prefsLoaded, picking, editingView, shotOpen, setPrefs]);
   const loaded = ready && listLoaded && viewLoaded && notesLoaded && settingsLoaded && !!origin;
-  const [full, enterFull, leaveFull] = useFullScreen(!picking && !editingView);
+  const [full, enterFull, leaveFull] = useFullScreen(!picking && !editingView && !shotOpen, shooting);
   const height = useFillHeight(row, toolbar, loaded, full);
 
   // The address wins over the last instrument on this device
@@ -307,6 +316,7 @@ export function MarketChart() {
 
   return (
     <section
+      ref={section}
       className={cn("space-y-2", full && "fixed inset-0 z-[90] overflow-y-auto bg-ink p-3")}
       data-testid="market-chart"
       data-fullscreen={full ? "true" : "false"}
@@ -364,6 +374,18 @@ export function MarketChart() {
               <Star size={14} aria-hidden="true" className={inList ? "fill-current text-vi" : undefined} />
               {inList ? t.chart.inList : t.chart.addToList}
             </button>
+            <ChartShot
+              root={section}
+              name={name}
+              ticker={inst.ticker}
+              interval={t.chart.intervals[prefs.interval]}
+              intervalId={prefs.interval}
+              drawing={view.drawing}
+              minor={!!game?.gameState.profile.minorMode}
+              enabled={canShoot}
+              onBusy={onShotBusy}
+              onOpen={setShotOpen}
+            />
             <button
               type="button"
               onClick={() => setEditingView(true)}
@@ -453,6 +475,11 @@ export function MarketChart() {
 
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
         <SourceLine delay={inst.delay} testId="market-chart-source" />
+        {!canShoot && (
+          <p className="text-[11px] text-mu" data-testid="market-chart-shot-phone">
+            {t.chart.shot.phone}
+          </p>
+        )}
         {view.drawing && (
           <p className="flex items-start gap-1.5 text-[11px] text-mu" data-testid="market-chart-drawing-note">
             <Info size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
