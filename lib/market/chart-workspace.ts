@@ -37,6 +37,8 @@ export interface ChartView {
   /** TradingView's left drawing toolbar. */
   drawing: boolean;
   clock: ClockPlace;
+  /** ISO time of the last change (the account sync keeps the newest version, migration 0008). */
+  updatedAt?: string;
 }
 
 export const DEFAULT_CHART_VIEW: ChartView = { watchlist: true, watchlistSide: "right", watchlistFolded: false, notes: true, notesPlace: "below", drawing: true, clock: "top" };
@@ -52,6 +54,7 @@ export function normalizeChartView(raw: unknown): ChartView {
     notesPlace: r.notesPlace === "side" ? "side" : "below",
     drawing: bool("drawing"),
     clock: CLOCK_PLACES.includes(r.clock as ClockPlace) ? (r.clock as ClockPlace) : DEFAULT_CHART_VIEW.clock,
+    ...(typeof r.updatedAt === "string" ? { updatedAt: r.updatedAt } : {}),
   };
 }
 
@@ -61,28 +64,39 @@ export interface InstrumentNote {
   text: string;
   /** ISO time of the last change. */
   updatedAt: string;
+  /** A cleared note stays as a «tombstone» (empty text), so clearing reaches the other devices too. */
+  deletedAt?: string;
 }
 
 export type ChartNotes = Partial<Record<InstrumentId, InstrumentNote>>;
 
-/** Only catalog instruments, text cut to the limit, empty notes dropped. */
+/** Only catalog instruments, text cut to the limit; empty notes dropped unless they are tombstones of a clearing. */
 export function normalizeNotes(raw: unknown): ChartNotes {
   const out: ChartNotes = {};
   if (!raw || typeof raw !== "object") return out;
   for (const [id, v] of Object.entries(raw as Record<string, unknown>)) {
     if (!isInstrumentId(id) || !v || typeof v !== "object") continue;
-    const { text, updatedAt } = v as { text?: unknown; updatedAt?: unknown };
+    const { text, updatedAt, deletedAt } = v as { text?: unknown; updatedAt?: unknown; deletedAt?: unknown };
+    const at = typeof updatedAt === "string" ? updatedAt : new Date(0).toISOString();
+    if (typeof deletedAt === "string") {
+      out[id] = { text: "", updatedAt: at, deletedAt };
+      continue;
+    }
     if (typeof text !== "string" || !text.trim()) continue;
-    out[id] = { text: text.slice(0, NOTE_LIMIT), updatedAt: typeof updatedAt === "string" ? updatedAt : new Date(0).toISOString() };
+    out[id] = { text: text.slice(0, NOTE_LIMIT), updatedAt: at };
   }
   return out;
 }
 
-/** Sets (or clears, when empty) the note of an instrument. */
+/** Sets (or clears, when empty) the note of an instrument; a clearing leaves a tombstone. */
 export function withNote(notes: ChartNotes, id: InstrumentId, text: string, now: Date): ChartNotes {
   const next = { ...notes };
   const cut = text.slice(0, NOTE_LIMIT);
-  if (cut.trim()) next[id] = { text: cut, updatedAt: now.toISOString() };
-  else delete next[id];
+  const at = now.toISOString();
+  if (cut.trim()) next[id] = { text: cut, updatedAt: at };
+  else if (notes[id] && !notes[id]?.deletedAt) next[id] = { text: "", updatedAt: at, deletedAt: at };
   return next;
 }
+
+/** The text to show (a tombstone shows nothing). */
+export const noteText = (notes: ChartNotes, id: InstrumentId) => (notes[id]?.deletedAt ? "" : (notes[id]?.text ?? ""));

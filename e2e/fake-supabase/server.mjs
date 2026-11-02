@@ -470,7 +470,8 @@ export function createFakeSupabase() {
       if (wantsObject) return rows.length ? send(200, rows[0]) : send(406, { code: "PGRST116", message: "0 rows" });
       return send(200, rows);
     }
-    if (path.startsWith("/rest/v1/journal_")) {
+    // the journal tables (0004, 0005) and the Market data (0008) share the same rules here
+    if (path.startsWith("/rest/v1/journal_") || path === "/rest/v1/market_user_data") {
       cloudRequests.journal++;
       const table = path.slice("/rest/v1/".length);
       const user = userFromAuthHeader(req);

@@ -4,6 +4,7 @@ import React from "react";
 import { useApp } from "@/lib/context";
 import { Button, Modal, cn } from "@/components/ui";
 import { Segmented, Toggle } from "@/components/ui/forms/choice";
+import { useMarketInAccount } from "@/lib/market/cloud-sync-engine";
 import { CLOCK_PLACES, DEFAULT_CHART_VIEW, type ChartView, type NotesPlace, type PanelSide } from "@/lib/market/chart-workspace";
 
 /** «Set up the view» (PR 1.3b): the Watchlist panel, notes and the drawing toolbar — on / off and where. */
@@ -11,13 +12,14 @@ export function ChartViewSettings({ open, onClose, value, onChange }: { open: bo
   const { dict } = useApp();
   const t = dict.market.chart.view;
   const set = (patch: Partial<ChartView>) => onChange({ ...value, ...patch });
+  const inAccount = useMarketInAccount();
 
   return (
     <Modal
       isOpen={open}
       onClose={onClose}
       title={t.title}
-      subtitle={t.deviceNote}
+      subtitle={inAccount ? t.accountNote : t.deviceNote}
       closeLabel={t.close}
       size="sm"
       sheetOnMobile
