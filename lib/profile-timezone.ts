@@ -7,6 +7,10 @@ import { AppStorage } from "@/lib/storage";
  *
  * The cloud column defaults to 'UTC' for every account, so 'UTC' that this device never saw counts as «not set yet».
  * Per device and account we keep the last value that matched the cloud and whether the local one changed since.
+ *
+ * The interface language follows the same rules in `profiles.locale` (column from 0001, no migration; owner
+ * 2026-11-02). Its cloud default is 'ru'; a device where the language was never chosen has no local value and only
+ * takes the account's.
  */
 export interface TimezoneSyncState {
   /** The value that last matched the cloud on this device (null: never exchanged here). */
@@ -24,10 +28,10 @@ export interface CloudTimezone {
 
 export type TimezoneAction = { kind: "none" } | { kind: "push"; value: string } | { kind: "take"; value: string };
 
-const CLOUD_DEFAULT = "UTC";
-
-export function decideTimezone(local: string | null, cloud: CloudTimezone, state: TimezoneSyncState): TimezoneAction {
-  const cloudTz = cloud.timezone || null;
+/** One profile value: what to do with this device's and the cloud's (`cloudDefault` = the column's default). */
+export function decideProfileValue(local: string | null, cloud: { value: string | null; updatedAt: string | null }, state: TimezoneSyncState, cloudDefault: string): TimezoneAction {
+  const CLOUD_DEFAULT = cloudDefault;
+  const cloudTz = cloud.value || null;
   const cloudNewerThanLocalChange = Boolean(cloud.updatedAt && state.changedAt && cloud.updatedAt > state.changedAt);
 
   if (state.synced === null) {
@@ -48,11 +52,20 @@ export function decideTimezone(local: string | null, cloud: CloudTimezone, state
   return { kind: "none" };
 }
 
-const KEY = "ayra_tz_sync";
+export function decideTimezone(local: string | null, cloud: CloudTimezone, state: TimezoneSyncState): TimezoneAction {
+  return decideProfileValue(local, { value: cloud.timezone, updatedAt: cloud.updatedAt }, state, "UTC");
+}
 
-export function readTimezoneSync(userId: string): TimezoneSyncState {
+export function decideLocale(local: string | null, cloud: { locale: string | null; updatedAt: string | null }, state: TimezoneSyncState): TimezoneAction {
+  return decideProfileValue(local, { value: cloud.locale, updatedAt: cloud.updatedAt }, state, "ru");
+}
+
+const KEY = "ayra_tz_sync";
+const LOCALE_KEY = "ayra_locale_sync";
+
+function readSync(key: string, userId: string): TimezoneSyncState {
   try {
-    const raw = JSON.parse(AppStorage.getItem(KEY, userId) || "null");
+    const raw = JSON.parse(AppStorage.getItem(key, userId) || "null");
     if (raw && typeof raw === "object") return { synced: typeof raw.synced === "string" ? raw.synced : null, dirty: Boolean(raw.dirty), changedAt: raw.changedAt };
   } catch {
     // broken value: start over
@@ -60,6 +73,13 @@ export function readTimezoneSync(userId: string): TimezoneSyncState {
   return { synced: null, dirty: false };
 }
 
+export const readTimezoneSync = (userId: string) => readSync(KEY, userId);
+export const readLocaleSync = (userId: string) => readSync(LOCALE_KEY, userId);
+
 export function writeTimezoneSync(userId: string, state: TimezoneSyncState): void {
   AppStorage.setItem(KEY, JSON.stringify(state), userId);
+}
+
+export function writeLocaleSync(userId: string, state: TimezoneSyncState): void {
+  AppStorage.setItem(LOCALE_KEY, JSON.stringify(state), userId);
 }

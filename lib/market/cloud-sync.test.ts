@@ -3,10 +3,11 @@ import { joinWatchlists, mergeMarket, type MarketCloudRow, type MarketLocal } fr
 import { MarketCloudError, syncMarketOnce, type MarketCloudRemote, type MarketLocalStore } from "./cloud-sync-engine";
 import { DEFAULT_CHART_VIEW, withNote, noteText } from "./chart-workspace";
 import { normalizeChartPrefs, type Watchlist } from "./watchlist";
+import { normalizeSettings } from "./sessions";
 
 const T = (h: number) => new Date(Date.UTC(2026, 10, 2, h)).toISOString();
 const list = (ids: string[], at?: string): Watchlist => ({ version: 1, ids: ids as Watchlist["ids"], ...(at ? { updatedAt: at } : {}) });
-const empty = (): MarketLocal => ({ watchlist: list([]), view: { ...DEFAULT_CHART_VIEW }, notes: {}, prefs: normalizeChartPrefs(null) });
+const empty = (): MarketLocal => ({ watchlist: list([]), view: { ...DEFAULT_CHART_VIEW }, notes: {}, prefs: normalizeChartPrefs(null), sessions: normalizeSettings(null) });
 const now = new Date(T(12));
 
 describe("Market data in the account: merge (newest wins; the first time the Watchlists are joined)", () => {
@@ -190,6 +191,68 @@ describe("the chart settings in the account (owner 2026-11-02): favourites, char
     const phone = device("u1", { ...empty(), prefs: prefs({ instrument: "btc", interval: "D" }) });
     await syncMarketOnce(cloud.remote("u1"), phone, () => now);
     expect(phone.data.prefs).toMatchObject({ instrument: "btc", interval: "D", style: "8", indicators: ["rsi", "bb"], layout: 4, favorites: ["5", "15", "60"] });
+  });
+});
+
+describe("the sessions block's settings follow the account (in the chart_view row, no new migration)", () => {
+  const settings = (patch: Partial<ReturnType<typeof normalizeSettings>>) => ({ ...normalizeSettings(null), ...patch });
+
+  it("a change here goes up under `sessions` with its own time; the view and chart parts are not touched", () => {
+    const local = { ...empty(), sessions: settings({ display: { kind: "utc" }, updatedAt: T(3) }) };
+    const r = mergeMarket(local, [], false, now);
+    const row = r.push.find((p) => p.id === "chart_view")!;
+    expect(row.data.sessions).toMatchObject({ display: { kind: "utc" }, updatedAt: T(3) });
+    expect(row.data.updatedAt).toBe(T(3));
+    expect(row.data).not.toHaveProperty("chart");
+  });
+
+  it("newer settings from the account come in, older ones do not", () => {
+    const cloud: MarketCloudRow[] = [
+      { id: "chart_view", data: { id: "chart_view", ...DEFAULT_CHART_VIEW, updatedAt: T(5), sessions: { ...settings({ display: { kind: "zone", zone: "Asia/Tokyo" } }), updatedAt: T(5) } } },
+    ];
+    const taken = mergeMarket({ ...empty(), sessions: settings({ display: { kind: "utc" }, updatedAt: T(2) }) }, cloud, false, now);
+    expect(taken.changed.sessions).toBe(true);
+    expect(taken.local.sessions).toMatchObject({ display: { kind: "zone", zone: "Asia/Tokyo" }, updatedAt: T(5) });
+    expect(taken.push).toEqual([]);
+    const kept = mergeMarket({ ...empty(), sessions: settings({ display: { kind: "utc" }, updatedAt: T(7) }) }, cloud, false, now);
+    expect(kept.changed.sessions).toBe(false);
+    expect(kept.push.find((p) => p.id === "chart_view")!.data.sessions).toMatchObject({ display: { kind: "utc" }, updatedAt: T(7) });
+  });
+
+  it("settings never changed here (no time) wait for the account's and are not sent", () => {
+    const r = mergeMarket(empty(), [], false, now);
+    expect(r.push).toEqual([]);
+    expect(r.changed.sessions).toBe(false);
+  });
+
+  it("the view, the chart settings and the sessions merge separately: all three newest parts survive", () => {
+    const cloud: MarketCloudRow[] = [
+      {
+        id: "chart_view",
+        data: {
+          id: "chart_view",
+          ...DEFAULT_CHART_VIEW,
+          clock: "top",
+          updatedAt: T(6),
+          viewUpdatedAt: T(1),
+          chart: { favorites: ["1"], style: "9", indicators: [], layout: 1, link: false, updatedAt: T(6) },
+          sessions: { ...settings({ display: { kind: "profile" } }), updatedAt: T(2) },
+        },
+      },
+    ];
+    const local = { ...empty(), view: { ...DEFAULT_CHART_VIEW, clock: "hidden" as const, updatedAt: T(4) }, sessions: settings({ display: { kind: "utc" }, updatedAt: T(5) }) };
+    const r = mergeMarket(local, cloud, false, now);
+    const row = r.push.find((p) => p.id === "chart_view")!;
+    expect(row.data).toMatchObject({ clock: "hidden", updatedAt: T(6), chart: { style: "9" }, sessions: { display: { kind: "utc" }, updatedAt: T(5) } });
+  });
+
+  it("two devices: the laptop's session hours reach the phone", async () => {
+    const cloud = fakeCloud();
+    const laptop = device("u1", { ...empty(), sessions: settings({ display: { kind: "zone", zone: "Europe/London" }, updatedAt: T(1) }) });
+    await syncMarketOnce(cloud.remote("u1"), laptop, () => now);
+    const phone = device("u1", empty());
+    await syncMarketOnce(cloud.remote("u1"), phone, () => now);
+    expect(phone.data.sessions.display).toEqual({ kind: "zone", zone: "Europe/London" });
   });
 });
 
