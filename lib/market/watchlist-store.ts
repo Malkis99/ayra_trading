@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AppStorage } from "@/lib/storage";
-import { emptyWatchlist, normalizeChartPrefs, normalizeWatchlist, type ChartPrefs, type Watchlist } from "./watchlist";
+import { emptyWatchlist, normalizeChartPrefs, normalizeWatchlist, sameSharedPrefs, type ChartPrefs, type Watchlist } from "./watchlist";
 import { normalizeChartView, normalizeNotes, type ChartNotes, type ChartView } from "./chart-workspace";
 
 /** The Watchlist of this space (account or guest), on this device; synced with the account (0008). */
 export const MARKET_WATCHLIST_KEY = "ayra_market_watchlist";
-/** The Chart's last instrument, timeframe and favourite timeframes (device only). */
+/** The Chart's settings: the instrument and timeframe stay on the device, the rest follows the account (0008). */
 export const MARKET_CHART_KEY = "ayra_market_chart";
 /** How the Chart page is laid out (PR 1.3b); synced with the account (0008). */
 export const MARKET_CHART_VIEW_KEY = "ayra_market_chart_view";
@@ -71,6 +71,10 @@ function useStored<T>(key: string, normalize: (raw: unknown) => T, initial: () =
 const stampNow = <T extends object>(next: T): T => ({ ...next, updatedAt: new Date().toISOString() });
 
 export const useWatchlist = () => useStored<Watchlist>(MARKET_WATCHLIST_KEY, normalizeWatchlist, emptyWatchlist, stampNow);
-export const useChartPrefs = () => useStored<ChartPrefs>(MARKET_CHART_KEY, normalizeChartPrefs, () => normalizeChartPrefs(null));
+/** Favourites, chart type, indicators or the layout changed: that part gets the time of the change (the account sync). */
+const stampSharedPrefs = (next: ChartPrefs): ChartPrefs =>
+  sameSharedPrefs(readMarketKey(MARKET_CHART_KEY, normalizeChartPrefs), next) ? next : { ...next, sharedUpdatedAt: new Date().toISOString() };
+
+export const useChartPrefs = () => useStored<ChartPrefs>(MARKET_CHART_KEY, normalizeChartPrefs, () => normalizeChartPrefs(null), stampSharedPrefs);
 export const useChartView = () => useStored<ChartView>(MARKET_CHART_VIEW_KEY, normalizeChartView, () => normalizeChartView(null), stampNow);
 export const useChartNotes = () => useStored<ChartNotes>(MARKET_NOTES_KEY, normalizeNotes, () => ({}));

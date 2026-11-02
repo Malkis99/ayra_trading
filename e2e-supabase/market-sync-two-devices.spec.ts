@@ -103,6 +103,55 @@ test.describe("Market data in the account: two devices", () => {
     await B.context.close();
   });
 
+  test("chart settings follow the account: favourites, chart type, indicators, layout; each device keeps its own instrument", async ({ browser, request }) => {
+    const email = `MarketPrefs_${Date.now()}@example.com`;
+    const A = await openDevice(browser);
+    await signIn(A.page, email);
+    await completeOnboarding(A.page, `Prf${Date.now() % 100000}`);
+    await setFlag(request, email, true);
+    await A.page.goto("/market?tab=chart&symbol=FX%3AEURUSD");
+    // chart type, two indicators, four windows, a favourite timeframe more
+    await A.page.getByTestId("market-chart-type").click();
+    await A.page.getByTestId("market-chart-type-8").click();
+    await A.page.getByTestId("market-chart-indicators").click();
+    await A.page.getByTestId("market-chart-indicator-rsi").click();
+    await A.page.getByTestId("market-chart-indicator-macd").click();
+    await A.page.keyboard.press("Escape");
+    await A.page.mouse.click(5, 300);
+    await A.page.getByTestId("market-chart-layout").click();
+    await A.page.getByTestId("market-chart-layout-4").click();
+    await A.page.keyboard.press("Escape");
+    await A.page.mouse.click(5, 300);
+    await A.page.getByTestId("market-chart-intervals-more").click();
+    await A.page.getByTestId("market-chart-favorite-30").click();
+    await A.page.keyboard.press("Escape");
+    await A.page.mouse.click(5, 300);
+    await expect
+      .poll(async () => (await marketRows(request, email)).find((r) => r.id === "chart_view")?.data.chart, { timeout: 15000 })
+      .toMatchObject({ style: "8", indicators: ["rsi", "macd"], layout: 4, favorites: ["1", "5", "15", "30", "60", "240", "D"] });
+
+    // the phone: its own instrument stays, the settings come in
+    const B = await openDevice(browser);
+    await signIn(B.page, email);
+    await B.page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
+    await B.page.goto("/market?tab=chart&symbol=BITSTAMP%3ABTCUSD");
+    await expect(B.page.getByTestId("market-chart-grid")).toHaveAttribute("data-layout", "4");
+    await expect(B.page.getByTestId("market-chart-name")).toHaveText("Биткоин (BTC)");
+    await expect(B.page.getByTestId("market-chart-indicators-count")).toHaveText("2");
+    await expect(B.page.getByTestId("market-chart-type")).toContainText("Хейкен Аши");
+    await expect(B.page.getByTestId("market-chart-interval-30")).toBeVisible();
+
+    // the phone switches back to one chart: the laptop follows; its own instrument stays EUR/USD
+    await B.page.getByTestId("market-chart-layout").click();
+    await B.page.getByTestId("market-chart-layout-1").click();
+    await expect.poll(async () => ((await marketRows(request, email)).find((r) => r.id === "chart_view")?.data.chart as { layout?: number })?.layout, { timeout: 15000 }).toBe(1);
+    await A.page.reload();
+    await expect(A.page.getByTestId("market-chart-grid")).toHaveAttribute("data-layout", "1");
+    await expect(A.page.getByTestId("market-chart-name")).toHaveText("EUR/USD");
+    await A.context.close();
+    await B.context.close();
+  });
+
   test("the switch off: the Market stays on the device, nothing goes to the cloud", async ({ browser, request }) => {
     const email = `MarketOff_${Date.now()}@example.com`;
     const A = await openDevice(browser);
