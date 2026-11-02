@@ -97,7 +97,7 @@ export function ChartClock({
           <ExactTime zone={zone} />
           <span data-testid="market-chart-clock-zone">{zoneName}</span>
         </span>
-        <span className="inline-flex items-center gap-1.5" data-testid="market-chart-clock-session">
+        <span className="inline-flex items-center gap-1.5" data-testid="market-chart-clock-session" data-on={sessionOn}>
           <Dot on={sessionOn} />
           <span className="text-tx">{sessionText}</span>
           {nextSession}
@@ -121,7 +121,7 @@ export function ChartClock({
           {zoneName}
         </p>
       </div>
-      <p className="flex items-start gap-2 text-sm text-tx" data-testid="market-chart-clock-session">
+      <p className="flex items-start gap-2 text-sm text-tx" data-testid="market-chart-clock-session" data-on={sessionOn}>
         <span className="flex h-5 shrink-0 items-center">
           <Dot on={sessionOn} />
         </span>
