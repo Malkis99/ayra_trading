@@ -6,9 +6,10 @@ import { AppStorage } from "@/lib/storage";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { isE2EMockEnabled } from "@/lib/supabase/config";
 import { mergeMarket, type MarketCloudRow, type MarketLocal } from "./cloud-sync";
-import { normalizeWatchlist } from "./watchlist";
+import { normalizeChartPrefs, normalizeWatchlist } from "./watchlist";
 import { normalizeChartView, normalizeNotes } from "./chart-workspace";
 import {
+  MARKET_CHART_KEY,
   MARKET_CHART_VIEW_KEY,
   MARKET_NOTES_KEY,
   MARKET_STORE_EVENT,
@@ -74,7 +75,7 @@ export class SupabaseMarketRemote implements MarketCloudRemote {
 export interface MarketLocalStore {
   userId(): string | null;
   read(): MarketLocal;
-  write(next: MarketLocal, changed: { watchlist: boolean; view: boolean; notes: boolean }): void;
+  write(next: MarketLocal, changed: { watchlist: boolean; view: boolean; notes: boolean; prefs: boolean }): void;
   joined(): boolean;
   markJoined(): void;
 }
@@ -85,11 +86,13 @@ export const appMarketStore: MarketLocalStore = {
     watchlist: readMarketKey(MARKET_WATCHLIST_KEY, normalizeWatchlist),
     view: readMarketKey(MARKET_CHART_VIEW_KEY, normalizeChartView),
     notes: readMarketKey(MARKET_NOTES_KEY, normalizeNotes),
+    prefs: readMarketKey(MARKET_CHART_KEY, normalizeChartPrefs),
   }),
   write: (next, changed) => {
     if (changed.watchlist) writeMarketKey(MARKET_WATCHLIST_KEY, next.watchlist, "cloud");
     if (changed.view) writeMarketKey(MARKET_CHART_VIEW_KEY, next.view, "cloud");
     if (changed.notes) writeMarketKey(MARKET_NOTES_KEY, next.notes, "cloud");
+    if (changed.prefs) writeMarketKey(MARKET_CHART_KEY, next.prefs, "cloud");
   },
   joined: () => AppStorage.getItem(MARKET_CLOUD_JOINED_KEY) === "1",
   markJoined: () => AppStorage.setItem(MARKET_CLOUD_JOINED_KEY, "1"),
@@ -107,9 +110,9 @@ export async function syncMarketOnce(remote: MarketCloudRemote, store: MarketLoc
     const rows = await remote.fetchAll();
     // the device may have changed while the rows were coming: read it now
     const result = mergeMarket(store.read(), rows, !store.joined(), now());
-    if (result.changed.watchlist || result.changed.view || result.changed.notes) store.write(result.local, result.changed);
+    if (result.changed.watchlist || result.changed.view || result.changed.notes || result.changed.prefs) store.write(result.local, result.changed);
     // a Watchlist stamped by the merge (joined, or never stamped) is kept here too
-    if (result.push.some((r) => r.id === "watchlist") && !result.changed.watchlist) store.write(result.local, { watchlist: true, view: false, notes: false });
+    if (result.push.some((r) => r.id === "watchlist") && !result.changed.watchlist) store.write(result.local, { watchlist: true, view: false, notes: false, prefs: false });
     await remote.upsert(result.push);
     store.markJoined();
     return "on";

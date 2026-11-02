@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { joinWatchlists, mergeMarket, type MarketCloudRow, type MarketLocal } from "./cloud-sync";
 import { syncMarketOnce, type MarketCloudRemote, type MarketLocalStore } from "./cloud-sync-engine";
 import { DEFAULT_CHART_VIEW, withNote, noteText } from "./chart-workspace";
-import type { Watchlist } from "./watchlist";
+import { normalizeChartPrefs, type Watchlist } from "./watchlist";
 
 const T = (h: number) => new Date(Date.UTC(2026, 10, 2, h)).toISOString();
 const list = (ids: string[], at?: string): Watchlist => ({ version: 1, ids: ids as Watchlist["ids"], ...(at ? { updatedAt: at } : {}) });
-const empty = (): MarketLocal => ({ watchlist: list([]), view: { ...DEFAULT_CHART_VIEW }, notes: {} });
+const empty = (): MarketLocal => ({ watchlist: list([]), view: { ...DEFAULT_CHART_VIEW }, notes: {}, prefs: normalizeChartPrefs(null) });
 const now = new Date(T(12));
 
 describe("Market data in the account: merge (newest wins; the first time the Watchlists are joined)", () => {
@@ -137,5 +137,58 @@ describe("Market data in the account: the exchange", () => {
     const broken: MarketCloudRemote = { currentUserId: async () => "u1", isSyncEnabled: async () => true, fetchAll: async () => Promise.reject(new Error("offline")), upsert: async () => {} };
     expect(await syncMarketOnce(broken, d)).toBe("error");
     expect(d.data.watchlist.ids).toEqual(["btc"]);
+  });
+});
+
+describe("the chart settings in the account (owner 2026-11-02): favourites, chart type, indicators, layout", () => {
+  const prefs = (patch: Record<string, unknown>) => normalizeChartPrefs({ ...patch });
+
+  it("go to the account in the chart_view row, with their own time; the instrument and timeframe stay on the device", () => {
+    const local = { ...empty(), prefs: prefs({ instrument: "gold", interval: "5", style: "2", indicators: ["rsi"], layout: 4, link: true, sharedUpdatedAt: T(3) }) };
+    const r = mergeMarket(local, [], false, now);
+    const row = r.push.find((p) => p.id === "chart_view")!;
+    expect(row.data.chart).toMatchObject({ style: "2", indicators: ["rsi"], layout: 4, link: true, updatedAt: T(3) });
+    expect(row.data.chart).not.toHaveProperty("instrument");
+    expect(row.data.chart).not.toHaveProperty("interval");
+    expect(row.data.updatedAt).toBe(T(3));
+  });
+
+  it("the newer settings from the account come in; this device's instrument and timeframe are kept", () => {
+    const cloud: MarketCloudRow[] = [
+      { id: "chart_view", data: { id: "chart_view", ...DEFAULT_CHART_VIEW, updatedAt: T(5), viewUpdatedAt: T(1), chart: { favorites: ["5", "60"], style: "8", indicators: ["macd"], layout: 2, link: false, updatedAt: T(5) } } },
+    ];
+    const local = { ...empty(), prefs: prefs({ instrument: "btc", interval: "240", sharedUpdatedAt: T(2) }) };
+    const r = mergeMarket(local, cloud, false, now);
+    expect(r.changed.prefs).toBe(true);
+    expect(r.local.prefs).toMatchObject({ instrument: "btc", interval: "240", favorites: ["5", "60"], style: "8", indicators: ["macd"], layout: 2, sharedUpdatedAt: T(5) });
+    expect(r.push).toEqual([]);
+  });
+
+  it("the view and the settings merge separately: a newer view here and newer settings in the account both survive", () => {
+    const cloud: MarketCloudRow[] = [
+      { id: "chart_view", data: { id: "chart_view", ...DEFAULT_CHART_VIEW, clock: "top", updatedAt: T(6), viewUpdatedAt: T(1), chart: { favorites: ["1"], style: "9", indicators: [], layout: 1, link: false, updatedAt: T(6) } } },
+    ];
+    const local = { ...empty(), view: { ...DEFAULT_CHART_VIEW, clock: "hidden" as const, updatedAt: T(4) }, prefs: prefs({ style: "2", sharedUpdatedAt: T(2) }) };
+    const r = mergeMarket(local, cloud, false, now);
+    expect(r.local.view.clock).toBe("hidden");
+    expect(r.local.prefs.style).toBe("9");
+    const row = r.push.find((p) => p.id === "chart_view")!;
+    expect(row.data).toMatchObject({ clock: "hidden", viewUpdatedAt: T(4), updatedAt: T(6), chart: { style: "9", updatedAt: T(6) } });
+  });
+
+  it("a row written before the settings joined (only updatedAt) still reads the view's time", () => {
+    const cloud: MarketCloudRow[] = [{ id: "chart_view", data: { id: "chart_view", ...DEFAULT_CHART_VIEW, clock: "strip", updatedAt: T(5) } }];
+    const r = mergeMarket({ ...empty(), view: { ...DEFAULT_CHART_VIEW, updatedAt: T(4) } }, cloud, false, now);
+    expect(r.local.view.clock).toBe("strip");
+    expect(r.changed.prefs).toBe(false);
+  });
+
+  it("two devices: the laptop's layout and indicators reach the phone, the phone keeps its own instrument", async () => {
+    const cloud = fakeCloud();
+    const laptop = device("u1", { ...empty(), prefs: prefs({ instrument: "eurusd", style: "8", indicators: ["rsi", "bb"], layout: 4, favorites: ["5", "15", "60"], sharedUpdatedAt: T(1) }) });
+    await syncMarketOnce(cloud.remote("u1"), laptop, () => now);
+    const phone = device("u1", { ...empty(), prefs: prefs({ instrument: "btc", interval: "D" }) });
+    await syncMarketOnce(cloud.remote("u1"), phone, () => now);
+    expect(phone.data.prefs).toMatchObject({ instrument: "btc", interval: "D", style: "8", indicators: ["rsi", "bb"], layout: 4, favorites: ["5", "15", "60"] });
   });
 });

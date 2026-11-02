@@ -58,7 +58,11 @@ export function move(w: Watchlist, id: InstrumentId, step: -1 | 1): Watchlist {
   return { ...w, ids };
 }
 
-/** The Chart's last instrument, timeframe and favourite timeframes on this device. */
+/**
+ * The Chart's settings. The last instrument and window 1's timeframe stay on the device; favourite timeframes, chart
+ * type, indicators and the layout (with windows 2–4 and «One instrument in all windows») follow the account
+ * (owner 2026-11-02) — see `sharedPrefs`.
+ */
 export interface ChartPrefs {
   instrument: InstrumentId;
   interval: ChartInterval;
@@ -72,6 +76,8 @@ export interface ChartPrefs {
   panes: ChartPane[];
   /** «One instrument in all windows» (off by default). */
   link: boolean;
+  /** ISO time of the last change of the part that follows the account. */
+  sharedUpdatedAt?: string;
 }
 
 export function normalizeChartPrefs(raw: unknown): ChartPrefs {
@@ -85,5 +91,21 @@ export function normalizeChartPrefs(raw: unknown): ChartPrefs {
     layout: isLayout(r.layout) ? r.layout : 1,
     panes: normalizePanes(r.panes),
     link: r.link === true,
+    ...(typeof r.sharedUpdatedAt === "string" ? { sharedUpdatedAt: r.sharedUpdatedAt } : {}),
   };
 }
+
+/** The settings that follow the account (in the `chart_view` row of 0008, under `chart` — no new migration). */
+export const SHARED_PREF_KEYS = ["favorites", "style", "indicators", "layout", "panes", "link"] as const;
+export type SharedChartPrefs = Pick<ChartPrefs, (typeof SHARED_PREF_KEYS)[number]>;
+
+export const sharedPrefs = (p: ChartPrefs): SharedChartPrefs => ({
+  favorites: p.favorites,
+  style: p.style,
+  indicators: p.indicators,
+  layout: p.layout,
+  panes: p.panes,
+  link: p.link,
+});
+
+export const sameSharedPrefs = (a: ChartPrefs, b: ChartPrefs) => JSON.stringify(sharedPrefs(a)) === JSON.stringify(sharedPrefs(b));
