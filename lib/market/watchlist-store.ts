@@ -44,7 +44,7 @@ export function writeMarketKey(key: string, value: unknown, source: MarketStoreS
  * A value kept on the device, a setter, and whether it was read yet (screens wait, so nothing jumps). It re-reads
  * when the same key is written elsewhere (another screen, or the account sync bringing another device's change).
  */
-function useStored<T>(key: string, normalize: (raw: unknown) => T, initial: () => T, stamp?: (next: T) => T): [T, (next: T) => void, boolean] {
+export function useStored<T>(key: string, normalize: (raw: unknown) => T, initial: () => T, stamp?: (next: T) => T): [T, (next: T) => void, boolean] {
   const [value, setValue] = useState<T>(initial);
   const [loaded, setLoaded] = useState(false);
   useEffect(() => {
@@ -68,7 +68,7 @@ function useStored<T>(key: string, normalize: (raw: unknown) => T, initial: () =
 }
 
 /** The time of a change made on this device (the account sync keeps the newest version). */
-const stampNow = <T extends object>(next: T): T => ({ ...next, updatedAt: new Date().toISOString() });
+export const stampNow = <T extends object>(next: T): T => ({ ...next, updatedAt: new Date().toISOString() });
 
 export const useWatchlist = () => useStored<Watchlist>(MARKET_WATCHLIST_KEY, normalizeWatchlist, emptyWatchlist, stampNow);
 /** Favourites, chart type, indicators or the layout changed: that part gets the time of the change (the account sync). */

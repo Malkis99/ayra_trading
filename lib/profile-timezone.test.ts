@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decideTimezone, type TimezoneSyncState } from "./profile-timezone";
+import { decideLocale, decideTimezone, type TimezoneSyncState } from "./profile-timezone";
 
 const fresh: TimezoneSyncState = { synced: null, dirty: false };
 const synced = (v: string): TimezoneSyncState => ({ synced: v, dirty: false });
@@ -24,5 +24,24 @@ describe("time zone in the cloud profile", () => {
     const local: TimezoneSyncState = { synced: "Asia/Tbilisi", dirty: true, changedAt: "2026-10-21T10:00:00Z" };
     expect(decideTimezone("Europe/Berlin", { timezone: "America/New_York", updatedAt: "2026-10-21T11:00:00Z" }, local)).toEqual({ kind: "take", value: "America/New_York" });
     expect(decideTimezone("Europe/Berlin", { timezone: "America/New_York", updatedAt: "2026-10-21T09:00:00Z" }, local)).toEqual({ kind: "push", value: "Europe/Berlin" });
+  });
+});
+
+describe("interface language in the cloud profile (profiles.locale)", () => {
+  const at = "2026-11-02T10:00:00Z";
+  it("a device where the language was never chosen takes the account's; the cloud default 'ru' changes nothing", () => {
+    expect(decideLocale(null, { locale: "en", updatedAt: at }, fresh)).toEqual({ kind: "take", value: "en" });
+    expect(decideLocale(null, { locale: "ru", updatedAt: at }, fresh)).toEqual({ kind: "none" });
+  });
+
+  it("first exchange: English chosen here goes up over the default 'ru'; a language set in the account wins", () => {
+    expect(decideLocale("en", { locale: "ru", updatedAt: at }, fresh)).toEqual({ kind: "push", value: "en" });
+    expect(decideLocale("ru", { locale: "en", updatedAt: at }, fresh)).toEqual({ kind: "take", value: "en" });
+  });
+
+  it("after that: a change here goes up, a change on another device comes in", () => {
+    expect(decideLocale("en", { locale: "ru", updatedAt: at }, { synced: "ru", dirty: true, changedAt: "2026-11-02T11:00:00Z" })).toEqual({ kind: "push", value: "en" });
+    expect(decideLocale("ru", { locale: "en", updatedAt: at }, synced("ru"))).toEqual({ kind: "take", value: "en" });
+    expect(decideLocale("en", { locale: "en", updatedAt: at }, synced("en"))).toEqual({ kind: "none" });
   });
 });

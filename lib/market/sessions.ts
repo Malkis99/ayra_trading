@@ -136,6 +136,8 @@ export interface MarketSessionsSettings {
   display: DisplayChoice;
   sessions: SessionSettings;
   killzones: KillzoneSettings;
+  /** When they were last changed (the account sync keeps the newest; none = never changed on this device). */
+  updatedAt?: string;
 }
 
 /** Read back: the new settings, or the killzones saved before 1.1b (kept, not lost). */
@@ -145,6 +147,7 @@ export function normalizeSettings(raw: unknown, legacyKillzones?: unknown): Mark
     display: normalizeDisplay(v.display),
     sessions: normalizeSessionHours(v.sessions),
     killzones: normalizeKillzones(v.killzones ?? legacyKillzones),
+    ...(typeof v.updatedAt === "string" ? { updatedAt: v.updatedAt } : {}),
   };
 }
 
