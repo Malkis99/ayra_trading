@@ -33,15 +33,15 @@ export function Topbar() {
   const frameColor = FRAMES[gameState.frame]?.color || "#a38ad1";
 
   return (
-    <header className="sticky top-0 z-20 flex h-14 items-center gap-1 border-b border-line bg-[#121117cc] px-3 backdrop-blur-md sm:gap-2.5 sm:px-4">
+    <header className="sticky top-0 z-20 flex h-14 items-center gap-0.5 border-b border-line bg-[#121117cc] px-2 backdrop-blur-md min-[380px]:gap-1 sm:gap-2.5 sm:px-4">
       {/* The «A» sign on phones and narrow screens (the sidebar with the sign and name is hidden there) */}
       <Link href="/" aria-label={dict.brand.home} className="flex flex-none items-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi md:hidden">
-        <Logo variant="mark" height={24} priority decorative />
+        <Logo variant="mark" height={22} priority decorative />
       </Link>
       {/* Compact Search Trigger (~120px on sm+, icon-only on mobile) */}
       <button
         onClick={() => setSearchOpen(true)}
-        className="flex w-9 sm:w-[120px] items-center justify-center sm:justify-start gap-2 rounded-xl border border-line bg-white/5 p-2 sm:px-3 sm:py-1.5 text-xs text-mu transition-colors hover:border-vi"
+        className="flex w-8 min-[380px]:w-9 sm:w-[120px] items-center justify-center sm:justify-start gap-2 rounded-xl border border-line bg-white/5 p-2 sm:px-3 sm:py-1.5 text-xs text-mu transition-colors hover:border-vi"
         aria-label={dict.topbar.search}
       >
         <Search size={14} className="flex-none" />
@@ -52,7 +52,7 @@ export function Topbar() {
       <button
         onClick={() => setAddModalOpen(true)}
         aria-label={dict.topbar.add}
-      className="btn flex flex-none items-center gap-1 text-xs py-1.5 px-2.5 sm:px-3"
+      className="btn flex flex-none items-center gap-1 text-xs py-1.5 px-2 min-[380px]:px-2.5 sm:px-3"
       >
         <Plus size={16} aria-hidden="true" />
         <span className="hidden sm:inline">{dict.topbar.add}</span>
