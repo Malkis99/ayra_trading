@@ -1,0 +1,119 @@
+import { test, expect, webkit, chromium, type Browser, type Page } from "@playwright/test";
+import { marketGuest } from "./helpers/market";
+
+// Market 1.4: «Calendar» (TradingView's economic calendar with our filters by importance and country; times by the
+// device's clock, with a warning when the profile's zone differs) and «News» (top stories or one catalog
+// instrument's). Both say «Not financial advice». TradingView is stubbed: the tests read the config the app passed.
+
+const el = (page: Page, id: string) => page.getByTestId(id);
+const config = async (page: Page, widget: string) => JSON.parse((await page.locator(`[data-testid="${widget}"] script`).textContent()) || "{}") as Record<string, unknown>;
+
+/** The profile's zone in the guest's saved state (the browser itself stays in Tbilisi). */
+async function profileZone(page: Page, zone: string) {
+  await page.addInitScript((z) => {
+    const raw = localStorage.getItem("ayra_demo_v1");
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    if (s.profile?.timezone === z) return;
+    s.profile = { ...s.profile, timezone: z };
+    localStorage.setItem("ayra_demo_v1", JSON.stringify(s));
+  }, zone);
+}
+
+for (const engine of ["chromium", "webkit"] as const) {
+  test.describe(`${engine}: Market — Calendar and News`, () => {
+    let browser: Browser;
+    test.beforeAll(async () => {
+      browser = await (engine === "webkit" ? webkit : chromium).launch();
+    });
+    test.afterAll(async () => {
+      await browser.close();
+    });
+
+    for (const width of [1440, 360]) {
+      test(`${width}: calendar filters drive the widget, the last option stays, kept after a reload; nothing wider than the screen`, async () => {
+        const { page } = await marketGuest(browser, width);
+        await page.goto("/market?tab=calendar");
+        await expect(el(page, "market-calendar-widget")).toHaveAttribute("data-status", "ready");
+        expect(await config(page, "market-calendar-widget")).toMatchObject({ importanceFilter: "1,0", countryFilter: "us,eu,gb,jp", colorTheme: "dark" });
+        await expect(el(page, "market-calendar-importance-high")).toHaveAttribute("aria-pressed", "true");
+        await expect(el(page, "market-calendar-importance-low")).toHaveAttribute("aria-pressed", "false");
+
+        await el(page, "market-calendar-importance-low").click();
+        await el(page, "market-calendar-country-cn").click();
+        await el(page, "market-calendar-country-eu").click();
+        await expect.poll(async () => (await config(page, "market-calendar-widget")).countryFilter).toBe("us,gb,jp,cn");
+        expect((await config(page, "market-calendar-widget")).importanceFilter).toBe("1,0,-1");
+
+        // the last importance cannot be turned off
+        await el(page, "market-calendar-importance-high").click();
+        await el(page, "market-calendar-importance-medium").click();
+        await el(page, "market-calendar-importance-low").click();
+        await expect(el(page, "market-calendar-importance-low")).toHaveAttribute("aria-pressed", "true");
+        await expect.poll(async () => (await config(page, "market-calendar-widget")).importanceFilter).toBe("-1");
+
+        await expect(el(page, "market-calendar-disclaimer")).toHaveText("Не является финансовой рекомендацией.");
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        const filters = (await el(page, "market-calendar-countries").boundingBox())!;
+        expect(filters.x + filters.width).toBeLessThanOrEqual(width);
+
+        await page.reload();
+        await expect(el(page, "market-calendar-widget")).toHaveAttribute("data-status", "ready");
+        expect(await config(page, "market-calendar-widget")).toMatchObject({ importanceFilter: "-1", countryFilter: "us,gb,jp,cn" });
+      });
+    }
+
+    test("calendar time: by the device's clock; a warning when the profile has another zone", async () => {
+      const same = await marketGuest(browser, 1440);
+      await same.page.goto("/market?tab=calendar");
+      await expect(el(same.page, "market-calendar-zone")).toContainText("Время событий — по часам этого устройства: Грузия");
+      await expect(el(same.page, "market-calendar-zone")).toHaveAttribute("data-differs", "false");
+      await expect(el(same.page, "market-calendar-zone")).not.toContainText("В профиле выбран другой пояс");
+
+      const other = await marketGuest(browser, 1440);
+      await profileZone(other.page, "America/New_York");
+      await other.page.goto("/market?tab=calendar");
+      await expect(el(other.page, "market-calendar-zone")).toHaveAttribute("data-differs", "true");
+      await expect(el(other.page, "market-calendar-zone")).toContainText("В профиле выбран другой пояс");
+    });
+
+    for (const width of [1440, 360]) {
+      test(`${width}: news — all, then one instrument from the catalog, then all again; kept after a reload`, async () => {
+        const { page } = await marketGuest(browser, width, { minor: true });
+        await page.goto("/market?tab=news");
+        await expect(el(page, "market-news-widget")).toHaveAttribute("data-status", "ready");
+        const all = await config(page, "market-news-widget");
+        expect(all).toMatchObject({ feedMode: "all_symbols" });
+        expect(all).not.toHaveProperty("symbol");
+        await expect(el(page, "market-news-all")).toHaveAttribute("aria-pressed", "true");
+        await expect(el(page, "market-news-disclaimer")).toHaveText("Не является финансовой рекомендацией.");
+
+        await el(page, "market-news-instrument").click();
+        await page.locator("#market-news-cat-tab-commodities").click();
+        await el(page, "market-news-pick-gold").click();
+        await expect(el(page, "market-news-instrument")).toContainText("Инструмент: Золото");
+        await expect.poll(async () => (await config(page, "market-news-widget")).symbol).toBe("OANDA:XAUUSD");
+        expect(await config(page, "market-news-widget")).toMatchObject({ feedMode: "symbol", displayMode: width === 360 ? "compact" : "regular" });
+        // no partner or referral parameters (16–17 mode)
+        expect(JSON.stringify(await config(page, "market-news-widget"))).not.toMatch(/ref|partner|utm|aff/i);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+        await page.reload();
+        await expect(el(page, "market-news-widget")).toHaveAttribute("data-status", "ready");
+        expect((await config(page, "market-news-widget")).symbol).toBe("OANDA:XAUUSD");
+        await el(page, "market-news-clear").click();
+        await expect(el(page, "market-news-all")).toHaveAttribute("aria-pressed", "true");
+        await expect.poll(async () => (await config(page, "market-news-widget")).feedMode).toBe("all_symbols");
+      });
+    }
+
+    test("TradingView not answering: a plain message with «Try again» on both tabs", async () => {
+      const { page } = await marketGuest(browser, 1440, { tradingView: "unavailable" });
+      for (const tab of ["calendar", "news"]) {
+        await page.goto(`/market?tab=${tab}`);
+        await expect(el(page, `market-${tab}-widget-error`)).toBeVisible({ timeout: 20000 });
+        await expect(el(page, `market-${tab}-disclaimer`)).toBeVisible();
+      }
+    });
+  });
+}

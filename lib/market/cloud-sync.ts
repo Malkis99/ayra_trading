@@ -2,6 +2,7 @@ import { isInstrumentId, type InstrumentId } from "./instruments";
 import { normalizeChartPrefs, normalizeWatchlist, sameSharedPrefs, sharedPrefs, WATCHLIST_LIMIT, type ChartPrefs, type SharedChartPrefs, type Watchlist } from "./watchlist";
 import { normalizeChartView, normalizeNotes, type ChartNotes, type ChartView, type InstrumentNote } from "./chart-workspace";
 import { normalizeSettings, type MarketSessionsSettings } from "./sessions";
+import { normalizeCalendarNews, type CalendarNewsPrefs } from "./calendar-news";
 
 /**
  * Market data in the account (owner 2026-11-02; migration 0008, the same approach as the journal, 0004):
@@ -14,7 +15,7 @@ import { normalizeSettings, type MarketSessionsSettings } from "./sessions";
  * indicators, the layout (owner 2026-11-02) — under `chart`, with their own change time: the view and those settings
  * merge separately, so a change of one never undoes the other. No new migration: the row keeps its id.
  * The sessions block's settings (shown time, session hours, killzones; owner 2026-11-02) ride in the same row under
- * `sessions`, with their own time, the same way.
+ * `sessions`, with their own time, the same way. So do the Calendar's and News' filters (1.4) under `calendar`.
  */
 
 export const WATCHLIST_ROW = "watchlist";
@@ -35,6 +36,8 @@ export interface MarketLocal {
   prefs: ChartPrefs;
   /** The sessions block's settings. */
   sessions: MarketSessionsSettings;
+  /** The Calendar's and News' filters. */
+  calendar: CalendarNewsPrefs;
 }
 
 type SharedInCloud = SharedChartPrefs & { updatedAt: string };
@@ -48,6 +51,7 @@ interface Decoded {
   view?: ChartView;
   chart?: SharedInCloud;
   sessions?: MarketSessionsSettings & { updatedAt: string };
+  calendar?: CalendarNewsPrefs & { updatedAt: string };
   notes: ChartNotes;
 }
 
@@ -66,6 +70,10 @@ export function decodeRows(rows: MarketCloudRow[]): Decoded {
       const sessions = row.data.sessions as Record<string, unknown> | undefined;
       if (sessions && typeof sessions === "object" && typeof sessions.updatedAt === "string") {
         out.sessions = { ...normalizeSettings(sessions), updatedAt: sessions.updatedAt };
+      }
+      const calendar = row.data.calendar as Record<string, unknown> | undefined;
+      if (calendar && typeof calendar === "object" && typeof calendar.updatedAt === "string") {
+        out.calendar = { ...normalizeCalendarNews(calendar), updatedAt: calendar.updatedAt };
       }
     }
     else if (row.id.startsWith(NOTE_PREFIX)) {
@@ -89,14 +97,14 @@ export interface MergeResult {
   /** Rows to send: the local version is newer than the cloud one, or the cloud has none. */
   push: MarketCloudRow[];
   /** Did the device's data change (another device's changes came in)? */
-  changed: { watchlist: boolean; view: boolean; notes: boolean; prefs: boolean; sessions: boolean };
+  changed: { watchlist: boolean; view: boolean; notes: boolean; prefs: boolean; sessions: boolean; calendar: boolean };
 }
 
 /** Merges the device and the cloud: the newest change wins; the first time, the Watchlists are joined. */
 export function mergeMarket(local: MarketLocal, rows: MarketCloudRow[], firstSync: boolean, now: Date): MergeResult {
   const cloud = decodeRows(rows);
   const push: MarketCloudRow[] = [];
-  const changed = { watchlist: false, view: false, notes: false, prefs: false, sessions: false };
+  const changed = { watchlist: false, view: false, notes: false, prefs: false, sessions: false, calendar: false };
 
   // Watchlist
   let watchlist = local.watchlist;
@@ -142,9 +150,17 @@ export function mergeMarket(local: MarketLocal, rows: MarketCloudRow[], firstSyn
   } else if (local.sessions.updatedAt && (!cloud.sessions || newer(local.sessions.updatedAt, cloud.sessions.updatedAt))) {
     sessionsPush = true;
   }
-  if (viewPush || prefsPush || sessionsPush) {
+  let calendar = local.calendar;
+  let calendarPush = false;
+  if (cloud.calendar && !newer(local.calendar.updatedAt, cloud.calendar.updatedAt)) {
+    changed.calendar = JSON.stringify(cloud.calendar) !== JSON.stringify(local.calendar);
+    calendar = cloud.calendar;
+  } else if (local.calendar.updatedAt && (!cloud.calendar || newer(local.calendar.updatedAt, cloud.calendar.updatedAt))) {
+    calendarPush = true;
+  }
+  if (viewPush || prefsPush || sessionsPush || calendarPush) {
     const { updatedAt: viewAt, ...viewFields } = view;
-    const at = [viewAt, prefs.sharedUpdatedAt, sessions.updatedAt].filter((x): x is string => !!x).sort((a, b) => time(b) - time(a))[0];
+    const at = [viewAt, prefs.sharedUpdatedAt, sessions.updatedAt, calendar.updatedAt].filter((x): x is string => !!x).sort((a, b) => time(b) - time(a))[0];
     push.push({
       id: VIEW_ROW,
       data: {
@@ -154,6 +170,7 @@ export function mergeMarket(local: MarketLocal, rows: MarketCloudRow[], firstSyn
         ...(viewAt ? { viewUpdatedAt: viewAt } : {}),
         ...(prefs.sharedUpdatedAt ? { chart: { ...sharedPrefs(prefs), updatedAt: prefs.sharedUpdatedAt } } : {}),
         ...(sessions.updatedAt ? { sessions } : {}),
+        ...(calendar.updatedAt ? { calendar } : {}),
       },
     });
   }
@@ -172,7 +189,7 @@ export function mergeMarket(local: MarketLocal, rows: MarketCloudRow[], firstSyn
     }
   }
 
-  return { local: { watchlist, view, notes, prefs, sessions }, push, changed };
+  return { local: { watchlist, view, notes, prefs, sessions, calendar }, push, changed };
 }
 
 function noteRow(id: InstrumentId, note: InstrumentNote): Record<string, unknown> {

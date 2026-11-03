@@ -1,11 +1,12 @@
 import type { BrowserContext } from "@playwright/test";
 
 // TradingView widgets in e2e (PR 1.2): no real network. The embed script is replaced by a stub that reads the config
-// the app passed and draws a frame with the symbols, as TradingView's script does; `unavailable` aborts it instead.
+// the app passed and draws a frame with the symbols, as TradingView's script does (the calendar: its filters; the
+// news without a symbol: «news all»); `unavailable` aborts it instead.
 const STUB = `(function () {
   var s = document.currentScript;
   var c = JSON.parse(s.textContent);
-  var names = c.symbol ? [c.symbol] : c.symbolsGroups[0].symbols.map(function (x) { return x.name; });
+  var names = c.symbol ? [c.symbol] : c.symbolsGroups ? c.symbolsGroups[0].symbols.map(function (x) { return x.name; }) : c.countryFilter ? ["events " + c.importanceFilter + " " + c.countryFilter] : ["news all"];
   var f = document.createElement("iframe");
   f.title = "tradingview-stub";
   f.style.cssText = "width:100%;height:100%;border:0;background:transparent";
