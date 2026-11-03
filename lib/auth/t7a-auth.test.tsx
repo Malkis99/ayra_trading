@@ -112,7 +112,12 @@ describe("T7a Security: Client Bundle & Source Secret Protection", () => {
         ) {
           const content = fs.readFileSync(fullPath, "utf-8");
           if (content.includes("SUPABASE_SERVICE_ROLE_KEY") || content.includes("service_role_key")) {
-            violations.push(fullPath);
+            // Allowed only in server route handlers (app/api/**/route.ts — never sent to a browser), e.g. the
+            // Market feeds collector (docs/market-feeds-plan.md). Such a file must not be a client module and must
+            // never read the key through a NEXT_PUBLIC_ variable (those are put into the browser bundle).
+            const serverRoute = /^app[\\/]api[\\/].+[\\/]route\.ts$/.test(fullPath);
+            const safe = serverRoute && !/^\s*["']use client["']/m.test(content) && !/NEXT_PUBLIC_[A-Z_]*SERVICE/.test(content);
+            if (!safe) violations.push(fullPath);
           }
         }
       }
