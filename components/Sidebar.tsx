@@ -56,8 +56,8 @@ export function Sidebar() {
   return (
     <aside className="hidden h-full w-[220px] flex-col border-r border-line bg-gradient-to-b from-[#17161e] to-[#121117] p-3 md:flex">
       {/* Logo */}
-      <Link href="/" aria-label={dict.brand.home} className="mb-2 flex items-center rounded-lg px-1 pt-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi">
-        <Logo variant="horizontal" height={50} priority decorative />
+      <Link href="/" aria-label={dict.brand.home} className="mb-3 flex h-14 items-center rounded-lg px-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi">
+        <Logo variant="lockup" height={38} priority decorative />
       </Link>
 
       {/* Navigation Links */}

@@ -159,7 +159,7 @@ export function PublicWelcomeCard() {
   const { dict } = useApp();
   return (
     <div className="card bg-gradient-to-r from-s1 via-[#1c1b28] to-s1 space-y-2">
-      <Logo variant="full" height={112} priority className="-ml-1" />
+      <Logo variant="full" height={120} priority />
       <div className="text-[11px] font-semibold uppercase tracking-wider text-vi">{dict.brand.slogan}</div>
       <h1 className="font-serif text-2xl font-bold text-tx md:text-3xl">{dict.publicHome.title}</h1>
       <p className="text-sm text-mu max-w-2xl">{dict.publicHome.description}</p>

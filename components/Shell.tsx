@@ -33,8 +33,8 @@ function ShellSkeleton() {
     <div className="flex h-screen overflow-hidden bg-ink text-tx">
       {/* Sidebar Skeleton */}
       <aside className="hidden h-full w-[220px] flex-col border-r border-line bg-gradient-to-b from-[#17161e] to-[#121117] p-3 md:flex">
-        <div className="mb-2 flex items-center px-1 pt-0.5">
-          <Logo variant="horizontal" height={50} priority decorative />
+        <div className="mb-3 flex h-14 items-center px-1.5">
+          <Logo variant="lockup" height={38} priority decorative />
         </div>
         <div className="flex flex-col gap-2 pt-2 animate-pulse">
           {[1, 2, 3, 4, 5].map((i) => (

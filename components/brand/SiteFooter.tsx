@@ -12,7 +12,7 @@ export function SiteFooter() {
   return (
     <footer className="mt-10 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line/60 pt-4 text-[11px] text-mu" data-testid="site-footer">
       <span className="inline-flex items-center gap-2">
-        <Logo variant="mark" height={18} decorative />
+        <Logo variant="mark" height={20} decorative />
         <span className="font-semibold text-tx">{b.name}</span>
         <span aria-hidden="true">·</span>
         <span>{b.slogan}</span>

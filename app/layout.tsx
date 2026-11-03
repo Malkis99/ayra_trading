@@ -19,7 +19,8 @@ export function generateMetadata(): Metadata {
   const lang: Language = cookies().get("NEXT_LOCALE")?.value === "en" ? "en" : "ru";
   const b = getDictionary(lang).brand;
   const title = `${b.name} · ${b.slogan}`;
-  const image = { url: "/brand/og-cover.png", width: 1920, height: 1080, alt: b.name };
+  const og = { url: "/brand/og-1200x630.png", width: 1200, height: 630, alt: b.name };
+  const twitterImage = { url: "/brand/twitter-1200x600.png", width: 1200, height: 600, alt: b.name };
   return {
     metadataBase: siteUrl(),
     title: { default: title, template: `%s · ${b.name}` },
@@ -28,11 +29,14 @@ export function generateMetadata(): Metadata {
     icons: {
       icon: [
         { url: "/favicon.ico", sizes: "any" },
+        { url: "/brand/icon.svg", type: "image/svg+xml" },
+        { url: "/brand/icon-16.png", sizes: "16x16", type: "image/png" },
         { url: "/brand/icon-32.png", sizes: "32x32", type: "image/png" },
+        { url: "/brand/icon-48.png", sizes: "48x48", type: "image/png" },
         { url: "/brand/icon-192.png", sizes: "192x192", type: "image/png" },
         { url: "/brand/icon-512.png", sizes: "512x512", type: "image/png" },
       ],
-      apple: [{ url: "/brand/icon-180.png", sizes: "180x180", type: "image/png" }],
+      apple: [{ url: "/brand/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
     },
     openGraph: {
       type: "website",
@@ -40,9 +44,9 @@ export function generateMetadata(): Metadata {
       title,
       description: b.description,
       locale: lang === "en" ? "en_US" : "ru_RU",
-      images: [image],
+      images: [og],
     },
-    twitter: { card: "summary_large_image", title, description: b.description, images: [image] },
+    twitter: { card: "summary_large_image", title, description: b.description, images: [twitterImage] },
     appleWebApp: { capable: true, title: b.name, statusBarStyle: "black-translucent" },
   };
 }
