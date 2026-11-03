@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import { Logo } from "@/components/brand/Logo";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useApp } from "@/lib/context";
@@ -440,8 +441,9 @@ Message: ${errorDetails.sanitizedMessage}${
 
   const logo = (
     <div className="mb-6 text-center">
-      <div className="font-serif text-3xl font-bold tracking-[0.32em] text-tx">AYRA</div>
-      <div aria-hidden="true" className="mx-auto mt-3 h-px w-16 bg-gradient-to-r from-transparent via-vi to-transparent" />
+      {/* smaller on phones, so the whole card still fits the screen */}
+      <Logo variant="full" height={88} priority className="mx-auto sm:hidden" />
+      <Logo variant="full" height={132} priority className="mx-auto hidden sm:block" />
     </div>
   );
 

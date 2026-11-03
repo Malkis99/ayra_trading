@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useEffect, useCallback } from "react";
+import { Logo } from "@/components/brand/Logo";
+import { SiteFooter } from "@/components/brand/SiteFooter";
 import { usePathname, useRouter } from "next/navigation";
 import { AppProvider } from "@/lib/context";
 import { GameProvider, useGame } from "@/lib/game-context";
@@ -30,11 +32,11 @@ function ShellSkeleton() {
   return (
     <div className="flex h-screen overflow-hidden bg-ink text-tx">
       {/* Sidebar Skeleton */}
-      <aside className="hidden h-full w-[220px] flex-col border-r border-line bg-gradient-to-b from-[#17161e] to-[#121117] p-3 md:flex animate-pulse">
-        <div className="px-2.5 pb-3.5 pt-1.5 font-serif text-xl font-semibold tracking-widest text-tx/30">
-          AYRA<b className="text-go/30">·</b>
+      <aside className="hidden h-full w-[220px] flex-col border-r border-line bg-gradient-to-b from-[#17161e] to-[#121117] p-3 md:flex">
+        <div className="mb-2 flex items-center px-1 pt-0.5">
+          <Logo variant="horizontal" height={50} priority decorative />
         </div>
-        <div className="flex flex-col gap-2 pt-2">
+        <div className="flex flex-col gap-2 pt-2 animate-pulse">
           {[1, 2, 3, 4, 5].map((i) => (
             <div key={i} className="h-9 w-full rounded-xl bg-s2/50" />
           ))}
@@ -245,6 +247,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
         {/* Internal Scrollable Main Content */}
         <main className="relative z-10 flex-1 overflow-y-auto p-4 md:p-6 pb-20 md:pb-6">
           {children}
+          <SiteFooter />
         </main>
       </div>
 

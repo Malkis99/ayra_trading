@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { Logo } from "@/components/brand/Logo";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -55,9 +56,9 @@ export function Sidebar() {
   return (
     <aside className="hidden h-full w-[220px] flex-col border-r border-line bg-gradient-to-b from-[#17161e] to-[#121117] p-3 md:flex">
       {/* Logo */}
-      <div className="px-2.5 pb-3.5 pt-1.5 font-serif text-xl font-semibold tracking-widest text-tx">
-        AYRA<b className="text-go">·</b>
-      </div>
+      <Link href="/" aria-label={dict.brand.home} className="mb-2 flex items-center rounded-lg px-1 pt-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi">
+        <Logo variant="horizontal" height={50} priority decorative />
+      </Link>
 
       {/* Navigation Links */}
       <nav className="flex flex-col gap-1">

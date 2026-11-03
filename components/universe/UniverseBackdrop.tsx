@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo } from "react";
+import { Logo } from "@/components/brand/Logo";
 import { cn } from "@/components/ui/cn";
 import { usePageVisible, usePrefersReducedMotion } from "@/components/awakening/usePageVisible";
 
@@ -103,7 +104,7 @@ export function UniverseLoader({ label }: { label?: string }) {
   return (
     <UniverseScreen>
       <div className="flex flex-col items-center gap-4" role="status" aria-live="polite">
-        <span className="font-serif text-2xl font-bold tracking-[0.3em] text-tx">AYRA</span>
+        <Logo variant="full" height={120} priority />
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-vi/30 border-t-vi motion-reduce:animate-none" aria-hidden="true" />
         {label && <span className="text-sm text-mu">{label}</span>}
       </div>
