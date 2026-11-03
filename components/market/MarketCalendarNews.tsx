@@ -13,6 +13,7 @@ import { deviceTimeZone, eventsOptions, sameClock, timelineOptions } from "@/lib
 import { useCalendarNews } from "@/lib/market/watchlist-store";
 import { InstrumentPicker } from "./InstrumentPicker";
 import { CalendarFilters } from "./CalendarFilters";
+import { OwnCalendar } from "./OwnCalendar";
 import { MarketSyncLine } from "./MarketSyncLine";
 import { TRADINGVIEW_HOME, TradingViewWidget, widgetConfig } from "./TradingViewWidget";
 
@@ -56,17 +57,21 @@ function Pill({ on, onClick, children, testId }: { on: boolean; onClick: () => v
 }
 
 /** «Source: TradingView» and «Not financial advice» under each widget. */
-function Footnote({ testId }: { testId: string }) {
+function Footnote({ testId, official }: { testId: string; official?: boolean }) {
   const { dict } = useApp();
   const t = dict.market;
   return (
     <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 text-[11px] text-mu">
+      {official ? (
+        <p data-testid="market-calendar-sources">{t.calendar.own.sourcesLine}</p>
+      ) : (
       <p>
         {t.overview.sourcePrefix}{" "}
         <a href={TRADINGVIEW_HOME} target="_blank" rel="noopener noreferrer nofollow" className="text-vi hover:underline">
           {t.overview.sourceName}
         </a>
       </p>
+      )}
       <p className="font-semibold text-tx" data-testid={testId}>
         {t.notAdvice}
       </p>
@@ -74,10 +79,29 @@ function Footnote({ testId }: { testId: string }) {
   );
 }
 
+type CalendarView = "own" | "world";
+
+/** The part of the Calendar kept in the address (`?view=world`): a link or a reload opens the same one. */
+function useCalendarView(): [CalendarView | null, (v: CalendarView) => void] {
+  const [view, setView] = useState<CalendarView | null>(null);
+  useEffect(() => {
+    setView(new URLSearchParams(window.location.search).get("view") === "world" ? "world" : "own");
+  }, []);
+  const choose = (v: CalendarView) => {
+    setView(v);
+    const url = new URL(window.location.href);
+    if (v === "world") url.searchParams.set("view", "world");
+    else url.searchParams.delete("view");
+    window.history.replaceState(window.history.state, "", url.toString());
+  };
+  return [view, choose];
+}
+
 /**
- * Market → Calendar (1.4): TradingView's economic calendar with our filters by importance and country. The times
- * follow the device's clock (the widget has no time zone option): the line under the filters says which zone, and
- * warns when the profile's zone (the one in «Time and session») is different.
+ * Market → Calendar: «Official events» (our own calendar from the 0009 table, PR 3 — times in the user's zone, the
+ * figures from BLS / BEA) and «World calendar» (TradingView's economic calendar with forecasts for every country;
+ * its times follow the device's clock — the widget has no time zone option, the line under it says so and warns
+ * when the profile's zone is different). The importance and country filters are shared.
  */
 export function MarketCalendar() {
   const { dict, lang } = useApp();
@@ -87,9 +111,10 @@ export function MarketCalendar() {
   const phone = usePhone();
   const origin = useOrigin();
   const [device, setDevice] = useState<string | null>(null);
+  const [view, setView] = useCalendarView();
   useEffect(() => setDevice(deviceTimeZone()), []);
 
-  if (!loaded || !origin || !device) return <section className="min-h-[480px]" data-testid="market-calendar" aria-busy="true" />;
+  if (!loaded || !origin || !device || !view) return <section className="min-h-[480px]" data-testid="market-calendar" aria-busy="true" />;
 
   const profile = game?.gameState.profile.timezone || device;
   const now = new Date();
@@ -97,9 +122,35 @@ export function MarketCalendar() {
   const options = eventsOptions(prefs);
 
   return (
-    <section className="space-y-3" data-testid="market-calendar" aria-label={t.title}>
+    <section className="space-y-3" data-testid="market-calendar" data-view={view} aria-label={t.title}>
+      <div className="inline-flex rounded-lg border border-line bg-s1 p-0.5 text-xs font-semibold" role="group" aria-label={t.title} data-testid="market-calendar-views">
+        {(["own", "world"] as const).map((v) => (
+          <button
+            key={v}
+            type="button"
+            aria-pressed={view === v}
+            onClick={() => setView(v)}
+            className={cn("rounded-md px-3 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi", view === v ? "bg-pri/40 text-tx" : "text-mu hover:text-tx")}
+            data-testid={`market-calendar-view-${v}`}
+          >
+            {t.views[v]}
+          </button>
+        ))}
+      </div>
+
       <CalendarFilters prefs={prefs} onChange={setPrefs} />
 
+      {view === "own" ? (
+        <>
+          <p className="flex items-start gap-2 text-xs text-mu" data-testid="own-calendar-zone">
+            <Info size={14} className="mt-0.5 shrink-0 text-vi" aria-hidden="true" />
+            <span>{formatString(t.own.zone, { zone: timeZoneLabel(profile, lang, now) })}</span>
+          </p>
+          <OwnCalendar prefs={prefs} zone={profile} />
+        </>
+      ) : (
+        <>
+      <p className="text-xs text-mu" data-testid="market-calendar-world-note">{t.worldNote}</p>
       <p className="flex items-start gap-2 text-xs text-mu" data-testid="market-calendar-zone" data-differs={differs}>
         <Info size={14} className="mt-0.5 shrink-0 text-vi" aria-hidden="true" />
         <span>
@@ -121,7 +172,9 @@ export function MarketCalendar() {
           testId="market-calendar-widget"
         />
       </div>
-      <Footnote testId="market-calendar-disclaimer" />
+        </>
+      )}
+      <Footnote testId="market-calendar-disclaimer" official={view === "own"} />
       <MarketSyncLine />
     </section>
   );

@@ -1,0 +1,167 @@
+import { test, expect, type Browser, type Page, type APIRequestContext } from "@playwright/test";
+import { marketGuest } from "../e2e/helpers/market";
+
+const FAKE_SUPABASE = "http://127.0.0.1:54329";
+
+// Market → Calendar → «Official events» (PR 3, docs/market-feeds-plan.md): the 0009 table read by the site (the
+// fake Supabase holds the rows), Monday to Friday tabs of this week or the next, times in the profile's zone, the
+// figures from BLS / BEA, the trust mark and source on every row. The TradingView calendar is the «World calendar».
+// The browser's clock is Tuesday 3 November 2026, 12:00 UTC (16:00 in Tbilisi).
+
+const NOW = "2026-11-03T12:00:00Z";
+const ev = (o: Record<string, unknown>) => ({
+  kind: "release",
+  code: null,
+  country: "us",
+  importance: 3,
+  time_tbd: false,
+  status: "scheduled",
+  actual: null,
+  previous: null,
+  hidden: false,
+  updated_at: "2026-11-03T11:50:00Z",
+  ...o,
+});
+const EVENTS = [
+  ev({ id: "bls:us_jolts:2026-11-03", source: "bls", code: "us_jolts", title: "Job Openings and Labor Turnover Survey", importance: 2, starts_at: "2026-11-03T15:00:00Z", status: "released", actual: "7.52M", previous: "7.19M", url: "https://www.bls.gov/schedule/news_release/" }),
+  ev({ id: "bea:us_trade:2026-11-04", source: "bea", code: "us_trade", title: "U.S. International Trade", importance: 2, starts_at: "2026-11-04T13:30:00Z", url: "https://www.bea.gov/news/schedule" }),
+  ev({ id: "bls:us_nfp:2026-11-06", source: "bls", code: "us_nfp", title: "Employment Situation", starts_at: "2026-11-06T13:30:00Z", url: "https://www.bls.gov/schedule/news_release/" }),
+  ev({ id: "bea:other:2026-11-06", source: "bea", title: "Outdoor Recreation Economic Statistics", importance: 1, starts_at: "2026-11-06T15:00:00Z" }),
+  ev({ id: "ecb:hidden:2026-11-05", source: "ecb", country: "eu", title: "Hidden by the owner", starts_at: "2026-11-05T09:00:00Z", hidden: true }),
+  ev({ id: "bls:us_cpi:2026-11-10", source: "bls", code: "us_cpi", title: "Consumer Price Index", starts_at: "2026-11-10T13:30:00Z" }),
+  ev({ id: "ecb:mpm:2026-11-12:decision", source: "ecb", kind: "decision", code: "ecb_decision", country: "eu", title: "ECB monetary policy decisions", starts_at: "2026-11-12T13:15:00Z" }),
+];
+
+const el = (page: Page, id: string) => page.getByTestId(id);
+const seed = (request: APIRequestContext, rows: unknown[] = EVENTS) => request.post(`${FAKE_SUPABASE}/__test/market-events`, { data: rows });
+
+/** A guest who chose «Continue without signing in» (with the cloud on, a visitor is otherwise sent to sign in). */
+async function guest(browser: Browser, width: number) {
+  const { page } = await marketGuest(browser, width);
+  await page.addInitScript(() => localStorage.setItem("ayra_guest_dismissed", "1"));
+  return page;
+}
+
+async function calendar(browser: Browser, width: number, url = "/market?tab=calendar") {
+  const page = await guest(browser, width);
+  await page.clock.install({ time: new Date(NOW) });
+  await page.clock.pauseAt(new Date(NOW));
+  await page.goto(url);
+  await expect(el(page, "own-calendar-list")).toBeVisible();
+  return page;
+}
+
+test.describe("Market — own calendar of official events", () => {
+  test.use({ reducedMotion: "reduce" });
+  test.beforeEach(async ({ request }) => {
+    await request.get(`${FAKE_SUPABASE}/__test/market-events-fail?on=0`);
+    await seed(request);
+  });
+
+  for (const width of [1440, 360]) {
+    test(`${width}: this week's days, today first; times in the profile's zone; the figure, status, trust mark and source`, async ({ browser }) => {
+      const page = await calendar(browser, width);
+      await expect(el(page, "market-calendar")).toHaveAttribute("data-view", "own");
+      await expect(el(page, "own-calendar-zone")).toContainText("Время — в вашем поясе: Грузия");
+      // Monday … Friday of 2–6 November, Tuesday (today) open
+      await expect(el(page, "own-calendar-days").getByRole("tab")).toHaveCount(5);
+      await expect(el(page, "own-calendar-day-2")).toHaveAttribute("aria-selected", "true");
+      await expect(el(page, "own-calendar-day-2-count")).toHaveText("сегодня");
+      await expect(el(page, "own-calendar-day-5-count")).toHaveText("1 соб."); // the low one is filtered out by default
+      const row = el(page, "own-calendar-event");
+      await expect(row).toHaveCount(1);
+      await expect(row.getByTestId("own-calendar-event-time")).toHaveText("19:00"); // 15:00 UTC in Tbilisi
+      await expect(row.getByTestId("own-calendar-event-title")).toHaveText("Вакансии JOLTS");
+      await expect(row.getByTestId("own-calendar-event-actual")).toHaveText("7.52M");
+      await expect(row.getByTestId("own-calendar-event-previous")).toHaveText("7.19M");
+      await expect(row.getByTestId("own-calendar-event-status")).toHaveText("Вышло");
+      await expect(row.getByTestId("own-calendar-event-trust")).toHaveText("Официальный");
+      await expect(row.getByTestId("own-calendar-event-source")).toHaveAttribute("href", "https://www.bls.gov/schedule/news_release/");
+      await expect(el(page, "market-calendar-disclaimer")).toHaveText("Не является финансовой рекомендацией.");
+      await expect(el(page, "market-calendar-sources")).toContainText("ФРС, ЕЦБ, BLS, BEA");
+      await expect(el(page, "own-calendar-updated")).toContainText("Данные обновлены: 3 нояб. 15:50");
+
+      // Friday: NFP at 17:30 in Tbilisi, still to come
+      await el(page, "own-calendar-day-5").click();
+      await expect(el(page, "own-calendar-event")).toHaveCount(1);
+      await expect(el(page, "own-calendar-event").getByTestId("own-calendar-event-title")).toHaveText("Занятость вне с/х (NFP) и безработица");
+      await expect(el(page, "own-calendar-event").getByTestId("own-calendar-event-time")).toHaveText("17:30");
+      await expect(el(page, "own-calendar-event").getByTestId("own-calendar-event-status")).toHaveText("Ожидается");
+      // the hidden row never shows
+      await el(page, "own-calendar-day-4").click();
+      await expect(el(page, "own-calendar-empty")).toBeVisible();
+
+      // nothing wider than the screen, the five tabs inside it
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      const tabs = (await el(page, "own-calendar-days").boundingBox())!;
+      expect(tabs.x + tabs.width).toBeLessThanOrEqual(width);
+    });
+  }
+
+  test("next week: opens on Monday; the ECB decision at 17:15 in Tbilisi; back to this week", async ({ browser }) => {
+    const page = await calendar(browser, 1440);
+    await el(page, "own-calendar-next-week").click();
+    await expect(el(page, "own-calendar")).toHaveAttribute("data-week", "1");
+    await expect(el(page, "own-calendar-range")).toHaveText("9 ноября – 13 ноября");
+    await expect(el(page, "own-calendar-day-1")).toHaveAttribute("aria-selected", "true");
+    await el(page, "own-calendar-day-2").click();
+    await expect(el(page, "own-calendar-event").getByTestId("own-calendar-event-title")).toHaveText("Индекс потребительских цен (CPI)");
+    await el(page, "own-calendar-day-4").click();
+    await expect(el(page, "own-calendar-event").getByTestId("own-calendar-event-time")).toHaveText("17:15");
+    await expect(el(page, "own-calendar-event").getByTestId("own-calendar-event-title")).toHaveText("Решение ЕЦБ по ставке");
+    await el(page, "own-calendar-this-week").click();
+    await expect(el(page, "own-calendar-day-2")).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("filters apply: low importance shown on demand; only countries we do not cover → a clear message", async ({ browser }) => {
+    const page = await calendar(browser, 1440);
+    await el(page, "own-calendar-day-5").click();
+    await el(page, "market-calendar-importance-low").click();
+    await expect(el(page, "own-calendar-event")).toHaveCount(2);
+    await expect(el(page, "own-calendar-event").nth(1)).toHaveAttribute("data-level", "low");
+    // countries: only Japan and the UK
+    for (const c of ["us", "eu", "gb"]) await el(page, `market-calendar-country-${c}`).click();
+    await expect(el(page, "own-calendar-no-country")).toContainText("Официальные события есть только для США и еврозоны");
+  });
+
+  test("the profile's zone moves the times (New York: NFP at 08:30)", async ({ browser }) => {
+    const page = await guest(browser, 1440);
+    await page.addInitScript(() => {
+      const raw = localStorage.getItem("ayra_demo_v1");
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      if (s.profile?.timezone === "America/New_York") return;
+      s.profile = { ...s.profile, timezone: "America/New_York" };
+      localStorage.setItem("ayra_demo_v1", JSON.stringify(s));
+    });
+    await page.clock.install({ time: new Date(NOW) });
+    await page.clock.pauseAt(new Date(NOW));
+    await page.goto("/market?tab=calendar");
+    await el(page, "own-calendar-day-5").click();
+    await expect(el(page, "own-calendar-event").getByTestId("own-calendar-event-time")).toHaveText("08:30");
+    await expect(el(page, "own-calendar-zone")).toContainText("Восточная Америка");
+  });
+
+  test("data not reachable: a plain message and «Try again» that works", async ({ browser, request }) => {
+    await request.get(`${FAKE_SUPABASE}/__test/market-events-fail?on=1`);
+    const page = await calendar(browser, 1440);
+    await expect(el(page, "own-calendar-error")).toBeVisible();
+    await request.get(`${FAKE_SUPABASE}/__test/market-events-fail?on=0`);
+    await el(page, "own-calendar-error").getByRole("button").click();
+    await expect(el(page, "own-calendar-event")).toHaveCount(1);
+  });
+
+  test("«World calendar» is TradingView's widget, kept in the address after a reload; back to the official events", async ({ browser }) => {
+    const page = await calendar(browser, 1440);
+    await el(page, "market-calendar-view-world").click();
+    await expect(el(page, "market-calendar")).toHaveAttribute("data-view", "world");
+    await expect(el(page, "market-calendar-widget")).toHaveAttribute("data-status", "ready");
+    await expect(el(page, "market-calendar-world-note")).toBeVisible();
+    expect(page.url()).toContain("view=world");
+    await page.reload();
+    await expect(el(page, "market-calendar")).toHaveAttribute("data-view", "world");
+    await el(page, "market-calendar-view-own").click();
+    await expect(el(page, "own-calendar-list")).toBeVisible();
+    expect(page.url()).not.toContain("view=world");
+  });
+});

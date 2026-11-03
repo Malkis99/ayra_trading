@@ -1,5 +1,13 @@
 export const ALLOWED_LATIN_WORDS = [
   "AYRA",
+  // official sources and their releases (Market → Calendar): BLS, BEA, FOMC, NFP, CPI…
+  "BLS",
+  "BEA",
+  "NFP",
+  "PPI",
+  "JOLTS",
+  "PCE",
+  "ECI",
   // the slogan «Trade · Train · Evolve» (owner's brand kit)
   "Trade",
   "Train",

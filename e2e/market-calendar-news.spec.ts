@@ -33,7 +33,7 @@ for (const engine of ["chromium", "webkit"] as const) {
     for (const width of [1440, 360]) {
       test(`${width}: calendar filters drive the widget, the last option stays, kept after a reload; nothing wider than the screen`, async () => {
         const { page } = await marketGuest(browser, width);
-        await page.goto("/market?tab=calendar");
+        await page.goto("/market?tab=calendar&view=world");
         await expect(el(page, "market-calendar-widget")).toHaveAttribute("data-status", "ready");
         expect(await config(page, "market-calendar-widget")).toMatchObject({ importanceFilter: "1,0", countryFilter: "us,eu,gb,jp", colorTheme: "dark" });
         await expect(el(page, "market-calendar-importance-high")).toHaveAttribute("aria-pressed", "true");
@@ -74,7 +74,7 @@ for (const engine of ["chromium", "webkit"] as const) {
     for (const width of [1440, 360]) {
       test(`${width}: filters — importance in its own colours, «Select all» and «Reset» for countries, what is chosen; small on a phone`, async () => {
         const { page } = await marketGuest(browser, width);
-        await page.goto("/market?tab=calendar");
+        await page.goto("/market?tab=calendar&view=world");
         await expect(el(page, "market-calendar-widget")).toHaveAttribute("data-status", "ready");
         // three different colours for the three levels
         const tones = await Promise.all(
@@ -101,14 +101,14 @@ for (const engine of ["chromium", "webkit"] as const) {
 
     test("calendar time: by the device's clock; a warning when the profile has another zone", async () => {
       const same = await marketGuest(browser, 1440);
-      await same.page.goto("/market?tab=calendar");
+      await same.page.goto("/market?tab=calendar&view=world");
       await expect(el(same.page, "market-calendar-zone")).toContainText("Время событий — по часам этого устройства: Грузия");
       await expect(el(same.page, "market-calendar-zone")).toHaveAttribute("data-differs", "false");
       await expect(el(same.page, "market-calendar-zone")).not.toContainText("В профиле выбран другой пояс");
 
       const other = await marketGuest(browser, 1440);
       await profileZone(other.page, "America/New_York");
-      await other.page.goto("/market?tab=calendar");
+      await other.page.goto("/market?tab=calendar&view=world");
       await expect(el(other.page, "market-calendar-zone")).toHaveAttribute("data-differs", "true");
       await expect(el(other.page, "market-calendar-zone")).toContainText("В профиле выбран другой пояс");
     });
@@ -143,10 +143,20 @@ for (const engine of ["chromium", "webkit"] as const) {
       });
     }
 
+    test("the Calendar opens on the official events; without the cloud it says so plainly; the world calendar still works", async () => {
+      const { page } = await marketGuest(browser, 1440);
+      await page.goto("/market?tab=calendar");
+      await expect(el(page, "market-calendar")).toHaveAttribute("data-view", "own");
+      await expect(el(page, "own-calendar-unavailable")).toContainText("Календарь официальных событий сейчас недоступен");
+      await expect(el(page, "market-calendar-disclaimer")).toHaveText("Не является финансовой рекомендацией.");
+      await el(page, "market-calendar-view-world").click();
+      await expect(el(page, "market-calendar-widget")).toHaveAttribute("data-status", "ready");
+    });
+
     test("TradingView not answering: a plain message with «Try again» on both tabs", async () => {
       const { page } = await marketGuest(browser, 1440, { tradingView: "unavailable" });
       for (const tab of ["calendar", "news"]) {
-        await page.goto(`/market?tab=${tab}`);
+        await page.goto(tab === "calendar" ? "/market?tab=calendar&view=world" : `/market?tab=${tab}`);
         await expect(el(page, `market-${tab}-widget-error`)).toBeVisible({ timeout: 20000 });
         await expect(el(page, `market-${tab}-disclaimer`)).toBeVisible();
       }
