@@ -38,6 +38,9 @@ export function createFakeSupabase() {
   const cloudFlags = new Map(); // user id -> boolean
   const journalRows = new Map(); // `${userId}:${table}:${id}` -> { user_id, table, id, data, updated_at }
   let journalWriteFailuresLeft = 0; // next N journal writes fail with 500 (server trouble)
+  // Migration 0009 stand-in: the shared calendar events (everyone reads rows that are not hidden; tests fill them)
+  let marketEvents = [];
+  let marketEventsFail = false;
   let marketTableMissing = false; // the Market table of 0008 is not in the project (migration not applied)
   let journalWriteDelayMs = 0; // every journal write waits this long (slow network: lets a test cancel mid-upload)
   let journalClock = Date.now();
@@ -179,6 +182,15 @@ export function createFakeSupabase() {
     if (path === "/__test/cloud-requests") {
       if (url.searchParams.has("reset")) Object.assign(cloudRequests, { userFeatures: 0, journal: 0 });
       return send(200, cloudRequests);
+    }
+    // tests put the calendar's rows (replacing all) or make reads fail
+    if (path === "/__test/market-events" && req.method === "POST") {
+      marketEvents = await readBody(req);
+      return send(200, { count: marketEvents.length });
+    }
+    if (path === "/__test/market-events-fail") {
+      marketEventsFail = url.searchParams.get("on") === "1";
+      return send(200, { fail: marketEventsFail });
     }
     if (path === "/__test/market-table") {
       marketTableMissing = url.searchParams.get("present") === "0";
@@ -473,6 +485,18 @@ export function createFakeSupabase() {
       const rows = user && idFilter === user.id && cloudFlags.has(user.id) ? [{ cloud_sync: cloudFlags.get(user.id) }] : [];
       const wantsObject = (req.headers.accept || "").includes("vnd.pgrst.object");
       if (wantsObject) return rows.length ? send(200, rows[0]) : send(406, { code: "PGRST116", message: "0 rows" });
+      return send(200, rows);
+    }
+    // 0009: read-only for the site, like PostgREST: starts_at=gte.X&starts_at=lt.Y, ordered by time
+    if (path === "/rest/v1/market_events" && req.method === "GET") {
+      if (marketEventsFail) return send(500, { code: "XX000", message: "fake failure" });
+      const bounds = url.searchParams.getAll("starts_at");
+      const gte = bounds.find((b) => b.startsWith("gte."))?.slice(4);
+      const lt = bounds.find((b) => b.startsWith("lt."))?.slice(3);
+      const rows = marketEvents
+        .filter((r) => !r.hidden)
+        .filter((r) => (!gte || Date.parse(r.starts_at) >= Date.parse(gte)) && (!lt || Date.parse(r.starts_at) < Date.parse(lt)))
+        .sort((a, b) => Date.parse(a.starts_at) - Date.parse(b.starts_at));
       return send(200, rows);
     }
     // the journal tables (0004, 0005) and the Market data (0008) share the same rules here

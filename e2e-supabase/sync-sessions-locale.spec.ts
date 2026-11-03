@@ -88,7 +88,7 @@ test.describe("Language and sessions settings follow the account", () => {
 
   test("Market 1.4: the calendar filters and the news instrument set on the laptop come to the phone", async ({ browser, request }) => {
     const { A, email } = await accountWithCloud(browser, request, "Cal");
-    await A.page.goto("/market?tab=calendar");
+    await A.page.goto("/market?tab=calendar&view=world");
     await A.page.getByTestId("market-calendar-importance-low").click();
     await A.page.getByTestId("market-calendar-country-cn").click();
     await A.page.goto("/market?tab=news");
@@ -102,7 +102,7 @@ test.describe("Language and sessions settings follow the account", () => {
     const B = await device(browser, 360);
     await signIn(B.page, email);
     await B.page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 10000 });
-    await B.page.goto("/market?tab=calendar");
+    await B.page.goto("/market?tab=calendar&view=world");
     await expect(B.page.getByTestId("market-calendar-importance-low")).toHaveAttribute("aria-pressed", "true", { timeout: 20000 });
     await expect(B.page.getByTestId("market-calendar-country-cn")).toHaveAttribute("aria-pressed", "true");
     await B.page.goto("/market?tab=news");
