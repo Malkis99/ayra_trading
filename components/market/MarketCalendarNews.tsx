@@ -9,17 +9,10 @@ import { timeZoneLabel } from "@/lib/timezones";
 import { cn } from "@/components/ui";
 import { useOutsideClose } from "@/components/ui/forms/popover";
 import { categoryOf, instrumentName } from "@/lib/market/instruments";
-import {
-  CALENDAR_COUNTRIES,
-  deviceTimeZone,
-  eventsOptions,
-  IMPORTANCE,
-  sameClock,
-  timelineOptions,
-  toggleIn,
-} from "@/lib/market/calendar-news";
+import { deviceTimeZone, eventsOptions, sameClock, timelineOptions } from "@/lib/market/calendar-news";
 import { useCalendarNews } from "@/lib/market/watchlist-store";
 import { InstrumentPicker } from "./InstrumentPicker";
+import { CalendarFilters } from "./CalendarFilters";
 import { MarketSyncLine } from "./MarketSyncLine";
 import { TRADINGVIEW_HOME, TradingViewWidget, widgetConfig } from "./TradingViewWidget";
 
@@ -105,25 +98,7 @@ export function MarketCalendar() {
 
   return (
     <section className="space-y-3" data-testid="market-calendar" aria-label={t.title}>
-      <div className="space-y-2 rounded-xl border border-line bg-s1 p-3">
-        <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t.importance} data-testid="market-calendar-importance">
-          <span className="mr-1 text-xs font-semibold text-mu">{t.importance}</span>
-          {IMPORTANCE.map((i) => (
-            <Pill key={i} on={prefs.importance.includes(i)} onClick={() => setPrefs({ ...prefs, importance: toggleIn(prefs.importance, i, IMPORTANCE) })} testId={`market-calendar-importance-${i}`}>
-              {t.levels[i]}
-            </Pill>
-          ))}
-        </div>
-        <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t.countries} data-testid="market-calendar-countries">
-          <span className="mr-1 text-xs font-semibold text-mu">{t.countries}</span>
-          {CALENDAR_COUNTRIES.map((c) => (
-            <Pill key={c} on={prefs.countries.includes(c)} onClick={() => setPrefs({ ...prefs, countries: toggleIn(prefs.countries, c, CALENDAR_COUNTRIES) })} testId={`market-calendar-country-${c}`}>
-              {t.countryNames[c]}
-            </Pill>
-          ))}
-        </div>
-        <p className="text-[11px] text-mu">{t.lastStays}</p>
-      </div>
+      <CalendarFilters prefs={prefs} onChange={setPrefs} />
 
       <p className="flex items-start gap-2 text-xs text-mu" data-testid="market-calendar-zone" data-differs={differs}>
         <Info size={14} className="mt-0.5 shrink-0 text-vi" aria-hidden="true" />
