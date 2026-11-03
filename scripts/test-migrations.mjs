@@ -13,7 +13,7 @@ try {
 }
 const read = (p) => readFileSync(`${repo}${p}`, "utf8").replace(/CREATE EXTENSION IF NOT EXISTS "uuid-ossp";/, "");
 const STUB = `
-  CREATE ROLE anon; CREATE ROLE authenticated;
+  CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;
   CREATE SCHEMA auth;
   CREATE TABLE auth.users (id uuid PRIMARY KEY, email text);
   -- same as Supabase: the user id comes from the JWT claim set for the request (NULL when signed out)
@@ -210,4 +210,27 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   (!after.market_table && !after.write_trigger_function) ? ok("H: rollback removes the Market table and its function") : fail(`H: rollback ${JSON.stringify(after)}`);
   const j = (await db.query(read("supabase/checks/0004_status.sql"))).rows[0];
   j.journal_tables === 9 && j.cloud_sync_function ? ok("H: rollback keeps 0004") : fail("H: rollback touched 0004");
+}
+
+// I. 0009: Market calendar and official news — applied twice; everyone reads (hidden rows excluded), nobody but the
+//    collector writes, the log is closed, only https links and short descriptions, 90-day clean-up; rollback removes
+//    only these tables
+{
+  const db = await fresh();
+  for (const f of ["0001_init", "0002_profile_defaults", "0003_nickname_cooldown", "0004_journal_sync", "0008_market_sync"]) await db.exec(read(`supabase/migrations/${f}.sql`));
+  await db.exec(read("supabase/migrations/0009_market_feeds.sql"));
+  await db.exec(read("supabase/migrations/0009_market_feeds.sql")); ok("I: 0009 applied twice");
+  try { await db.exec(read("supabase/tests/market_feeds_rls.sql")); ok("I: tests/market_feeds_rls.sql passed"); } catch (e) { fail(`I: test script: ${e.message}`); }
+  const left = (await db.query(`SELECT (SELECT count(*) FROM public.market_events) + (SELECT count(*) FROM public.market_news) + (SELECT count(*) FROM public.market_feed_runs) AS n`)).rows[0].n;
+  Number(left) === 0 ? ok("I: test rolled back (no rows left)") : fail("I: rows left after test");
+  const svc = (await db.query(`SELECT has_table_privilege('service_role', 'public.market_news', 'INSERT') AS w, has_function_privilege('service_role', 'public.market_feeds_prune()', 'EXECUTE') AS p`)).rows[0];
+  svc.w && svc.p ? ok("I: the collector (service role) may write and clean up") : fail(`I: service role rights ${JSON.stringify(svc)}`);
+  const chk = (await db.query(read("supabase/checks/0009_status.sql"))).rows[0];
+  console.log("   check:", JSON.stringify(chk));
+  (chk.feed_tables === 3 && chk.rls_enabled === 3 && chk.prune_function && chk.client_write_grants === 0 && chk.client_log_grants === 0 && chk.read_policies === 2) ? ok("I: check query") : fail("I: check query");
+  await db.exec(read("supabase/migrations/0009_market_feeds.down.sql"));
+  const after = (await db.query(read("supabase/checks/0009_status.sql"))).rows[0];
+  (after.feed_tables === 0 && !after.prune_function) ? ok("I: rollback removes the feed tables and functions") : fail(`I: rollback ${JSON.stringify(after)}`);
+  const m = (await db.query(read("supabase/checks/0008_status.sql"))).rows[0];
+  m.market_table ? ok("I: rollback keeps 0008") : fail("I: rollback touched 0008");
 }
