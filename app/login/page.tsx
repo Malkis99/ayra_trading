@@ -442,8 +442,8 @@ Message: ${errorDetails.sanitizedMessage}${
   const logo = (
     <div className="mb-6 text-center">
       {/* smaller on phones, so the whole card still fits the screen */}
-      <Logo variant="full" height={88} priority className="mx-auto sm:hidden" />
-      <Logo variant="full" height={132} priority className="mx-auto hidden sm:block" />
+      <Logo variant="full" height={92} priority className="mx-auto sm:hidden" />
+      <Logo variant="full" height={136} priority className="mx-auto hidden sm:block" />
     </div>
   );
 

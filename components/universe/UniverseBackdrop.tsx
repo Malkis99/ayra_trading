@@ -104,7 +104,7 @@ export function UniverseLoader({ label }: { label?: string }) {
   return (
     <UniverseScreen>
       <div className="flex flex-col items-center gap-4" role="status" aria-live="polite">
-        <Logo variant="full" height={120} priority />
+        <Logo variant="full" height={140} priority />
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-vi/30 border-t-vi motion-reduce:animate-none" aria-hidden="true" />
         {label && <span className="text-sm text-mu">{label}</span>}
       </div>

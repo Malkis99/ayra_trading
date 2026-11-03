@@ -11,8 +11,11 @@ export default function manifest(): MetadataRoute.Manifest {
     background_color: "#121117",
     theme_color: "#121117",
     icons: [
-      { src: "/brand/icon-192.png", sizes: "192x192", type: "image/png" },
-      { src: "/brand/icon-512.png", sizes: "512x512", type: "image/png" },
+      { src: "/brand/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/brand/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      // Android shapes: the kit's maskable icons keep the sign inside the safe zone
+      { src: "/brand/maskable-192.png", sizes: "192x192", type: "image/png", purpose: "maskable" },
+      { src: "/brand/maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
   };
 }

@@ -113,8 +113,8 @@ export default function ProfileSelectPage() {
   return (
     <div className="min-h-screen w-full overflow-y-auto bg-ink text-tx">
       <header className="flex h-14 items-center border-b border-line/40 px-4 md:px-8">
-        <Logo variant="mark" height={32} priority className="md:hidden" />
-        <Logo variant="horizontal" height={40} priority className="hidden md:block" />
+        <Logo variant="mark" height={28} priority className="md:hidden" />
+        <Logo variant="lockup" height={32} priority className="hidden md:inline-flex" />
       </header>
 
       <main className="mx-auto flex w-full max-w-lg flex-col gap-5 px-4 py-6 md:py-10">
