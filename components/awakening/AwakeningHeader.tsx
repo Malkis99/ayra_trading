@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { Logo } from "@/components/brand/Logo";
 import Link from "next/link";
 import { LogOut } from "lucide-react";
 import { useApp } from "@/lib/context";
@@ -35,8 +36,9 @@ export function AwakeningHeader({ step, subStep, questionsInStep, onGoToStep, em
       {/* Same grid as the page: logo at the left padding, account block on the right edge of the question column
           (right column = 55% of the width, the question column is --aw-col wide and centred in it) */}
       <div className="grid h-full grid-cols-[minmax(0,1fr)_auto] grid-rows-[40px_auto] content-center items-center gap-x-3 gap-y-1 pl-[var(--aw-pad,16px)] pr-[var(--aw-pad,16px)] md:grid-cols-[auto_minmax(0,1fr)_auto] md:grid-rows-1 md:gap-6 md:pr-[calc(var(--aw-pad)_+_max(0px,_(55%_-_2_*_var(--aw-pad)_-_var(--aw-col))_/_2))]">
-        <Link href="/" className="col-start-1 row-start-1 justify-self-start font-serif text-lg font-bold tracking-[0.2em] text-tx hover:opacity-80 md:text-xl">
-          AYRA
+        <Link href="/" aria-label={dict.brand.home} className="col-start-1 row-start-1 flex items-center justify-self-start rounded-lg hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi">
+          <Logo variant="mark" height={34} priority decorative className="md:hidden" />
+          <Logo variant="horizontal" height={44} priority decorative className="hidden md:block" />
         </Link>
 
         <nav aria-label={formatString(a.questionProgress, { step: step, subStep: subStep + 1, totalSubSteps: questionsInStep })} className="col-span-2 row-start-2 mx-auto w-full min-w-0 max-w-[560px] md:col-span-1 md:col-start-2 md:row-start-1">

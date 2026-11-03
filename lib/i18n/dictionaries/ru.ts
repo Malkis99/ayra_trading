@@ -1,4 +1,10 @@
 export const ru = {
+  brand: {
+    name: "AYRA Trading",
+    slogan: "Trade · Train · Evolve",
+    description: "AYRA Trading — Trade · Train · Evolve. Журнал сделок, рыночный центр, ежедневные задания и персонаж трейдера.",
+    home: "AYRA Trading — на главную",
+  },
   timezones: {
     label: "Часовой пояс",
     regions: {

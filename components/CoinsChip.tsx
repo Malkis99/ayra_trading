@@ -79,7 +79,7 @@ export function CoinsChip({ value }: CoinsChipProps) {
     <div data-testid="coins-chip" className="relative inline-flex items-center group">
       <div
         title={dict.topbar.coinsTooltip}
-        className={`flex items-center gap-1.5 rounded-xl border border-go/40 bg-gradient-to-r from-[#d6a94a15] to-[#d6a94a08] px-2.5 py-1 text-xs font-bold text-go transition-all duration-300 hover:border-go hover:shadow-[0_0_12px_#d6a94a44] ${
+        className={`flex items-center gap-1.5 rounded-xl border border-go/40 bg-gradient-to-r from-[#d6a94a15] to-[#d6a94a08] px-2 py-1 sm:px-2.5 text-xs font-bold text-go transition-all duration-300 hover:border-go hover:shadow-[0_0_12px_#d6a94a44] ${
           isFlashing ? "border-go bg-go/30 shadow-[0_0_16px_#d6a94a88]" : ""
         }`}
       >

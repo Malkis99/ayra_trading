@@ -1,6 +1,12 @@
 import { Dictionary } from "../types";
 
 export const en: Dictionary = {
+  brand: {
+    name: "AYRA Trading",
+    slogan: "Trade · Train · Evolve",
+    description: "AYRA Trading — Trade · Train · Evolve. A trading journal, market center, daily quests and a trader character.",
+    home: "AYRA Trading — home",
+  },
   timezones: {
     label: "Time zone",
     regions: {

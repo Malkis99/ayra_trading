@@ -1,5 +1,9 @@
 export const ALLOWED_LATIN_WORDS = [
   "AYRA",
+  // the slogan «Trade · Train · Evolve» (owner's brand kit)
+  "Trade",
+  "Train",
+  "Evolve",
   // file formats and technical names in import/export texts
   "CFD",
   "CSV",
