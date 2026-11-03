@@ -8,6 +8,7 @@ import { SessionsClock } from "@/components/market/SessionsClock";
 import { MarketOverview } from "@/components/market/MarketOverview";
 import { MarketChart } from "@/components/market/MarketChart";
 import { MarketWatchlist } from "@/components/market/MarketWatchlist";
+import { MarketCalendar, MarketNews } from "@/components/market/MarketCalendarNews";
 import { INSTRUMENTS, type InstrumentId } from "@/lib/market/instruments";
 import { useMarketCloudSync } from "@/lib/market/cloud-sync-engine";
 
@@ -92,6 +93,10 @@ export default function MarketPage() {
           </>
         ) : tab === "chart" ? (
           <MarketChart />
+        ) : tab === "calendar" ? (
+          <MarketCalendar />
+        ) : tab === "news" ? (
+          <MarketNews />
         ) : tab === "watchlist" ? (
           <MarketWatchlist onOpenChart={openChart} />
         ) : (

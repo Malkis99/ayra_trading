@@ -85,4 +85,29 @@ test.describe("Language and sessions settings follow the account", () => {
     await A.ctx.close();
     await B.ctx.close();
   });
+
+  test("Market 1.4: the calendar filters and the news instrument set on the laptop come to the phone", async ({ browser, request }) => {
+    const { A, email } = await accountWithCloud(browser, request, "Cal");
+    await A.page.goto("/market?tab=calendar");
+    await A.page.getByTestId("market-calendar-importance-low").click();
+    await A.page.getByTestId("market-calendar-country-cn").click();
+    await A.page.goto("/market?tab=news");
+    await A.page.getByTestId("market-news-instrument").click();
+    await A.page.locator("#market-news-cat-tab-commodities").click();
+    await A.page.getByTestId("market-news-pick-gold").click();
+    await expect
+      .poll(async () => (await viewRow(request, email))?.data.calendar as Record<string, unknown> | undefined, { timeout: 20000 })
+      .toMatchObject({ importance: ["high", "medium", "low"], countries: ["us", "eu", "gb", "jp", "cn"], newsInstrument: "gold" });
+
+    const B = await device(browser, 360);
+    await signIn(B.page, email);
+    await B.page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 10000 });
+    await B.page.goto("/market?tab=calendar");
+    await expect(B.page.getByTestId("market-calendar-importance-low")).toHaveAttribute("aria-pressed", "true", { timeout: 20000 });
+    await expect(B.page.getByTestId("market-calendar-country-cn")).toHaveAttribute("aria-pressed", "true");
+    await B.page.goto("/market?tab=news");
+    await expect(B.page.getByTestId("market-news-instrument")).toContainText("Золото", { timeout: 20000 });
+    await A.ctx.close();
+    await B.ctx.close();
+  });
 });

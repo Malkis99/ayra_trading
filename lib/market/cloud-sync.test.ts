@@ -4,10 +4,11 @@ import { MarketCloudError, syncMarketOnce, type MarketCloudRemote, type MarketLo
 import { DEFAULT_CHART_VIEW, withNote, noteText } from "./chart-workspace";
 import { normalizeChartPrefs, type Watchlist } from "./watchlist";
 import { normalizeSettings } from "./sessions";
+import { normalizeCalendarNews } from "./calendar-news";
 
 const T = (h: number) => new Date(Date.UTC(2026, 10, 2, h)).toISOString();
 const list = (ids: string[], at?: string): Watchlist => ({ version: 1, ids: ids as Watchlist["ids"], ...(at ? { updatedAt: at } : {}) });
-const empty = (): MarketLocal => ({ watchlist: list([]), view: { ...DEFAULT_CHART_VIEW }, notes: {}, prefs: normalizeChartPrefs(null), sessions: normalizeSettings(null) });
+const empty = (): MarketLocal => ({ watchlist: list([]), view: { ...DEFAULT_CHART_VIEW }, notes: {}, prefs: normalizeChartPrefs(null), sessions: normalizeSettings(null), calendar: normalizeCalendarNews(null) });
 const now = new Date(T(12));
 
 describe("Market data in the account: merge (newest wins; the first time the Watchlists are joined)", () => {

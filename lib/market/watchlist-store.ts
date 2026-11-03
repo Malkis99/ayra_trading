@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AppStorage } from "@/lib/storage";
 import { emptyWatchlist, normalizeChartPrefs, normalizeWatchlist, sameSharedPrefs, type ChartPrefs, type Watchlist } from "./watchlist";
 import { normalizeChartView, normalizeNotes, type ChartNotes, type ChartView } from "./chart-workspace";
+import { normalizeCalendarNews, type CalendarNewsPrefs } from "./calendar-news";
 
 /** The Watchlist of this space (account or guest), on this device; synced with the account (0008). */
 export const MARKET_WATCHLIST_KEY = "ayra_market_watchlist";
@@ -13,6 +14,8 @@ export const MARKET_CHART_KEY = "ayra_market_chart";
 export const MARKET_CHART_VIEW_KEY = "ayra_market_chart_view";
 /** Notes per instrument (PR 1.3b); synced with the account (0008). */
 export const MARKET_NOTES_KEY = "ayra_market_notes";
+/** The Calendar's and News' filters (1.4); synced with the account in the `chart_view` row (0008). */
+export const MARKET_CALENDAR_KEY = "ayra_market_calendar";
 
 /** Every write of a Market key is announced: screens re-read, the account sync sends local changes. */
 export const MARKET_STORE_EVENT = "ayra-market-store";
@@ -78,3 +81,4 @@ const stampSharedPrefs = (next: ChartPrefs): ChartPrefs =>
 export const useChartPrefs = () => useStored<ChartPrefs>(MARKET_CHART_KEY, normalizeChartPrefs, () => normalizeChartPrefs(null), stampSharedPrefs);
 export const useChartView = () => useStored<ChartView>(MARKET_CHART_VIEW_KEY, normalizeChartView, () => normalizeChartView(null), stampNow);
 export const useChartNotes = () => useStored<ChartNotes>(MARKET_NOTES_KEY, normalizeNotes, () => ({}));
+export const useCalendarNews = () => useStored<CalendarNewsPrefs>(MARKET_CALENDAR_KEY, normalizeCalendarNews, () => normalizeCalendarNews(null), stampNow);

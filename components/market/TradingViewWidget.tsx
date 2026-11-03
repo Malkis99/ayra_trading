@@ -6,9 +6,10 @@ import { cn } from "@/components/ui";
 
 /**
  * The free TradingView widgets used on the Market (PR 1.2). «Technical analysis» is not here on purpose: it shows a
- * «buy / sell» rating, which looks like a signal (`docs/market-plan.md` section 9).
+ * «buy / sell» rating, which looks like a signal (`docs/market-plan.md` section 9). 1.4 adds the economic calendar
+ * («events») and the news («timeline»).
  */
-export type TradingViewWidgetName = "mini-symbol-overview" | "market-quotes" | "advanced-chart";
+export type TradingViewWidgetName = "mini-symbol-overview" | "market-quotes" | "advanced-chart" | "events" | "timeline";
 
 export const TRADINGVIEW_SCRIPT_BASE = "https://s3.tradingview.com/external-embedding/embed-widget-";
 export const TRADINGVIEW_HOME = "https://www.tradingview.com/";
