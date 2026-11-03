@@ -40,6 +40,12 @@ for (const engine of ["chromium", "webkit"] as const) {
         await expect(el(page, "market-calendar-importance-low")).toHaveAttribute("aria-pressed", "false");
 
         await el(page, "market-calendar-importance-low").click();
+        // phones: the countries are folded into one line until «Change»
+        if (width === 360) {
+          await expect(el(page, "market-calendar-country-list")).toBeHidden();
+          await el(page, "market-calendar-countries-toggle").click();
+        }
+        await expect(el(page, "market-calendar-country-list")).toBeVisible();
         await el(page, "market-calendar-country-cn").click();
         await el(page, "market-calendar-country-eu").click();
         await expect.poll(async () => (await config(page, "market-calendar-widget")).countryFilter).toBe("us,gb,jp,cn");
@@ -54,12 +60,42 @@ for (const engine of ["chromium", "webkit"] as const) {
 
         await expect(el(page, "market-calendar-disclaimer")).toHaveText("Не является финансовой рекомендацией.");
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-        const filters = (await el(page, "market-calendar-countries").boundingBox())!;
+        const filters = (await el(page, "market-calendar-filters").boundingBox())!;
         expect(filters.x + filters.width).toBeLessThanOrEqual(width);
+        await expect(el(page, "market-calendar-countries-count")).toHaveText("4 из 10");
+        await expect(el(page, "market-calendar-summary")).toHaveText("Выбрано: Низкая · США, Великобритания, Япония, Китай");
 
         await page.reload();
         await expect(el(page, "market-calendar-widget")).toHaveAttribute("data-status", "ready");
         expect(await config(page, "market-calendar-widget")).toMatchObject({ importanceFilter: "-1", countryFilter: "us,gb,jp,cn" });
+      });
+    }
+
+    for (const width of [1440, 360]) {
+      test(`${width}: filters — importance in its own colours, «Select all» and «Reset» for countries, what is chosen; small on a phone`, async () => {
+        const { page } = await marketGuest(browser, width);
+        await page.goto("/market?tab=calendar");
+        await expect(el(page, "market-calendar-widget")).toHaveAttribute("data-status", "ready");
+        // three different colours for the three levels
+        const tones = await Promise.all(
+          (["high", "medium", "low"] as const).map((i) => el(page, `market-calendar-importance-${i}`).locator("span").first().evaluate((d) => getComputedStyle(d).backgroundColor))
+        );
+        expect(new Set(tones).size).toBe(3);
+        await expect(el(page, "market-calendar-summary")).toHaveText("Выбрано: Высокая, Средняя · США, Еврозона, Великобритания, Япония");
+        await expect(el(page, "market-calendar-countries-reset")).toBeDisabled();
+        if (width === 360) {
+          // folded: the block is about two thirds of the old one (263 px before 1.4b)
+          expect((await el(page, "market-calendar-filters").boundingBox())!.height).toBeLessThan(180);
+          await el(page, "market-calendar-countries-toggle").click();
+        }
+        await el(page, "market-calendar-countries-all").click();
+        await expect(el(page, "market-calendar-countries-count")).toHaveText("10 из 10");
+        await expect(el(page, "market-calendar-countries-all")).toBeDisabled();
+        await expect.poll(async () => (await config(page, "market-calendar-widget")).countryFilter).toBe("us,eu,gb,jp,cn,de,ca,au,nz,ch");
+        await el(page, "market-calendar-countries-reset").click();
+        await expect(el(page, "market-calendar-countries-count")).toHaveText("4 из 10");
+        await expect.poll(async () => (await config(page, "market-calendar-widget")).countryFilter).toBe("us,eu,gb,jp");
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       });
     }
 
