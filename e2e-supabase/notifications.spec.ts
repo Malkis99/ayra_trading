@@ -44,7 +44,8 @@ test("notifications: inbox, explicit read, pagination, filters, cloud settings, 
   await completeOnboarding(page, `Notify${Date.now() % 100000}`, { after: "left" });
   await page.goto("/settings/notifications");
   await expect(page.getByRole("button", { name: "Сохранить", exact: true })).toBeDisabled();
-  await page.getByRole("switch", { name: /^Отключить обычные уведомления/ }).click();
+  await expect(page.getByRole("switch", { name: /^Все уведомления/ })).toBeChecked();
+  await page.getByRole("switch", { name: /^Все уведомления/ }).click();
   await page.getByRole("switch", { name: /^Тихие часы/ }).click();
   await page.getByRole("button", { name: "Сохранить", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Сохранено в аккаунте");
@@ -52,18 +53,22 @@ test("notifications: inbox, explicit read, pagination, filters, cloud settings, 
   const second = await page.context().newPage();
   await fixtures.attach(second);
   await second.goto("/settings/notifications");
-  await expect(second.getByRole("switch", { name: /^Отключить обычные уведомления/ })).toBeChecked();
+  await expect(second.getByRole("switch", { name: /^Все уведомления/ })).not.toBeChecked();
   await second.close();
   await page.reload();
-  await expect(page.getByRole("switch", { name: /^Отключить обычные уведомления/ })).toBeChecked();
-  await expect(page.getByText("Критические уведомления безопасности остаются включёнными.", { exact: false })).toBeVisible();
-  await expect(page.getByRole("switch", { name: /^Web Push/ }).first()).toBeDisabled();
+  await expect(page.getByRole("switch", { name: /^Все уведомления/ })).not.toBeChecked();
+  await expect(page.getByText("Важные уведомления безопасности остаются включены.")).toBeVisible();
+  await expect(page.getByRole("switch", { name: /: Web Push$/ }).first()).toBeDisabled();
+  expect(await page.getByTestId("notification-settings").innerText()).not.toMatch(/хранение|источник|демонстрацион|миграци|не подключен/i);
   const output = process.env.SHOT_DIR;
   for (const width of [1440, 360]) {
-    await page.setViewportSize({ width, height: 900 });
+    await page.setViewportSize({ width, height: width === 360 ? 2100 : 2000 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
+    const matrix = page.getByTestId("notification-matrix");
+    expect(await matrix.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
     if (output) await page.screenshot({ path: `${output}/notifications-settings-${width}.png` });
   }
+  await page.setViewportSize({ width: 360, height: 900 });
   await page.getByRole("button", { name: "Уведомления", exact: true }).click();
   const center = page.getByTestId("notification-center");
   await expect(center.getByTestId("notification-item")).toHaveCount(20);
@@ -85,6 +90,13 @@ test("notifications: inbox, explicit read, pagination, filters, cloud settings, 
   await page.keyboard.press("Escape");
   await expect(center).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Уведомления", exact: true })).toBeFocused();
+  if (output) {
+    for (const section of ["profile", "journal", "interface", "privacy"]) {
+      await page.goto(`/settings/${section}`);
+      await expect(page.getByTestId(`settings-section-${section}`)).toBeVisible();
+      await page.screenshot({ path: `${output}/settings-reference-${section}-360.png` });
+    }
+  }
   await page.goto("/settings/interface");
   await page.getByRole("button", { name: "English", exact: true }).click();
   await page.goto("/settings/notifications");
@@ -93,6 +105,6 @@ test("notifications: inbox, explicit read, pagination, filters, cloud settings, 
   if (output) await page.screenshot({ path: `${output}/notifications-settings-en-360.png` });
   fixtures.setMissing();
   await page.reload();
-  await expect(page.getByTestId("notification-settings").getByRole("alert")).toContainText("not set up on the server");
-  await expect(page.getByRole("switch", { name: /^Disable optional notifications/ })).toBeDisabled();
+  await expect(page.getByTestId("notification-settings").getByRole("alert")).toContainText("unavailable right now");
+  await expect(page.getByRole("switch", { name: /^All notifications/ })).toBeDisabled();
 });

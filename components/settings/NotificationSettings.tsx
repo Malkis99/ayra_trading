@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth/auth-context";
 import { Toggle } from "@/components/ui/forms/choice";
 import { InstrumentPicker } from "@/components/market/InstrumentPicker";
 import { TimezoneSelect } from "@/components/TimezoneSelect";
+import { SettingRow } from "@/components/ui/SettingRow";
 import { CHANNELS, TYPES, TYPE_CODES, channelAvailable, type NotificationChannel, type NotificationType } from "@/lib/notifications/registry";
 import { notificationRepository as repo } from "@/lib/notifications/repository";
 import { defaultSettings, type NotificationPreference, type NotificationSettings as Settings, type NotificationError } from "@/lib/notifications/types";
@@ -63,37 +64,52 @@ function AccountSettings({ userId, timezone }: { userId: string; timezone: strin
     finally { setSaving(false); }
   };
   const blocked = loading || !loaded || error === "setup" || saving;
+  const visibleChannels = CHANNELS.filter((channel) => channel !== "mobile_push");
   return <form onSubmit={save} className="space-y-4" data-testid="notification-settings">
-    <p className="rounded-xl border border-line bg-s1 p-3 text-xs text-mu">{t.foundation}</p>
     {loading && <p role="status">{t.loading}</p>}
     {error && <div role="alert" className="card text-sm"><p>{error === "setup" ? t.setup : t.error}</p><button type="button" className="btn-ghost mt-2 p-2" onClick={() => { if (dirty) { setError(null); } else { setLoading(true); setRetry((r) => r + 1); } }}>{t.retry}</button></div>}
     <fieldset disabled={blocked} className="card min-w-0 space-y-4 disabled:opacity-60">
-      <Toggle label={t.disableAll} description={t.securityException} checked={settings.all_disabled} onChange={(all_disabled) => change({ all_disabled })} />
-      <p className="text-xs text-mu">{t.securitySoon}</p>
-      <Toggle label={t.quiet} description={t.quietHelp} checked={settings.quiet_enabled} onChange={(quiet_enabled) => change({ quiet_enabled })} />
+      <Toggle label={t.disableAll} description={t.securityException} checked={!settings.all_disabled} onChange={(enabled) => change({ all_disabled: !enabled })} />
+      <Toggle label={t.quiet} checked={settings.quiet_enabled} onChange={(quiet_enabled) => change({ quiet_enabled })} />
+      {settings.quiet_enabled && <>
       <div className="grid min-w-0 gap-3 sm:grid-cols-2">
         <label className="min-w-0 space-y-1 text-sm"><span className="block">{t.quietStart}</span><input type="time" className="w-full min-w-0 rounded-lg border border-line bg-s1 p-2" value={settings.quiet_start} onChange={(e) => change({ quiet_start: e.target.value })} required /></label>
         <label className="min-w-0 space-y-1 text-sm"><span className="block">{t.quietEnd}</span><input type="time" className="w-full min-w-0 rounded-lg border border-line bg-s1 p-2" value={settings.quiet_end} onChange={(e) => change({ quiet_end: e.target.value })} required /></label>
       </div>
+      </>}
       <TimezoneSelect label={t.timezone} value={settings.timezone} disabled={blocked} onChange={(timezone) => change({ timezone })} />
       <label className="block space-y-1 text-sm"><span>{t.importance}</span><select className="w-full rounded-lg border border-line bg-s1 p-2" value={settings.min_importance} onChange={(e) => change({ min_importance: Number(e.target.value) })}>{([1, 2, 3] as const).map((v) => <option value={v} key={v}>{t.importances[v]}</option>)}</select></label>
-      <details><summary className="cursor-pointer text-sm font-semibold">{t.instruments} ({settings.instrument_ids.length})</summary><p className="my-2 text-xs text-mu">{t.instrumentHelp}</p>
+      <details><summary className="cursor-pointer text-sm font-semibold">{t.instruments}</summary>
+        <SettingRow title={t.instruments} hint={t.instrumentHelp} hintLabel={dict.journalSettings.hintLabel} className="mt-3">
         <InstrumentPicker idPrefix="notification-instruments" selected={(id) => settings.instrument_ids.includes(id)} onPick={(id) => change({ instrument_ids: settings.instrument_ids.includes(id) ? settings.instrument_ids.filter((x) => x !== id) : [...settings.instrument_ids, id] })} />
+        </SettingRow>
       </details>
     </fieldset>
-    <section aria-label={t.matrix} className="space-y-3">
-      <h3 className="font-semibold">{t.matrix}</h3><p className="text-xs text-mu">{t.matrixHelp}</p>
-      {TYPE_CODES.map((type) => <fieldset key={type} className="min-w-0 rounded-xl border border-line bg-s1 p-3" disabled={blocked}>
-        <legend className="px-1 text-sm font-semibold">{t.types[type]} — {t.soon}</legend>
-        <div className="grid gap-x-4 sm:grid-cols-2">
-          {CHANNELS.map((channel) => {
+    <section aria-label={t.matrix} className="card min-w-0 space-y-3">
+      <h3 className="h4">{t.matrix}</h3>
+      <table className="w-full table-fixed border-collapse text-xs" data-testid="notification-matrix">
+        <caption className="sr-only">{t.matrix}</caption>
+        <colgroup><col className="w-[32%] sm:w-[36%]" />{visibleChannels.map((channel) => <col key={channel} />)}</colgroup>
+        <thead><tr className="border-b border-line text-[10px] text-mu sm:text-xs">
+          <th scope="col" className="py-3 pr-1 text-left font-medium">{t.eventType}</th>
+          {visibleChannels.map((channel) => <th key={channel} scope="col" className="px-0.5 py-3 text-center font-medium"><span className={channel === "telegram" ? "whitespace-nowrap" : undefined}>{t.channels[channel]}</span>{!TYPE_CODES.some((type) => channelAvailable(type, channel)) && <span className="mt-1 block text-[9px] font-normal text-mu">{t.soon}</span>}</th>)}
+        </tr></thead>
+        <tbody>{TYPE_CODES.map((type, index) => <React.Fragment key={type}>
+          {(index === 0 || TYPES[TYPE_CODES[index - 1]].group !== TYPES[type].group) && <tr><th colSpan={visibleChannels.length + 1} scope="rowgroup" className="pb-1 pt-4 text-left text-[11px] font-semibold text-vi">{t.groups[TYPES[type].group]}</th></tr>}
+          <tr className="border-b border-line/50 last:border-0">
+            <th scope="row" className="py-2 pr-1 text-left text-[11px] font-normal leading-snug text-tx sm:text-xs">{t.types[type]}</th>
+            {visibleChannels.map((channel) => {
             const available = channelAvailable(type, channel);
             const locked = TYPES[type].critical && channel === "site";
-            return <Toggle key={channel} label={t.channels[channel]} description={locked ? t.required : available ? undefined : channel === "site" ? t.soon : t.notConnected}
-              checked={available && preferenceEnabled(type, channel, prefs)} disabled={!available || locked} onChange={(enabled) => changePreference(type, channel, enabled)} />;
-          })}
-        </div>
-      </fieldset>)}
+            const checked = available && preferenceEnabled(type, channel, prefs);
+            return <td key={channel} className="px-0.5 text-center"><button type="button" role="switch" aria-label={`${t.types[type]}: ${t.channels[channel]}`} aria-checked={checked}
+              disabled={blocked || !available || locked} onClick={() => changePreference(type, channel, !checked)}
+              className="mx-auto flex min-h-11 w-full items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi disabled:cursor-not-allowed disabled:opacity-40">
+              <span aria-hidden="true" className={`relative h-[18px] w-8 rounded-full border ${checked ? "border-pri bg-pri" : "border-edge bg-field"}`}><span className={`absolute top-[2px] h-3 w-3 rounded-full ${checked ? "left-[16px] bg-white" : "left-[3px] bg-mu"}`} /></span>
+            </button></td>;
+          })}</tr>
+        </React.Fragment>)}</tbody>
+      </table>
     </section>
     <p className="text-xs text-mu">{t.disclaimer}</p><p className="text-xs text-mu">{t.retention}</p>
     {dirty && !validSettings(settings) && <p role="alert" className="text-sm text-mu">{t.invalid}</p>}

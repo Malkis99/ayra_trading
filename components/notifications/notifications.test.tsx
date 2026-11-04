@@ -39,7 +39,10 @@ describe("notification UI boundaries", () => {
     mock.save.mockRejectedValue(new Error("offline"));
     render(<NotificationSettings />);
     await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
-    fireEvent.click(screen.getByRole("switch", { name: /^Отключить обычные уведомления/ }));
+    const master = screen.getByRole("switch", { name: /^Все уведомления/ });
+    expect(master.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(master);
+    expect(master.getAttribute("aria-checked")).toBe("false");
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
     await screen.findByRole("alert");
     expect(screen.queryByText("Сохранено в аккаунте")).toBeNull();
@@ -51,9 +54,25 @@ describe("notification UI boundaries", () => {
     const { container } = render(<NotificationSettings />);
     await waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());
     expect(container.textContent).not.toMatch(/[А-Яа-яЁё]/);
-    const external = screen.getAllByRole("switch", { name: /^Web Push/ });
+    const external = screen.getAllByRole("switch", { name: /: Web Push$/ });
     expect(external.every((el) => (el as HTMLButtonElement).disabled)).toBe(true);
-    expect(screen.getByText(en.notifications.securitySoon)).toBeTruthy();
+    expect(screen.getByText(en.notifications.securityException)).toBeTruthy();
+    expect(container.textContent).not.toMatch(/storage|sources|migration|demo/i);
+    expect(screen.getAllByRole("columnheader").map((el) => el.textContent)).toEqual([
+      "Events", "On siteComing soon", "Web PushComing soon", "TelegramComing soon", "EmailComing soon",
+    ]);
+  });
+  it("enabling All notifications saves all_disabled=false without changing other preferences", async () => {
+    const stored = { ...defaultSettings(), all_disabled: true, quiet_enabled: true, min_importance: 3, instrument_ids: ["btc"] };
+    mock.settings.mockResolvedValue({ settings: stored, preferences: [] });
+    render(<NotificationSettings />);
+    await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
+    const master = screen.getByRole("switch", { name: /^Все уведомления/ });
+    expect(master.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(master);
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await screen.findByText("Сохранено в аккаунте");
+    expect(mock.save).toHaveBeenCalledWith("a", { ...stored, all_disabled: false }, []);
   });
   it("opening the center does not mark anything read", async () => {
     render(<NotificationCenter onClose={() => undefined} />);
