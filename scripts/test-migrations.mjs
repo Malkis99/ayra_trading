@@ -234,3 +234,32 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   const m = (await db.query(read("supabase/checks/0008_status.sql"))).rows[0];
   m.market_table ? ok("I: rollback keeps 0008") : fail("I: rollback touched 0008");
 }
+
+// J. 0010: more official sources — applied twice on top of 0009; the new sources and countries are accepted, others
+//    (companies, aggregators, countries outside the plan) still rejected; access unchanged; rollback restores the 0009
+//    lists, removing only rows of the new sources and keeping the old ones
+{
+  const db = await fresh();
+  for (const f of ["0001_init", "0002_profile_defaults", "0003_nickname_cooldown", "0004_journal_sync", "0008_market_sync", "0009_market_feeds"]) await db.exec(read(`supabase/migrations/${f}.sql`));
+  const before = (await db.query(read("supabase/checks/0010_status.sql"))).rows[0];
+  (!before.events_sources && !before.news_countries) ? ok("J: check query is false before 0010") : fail(`J: before ${JSON.stringify(before)}`);
+  await db.exec(read("supabase/migrations/0010_market_feeds_sources.sql"));
+  await db.exec(read("supabase/migrations/0010_market_feeds_sources.sql")); ok("J: 0010 applied twice");
+  try { await db.exec(read("supabase/tests/market_feeds_sources.sql")); ok("J: tests/market_feeds_sources.sql passed"); } catch (e) { fail(`J: test script: ${e.message}`); }
+  try { await db.exec(read("supabase/tests/market_feeds_rls.sql")); ok("J: tests/market_feeds_rls.sql still passes after 0010"); } catch (e) { fail(`J: 0009 test after 0010: ${e.message}`); }
+  const chk = (await db.query(read("supabase/checks/0010_status.sql"))).rows[0];
+  console.log("   check:", JSON.stringify(chk));
+  (chk.events_sources && chk.events_countries && chk.news_sources && chk.news_countries && chk.read_policies === 2 && chk.client_write_grants === 0) ? ok("J: check query") : fail("J: check query");
+  await db.exec(`INSERT INTO public.market_events (id, source, kind, country, title, importance, starts_at) VALUES
+    ('bls:keep:2026-11-06', 'bls', 'release', 'us', 'Keep', 3, '2026-11-06T13:30:00Z'),
+    ('ons:gone:2026-11-12', 'ons', 'release', 'gb', 'Gone', 3, '2026-11-12T07:00:00Z');
+    INSERT INTO public.market_news (id, source, kind, country, title, url, published_at, importance, dedupe_key) VALUES
+    ('eia:gone', 'eia', 'data', 'us', 'Gone', 'https://www.eia.gov/x', '2026-11-04T15:30:00Z', 2, 'eia-gone')`);
+  await db.exec(read("supabase/migrations/0010_market_feeds_sources.down.sql"));
+  const after = (await db.query(read("supabase/checks/0010_status.sql"))).rows[0];
+  (!after.events_sources && !after.events_countries && !after.news_sources && !after.news_countries) ? ok("J: rollback restores the 0009 lists") : fail(`J: rollback ${JSON.stringify(after)}`);
+  const rows = (await db.query(`SELECT (SELECT string_agg(id, ',') FROM public.market_events) AS e, (SELECT count(*)::int FROM public.market_news) AS n`)).rows[0];
+  (rows.e === "bls:keep:2026-11-06" && rows.n === 0) ? ok("J: rollback removes only the new sources' rows") : fail(`J: rows after rollback ${JSON.stringify(rows)}`);
+  const f9 = (await db.query(read("supabase/checks/0009_status.sql"))).rows[0];
+  (f9.feed_tables === 3 && f9.read_policies === 2) ? ok("J: rollback keeps 0009") : fail("J: rollback touched 0009");
+}
