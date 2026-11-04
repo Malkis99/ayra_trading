@@ -156,7 +156,8 @@ for (const engine of ["chromium", "webkit"] as const) {
       await expect(el(page, "market-calendar")).toHaveAttribute("data-view", "world");
       await expect(el(page, "market-calendar-views").getByRole("button").first()).toHaveText("Мировой календарь");
       await expect(el(page, "market-calendar-widget")).toHaveAttribute("data-status", "ready");
-      await expect(el(page, "today-unavailable")).toBeVisible();
+      // «Today important» is on the Overview only
+      await expect(el(page, "today-important")).toHaveCount(0);
       await el(page, "market-calendar-view-own").click();
       await expect(el(page, "own-calendar-unavailable")).toContainText("Календарь официальных событий сейчас недоступен");
       await expect(el(page, "market-calendar-disclaimer")).toHaveText("Не является финансовой рекомендацией.");
