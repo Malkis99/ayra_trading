@@ -23,6 +23,7 @@ export function useMarketEvents(from: number, to: number): [EventsState, () => v
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
+    if (!from || !to) return; // the week is not known yet (the clock starts on the device)
     const cached = cache.get(key);
     if (cached && attempt === 0) {
       setState({ status: "ready", events: cached });

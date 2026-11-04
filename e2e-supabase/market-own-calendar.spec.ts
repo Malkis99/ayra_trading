@@ -42,7 +42,7 @@ async function guest(browser: Browser, width: number) {
   return page;
 }
 
-async function calendar(browser: Browser, width: number, url = "/market?tab=calendar") {
+async function calendar(browser: Browser, width: number, url = "/market?tab=calendar&view=own") {
   const page = await guest(browser, width);
   await page.clock.install({ time: new Date(NOW) });
   await page.clock.pauseAt(new Date(NOW));
@@ -136,7 +136,7 @@ test.describe("Market — own calendar of official events", () => {
     });
     await page.clock.install({ time: new Date(NOW) });
     await page.clock.pauseAt(new Date(NOW));
-    await page.goto("/market?tab=calendar");
+    await page.goto("/market?tab=calendar&view=own");
     await el(page, "own-calendar-day-5").click();
     await expect(el(page, "own-calendar-event").getByTestId("own-calendar-event-time")).toHaveText("08:30");
     await expect(el(page, "own-calendar-zone")).toContainText("Восточная Америка");
@@ -151,17 +151,18 @@ test.describe("Market — own calendar of official events", () => {
     await expect(el(page, "own-calendar-event")).toHaveCount(1);
   });
 
-  test("«World calendar» is TradingView's widget, kept in the address after a reload; back to the official events", async ({ browser }) => {
+  test("«World calendar» is TradingView's widget and opens by default; the official events are kept in the address", async ({ browser }) => {
     const page = await calendar(browser, 1440);
     await el(page, "market-calendar-view-world").click();
     await expect(el(page, "market-calendar")).toHaveAttribute("data-view", "world");
     await expect(el(page, "market-calendar-widget")).toHaveAttribute("data-status", "ready");
     await expect(el(page, "market-calendar-world-note")).toBeVisible();
-    expect(page.url()).toContain("view=world");
+    // the world calendar is the default: the address keeps no view for it
+    expect(page.url()).not.toContain("view=");
     await page.reload();
     await expect(el(page, "market-calendar")).toHaveAttribute("data-view", "world");
     await el(page, "market-calendar-view-own").click();
     await expect(el(page, "own-calendar-list")).toBeVisible();
-    expect(page.url()).not.toContain("view=world");
+    expect(page.url()).toContain("view=own");
   });
 });

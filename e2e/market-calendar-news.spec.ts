@@ -6,7 +6,14 @@ import { marketGuest } from "./helpers/market";
 // instrument's). Both say «Not financial advice». TradingView is stubbed: the tests read the config the app passed.
 
 const el = (page: Page, id: string) => page.getByTestId(id);
-const config = async (page: Page, widget: string) => JSON.parse((await page.locator(`[data-testid="${widget}"] script`).textContent()) || "{}") as Record<string, unknown>;
+/**
+ * The config the app passed to the widget. A widget loads only near the screen (on phones it is below «Today
+ * important» and the filters), so look at it the way a person would: scroll to it first.
+ */
+const config = async (page: Page, widget: string) => {
+  await page.getByTestId(widget).scrollIntoViewIfNeeded();
+  return JSON.parse((await page.locator(`[data-testid="${widget}"] script`).textContent({ timeout: 5000 })) || "{}") as Record<string, unknown>;
+};
 
 /** The profile's zone in the guest's saved state (the browser itself stays in Tbilisi). */
 async function profileZone(page: Page, zone: string) {
@@ -116,7 +123,7 @@ for (const engine of ["chromium", "webkit"] as const) {
     for (const width of [1440, 360]) {
       test(`${width}: news — all, then one instrument from the catalog, then all again; kept after a reload`, async () => {
         const { page } = await marketGuest(browser, width, { minor: true });
-        await page.goto("/market?tab=news");
+        await page.goto("/market?tab=news&view=market");
         await expect(el(page, "market-news-widget")).toHaveAttribute("data-status", "ready");
         const all = await config(page, "market-news-widget");
         expect(all).toMatchObject({ feedMode: "all_symbols" });
@@ -143,20 +150,33 @@ for (const engine of ["chromium", "webkit"] as const) {
       });
     }
 
-    test("the Calendar opens on the official events; without the cloud it says so plainly; the world calendar still works", async () => {
+    test("the Calendar opens on the world calendar (first tab); the official events without the cloud say so plainly", async () => {
       const { page } = await marketGuest(browser, 1440);
       await page.goto("/market?tab=calendar");
-      await expect(el(page, "market-calendar")).toHaveAttribute("data-view", "own");
+      await expect(el(page, "market-calendar")).toHaveAttribute("data-view", "world");
+      await expect(el(page, "market-calendar-views").getByRole("button").first()).toHaveText("Мировой календарь");
+      await expect(el(page, "market-calendar-widget")).toHaveAttribute("data-status", "ready");
+      await expect(el(page, "today-unavailable")).toBeVisible();
+      await el(page, "market-calendar-view-own").click();
       await expect(el(page, "own-calendar-unavailable")).toContainText("Календарь официальных событий сейчас недоступен");
       await expect(el(page, "market-calendar-disclaimer")).toHaveText("Не является финансовой рекомендацией.");
-      await el(page, "market-calendar-view-world").click();
-      await expect(el(page, "market-calendar-widget")).toHaveAttribute("data-status", "ready");
+    });
+
+    test("News opens on the official feed; without the cloud it says so; «Market · TradingView» keeps the widget", async () => {
+      const { page } = await marketGuest(browser, 360);
+      await page.goto("/market?tab=news");
+      await expect(el(page, "market-news-tab")).toHaveAttribute("data-view", "official");
+      await expect(el(page, "official-news-unavailable")).toBeVisible();
+      await expect(el(page, "official-news-disclaimer")).toHaveText("Не является финансовой рекомендацией.");
+      await el(page, "market-news-view-market").click();
+      await expect(el(page, "market-news-widget")).toHaveAttribute("data-status", "ready");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     });
 
     test("TradingView not answering: a plain message with «Try again» on both tabs", async () => {
       const { page } = await marketGuest(browser, 1440, { tradingView: "unavailable" });
       for (const tab of ["calendar", "news"]) {
-        await page.goto(tab === "calendar" ? "/market?tab=calendar&view=world" : `/market?tab=${tab}`);
+        await page.goto(tab === "calendar" ? "/market?tab=calendar&view=world" : "/market?tab=news&view=market");
         await expect(el(page, `market-${tab}-widget-error`)).toBeVisible({ timeout: 20000 });
         await expect(el(page, `market-${tab}-disclaimer`)).toBeVisible();
       }

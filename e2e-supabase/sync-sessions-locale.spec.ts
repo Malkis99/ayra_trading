@@ -91,7 +91,7 @@ test.describe("Language and sessions settings follow the account", () => {
     await A.page.goto("/market?tab=calendar&view=world");
     await A.page.getByTestId("market-calendar-importance-low").click();
     await A.page.getByTestId("market-calendar-country-cn").click();
-    await A.page.goto("/market?tab=news");
+    await A.page.goto("/market?tab=news&view=market");
     await A.page.getByTestId("market-news-instrument").click();
     await A.page.locator("#market-news-cat-tab-commodities").click();
     await A.page.getByTestId("market-news-pick-gold").click();
@@ -105,7 +105,7 @@ test.describe("Language and sessions settings follow the account", () => {
     await B.page.goto("/market?tab=calendar&view=world");
     await expect(B.page.getByTestId("market-calendar-importance-low")).toHaveAttribute("aria-pressed", "true", { timeout: 20000 });
     await expect(B.page.getByTestId("market-calendar-country-cn")).toHaveAttribute("aria-pressed", "true");
-    await B.page.goto("/market?tab=news");
+    await B.page.goto("/market?tab=news&view=market");
     await expect(B.page.getByTestId("market-news-instrument")).toContainText("Золото", { timeout: 20000 });
     await A.ctx.close();
     await B.ctx.close();

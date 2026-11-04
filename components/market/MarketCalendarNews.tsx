@@ -14,6 +14,8 @@ import { useCalendarNews } from "@/lib/market/watchlist-store";
 import { InstrumentPicker } from "./InstrumentPicker";
 import { CalendarFilters } from "./CalendarFilters";
 import { OwnCalendar } from "./OwnCalendar";
+import { TodayImportant } from "./TodayImportant";
+import { OfficialNews } from "./OfficialNews";
 import { MarketSyncLine } from "./MarketSyncLine";
 import { TRADINGVIEW_HOME, TradingViewWidget, widgetConfig } from "./TradingViewWidget";
 
@@ -81,21 +83,30 @@ function Footnote({ testId, official }: { testId: string; official?: boolean }) 
 
 type CalendarView = "own" | "world";
 
-/** The part of the Calendar kept in the address (`?view=world`): a link or a reload opens the same one. */
-function useCalendarView(): [CalendarView | null, (v: CalendarView) => void] {
-  const [view, setView] = useState<CalendarView | null>(null);
+/**
+ * The Calendar opens on this part. «World» while our own calendar is still partial (no ADP, ISM, PMI or forecasts —
+ * owner 2026-11-03); set it to "own" to open on the official events again.
+ */
+export const DEFAULT_CALENDAR_VIEW: CalendarView = "world";
+const CALENDAR_VIEWS: readonly CalendarView[] = DEFAULT_CALENDAR_VIEW === "world" ? ["world", "own"] : ["own", "world"];
+
+/** A part kept in the address (`?view=…`) when it is not the default one: a link or a reload opens the same one. */
+function useView<V extends string>(fallback: V, allowed: readonly V[]): [V | null, (v: V) => void] {
+  const [view, setView] = useState<V | null>(null);
   useEffect(() => {
-    setView(new URLSearchParams(window.location.search).get("view") === "world" ? "world" : "own");
-  }, []);
-  const choose = (v: CalendarView) => {
+    const fromUrl = new URLSearchParams(window.location.search).get("view") as V | null;
+    setView(fromUrl && allowed.includes(fromUrl) ? fromUrl : fallback);
+  }, [fallback, allowed]);
+  const choose = (v: V) => {
     setView(v);
     const url = new URL(window.location.href);
-    if (v === "world") url.searchParams.set("view", "world");
-    else url.searchParams.delete("view");
+    if (v === fallback) url.searchParams.delete("view");
+    else url.searchParams.set("view", v);
     window.history.replaceState(window.history.state, "", url.toString());
   };
   return [view, choose];
 }
+const useCalendarView = () => useView<CalendarView>(DEFAULT_CALENDAR_VIEW, CALENDAR_VIEWS);
 
 /**
  * Market → Calendar: «Official events» (our own calendar from the 0009 table, PR 3 — times in the user's zone, the
@@ -123,8 +134,9 @@ export function MarketCalendar() {
 
   return (
     <section className="space-y-3" data-testid="market-calendar" data-view={view} aria-label={t.title}>
+      <TodayImportant />
       <div className="inline-flex rounded-lg border border-line bg-s1 p-0.5 text-xs font-semibold" role="group" aria-label={t.title} data-testid="market-calendar-views">
-        {(["own", "world"] as const).map((v) => (
+        {CALENDAR_VIEWS.map((v) => (
           <button
             key={v}
             type="button"
@@ -184,7 +196,37 @@ export function MarketCalendar() {
  * Market → News (1.4): TradingView's news, all top stories or one catalog instrument's. Headlines come in English
  * (TradingView sends them so); links lead to TradingView's news pages only — no brokers, no ads (16–17 mode too).
  */
+type NewsView = "official" | "market";
+const NEWS_VIEWS: readonly NewsView[] = ["official", "market"];
+
+/** Market → News: «Official» (the Fed, the ECB, the White House, BLS, BEA — PR 5) and «Market» (TradingView). */
 export function MarketNews() {
+  const { dict } = useApp();
+  const [view, setView] = useView<NewsView>("official", NEWS_VIEWS);
+  if (!view) return <section className="min-h-[480px]" data-testid="market-news-tab" aria-busy="true" />;
+  return (
+    <div className="space-y-3" data-testid="market-news-tab" data-view={view}>
+      <div className="inline-flex rounded-lg border border-line bg-s1 p-0.5 text-xs font-semibold" role="group" aria-label={dict.market.news.title} data-testid="market-news-views">
+        {NEWS_VIEWS.map((v) => (
+          <button
+            key={v}
+            type="button"
+            aria-pressed={view === v}
+            onClick={() => setView(v)}
+            className={cn("rounded-md px-3 py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi", view === v ? "bg-pri/40 text-tx" : "text-mu hover:text-tx")}
+            data-testid={`market-news-view-${v}`}
+          >
+            {dict.market.news.views[v]}
+          </button>
+        ))}
+      </div>
+      {view === "official" ? <OfficialNews /> : <TradingViewNews />}
+    </div>
+  );
+}
+
+/** «Market»: TradingView's news widget (1.4), top stories or one catalog instrument's. */
+function TradingViewNews() {
   const { dict, lang } = useApp();
   const t = dict.market.news;
   const [prefs, setPrefs, loaded] = useCalendarNews();

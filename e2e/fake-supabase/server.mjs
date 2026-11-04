@@ -41,6 +41,7 @@ export function createFakeSupabase() {
   // Migration 0009 stand-in: the shared calendar events (everyone reads rows that are not hidden; tests fill them)
   let marketEvents = [];
   let marketEventsFail = false;
+  let marketNews = [];
   let marketTableMissing = false; // the Market table of 0008 is not in the project (migration not applied)
   let journalWriteDelayMs = 0; // every journal write waits this long (slow network: lets a test cancel mid-upload)
   let journalClock = Date.now();
@@ -187,6 +188,10 @@ export function createFakeSupabase() {
     if (path === "/__test/market-events" && req.method === "POST") {
       marketEvents = await readBody(req);
       return send(200, { count: marketEvents.length });
+    }
+    if (path === "/__test/market-news" && req.method === "POST") {
+      marketNews = await readBody(req);
+      return send(200, { count: marketNews.length });
     }
     if (path === "/__test/market-events-fail") {
       marketEventsFail = url.searchParams.get("on") === "1";
@@ -497,6 +502,17 @@ export function createFakeSupabase() {
         .filter((r) => !r.hidden)
         .filter((r) => (!gte || Date.parse(r.starts_at) >= Date.parse(gte)) && (!lt || Date.parse(r.starts_at) < Date.parse(lt)))
         .sort((a, b) => Date.parse(a.starts_at) - Date.parse(b.starts_at));
+      return send(200, rows);
+    }
+    // 0009: official news, read-only; published_at=gte.X, newest first, limit
+    if (path === "/rest/v1/market_news" && req.method === "GET") {
+      if (marketEventsFail) return send(500, { code: "XX000", message: "fake failure" });
+      const gte = (url.searchParams.get("published_at") || "").replace(/^gte\./, "");
+      const limit = Number(url.searchParams.get("limit") || 1000);
+      const rows = marketNews
+        .filter((r) => !r.hidden && (!gte || Date.parse(r.published_at) >= Date.parse(gte)))
+        .sort((a, b) => Date.parse(b.published_at) - Date.parse(a.published_at))
+        .slice(0, limit);
       return send(200, rows);
     }
     // the journal tables (0004, 0005) and the Market data (0008) share the same rules here
