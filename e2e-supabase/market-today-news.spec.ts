@@ -117,10 +117,12 @@ test.describe("Market — «Today important» and official news", () => {
     await expect(block.getByTestId("today-next-countdown")).toContainText("через 3 д");
   });
 
-  test("Calendar: «Today important» on top; the world calendar opens first", async ({ browser }) => {
+  test("«Today important» is on the Overview only (owner 2026-11-04): the Calendar opens on the world calendar without it", async ({ browser }) => {
     const page = await open(browser, 1440, "/market?tab=calendar");
-    await expect(el(page, "today-important").getByTestId("today-next-title")).toHaveText("Индекс потребительских цен (CPI)");
     await expect(el(page, "market-calendar")).toHaveAttribute("data-view", "world");
+    await expect(el(page, "today-important")).toHaveCount(0);
+    await page.goto("/market");
+    await expect(el(page, "today-important").getByTestId("today-next-title")).toHaveText("Индекс потребительских цен (CPI)");
   });
 
   for (const width of [1440, 360]) {

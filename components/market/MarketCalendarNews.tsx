@@ -14,7 +14,6 @@ import { useCalendarNews } from "@/lib/market/watchlist-store";
 import { InstrumentPicker } from "./InstrumentPicker";
 import { CalendarFilters } from "./CalendarFilters";
 import { OwnCalendar } from "./OwnCalendar";
-import { TodayImportant } from "./TodayImportant";
 import { OfficialNews } from "./OfficialNews";
 import { MarketSyncLine } from "./MarketSyncLine";
 import { TRADINGVIEW_HOME, TradingViewWidget, widgetConfig } from "./TradingViewWidget";
@@ -134,7 +133,6 @@ export function MarketCalendar() {
 
   return (
     <section className="space-y-3" data-testid="market-calendar" data-view={view} aria-label={t.title}>
-      <TodayImportant />
       <div className="inline-flex rounded-lg border border-line bg-s1 p-0.5 text-xs font-semibold" role="group" aria-label={t.title} data-testid="market-calendar-views">
         {CALENDAR_VIEWS.map((v) => (
           <button
