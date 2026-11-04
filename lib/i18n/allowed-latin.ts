@@ -8,6 +8,9 @@ export const ALLOWED_LATIN_WORDS = [
   "JOLTS",
   "PCE",
   "ECI",
+  "EIA",
+  "Census",
+  "DOL",
   // the slogan «Trade · Train · Evolve» (owner's brand kit)
   "Trade",
   "Train",
