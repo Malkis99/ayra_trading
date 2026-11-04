@@ -172,6 +172,32 @@ test.describe("Market — own calendar of official events", () => {
     });
   }
 
+  for (const width of [1440, 360]) {
+    test(`${width}: Eurostat (PR 2 of section 9): the euro area's releases at 11:00 Luxembourg time, the trust mark, Eurostat with its link, the credit`, async ({ browser, request }) => {
+      await seed(request, [
+        ...EVENTS,
+        ev({ id: "eurostat:eu_hicp_flash:2026-11-04", source: "eurostat", code: "eu_hicp_flash", country: "eu", title: "Flash estimate inflation euro area", starts_at: "2026-11-04T10:00:00Z", url: "https://ec.europa.eu/eurostat/news/euro-indicators" }),
+        ev({ id: "eurostat:eu_retail_sales:2026-11-06", source: "eurostat", code: "eu_retail_sales", country: "eu", title: "Retail trade", importance: 2, starts_at: "2026-11-06T10:00:00Z", url: "https://ec.europa.eu/eurostat/news/euro-indicators" }),
+        ev({ id: "eurostat:eu_unemployment:2026-10-30", source: "eurostat", code: "eu_unemployment", country: "eu", title: "Unemployment", importance: 2, starts_at: "2026-11-02T10:00:00Z", status: "released", actual: "6.5%", previous: "6.5%", url: "https://ec.europa.eu/eurostat/news/euro-indicators" }),
+      ]);
+      const page = await calendar(browser, width);
+      await el(page, "own-calendar-day-3").click();
+      const flash = el(page, "own-calendar-event").filter({ hasText: "Инфляция в еврозоне" });
+      await expect(flash.getByTestId("own-calendar-event-title")).toHaveText("Инфляция в еврозоне (экспресс-оценка)");
+      await expect(flash.getByTestId("own-calendar-event-time")).toHaveText("14:00"); // 11:00 CET = 10:00 UTC
+      await expect(flash.getByTestId("own-calendar-event-trust")).toHaveText("Официальный");
+      await expect(flash.getByTestId("own-calendar-event-source")).toHaveText(/Eurostat/);
+      await expect(flash.getByTestId("own-calendar-event-source")).toHaveAttribute("href", "https://ec.europa.eu/eurostat/news/euro-indicators");
+      await expect(flash.getByTestId("own-calendar-event-status")).toHaveText("Ожидается");
+      await el(page, "own-calendar-day-1").click();
+      const jobless = el(page, "own-calendar-event").filter({ hasText: "Безработица в еврозоне" });
+      await expect(jobless.getByTestId("own-calendar-event-actual")).toHaveText("6.5%");
+      await expect(jobless.getByTestId("own-calendar-event-status")).toHaveText("Вышло");
+      await expect(el(page, "market-calendar-sources")).toContainText("Данные еврозоны: источник — Eurostat.");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    });
+  }
+
   test("data not reachable: a plain message and «Try again» that works", async ({ browser, request }) => {
     await request.get(`${FAKE_SUPABASE}/__test/market-events-fail?on=1`);
     const page = await calendar(browser, 1440);

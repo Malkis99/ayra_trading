@@ -51,6 +51,17 @@ export function supabaseFeedsDb(db: SupabaseClient): FeedsDb {
       check(error, "market_events read");
       return new Set((data ?? []).map((r: { id: string }) => r.id));
     },
+    async waitingEvents(source: string, from: number, to: number) {
+      const { data, error } = await db
+        .from("market_events")
+        .select("id,starts_at")
+        .eq("source", source)
+        .neq("status", "released")
+        .gte("starts_at", new Date(from).toISOString())
+        .lte("starts_at", new Date(to).toISOString());
+      check(error, "market_events read");
+      return (data ?? []) as { id: string; starts_at: string }[];
+    },
     async lastRun(source: string) {
       const { data, error } = await db.from("market_feed_runs").select("started_at").eq("source", source).order("started_at", { ascending: false }).limit(1);
       check(error, "market_feed_runs read");

@@ -33,19 +33,38 @@ export function parseDtStart(line: string): number | null {
   }
 }
 
-export function parseIcs(ics: string): IcsEvent[] {
-  const out: IcsEvent[] = [];
-  let cur: { summary?: string; start?: number | null; uid?: string } | null = null;
+type RawEvent = { summary?: string; start?: number | null; day?: string | null; uid?: string };
+
+function events(ics: string): RawEvent[] {
+  const out: RawEvent[] = [];
+  let cur: RawEvent | null = null;
   for (const line of unfold(ics)) {
     if (line === "BEGIN:VEVENT") cur = {};
     else if (line === "END:VEVENT") {
-      if (cur?.summary && typeof cur.start === "number") out.push({ summary: cur.summary, start: cur.start, uid: cur.uid ?? null });
+      if (cur) out.push(cur);
       cur = null;
     } else if (cur) {
       if (line.startsWith("SUMMARY")) cur.summary = unescape(line.slice(line.indexOf(":") + 1));
-      else if (line.startsWith("DTSTART")) cur.start = parseDtStart(line);
-      else if (line.startsWith("UID:")) cur.uid = line.slice(4).trim();
+      else if (line.startsWith("DTSTART")) {
+        cur.start = parseDtStart(line);
+        const day = line.match(/^DTSTART;VALUE=DATE:(\d{4})(\d{2})(\d{2})$/);
+        cur.day = day ? `${day[1]}-${day[2]}-${day[3]}` : null;
+      } else if (line.startsWith("UID:")) cur.uid = line.slice(4).trim();
     }
   }
   return out;
+}
+
+/** Entries with a time (all-day entries are left out: their hour is unknown). */
+export function parseIcs(ics: string): IcsEvent[] {
+  return events(ics)
+    .filter((e): e is RawEvent & { summary: string; start: number } => !!e.summary && typeof e.start === "number")
+    .map((e) => ({ summary: e.summary, start: e.start, uid: e.uid ?? null }));
+}
+
+/** All-day entries (`DTSTART;VALUE=DATE:20261104`): the day only, as Eurostat's release calendar gives it. */
+export function parseIcsDays(ics: string): { summary: string; day: string }[] {
+  return events(ics)
+    .filter((e): e is RawEvent & { summary: string; day: string } => !!e.summary && !!e.day)
+    .map((e) => ({ summary: e.summary, day: e.day }));
 }

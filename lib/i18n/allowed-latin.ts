@@ -11,6 +11,7 @@ export const ALLOWED_LATIN_WORDS = [
   "EIA",
   "Census",
   "DOL",
+  "Eurostat",
   // the slogan «Trade · Train · Evolve» (owner's brand kit)
   "Trade",
   "Train",

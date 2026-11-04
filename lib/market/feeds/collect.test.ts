@@ -31,6 +31,9 @@ function memoryDb(seed: { lastBls?: number } = {}) {
     async releasedEventIds(ids) {
       return new Set(ids.filter((i) => events.get(i)?.status === "released"));
     },
+    async waitingEvents(source, from, to) {
+      return Array.from(events.values()).filter((e) => e.source === source && e.status !== "released" && Date.parse(e.starts_at) >= from && Date.parse(e.starts_at) <= to);
+    },
     async lastRun(source) {
       return source === "bls-api" ? seed.lastBls ?? null : null;
     },
@@ -66,10 +69,11 @@ describe("the collector", () => {
     expect(out.results.map((r) => [r.source, r.ok])).toEqual([
       ["schedules-listed", true],
       ["bea-schedule", true],
+      ["eurostat-schedule", false], // not in this test's network
     ]);
     expect(events.has("fed:fomc:2026-12-09:decision")).toBe(true);
     expect(events.has("bea:us_pce:2026-11-25")).toBe(true);
-    expect(runs.map((r) => r.source)).toEqual(["schedules-listed", "bea-schedule"]);
+    expect(runs.map((r) => r.source)).toEqual(["schedules-listed", "bea-schedule", "eurostat-schedule"]);
   });
 
   it("news: a failing source never stops the others; its error is logged", async () => {
