@@ -190,6 +190,9 @@ describe("sources: importance and noise", () => {
     expect(news[0]).toMatchObject({ source: "bea", kind: "data", importance: 3, event_id: "bea:us_gdp:2026-10-29", summary: "Real GDP increased at an annual rate of 3.4 percent.", published_at: "2026-10-29T12:30:00.000Z" });
     expect(results).toEqual([{ id: "bea:us_gdp:2026-10-29", status: "released", actual: "+3.4%", previous: "+2.2%", summary: "Real GDP increased at an annual rate of 3.4 percent." }]);
     expect(beaFigure(null)).toBeNull();
+    // the trade balance is an amount (BEA's feed of 4 November 2026), not a percent
+    expect(beaFigure("<current><percentChange>-$105.0 billion</percentChange></current>")).toBe("−$105.0B");
+    expect(beaFigure("<previous><percentChange>-$105.7 billion</percentChange></previous>")).toBe("−$105.7B");
   });
 });
 

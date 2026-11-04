@@ -1,51 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { BLS_EVERY_MS, collectFeeds, dedupe, recent, type FeedsDb, type Fetcher, type RunLog } from "./collect";
+import { BLS_EVERY_MS, collectFeeds, dedupe, recent, type Fetcher } from "./collect";
+import { memoryFeedsDb } from "./memory-db";
 import { FEEDS } from "./sources";
 import { BLS_API_V1, BLS_API_V2 } from "./bls";
-import type { EventResult, EventRow, NewsRow } from "./types";
+import type { NewsRow } from "./types";
 import { sameSecret } from "./secret";
 
 const rss = (items: string) => `<rss><channel>${items}</channel></rss>`;
 const item = (title: string, link: string, date: string) => `<item><title>${title}</title><link>${link}</link><pubDate>${date}</pubDate></item>`;
 
-function memoryDb(seed: { lastBls?: number } = {}) {
-  const events = new Map<string, EventRow & Partial<EventResult>>();
-  const news = new Map<string, NewsRow>();
-  const runs: RunLog[] = [];
-  const db: FeedsDb = {
-    async upsertEvents(rows) {
-      for (const r of rows) events.set(r.id, { ...(events.get(r.id) ?? {}), ...r });
-    },
-    async saveResults(rows) {
-      for (const r of rows) {
-        const e = events.get(r.id);
-        if (e) events.set(r.id, { ...e, ...r });
-      }
-    },
-    async insertNews(rows) {
-      for (const r of rows) if (!news.has(r.id)) news.set(r.id, r);
-    },
-    async existingEventIds(ids) {
-      return new Set(ids.filter((i) => events.has(i)));
-    },
-    async releasedEventIds(ids) {
-      return new Set(ids.filter((i) => events.get(i)?.status === "released"));
-    },
-    async waitingEvents(source, from, to) {
-      return Array.from(events.values()).filter((e) => e.source === source && e.status !== "released" && Date.parse(e.starts_at) >= from && Date.parse(e.starts_at) <= to);
-    },
-    async lastRun(source) {
-      return source === "bls-api" ? seed.lastBls ?? null : null;
-    },
-    async logRun(r) {
-      runs.push(r);
-    },
-    async prune() {
-      return 7;
-    },
-  };
-  return { db, events, news, runs };
-}
+const memoryDb = (seed: { lastBls?: number } = {}) => memoryFeedsDb({ lastRuns: seed.lastBls === undefined ? {} : { "bls-api": seed.lastBls } });
 
 /** A network that knows some URLs; the rest answer 404. Records what was asked. */
 function network(pages: Record<string, string>, opts: { failing?: string[] } = {}) {
@@ -70,10 +34,11 @@ describe("the collector", () => {
       ["schedules-listed", true],
       ["bea-schedule", true],
       ["eurostat-schedule", false], // not in this test's network
+      ["previous-values", false], // the sources are not in this test's network either
     ]);
     expect(events.has("fed:fomc:2026-12-09:decision")).toBe(true);
     expect(events.has("bea:us_pce:2026-11-25")).toBe(true);
-    expect(runs.map((r) => r.source)).toEqual(["schedules-listed", "bea-schedule", "eurostat-schedule"]);
+    expect(runs.map((r) => r.source)).toEqual(["schedules-listed", "bea-schedule", "eurostat-schedule", "previous-values"]);
   });
 
   it("news: a failing source never stops the others; its error is logged", async () => {

@@ -39,30 +39,52 @@ export function parseBlsResponse(json: unknown): Map<string, SeriesValues> {
 const signed = (n: number, digits: number, unit: string) => `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(digits)}${unit}`;
 const monthOverMonth = (v: SeriesValues, i: number) => (v[i] && v[i + 1] ? (v[i].value / v[i + 1].value - 1) * 100 : null);
 
-/** One figure and the one before, or null when the reference month is not in the API yet. */
+/** The releases a figure is computed for (ECI is quarterly: the calendar shows it without a figure). */
+export const BLS_FIGURE_CODES = ["us_nfp", "us_cpi", "us_ppi", "us_jolts"] as const;
+
+/**
+ * The figure for a reference month and the month before, or null when that month is not in the API yet. Found by
+ * the month, not as «the newest», so a release asked for days later (the collector's retries) still gets its own.
+ */
 function figure(code: keyof typeof BLS_RELEASES, ref: string, data: Map<string, SeriesValues>): { actual: string; previous: string | null } | null {
   const pick = (id: SeriesId) => data.get(id) ?? [];
+  const at = (v: SeriesValues) => v.findIndex((x) => x.period === ref);
   if (code === "us_nfp") {
     const v = pick(BLS_SERIES.payrolls);
-    if (v[0]?.period !== ref || !v[1]) return null;
-    const change = v[0].value - v[1].value;
-    const before = v[2] ? v[1].value - v[2].value : null;
+    const i = at(v);
+    if (i < 0 || !v[i + 1]) return null;
+    const change = v[i].value - v[i + 1].value;
+    const before = v[i + 2] ? v[i + 1].value - v[i + 2].value : null;
     const rate = pick(BLS_SERIES.unemployment).find((x) => x.period === ref);
     return { actual: `${signed(change, 0, "K")}${rate ? ` · ${rate.value.toFixed(1)}%` : ""}`, previous: before === null ? null : signed(before, 0, "K") };
   }
   if (code === "us_cpi" || code === "us_ppi") {
     const v = pick(code === "us_cpi" ? BLS_SERIES.cpi : BLS_SERIES.ppi);
-    if (v[0]?.period !== ref) return null;
-    const now = monthOverMonth(v, 0);
-    const before = monthOverMonth(v, 1);
+    const i = at(v);
+    if (i < 0) return null;
+    const now = monthOverMonth(v, i);
+    const before = monthOverMonth(v, i + 1);
     return now === null ? null : { actual: signed(now, 1, "%"), previous: before === null ? null : signed(before, 1, "%") };
   }
   if (code === "us_jolts") {
     const v = pick(BLS_SERIES.jolts);
-    if (v[0]?.period !== ref) return null;
-    return { actual: `${(v[0].value / 1000).toFixed(2)}M`, previous: v[1] ? `${(v[1].value / 1000).toFixed(2)}M` : null };
+    const i = at(v);
+    if (i < 0) return null;
+    return { actual: `${(v[i].value / 1000).toFixed(2)}M`, previous: v[i + 1] ? `${(v[i + 1].value / 1000).toFixed(2)}M` : null };
   }
   return null; // ECI: quarterly, the status shows it is out but no figure is computed here
+}
+
+/** The figure of each release's newest month in the API: the «previous» of its next release. */
+export function blsLatest(data: Map<string, SeriesValues>): Map<string, string> {
+  const out = new Map<string, string>();
+  const series: Record<(typeof BLS_FIGURE_CODES)[number], SeriesId> = { us_nfp: BLS_SERIES.payrolls, us_cpi: BLS_SERIES.cpi, us_ppi: BLS_SERIES.ppi, us_jolts: BLS_SERIES.jolts };
+  for (const code of BLS_FIGURE_CODES) {
+    const ref = data.get(series[code])?.[0]?.period;
+    const f = ref ? figure(code, ref, data) : null;
+    if (f) out.set(code, f.actual);
+  }
+  return out;
 }
 
 /** Figures for the given due events (`bls:<code>:<day>`) that the API already has. */

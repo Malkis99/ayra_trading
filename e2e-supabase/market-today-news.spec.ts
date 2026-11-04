@@ -13,7 +13,7 @@ const nw = (o: Record<string, unknown>) => ({ trust: "official", country: "us", 
 
 const TODAY_EVENTS = [
   ev({ id: "bls:us_jolts:2026-11-03", source: "bls", code: "us_jolts", title: "JOLTS", importance: 2, starts_at: "2026-11-03T15:00:00Z" }),
-  ev({ id: "bls:us_cpi:2026-11-03", source: "bls", code: "us_cpi", title: "Consumer Price Index", starts_at: "2026-11-03T17:00:00Z" }),
+  ev({ id: "bls:us_cpi:2026-11-03", source: "bls", code: "us_cpi", title: "Consumer Price Index", starts_at: "2026-11-03T17:00:00Z", previous: "+0.6%" }),
   ev({ id: "bls:us_nfp:2026-11-06", source: "bls", code: "us_nfp", title: "Employment Situation", starts_at: "2026-11-06T13:30:00Z" }),
 ];
 const NEWS = [
@@ -64,6 +64,8 @@ test.describe("Market — «Today important» and official news", () => {
       await expect(block.getByTestId("today-item-time").nth(1)).toHaveText("14:00");
       await expect(block.getByTestId("today-trust").first()).toHaveText("Официальный");
       await expect(block.getByTestId("today-item-status").nth(2)).toHaveText("Ожидается");
+      // «previous» before the release (from the last one of the same indicator)
+      await expect(block.getByTestId("today-item").nth(2).getByTestId("today-item-figures")).toHaveText("Пред. +0.6%");
       await expect(block.getByTestId("today-item-source").nth(2)).toHaveAttribute("href", "https://www.bls.gov/schedule/news_release/");
       await expect(block.getByTestId("today-disclaimer")).toHaveText("Не является финансовой рекомендацией.");
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

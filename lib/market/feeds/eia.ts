@@ -18,10 +18,10 @@ export const EIA_SERIES = {
 } as const;
 export type EiaCode = keyof typeof EIA_SERIES;
 
-/** The newest three weeks of a series (enough for this week's change and the one before). */
+/** The newest six weeks of a series (a report asked for days later still finds its week and the two before). */
 export function eiaUrl(code: EiaCode, key: string): string {
   const s = EIA_SERIES[code];
-  const q = new URLSearchParams({ api_key: key, frequency: "weekly", "data[0]": "value", "facets[series][]": s.series, "sort[0][column]": "period", "sort[0][direction]": "desc", length: "3" });
+  const q = new URLSearchParams({ api_key: key, frequency: "weekly", "data[0]": "value", "facets[series][]": s.series, "sort[0][column]": "period", "sort[0][direction]": "desc", length: "6" });
   return `${EIA_API}/${s.route}/data/?${q.toString()}`;
 }
 
@@ -43,8 +43,16 @@ const signed = (n: number, digits: number, unit: string) => `${n >= 0 ? "+" : "�
 export function eiaResult(id: string, values: { period: string; value: number }[]): EventResult | null {
   const [, code, day] = id.split(":") as [string, EiaCode, string];
   if (!EIA_SERIES[code]) return null;
-  const [now, before, older] = values;
-  if (!now || !before || now.period !== weekEnding(day)) return null;
-  const fmt = (n: number) => (code === "us_eia_crude" ? signed(n / 1000, 1, "M") : signed(n, 0, " Bcf"));
-  return { id, status: "released", actual: fmt(now.value - before.value), previous: older ? fmt(before.value - older.value) : null, summary: null };
+  // found by the week, not as «the newest», so a report asked for days later still gets its own week
+  const i = values.findIndex((v) => v.period === weekEnding(day));
+  const [now, before, older] = i < 0 ? [] : values.slice(i, i + 3);
+  if (!now || !before) return null;
+  return { id, status: "released", actual: change(code, now.value - before.value), previous: older ? change(code, before.value - older.value) : null, summary: null };
+}
+
+const change = (code: EiaCode, n: number) => (code === "us_eia_crude" ? signed(n / 1000, 1, "M") : signed(n, 0, " Bcf"));
+
+/** The newest week's change: the «previous» of the next report. */
+export function eiaLatest(code: EiaCode, values: { period: string; value: number }[]): string | null {
+  return values[0] && values[1] ? change(code, values[0].value - values[1].value) : null;
 }

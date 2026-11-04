@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { EUROSTAT_ICS, eurostatResult, eurostatSchedule, eurostatUrl, parseEurostat } from "./eurostat";
 import { parseIcs, parseIcsDays } from "./ics";
-import { collectFeeds, type FeedsDb, type Fetcher, type RunLog } from "./collect";
-import type { EventResult, EventRow } from "./types";
+import { collectFeeds, type Fetcher } from "./collect";
+import { memoryFeedsDb } from "./memory-db";
+import type { EventRow } from "./types";
 import { ru } from "@/lib/i18n/dictionaries/ru";
 import { en } from "@/lib/i18n/dictionaries/en";
 
@@ -109,38 +110,7 @@ describe("Eurostat figures (dissemination API, JSON-stat)", () => {
   });
 });
 
-function memoryDb(rows: EventRow[] = []) {
-  const events = new Map<string, EventRow & Partial<EventResult>>(rows.map((r) => [r.id, r]));
-  const runs: RunLog[] = [];
-  const db: FeedsDb = {
-    async upsertEvents(rs) {
-      for (const r of rs) events.set(r.id, { ...(events.get(r.id) ?? {}), ...r });
-    },
-    async saveResults(rs) {
-      for (const r of rs) if (events.has(r.id)) events.set(r.id, { ...events.get(r.id)!, ...r });
-    },
-    async insertNews() {},
-    async existingEventIds(ids) {
-      return new Set(ids.filter((i) => events.has(i)));
-    },
-    async releasedEventIds(ids) {
-      return new Set(ids.filter((i) => events.get(i)?.status === "released"));
-    },
-    async waitingEvents(source, from, to) {
-      return Array.from(events.values()).filter((e) => e.source === source && e.status !== "released" && Date.parse(e.starts_at) >= from && Date.parse(e.starts_at) <= to);
-    },
-    async lastRun() {
-      return null;
-    },
-    async logRun(r) {
-      runs.push(r);
-    },
-    async prune() {
-      return 0;
-    },
-  };
-  return { db, events, runs };
-}
+const memoryDb = (rows: EventRow[] = []) => memoryFeedsDb({ events: rows });
 
 function network(pages: Record<string, string>) {
   const asked: string[] = [];
@@ -171,10 +141,16 @@ describe("the collector and Eurostat", () => {
     expect(asked.filter((u) => u.includes("une_rt_m"))).toHaveLength(1);
   });
 
-  it("before the release time nothing is asked", async () => {
-    const { db } = memoryDb(eurostatSchedule(ICS, NOW));
-    const { fetcher, asked } = network({});
-    await collectFeeds({ scope: "releases", now: NOW, fetch: fetcher, db });
-    expect(asked.some((u) => u.includes("eurostat/api"))).toBe(false);
+  it("before a release nothing is asked for it; a release of the last week without a figure is caught up", async () => {
+    const future = memoryDb(eurostatSchedule(ICS, NOW).filter((r) => r.starts_at > new Date(NOW).toISOString()));
+    const a = network({});
+    await collectFeeds({ scope: "releases", now: NOW, fetch: a.fetcher, db: future.db });
+    expect(a.asked.some((u) => u.includes("eurostat/api"))).toBe(false);
+
+    // 4 November: unemployment of 30 October has no figure yet (the collector was not there) — it is asked again
+    const { db, events } = memoryDb(eurostatSchedule(ICS, NOW));
+    const b = network({ "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/une_rt_m": JSON.stringify(UNEMPLOYMENT) });
+    await collectFeeds({ scope: "releases", now: NOW, fetch: b.fetcher, db });
+    expect(events.get("eurostat:eu_unemployment:2026-10-30")).toMatchObject({ status: "released", actual: "6.5%" });
   });
 });
