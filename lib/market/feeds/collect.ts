@@ -2,6 +2,11 @@ import type { EventResult, EventRow, NewsRow } from "./types";
 import { FEEDS, beaReleases, beaSchedule, ecbPress, fedMonetary, fedSpeeches, whiteHouseActions, whiteHouseNews } from "./sources";
 import { listedEvents } from "./schedules";
 import { BLS_API_V1, BLS_API_V2, blsRequestBody, blsResults, parseBlsResponse } from "./bls";
+import { type EiaCode, eiaResult, eiaUrl, parseEia } from "./eia";
+import { DOL_RELEASE_URL, claimsResult, parseClaims } from "./dol";
+import { CENSUS_SERIES, censusResult, censusUrl, parseCensus } from "./census";
+import { CENSUS_RELEASES } from "./schedules-us";
+import { pdfText } from "./pdf-text";
 
 /**
  * The collector (docs/market-feeds-plan.md, section 4): reads the official feeds, turns them into calendar events and
@@ -33,7 +38,7 @@ export interface RunLog {
   error: string | null;
 }
 
-export type Fetcher = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
+export type Fetcher = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<{ ok: boolean; status: number; text(): Promise<string>; arrayBuffer?(): Promise<ArrayBuffer> }>;
 
 /**
  * news — every news feed and the figures; releases — only BEA's releases and the BLS figures (the frequent run
@@ -49,6 +54,8 @@ export interface CollectOptions {
   db: FeedsDb;
   /** Optional free BLS key: 500 requests a day instead of 25. */
   blsKey?: string;
+  /** Free EIA key (`EIA_API_KEY`): without it the EIA figures are not asked for, and the log says so. */
+  eiaKey?: string;
 }
 
 export interface SourceResult {
@@ -64,6 +71,10 @@ const TIMEOUT_MS = 15_000;
 /** BLS: ask the API at most this often, and only this long after a release. */
 export const BLS_EVERY_MS = 10 * 60_000;
 export const BLS_WINDOW_MS = 2 * 60 * 60_000;
+/** EIA, Census, DOL: the same pace; EIA's API may take up to two hours after a report, so it gets three. */
+export const FIGURES_EVERY_MS = 10 * 60_000;
+export const EIA_WINDOW_MS = 3 * 60 * 60_000;
+export const FIGURES_WINDOW_MS = 2 * 60 * 60_000;
 
 async function get(fetcher: Fetcher, url: string): Promise<string> {
   const res = await withTimeout(fetcher(url, { headers: { "User-Agent": USER_AGENT, Accept: "application/rss+xml, application/xml, text/calendar, text/plain, */*" } }));
@@ -163,14 +174,100 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
       return rows.length + known.length;
     });
     await blsFigures(o, run);
+    await eiaFigures(o, run);
+    await censusFigures(o, run);
+    await dolFigures(o, run);
   }
 
   const pruned = o.prune ? await o.db.prune() : null;
   return { results, pruned };
 }
 
+type Run = (source: string, job: () => Promise<number>) => Promise<void>;
+
+/** Listed events of a source released within the window and not filled in yet — empty when it is not time to ask. */
+async function waitingFor(o: CollectOptions, source: string, windowMs: number, runName: string): Promise<string[]> {
+  const due = listedEvents()
+    .filter((e) => e.source === source)
+    .filter((e) => {
+      const at = Date.parse(e.starts_at);
+      return at <= o.now && o.now - at <= windowMs;
+    })
+    .map((e) => e.id);
+  if (!due.length) return [];
+  const released = await o.db.releasedEventIds(due);
+  const waiting = due.filter((id) => !released.has(id));
+  if (!waiting.length) return [];
+  const last = await o.db.lastRun(runName);
+  return last !== null && o.now - last < FIGURES_EVERY_MS ? [] : waiting;
+}
+
+async function json(o: CollectOptions, url: string, what: string): Promise<unknown> {
+  const res = await withTimeout(o.fetch(url, { headers: { "User-Agent": USER_AGENT, Accept: "application/json" } }));
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${what}`);
+  return JSON.parse(await res.text());
+}
+
+/** EIA's weekly crude and gas storage: the week's change from the API (key required). */
+async function eiaFigures(o: CollectOptions, run: Run) {
+  const waiting = await waitingFor(o, "eia", EIA_WINDOW_MS, "eia-api");
+  if (!waiting.length) return;
+  await run("eia-api", async () => {
+    if (!o.eiaKey) throw new Error("EIA_API_KEY is not set: EIA figures are not asked for");
+    const out = [];
+    for (const code of Array.from(new Set(waiting.map((id) => id.split(":")[1] as EiaCode)))) {
+      // the key is in the URL as EIA asks; the error message names the series, never the URL
+      const values = parseEia(await json(o, eiaUrl(code, o.eiaKey), `EIA API ${code}`));
+      for (const id of waiting.filter((x) => x.split(":")[1] === code)) {
+        const r = eiaResult(id, values);
+        if (r) out.push(r);
+      }
+    }
+    await o.db.saveResults(out);
+    return out.length;
+  });
+}
+
+/** Census: retail sales, durable goods, housing starts, new home sales from its Economic Indicators API. */
+async function censusFigures(o: CollectOptions, run: Run) {
+  const waiting = await waitingFor(o, "census", FIGURES_WINDOW_MS, "census-api");
+  if (!waiting.length) return;
+  await run("census-api", async () => {
+    const out = [];
+    const missing: string[] = [];
+    for (const id of waiting) {
+      const [, code, day] = id.split(":") as [string, keyof typeof CENSUS_RELEASES, string];
+      const ref = CENSUS_RELEASES[code].dates[day];
+      const data = parseCensus(await json(o, censusUrl(code, ref), `Census API ${code}`), CENSUS_SERIES[code].category);
+      const r = censusResult(id, data);
+      if (r) out.push(r);
+      else missing.push(`${code} ${ref}`);
+    }
+    await o.db.saveResults(out);
+    // not out yet is normal for a few minutes; after that the log shows what the answer lacked
+    if (missing.length && !out.length) throw new Error(`Census API: no figure yet for ${missing.join(", ")}`);
+    return out.length;
+  });
+}
+
+/** DOL: the weekly claims from the current news release (PDF). */
+async function dolFigures(o: CollectOptions, run: Run) {
+  const waiting = await waitingFor(o, "dol", FIGURES_WINDOW_MS, "dol-claims");
+  if (!waiting.length) return;
+  await run("dol-claims", async () => {
+    const res = await withTimeout(o.fetch(DOL_RELEASE_URL, { headers: { "User-Agent": USER_AGENT, Accept: "application/pdf" } }));
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${DOL_RELEASE_URL}`);
+    if (!res.arrayBuffer) throw new Error("DOL: the answer cannot be read as a file");
+    const release = parseClaims(pdfText(new Uint8Array(await res.arrayBuffer())));
+    if (!release) throw new Error("DOL: the release's wording was not found");
+    const out = claimsResult(waiting, release);
+    await o.db.saveResults(out);
+    return out.length;
+  });
+}
+
 /** BLS figures: only for releases of the last two hours not yet filled in, at most every ten minutes. */
-async function blsFigures(o: CollectOptions, run: (source: string, job: () => Promise<number>) => Promise<void>) {
+async function blsFigures(o: CollectOptions, run: Run) {
   const due = listedEvents()
     .filter((e) => e.source === "bls")
     .filter((e) => {

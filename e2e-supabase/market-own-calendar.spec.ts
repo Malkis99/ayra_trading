@@ -142,6 +142,36 @@ test.describe("Market — own calendar of official events", () => {
     await expect(el(page, "own-calendar-zone")).toContainText("Восточная Америка");
   });
 
+  for (const width of [1440, 360]) {
+    test(`${width}: EIA, Census and DOL (PR 1 of section 9): names, the source, the week's figure; nothing wider than the screen`, async ({ browser, request }) => {
+      await seed(request, [
+        ...EVENTS,
+        ev({ id: "eia:us_eia_crude:2026-11-04", source: "eia", code: "us_eia_crude", title: "Weekly Petroleum Status Report", starts_at: "2026-11-04T15:30:00Z", status: "released", actual: "−1.9M", previous: "−3.1M", url: "https://www.eia.gov/petroleum/supply/weekly/" }),
+        ev({ id: "eia:us_eia_gas:2026-11-05", source: "eia", code: "us_eia_gas", title: "Weekly Natural Gas Storage Report", importance: 2, starts_at: "2026-11-05T15:30:00Z", url: "https://ir.eia.gov/ngs/ngs.html" }),
+        ev({ id: "dol:us_jobless_claims:2026-11-05", source: "dol", code: "us_jobless_claims", title: "Unemployment Insurance Weekly Claims", starts_at: "2026-11-05T13:30:00Z", url: "https://www.dol.gov/ui/data.pdf" }),
+        // a Census row on this week's Friday (the real retail release is 17 November, two weeks ahead)
+        ev({ id: "census:us_retail_sales:2026-11-06", source: "census", code: "us_retail_sales", title: "Advance Monthly Sales for Retail and Food Services", starts_at: "2026-11-06T15:00:00Z", url: "https://www.census.gov/economic-indicators/" }),
+      ]);
+      const page = await calendar(browser, width);
+      await el(page, "own-calendar-day-3").click();
+      const crude = el(page, "own-calendar-event").filter({ hasText: "Запасы нефти" });
+      await expect(crude.getByTestId("own-calendar-event-title")).toHaveText("Запасы нефти в США (EIA)");
+      await expect(crude.getByTestId("own-calendar-event-time")).toHaveText("19:30"); // 10:30 ET = 15:30 UTC
+      await expect(crude.getByTestId("own-calendar-event-actual")).toHaveText("−1.9M");
+      await expect(crude.getByTestId("own-calendar-event-previous")).toHaveText("−3.1M");
+      await expect(crude.getByTestId("own-calendar-event-source")).toHaveText(/EIA/);
+      await expect(crude.getByTestId("own-calendar-event-source")).toHaveAttribute("href", "https://www.eia.gov/petroleum/supply/weekly/");
+      await el(page, "own-calendar-day-4").click();
+      const titles = el(page, "own-calendar-event").getByTestId("own-calendar-event-title");
+      await expect(titles).toHaveText(["Первичные заявки на пособие по безработице", "Запасы газа в хранилищах США (EIA)"]);
+      await expect(el(page, "own-calendar-event").first().getByTestId("own-calendar-event-source")).toHaveText(/Минтруд США/);
+      await expect(el(page, "market-calendar-sources")).toContainText("EIA, Census, Минтруд США (DOL)");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await el(page, "own-calendar-day-5").click();
+      await expect(el(page, "own-calendar-event").filter({ hasText: "Розничные продажи США" }).getByTestId("own-calendar-event-source")).toHaveText(/Census/);
+    });
+  }
+
   test("data not reachable: a plain message and «Try again» that works", async ({ browser, request }) => {
     await request.get(`${FAKE_SUPABASE}/__test/market-events-fail?on=1`);
     const page = await calendar(browser, 1440);

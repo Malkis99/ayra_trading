@@ -1,5 +1,6 @@
 import type { EventRow } from "./types";
 import { FRANKFURT, NEW_YORK, isoUtc, wallToUtc } from "./time";
+import { listedUsEvents } from "./schedules-us";
 
 /**
  * Schedules that have no machine-readable feed we may use, taken from the official pages (read 2026-11-03).
@@ -80,7 +81,7 @@ const BLS_PAGE = "https://www.bls.gov/schedule/news_release/";
 
 const addDays = (date: string, n: number) => new Date(Date.parse(`${date}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
-/** Every listed FOMC, ECB and BLS event as calendar rows. */
+/** Every listed event as calendar rows: FOMC, ECB, BLS, and EIA, Census, DOL (schedules-us.ts). */
 export function listedEvents(): EventRow[] {
   const rows: EventRow[] = [];
   for (const day of FOMC_DECISIONS) {
@@ -102,6 +103,7 @@ export function listedEvents(): EventRow[] {
       rows.push({ id: `bls:${code}:${day}`, source: "bls", kind: "release", code, country: "us", title: r.name, importance: r.importance, starts_at: isoUtc(wallToUtc(day, r.time, NEW_YORK)), time_tbd: false, url: BLS_PAGE });
     }
   }
+  rows.push(...listedUsEvents());
   return rows;
 }
 

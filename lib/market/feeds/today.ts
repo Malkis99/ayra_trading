@@ -1,5 +1,6 @@
 import { instantOf, wallAt } from "../sessions";
 import type { CalendarEvent } from "./calendar-view";
+import type { FeedSource } from "./types";
 
 /**
  * «Today important» and the official news feed (PR 4–5, docs/market-feeds-plan.md): what of the calendar and the
@@ -9,7 +10,7 @@ import type { CalendarEvent } from "./calendar-view";
 /** A row of `market_news` as the site reads it (only what the source itself gives: title, description, date). */
 export interface NewsItem {
   id: string;
-  source: "fed" | "ecb" | "whitehouse" | "bls" | "bea";
+  source: FeedSource;
   trust: "official" | "agency";
   kind: "decision" | "statement" | "speech" | "testimony" | "press_conference" | "minutes" | "data" | "presidential_action" | "press_release";
   country: "us" | "eu";

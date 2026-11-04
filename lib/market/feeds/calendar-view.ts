@@ -1,5 +1,6 @@
 import { instantOf, wallAt } from "../sessions";
 import type { CalendarNewsPrefs, Importance as Level } from "../calendar-news";
+import type { FeedSource } from "./types";
 
 /**
  * Market → Calendar, own (plan docs/market-feeds-plan.md, PR 3): the week's working days in the user's time zone,
@@ -10,7 +11,7 @@ import type { CalendarNewsPrefs, Importance as Level } from "../calendar-news";
 /** A row of `market_events` as the site reads it. */
 export interface CalendarEvent {
   id: string;
-  source: "fed" | "ecb" | "whitehouse" | "bls" | "bea";
+  source: FeedSource;
   kind: string;
   code: string | null;
   country: "us" | "eu";
