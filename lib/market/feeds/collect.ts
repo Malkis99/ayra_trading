@@ -7,6 +7,7 @@ import { DOL_RELEASE_URL, claimsResult, parseClaims } from "./dol";
 import { CENSUS_SERIES, censusResult, censusUrl, parseCensus } from "./census";
 import { CENSUS_RELEASES } from "./schedules-us";
 import { pdfText } from "./pdf-text";
+import { EUROSTAT_ICS, type EurostatCode, eurostatResult, eurostatSchedule, eurostatUrl, parseEurostat } from "./eurostat";
 
 /**
  * The collector (docs/market-feeds-plan.md, section 4): reads the official feeds, turns them into calendar events and
@@ -23,6 +24,8 @@ export interface FeedsDb {
   insertNews(rows: NewsRow[]): Promise<void>;
   existingEventIds(ids: string[]): Promise<Set<string>>;
   releasedEventIds(ids: string[]): Promise<Set<string>>;
+  /** Stored events of a source that started between `from` and `to` (ms) and have no figure yet (schedules from a feed). */
+  waitingEvents(source: string, from: number, to: number): Promise<{ id: string; starts_at: string }[]>;
   /** When this source last ran (ms), for throttling. */
   lastRun(source: string): Promise<number | null>;
   logRun(run: RunLog): Promise<void>;
@@ -147,6 +150,11 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
       await o.db.upsertEvents(rows);
       return rows.length;
     });
+    await run("eurostat-schedule", async () => {
+      const rows = eurostatSchedule(await get(o.fetch, EUROSTAT_ICS), o.now);
+      await o.db.upsertEvents(rows);
+      return rows.length;
+    });
   }
 
   if (newsScope) {
@@ -177,6 +185,7 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
     await eiaFigures(o, run);
     await censusFigures(o, run);
     await dolFigures(o, run);
+    await eurostatFigures(o, run);
   }
 
   const pruned = o.prune ? await o.db.prune() : null;
@@ -235,15 +244,21 @@ async function censusFigures(o: CollectOptions, run: Run) {
   await run("census-api", async () => {
     const out = [];
     const missing: string[] = [];
+    const errors: string[] = [];
+    // each release on its own: one failing never keeps the others' figures from being saved
     for (const id of waiting) {
       const [, code, day] = id.split(":") as [string, keyof typeof CENSUS_RELEASES, string];
       const ref = CENSUS_RELEASES[code].dates[day];
-      const data = parseCensus(await json(o, censusUrl(code, ref), `Census API ${code}`), CENSUS_SERIES[code].category);
-      const r = censusResult(id, data);
-      if (r) out.push(r);
-      else missing.push(`${code} ${ref}`);
+      try {
+        const r = censusResult(id, parseCensus(await json(o, censusUrl(code, ref), `Census API ${code}`), CENSUS_SERIES[code].category));
+        if (r) out.push(r);
+        else missing.push(`${code} ${ref}`);
+      } catch (e) {
+        errors.push(e instanceof Error ? e.message : String(e));
+      }
     }
     await o.db.saveResults(out);
+    if (errors.length) throw new Error(errors.join("; "));
     // not out yet is normal for a few minutes; after that the log shows what the answer lacked
     if (missing.length && !out.length) throw new Error(`Census API: no figure yet for ${missing.join(", ")}`);
     return out.length;
@@ -262,6 +277,34 @@ async function dolFigures(o: CollectOptions, run: Run) {
     if (!release) throw new Error("DOL: the release's wording was not found");
     const out = claimsResult(waiting, release);
     await o.db.saveResults(out);
+    return out.length;
+  });
+}
+
+/** Eurostat: the euro area's figure from its API once the dataset is updated with the release. */
+async function eurostatFigures(o: CollectOptions, run: Run) {
+  const waiting = await o.db.waitingEvents("eurostat", o.now - FIGURES_WINDOW_MS, o.now);
+  if (!waiting.length) return;
+  const last = await o.db.lastRun("eurostat-api");
+  if (last !== null && o.now - last < FIGURES_EVERY_MS) return;
+  await run("eurostat-api", async () => {
+    const out = [];
+    const errors: string[] = [];
+    const asked = new Map<string, Promise<ReturnType<typeof parseEurostat>>>();
+    // each release on its own (two come out the same morning); one dataset is asked once
+    for (const e of waiting) {
+      const code = e.id.split(":")[1] as EurostatCode;
+      const url = eurostatUrl(code);
+      if (!asked.has(url)) asked.set(url, json(o, url, `Eurostat API ${code}`).then(parseEurostat));
+      try {
+        const r = eurostatResult(e.id, e.starts_at, await asked.get(url)!);
+        if (r) out.push(r);
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+    await o.db.saveResults(out);
+    if (errors.length) throw new Error(Array.from(new Set(errors)).join("; "));
     return out.length;
   });
 }

@@ -169,6 +169,9 @@ function memoryDb(rows: EventRow[], last: Record<string, number> = {}) {
     async releasedEventIds(ids) {
       return new Set(ids.filter((i) => events.get(i)?.status === "released"));
     },
+    async waitingEvents(source, from, to) {
+      return Array.from(events.values()).filter((e) => e.source === source && e.status !== "released" && Date.parse(e.starts_at) >= from && Date.parse(e.starts_at) <= to);
+    },
     async lastRun(source) {
       return last[source] ?? null;
     },
