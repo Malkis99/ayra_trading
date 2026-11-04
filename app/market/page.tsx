@@ -9,6 +9,7 @@ import { MarketOverview } from "@/components/market/MarketOverview";
 import { MarketChart } from "@/components/market/MarketChart";
 import { MarketWatchlist } from "@/components/market/MarketWatchlist";
 import { MarketCalendar, MarketNews } from "@/components/market/MarketCalendarNews";
+import { TodayImportant } from "@/components/market/TodayImportant";
 import { INSTRUMENTS, type InstrumentId } from "@/lib/market/instruments";
 import { useMarketCloudSync } from "@/lib/market/cloud-sync-engine";
 
@@ -88,6 +89,7 @@ export default function MarketPage() {
       <div role="tabpanel" id={`market-panel-${tab}`} aria-labelledby={`market-tab-${tab}`} className="space-y-4" data-testid={`market-panel-${tab}`}>
         {tab === "overview" ? (
           <>
+            <TodayImportant />
             <SessionsClock />
             <MarketOverview onOpenChart={openChart} />
           </>
