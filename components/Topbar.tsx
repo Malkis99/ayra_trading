@@ -4,6 +4,8 @@ import React, { useState } from "react";
 import { Logo } from "@/components/brand/Logo";
 import Link from "next/link";
 import { Search, Plus, Bell, LogIn } from "lucide-react";
+import { NotificationCenter } from "@/components/notifications/NotificationCenter";
+import { useUnreadCount } from "@/lib/notifications/use-notifications";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
@@ -25,7 +27,9 @@ export function Topbar() {
   } = useApp();
 
   const { gameState } = useGame();
-  const { isPublicVisitor, authState, isConfigured } = useAuth();
+  const { isPublicVisitor, authState, isConfigured, user } = useAuth();
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const unreadCount = useUnreadCount(user?.id);
   // Personal badges (coins, plan, notifications) exist only for a signed-in account.
   const isSignedIn = authState === "authenticated";
   const [isProfileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -88,12 +92,16 @@ export function Topbar() {
           <SyncBadge />
 
           <button
-            onClick={() => showToast(dict.topbar.notificationsToast)}
-            className="rounded-xl border border-line bg-s1 p-2 text-mu transition-colors hover:border-vi hover:text-tx"
+            onClick={() => setNotificationsOpen(true)}
+            className="relative rounded-xl border border-line bg-s1 p-2 text-mu transition-colors hover:border-vi hover:text-tx focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
             aria-label={dict.topbar.notifications}
+            aria-haspopup="dialog"
+            aria-expanded={notificationsOpen}
           >
             <Bell size={16} />
+            {unreadCount > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-pri px-1 text-[10px] text-white" aria-label={`${dict.notifications.unread}: ${unreadCount}`}>{unreadCount > 99 ? "99+" : unreadCount}</span>}
           </button>
+          {notificationsOpen && <NotificationCenter key={user?.id} onClose={() => setNotificationsOpen(false)} />}
 
           {/* Plan chip after the bell; on phones the avatar stays last */}
           <Link

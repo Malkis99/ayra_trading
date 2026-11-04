@@ -15,6 +15,7 @@ import { DeviceDataCard } from "@/components/DeviceDataCard";
 import { JournalSettingsCard } from "@/components/JournalSettingsCard";
 import { CloudSyncCard } from "@/components/settings/CloudSyncCard";
 import { ScreenshotsCloudCard } from "@/components/settings/ScreenshotsCloudCard";
+import { NotificationSettings } from "@/components/settings/NotificationSettings";
 
 /* ------------------------------------------------------------------ Profile */
 
@@ -290,6 +291,8 @@ export function SettingsSectionContent({ section }: { section: SettingsSection }
       return <CloudSection />;
     case "account":
       return <AccountSection />;
+    case "notifications":
+      return <NotificationSettings />;
     case "interface":
       return <InterfaceSection />;
     case "privacy":

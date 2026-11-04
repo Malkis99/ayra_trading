@@ -32,6 +32,10 @@ export const ALLOWED_LATIN_WORDS = [
   "UTC",
   // social network names in the profile editor
   "Telegram",
+  // Notification channel names (no English prose in the Russian UI).
+  "Web",
+  "Push",
+  "Email",
   "Instagram",
   "YouTube",
   "Excel",

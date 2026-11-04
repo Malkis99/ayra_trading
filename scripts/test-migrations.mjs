@@ -263,3 +263,17 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   const f9 = (await db.query(read("supabase/checks/0009_status.sql"))).rows[0];
   (f9.feed_tables === 3 && f9.read_policies === 2) ? ok("J: rollback keeps 0009") : fail("J: rollback touched 0009");
 }
+
+// K. 0011: notification inbox/settings, two-user RLS, immutable content and atomic preferences.
+{
+  const db = await fresh();
+  for (const f of ["0001_init", "0002_profile_defaults"]) await db.exec(read(`supabase/migrations/${f}.sql`));
+  await db.exec(read("supabase/migrations/0011_notifications.sql"));
+  await db.exec(read("supabase/migrations/0011_notifications.sql")); ok("K: 0011 applied twice");
+  try { await db.exec(read("supabase/tests/notifications_rls.sql")); ok("K: notifications_rls.sql passed"); }
+  catch (e) { fail(`K: notifications_rls.sql: ${e.code} ${e.message}`); }
+  const chk = (await db.query(read("supabase/checks/0011_status.sql"))).rows[0];
+  (chk.tables === 3 && chk.rls_enabled === 3 && chk.save_function && !chk.client_can_forge_notification && !chk.client_can_change_payload && chk.client_can_mark_read && !chk.anon_can_read)
+    ? ok("K: grants and status") : fail(`K: status ${JSON.stringify(chk)}`);
+  await db.close();
+}
