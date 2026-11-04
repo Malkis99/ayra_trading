@@ -118,6 +118,18 @@ export function parseEurostat(json: unknown): EurostatData {
   return empty;
 }
 
+/**
+ * The «previous» of a code's next release: the euro area's newest value. GDP comes twice for one quarter (the
+ * preliminary flash, then the flash with employment about two weeks later), so a flash due within 20 days — after
+ * the preliminary one — compares with the quarter before.
+ */
+export function eurostatLatest(code: EurostatCode, data: EurostatData, nextStartsAt: string, now: number): string | null {
+  const s = EUROSTAT_SERIES[code];
+  const sameQuarter = code === "eu_gdp_flash" && Date.parse(nextStartsAt) - now <= 20 * 86_400_000;
+  const v = data.values[sameQuarter ? 1 : 0];
+  return s && v ? fmt(v.value, s.signed) : null;
+}
+
 const fmt = (n: number, signed: boolean) => `${signed && n >= 0 ? "+" : n < 0 ? "−" : ""}${Math.abs(n).toFixed(1)}%`;
 
 /**

@@ -6,8 +6,9 @@ import { EIA_SERIES, eiaResult, eiaUrl, parseEia } from "./eia";
 import { claimsResult, parseClaims } from "./dol";
 import { pdfText } from "./pdf-text";
 import { censusResult, censusUrl, parseCensus } from "./census";
-import { collectFeeds, type FeedsDb, type Fetcher, type RunLog } from "./collect";
-import type { EventResult, EventRow } from "./types";
+import { collectFeeds, type Fetcher } from "./collect";
+import { memoryFeedsDb } from "./memory-db";
+import type { EventRow } from "./types";
 import { ru } from "@/lib/i18n/dictionaries/ru";
 import { en } from "@/lib/i18n/dictionaries/en";
 
@@ -86,11 +87,11 @@ describe("EIA figures", () => {
     expect(eiaResult("eia:us_eia_crude:2026-11-04", parseEia(EIA_CRUDE))).toBeNull();
     expect(parseEia({ error: "x" })).toEqual([]);
   });
-  it("asks for the newest three weeks of one series", () => {
+  it("asks for the newest six weeks of one series (a report caught up days later still finds its week)", () => {
     const u = new URL(eiaUrl("us_eia_crude", "KEY"));
     expect(u.origin + u.pathname).toBe("https://api.eia.gov/v2/petroleum/stoc/wstk/data/");
     expect(u.searchParams.get("facets[series][]")).toBe(EIA_SERIES.us_eia_crude.series);
-    expect(u.searchParams.get("length")).toBe("3");
+    expect(u.searchParams.get("length")).toBe("6");
   });
 });
 
@@ -154,36 +155,7 @@ describe("Census figures (Economic Indicators API, documented format)", () => {
   });
 });
 
-function memoryDb(rows: EventRow[], last: Record<string, number> = {}) {
-  const events = new Map<string, EventRow & Partial<EventResult>>(rows.map((r) => [r.id, r]));
-  const runs: RunLog[] = [];
-  const db: FeedsDb = {
-    async upsertEvents() {},
-    async saveResults(rs) {
-      for (const r of rs) if (events.has(r.id)) events.set(r.id, { ...events.get(r.id)!, ...r });
-    },
-    async insertNews() {},
-    async existingEventIds(ids) {
-      return new Set(ids.filter((i) => events.has(i)));
-    },
-    async releasedEventIds(ids) {
-      return new Set(ids.filter((i) => events.get(i)?.status === "released"));
-    },
-    async waitingEvents(source, from, to) {
-      return Array.from(events.values()).filter((e) => e.source === source && e.status !== "released" && Date.parse(e.starts_at) >= from && Date.parse(e.starts_at) <= to);
-    },
-    async lastRun(source) {
-      return last[source] ?? null;
-    },
-    async logRun(r) {
-      runs.push(r);
-    },
-    async prune() {
-      return 0;
-    },
-  };
-  return { db, events, runs };
-}
+const memoryDb = (rows: EventRow[], last: Record<string, number> = {}) => memoryFeedsDb({ events: rows, lastRuns: last });
 
 /** Answers by URL prefix; everything else 404. */
 function network(pages: Record<string, string | Uint8Array>) {
@@ -226,14 +198,33 @@ describe("the collector asks EIA, Census and DOL only around their releases", ()
     expect(JSON.stringify(runs)).not.toContain("SECRET-KEY");
   });
 
-  it("not asked again within ten minutes, nor once filled in, nor three hours after", async () => {
-    const recent = memoryDb(allEvents, { "eia-api": AFTER_EIA - 5 * 60_000 });
+  it("the pace of asking again: 10 minutes right after, 30 minutes the first day, daily for a week, then never", async () => {
+    const asksAt = async (ageMs: number, lastAgoMs: number) => {
+      const { db } = memoryDb(allEvents, { "eia-api": Date.UTC(2026, 10, 4, 15, 30) + ageMs - lastAgoMs });
+      const n = network({});
+      await collectFeeds({ scope: "releases", now: Date.UTC(2026, 10, 4, 15, 30) + ageMs, fetch: n.fetcher, db, eiaKey: "K" });
+      return n.asked.some((u) => u.includes("api.eia.gov"));
+    };
+    const MIN = 60_000;
+    expect(await asksAt(15 * MIN, 5 * MIN)).toBe(false); // asked 5 minutes ago
+    expect(await asksAt(15 * MIN, 11 * MIN)).toBe(true);
+    expect(await asksAt(5 * 60 * MIN, 20 * MIN)).toBe(false); // the rest of the first day: every 30 minutes
+    expect(await asksAt(5 * 60 * MIN, 31 * MIN)).toBe(true);
+    // the second day: once a day (the next week's report is not out yet on Monday 9 November)
+    expect(await asksAt(4 * 24 * 60 * MIN, 5 * 60 * MIN)).toBe(false);
+    expect(await asksAt(4 * 24 * 60 * MIN, 25 * 60 * MIN)).toBe(true);
+  });
+
+  it("once filled in, never asked again; after a week, given up", async () => {
+    const { db, events } = memoryDb(allEvents);
+    events.set("eia:us_eia_crude:2026-11-04", { ...events.get("eia:us_eia_crude:2026-11-04")!, status: "released", actual: "−2.6M" });
     const a = network({});
-    await collectFeeds({ scope: "releases", now: AFTER_EIA, fetch: a.fetcher, db: recent.db, eiaKey: "K" });
+    await collectFeeds({ scope: "releases", now: AFTER_EIA, fetch: a.fetcher, db, eiaKey: "K" });
     expect(a.asked.some((u) => u.includes("api.eia.gov"))).toBe(false);
-    const late = memoryDb(allEvents);
+    // only the weeks of 2027-01: everything older than a week is not asked any more
+    const old = memoryDb(allEvents.filter((e) => e.id === "eia:us_eia_crude:2026-11-04"));
     const b = network({});
-    await collectFeeds({ scope: "releases", now: AFTER_EIA + 3 * 60 * 60_000, fetch: b.fetcher, db: late.db, eiaKey: "K" });
+    await collectFeeds({ scope: "releases", now: AFTER_EIA + 8 * 24 * 60 * 60_000, fetch: b.fetcher, db: old.db, eiaKey: "K" });
     expect(b.asked.some((u) => u.includes("api.eia.gov"))).toBe(false);
   });
 
@@ -251,7 +242,7 @@ describe("the collector asks EIA, Census and DOL only around their releases", ()
     const { fetcher } = network({ "https://www.dol.gov/ui/data.pdf": pdfOf(RELEASE) });
     const out = await collectFeeds({ scope: "releases", now: Date.UTC(2026, 10, 5, 13, 40), fetch: fetcher, db });
     expect(out.results.find((r) => r.source === "dol-claims")).toMatchObject({ ok: true, items: 0 });
-    expect(events.get("dol:us_jobless_claims:2026-11-05")?.status).toBeUndefined();
+    expect(events.get("dol:us_jobless_claims:2026-11-05")?.status).toBe("scheduled");
   });
 
   it("Census refusing (403): the error is logged, the other sources go on", async () => {

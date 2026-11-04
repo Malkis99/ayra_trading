@@ -7,7 +7,8 @@ import { useOptionalGame } from "@/lib/game-context";
 import { formatString } from "@/lib/i18n";
 import { browserTimeZone, timeZoneLabel } from "@/lib/timezones";
 import { cn } from "@/components/ui";
-import { clockIn, levelOf, type CalendarEvent } from "@/lib/market/feeds/calendar-view";
+import { clockIn, eventStatus, levelOf, type CalendarEvent } from "@/lib/market/feeds/calendar-view";
+import { FigureMissing, STATUS_TONE } from "@/components/market/OwnCalendar";
 import { dayOf, nextImportant, todayItems, type NewsItem, type TodayItem } from "@/lib/market/feeds/today";
 import { useMarketEvents } from "@/lib/market/feeds/use-market-events";
 import { useMarketNews } from "@/lib/market/feeds/use-market-news";
@@ -136,7 +137,7 @@ function TodayRow({ item, zone, now, onOpen, eventTitle }: { item: TodayItem; zo
   const importance = isEvent ? item.event.importance : item.news.importance;
   const sourceKey = isEvent ? item.event.source : item.news.source;
   const source = own.sources[sourceKey];
-  const status = isEvent ? (item.event.status === "released" ? "released" : item.at <= now ? "due" : "scheduled") : "released";
+  const status = isEvent ? eventStatus(item.event, now) : "released";
   const time = isEvent && item.event.time_tbd ? "—" : clockIn(item.at, zone);
   const link = isEvent ? item.event.url : null;
 
@@ -165,13 +166,19 @@ function TodayRow({ item, zone, now, onOpen, eventTitle }: { item: TodayItem; zo
           ) : (
             <span data-testid="today-item-source">{source}</span>
           )}
-          <span className={cn("rounded px-1.5 py-px text-[10px] font-semibold", status === "released" ? "bg-long/15 text-long" : status === "due" ? "bg-amber-300/15 text-amber-300" : "bg-s2 text-mu")} data-testid="today-item-status">
+          <span className={cn("rounded px-1.5 py-px text-[10px] font-semibold", STATUS_TONE[status])} data-testid="today-item-status">
             {own.status[status]}
           </span>
           {isEvent && item.event.actual && (
-            <span className="tabular-nums">
+            <span className="tabular-nums" data-testid="today-item-figures">
               {own.actual} <span className="font-semibold text-tx">{item.event.actual}</span>
               {item.event.previous && <> · {own.previous} {item.event.previous}</>}
+            </span>
+          )}
+          {isEvent && !item.event.actual && status === "unavailable" && <FigureMissing url={item.event.url} note={own.unavailableNote} testId="today-item-missing" />}
+          {isEvent && !item.event.actual && status !== "unavailable" && item.event.previous && (
+            <span className="tabular-nums" data-testid="today-item-figures">
+              {own.previous} <span className="text-tx">{item.event.previous}</span>
             </span>
           )}
         </span>

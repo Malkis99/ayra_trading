@@ -9,6 +9,7 @@ import type { CalendarNewsPrefs } from "@/lib/market/calendar-news";
 import {
   clockIn,
   countByDay,
+  eventStatus,
   eventsOfDay,
   initialDay,
   lastUpdate,
@@ -17,6 +18,7 @@ import {
   visibleEvents,
   workWeek,
   type CalendarEvent,
+  type EventStatus,
 } from "@/lib/market/feeds/calendar-view";
 import { useMarketEvents } from "@/lib/market/feeds/use-market-events";
 
@@ -164,7 +166,7 @@ function EventRow({ e, zone, now, names }: { e: CalendarEvent; zone: string; now
   const level = levelOf(e.importance);
   const at = Date.parse(e.starts_at);
   const title = (e.code && (t.events as Record<string, string>)[e.code]) || e.title;
-  const status = e.status === "released" ? "released" : e.status === "cancelled" ? "cancelled" : at <= now ? "due" : "scheduled";
+  const status = eventStatus(e, now);
   const source = t.sources[e.source];
 
   return (
@@ -198,28 +200,53 @@ function EventRow({ e, zone, now, names }: { e: CalendarEvent; zone: string; now
         </p>
       </div>
       <div className="col-start-2 flex flex-wrap items-center gap-x-3 gap-y-1 pl-4 text-xs md:col-start-3 md:justify-end md:pl-0" data-testid="own-calendar-event-figures">
-        <span className="tabular-nums">
-          <span className="text-mu">{t.actual} </span>
-          <span className={cn("font-semibold", e.actual ? "text-tx" : "text-mu")} data-testid="own-calendar-event-actual">
-            {e.actual ?? "—"}
+        {status === "unavailable" ? (
+          <FigureMissing url={e.url} note={t.unavailableNote} />
+        ) : (
+          e.kind === "release" && (
+            <span className="tabular-nums">
+              <span className="text-mu">{t.actual} </span>
+              <span className={cn("font-semibold", e.actual ? "text-tx" : "text-mu")} data-testid="own-calendar-event-actual">
+                {e.actual ?? "—"}
+              </span>
+            </span>
+          )
+        )}
+        {e.kind === "release" && (
+          <span className="tabular-nums">
+            <span className="text-mu">{t.previous} </span>
+            <span className="text-tx" data-testid="own-calendar-event-previous">
+              {e.previous ?? "—"}
+            </span>
           </span>
-        </span>
-        <span className="tabular-nums">
-          <span className="text-mu">{t.previous} </span>
-          <span className="text-tx" data-testid="own-calendar-event-previous">
-            {e.previous ?? "—"}
-          </span>
-        </span>
-        <span
-          className={cn(
-            "rounded px-1.5 py-px text-[10px] font-semibold",
-            status === "released" ? "bg-long/15 text-long" : status === "cancelled" ? "bg-short/15 text-short" : status === "due" ? "bg-amber-300/15 text-amber-300" : "bg-s2 text-mu"
-          )}
-          data-testid="own-calendar-event-status"
-        >
+        )}
+        <span className={cn("rounded px-1.5 py-px text-[10px] font-semibold", STATUS_TONE[status])} data-testid="own-calendar-event-status">
           {t.status[status]}
         </span>
       </div>
     </li>
+  );
+}
+
+export const STATUS_TONE: Record<EventStatus, string> = {
+  released: "bg-long/15 text-long",
+  cancelled: "bg-short/15 text-short",
+  due: "bg-amber-300/15 text-amber-300",
+  unavailable: "bg-s2 text-tx",
+  held: "bg-s2 text-mu",
+  scheduled: "bg-s2 text-mu",
+};
+
+/** No figure from the source: said plainly, with the official page to look at. */
+export function FigureMissing({ url, note, testId = "own-calendar-event-missing" }: { url: string | null; note: string; testId?: string }) {
+  return url ? (
+    <a href={url} target="_blank" rel="noopener noreferrer nofollow" className="text-mu hover:text-vi hover:underline" data-testid={testId}>
+      {note}
+      <ExternalLink size={10} aria-hidden="true" className="ml-1 inline align-[-1px]" />
+    </a>
+  ) : (
+    <span className="text-mu" data-testid={testId}>
+      {note}
+    </span>
   );
 }

@@ -58,31 +58,33 @@ export function parseCensus(json: unknown, category: string): Map<string, Map<st
 
 const signed = (n: number) => `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(1)}%`;
 
-/** This month's figure and the month before's, or null until the API has the reference month. */
-export function censusResult(id: string, data: Map<string, Map<string, number>>): EventResult | null {
-  const [, code, day] = id.split(":") as [string, CensusCode, string];
-  const r = CENSUS_RELEASES[code];
+/** The figure of one month as the calendar shows it (a percent change or a level), or null when it is not in. */
+function figureOf(code: CensusCode, month: string, data: Map<string, Map<string, number>>): string | null {
   const s = CENSUS_SERIES[code];
-  const ref = r?.dates[day];
-  if (!ref) return null;
-  const prev = monthsBefore(ref, 1);
   const level = data.get(s.level);
   if (s.unit === "pct") {
     const own = s.change ? data.get(s.change) : undefined;
-    const pct = (month: string) => {
-      if (own?.has(month)) return own.get(month)!;
-      const a = level?.get(month);
-      const b = level?.get(monthsBefore(month, 1));
-      return a !== undefined && b ? (a / b - 1) * 100 : null;
-    };
-    const now = pct(ref);
-    if (now === null) return null;
-    const before = pct(prev);
-    return { id, status: "released", actual: signed(now), previous: before === null ? null : signed(before), summary: null };
+    if (own?.has(month)) return signed(own.get(month)!);
+    const a = level?.get(month);
+    const b = level?.get(monthsBefore(month, 1));
+    return a !== undefined && b ? signed((a / b - 1) * 100) : null;
   }
-  const now = level?.get(ref);
-  if (now === undefined) return null;
-  const fmt = (n: number) => (s.unit === "millions" ? `${(n / 1000).toFixed(2)}M` : `${Math.round(n)}K`);
-  const before = level?.get(prev);
-  return { id, status: "released", actual: fmt(now), previous: before === undefined ? null : fmt(before), summary: null };
+  const v = level?.get(month);
+  if (v === undefined) return null;
+  return s.unit === "millions" ? `${(v / 1000).toFixed(2)}M` : `${Math.round(v)}K`;
+}
+
+/** This month's figure and the month before's, or null until the API has the reference month. */
+export function censusResult(id: string, data: Map<string, Map<string, number>>): EventResult | null {
+  const [, code, day] = id.split(":") as [string, CensusCode, string];
+  const ref = CENSUS_RELEASES[code]?.dates[day];
+  if (!ref) return null;
+  const actual = figureOf(code, ref, data);
+  if (actual === null) return null;
+  return { id, status: "released", actual, previous: figureOf(code, monthsBefore(ref, 1), data), summary: null };
+}
+
+/** The «previous» of the release covering `ref`: the figure of the month before. */
+export function censusLatest(code: CensusCode, ref: string, data: Map<string, Map<string, number>>): string | null {
+  return figureOf(code, monthsBefore(ref, 1), data);
 }

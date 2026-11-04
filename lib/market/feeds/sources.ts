@@ -275,6 +275,9 @@ export function beaFigure(block: string | null): string | null {
   if (!block) return null;
   const v = text(block, "percentChange");
   if (!v) return null;
+  // the trade balance comes as an amount, «-$105.0 billion» (not a percent)
+  const money = v.match(/([+-]?)\s*\$\s*(\d+(?:\.\d+)?)\s*(trillion|billion|million)/i);
+  if (money) return `${money[1] === "-" ? "−" : ""}$${money[2]}${{ trillion: "T", billion: "B", million: "M" }[money[3].toLowerCase() as "trillion" | "billion" | "million"]}`;
   const m = v.match(/[+-]?\d+(?:\.\d+)?%?/);
   if (!m) return null;
   const n = m[0].replace(/%$/, "");

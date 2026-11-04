@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { FeedsDb, RunLog } from "./collect";
+import type { FeedsDb, RunLog, ScheduledEvent, WaitingEvent } from "./collect";
 import type { EventResult, EventRow, NewsRow } from "./types";
 
 /**
@@ -54,13 +54,42 @@ export function supabaseFeedsDb(db: SupabaseClient): FeedsDb {
     async waitingEvents(source: string, from: number, to: number) {
       const { data, error } = await db
         .from("market_events")
-        .select("id,starts_at")
+        .select("id,code,starts_at")
         .eq("source", source)
-        .neq("status", "released")
+        .eq("kind", "release")
+        .eq("status", "scheduled")
         .gte("starts_at", new Date(from).toISOString())
         .lte("starts_at", new Date(to).toISOString());
       check(error, "market_events read");
-      return (data ?? []) as { id: string; starts_at: string }[];
+      return (data ?? []) as WaitingEvent[];
+    },
+    async scheduledEvents(from: number, to: number) {
+      const { data, error } = await db
+        .from("market_events")
+        .select("id,source,code,starts_at,previous")
+        .eq("status", "scheduled")
+        .not("code", "is", null)
+        .gte("starts_at", new Date(from).toISOString())
+        .lte("starts_at", new Date(to).toISOString());
+      check(error, "market_events read");
+      return (data ?? []) as ScheduledEvent[];
+    },
+    async releasedFigures(from: number) {
+      const { data, error } = await db
+        .from("market_events")
+        .select("id,source,code,starts_at,actual")
+        .eq("status", "released")
+        .not("actual", "is", null)
+        .gte("starts_at", new Date(from).toISOString());
+      check(error, "market_events read");
+      return (data ?? []) as { id: string; source: string; code: string | null; starts_at: string; actual: string | null }[];
+    },
+    async setPrevious(rows: { id: string; previous: string }[]) {
+      for (const r of rows) {
+        // only a scheduled event: a published release keeps the source's own «previous»
+        const { error } = await db.from("market_events").update({ previous: r.previous }).eq("id", r.id).eq("status", "scheduled");
+        check(error, "market_events update");
+      }
     },
     async lastRun(source: string) {
       const { data, error } = await db.from("market_feed_runs").select("started_at").eq("source", source).order("started_at", { ascending: false }).limit(1);

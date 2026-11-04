@@ -198,6 +198,34 @@ test.describe("Market — own calendar of official events", () => {
     });
   }
 
+  for (const width of [1440, 360]) {
+    test(`${width}: figures — «previous» shown before the release; no figure after three hours says so with the source's link; a decision has no figures, it is «held»`, async ({ browser, request }) => {
+      await seed(request, [
+        ...EVENTS.filter((e) => (e as { id?: string }).id !== "bls:us_nfp:2026-11-06"),
+        ev({ id: "bls:us_nfp:2026-11-06", source: "bls", code: "us_nfp", title: "Employment Situation", starts_at: "2026-11-06T13:30:00Z", previous: "+29K · 4.2%", url: "https://www.bls.gov/schedule/news_release/" }),
+        ev({ id: "bea:us_construction:2026-11-02", source: "bea", title: "Construction Spending", importance: 2, starts_at: "2026-11-02T15:00:00Z", url: "https://www.bea.gov/news/schedule" }),
+        ev({ id: "ecb:mpm:2026-11-02:decision", source: "ecb", kind: "decision", code: "ecb_decision", country: "eu", title: "ECB monetary policy decisions", starts_at: "2026-11-02T13:15:00Z", url: "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html" }),
+      ]);
+      const page = await calendar(browser, width);
+      // Friday's NFP: «previous» before it is out
+      await el(page, "own-calendar-day-5").click();
+      const nfp = el(page, "own-calendar-event").filter({ hasText: "NFP" });
+      await expect(nfp.getByTestId("own-calendar-event-actual")).toHaveText("—");
+      await expect(nfp.getByTestId("own-calendar-event-previous")).toHaveText("+29K · 4.2%");
+      await expect(nfp.getByTestId("own-calendar-event-status")).toHaveText("Ожидается");
+      // Monday: a release without a figure for a day — said plainly, with the link; the ECB decision is «held»
+      await el(page, "own-calendar-day-1").click();
+      const missing = el(page, "own-calendar-event").filter({ hasText: "Construction Spending" });
+      await expect(missing.getByTestId("own-calendar-event-status")).toHaveText("Нет данных");
+      await expect(missing.getByTestId("own-calendar-event-missing")).toHaveText("Данные недоступны от источника, смотрите по ссылке");
+      await expect(missing.getByTestId("own-calendar-event-missing")).toHaveAttribute("href", "https://www.bea.gov/news/schedule");
+      const decision = el(page, "own-calendar-event").filter({ hasText: "Решение ЕЦБ" });
+      await expect(decision.getByTestId("own-calendar-event-status")).toHaveText("Состоялось");
+      await expect(decision.getByTestId("own-calendar-event-actual")).toHaveCount(0);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    });
+  }
+
   test("data not reachable: a plain message and «Try again» that works", async ({ browser, request }) => {
     await request.get(`${FAKE_SUPABASE}/__test/market-events-fail?on=1`);
     const page = await calendar(browser, 1440);

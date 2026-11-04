@@ -109,3 +109,22 @@ export function lastUpdate(events: CalendarEvent[]): number | null {
   const times = events.map((e) => Date.parse(e.updated_at)).filter(Number.isFinite);
   return times.length ? Math.max(...times) : null;
 }
+
+/** How long after a release a figure is still «on its way» before the row says the source has not given it. */
+export const FIGURE_WAIT_MS = 3 * 60 * 60_000;
+
+export type EventStatus = "scheduled" | "due" | "released" | "cancelled" | "held" | "unavailable";
+
+/**
+ * What a row says: «expected» before the time; then for a data release «waiting for data» for three hours and, if no
+ * figure came, «no data from the source — see the link» (the collector still asks for a week: a late figure replaces
+ * it); a decision, press conference or speech has no figure — it is «held».
+ */
+export function eventStatus(e: Pick<CalendarEvent, "status" | "kind" | "starts_at">, now: number): EventStatus {
+  if (e.status === "released") return "released";
+  if (e.status === "cancelled") return "cancelled";
+  const at = Date.parse(e.starts_at);
+  if (at > now) return "scheduled";
+  if (e.kind !== "release") return "held";
+  return now - at <= FIGURE_WAIT_MS ? "due" : "unavailable";
+}
