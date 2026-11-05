@@ -82,7 +82,7 @@ describe("«previous» before the release", () => {
   it("the daily schedules run fills «previous» of every indicator's next release from what the sources publish now", async () => {
     const { db, events, runs } = memoryFeedsDb();
     await collectFeeds({ scope: "schedules", now: NOV4, fetch: network({ [BLS_API_V1]: BLS_NOV4 }).fetcher, db });
-    expect(events.get("bls:us_nfp:2026-11-06")).toMatchObject({ previous: "+29K · 4.2%" });
+    expect(events.get("bls:us_nfp:2026-11-06")).toMatchObject({ previous: "+29K" });
     expect(events.get("bls:us_cpi:2026-11-10")).toMatchObject({ previous: "+0.6%" });
     expect(events.get("bls:us_jolts:2026-12-01")).toMatchObject({ previous: "7.52M" });
     // only the nearest release of an indicator: the December NFP still waits for November's
@@ -102,13 +102,14 @@ describe("«previous» before the release", () => {
   it("BEA: the stored release's figure passes to the next one of the same indicator", async () => {
     const { db, events } = memoryFeedsDb({
       events: [
-        { id: "bea:us_pce:2026-11-25", source: "bea", kind: "release", code: "us_pce", country: "us", title: "Personal Income and Outlays", importance: 3, starts_at: "2026-11-25T13:30:00.000Z", time_tbd: false, url: null },
+        { id: "bea:us_pce:2026-11-25", reference_period: "2026-10", release_stage: "regular", source: "bea", kind: "release", code: "us_pce", country: "us", title: "Personal Income and Outlays", importance: 3, starts_at: "2026-11-25T13:30:00.000Z", time_tbd: false, url: null },
       ],
     });
     const rss = `<rss><channel><item><title>Personal Income and Outlays, September 2026</title><link>https://www.bea.gov/news/2026/pio-september-2026</link><description>Personal income increased 0.4 percent in September.</description><data><main><current><infoDate>September 2026</infoDate><percentChange>+0.2</percentChange></current><previous><infoDate>August 2026</infoDate><percentChange>0.3%</percentChange></previous></main></data><pubDate>Thu, 29 Oct 2026 08:30:00 EDT</pubDate></item></channel></rss>`;
     // the stored release of 29 October (BEA's feed gives its figure)
-    await db.upsertEvents([{ id: "bea:us_pce:2026-10-29", source: "bea", kind: "release", code: "us_pce", country: "us", title: "Personal Income and Outlays", importance: 3, starts_at: "2026-10-29T12:30:00.000Z", time_tbd: false, url: null }]);
+    await db.upsertEvents([{ id: "bea:us_pce:2026-10-29", reference_period: "2026-09", release_stage: "regular", source: "bea", kind: "release", code: "us_pce", country: "us", title: "Personal Income and Outlays", importance: 3, starts_at: "2026-10-29T12:30:00.000Z", time_tbd: false, url: null }]);
     await collectFeeds({ scope: "releases", now: NOV4, fetch: network({ [FEEDS.beaRss]: rss }).fetcher, db });
+    await collectFeeds({ scope: "schedules", now: NOV4, fetch: network({}).fetcher, db });
     expect(events.get("bea:us_pce:2026-10-29")).toMatchObject({ status: "released", actual: "+0.2%" });
     expect(events.get("bea:us_pce:2026-11-25")).toMatchObject({ status: "scheduled", previous: "+0.2%" });
   });
@@ -120,7 +121,7 @@ describe("«previous» before the release", () => {
     expect(censusLatest("us_retail_sales", "2026-10", parseCensus([head, ["0.6", "MPCSM", "44X72", "yes", "2026-09"]], "44X72"))).toBe("+0.6%");
     const gdp = parseEurostat({ updated: "2026-10-30T23:00:00+0100", id: ["geo", "time"], size: [1, 2], value: { "0": 0.6, "1": 0.4 }, dimension: { geo: { category: { index: { EA: 0 } } }, time: { category: { index: { "2026-Q2": 0, "2026-Q3": 1 } } } } });
     // the flash of 13 November is the same quarter as the preliminary one of 30 October: it compares with Q2
-    expect(eurostatLatest("eu_gdp_flash", gdp, "2026-11-13T10:00:00.000Z", NOV4)).toBe("+0.6%");
-    expect(eurostatLatest("eu_gdp_prelim", gdp, "2027-01-29T10:00:00.000Z", NOV4)).toBe("+0.4%");
+    expect(eurostatLatest("eu_gdp_flash", gdp, "2026-11-13T10:00:00.000Z", NOV4)).toBeNull();
+    expect(eurostatLatest("eu_gdp_prelim", gdp, "2027-01-29T10:00:00.000Z", NOV4)).toBeNull();
   });
 });

@@ -188,7 +188,7 @@ describe("sources: importance and noise", () => {
     const xml = `<rss><channel><item name="GDP"><title>GDP (Advance Estimate), 3rd Quarter 2026</title><link>https://www.bea.gov/news/2026/gdp</link><guid isPermaLink="true">https://www.bea.gov/news/2026/gdp</guid><description><![CDATA[<p>Real GDP increased at an annual rate of 3.4 percent.</p>]]></description><data><main><current><infoDate>Q3 2026</infoDate><percentChange>+3.4</percentChange></current><previous><infoDate>Q2 2026</infoDate><percentChange>2.2%</percentChange></previous></main></data><pubDate>Thu, 29 Oct 2026 08:30:00 EDT</pubDate></item></channel></rss>`;
     const { news, results } = beaReleases(xml);
     expect(news[0]).toMatchObject({ source: "bea", kind: "data", importance: 3, event_id: "bea:us_gdp:2026-10-29", summary: "Real GDP increased at an annual rate of 3.4 percent.", published_at: "2026-10-29T12:30:00.000Z" });
-    expect(results).toEqual([{ id: "bea:us_gdp:2026-10-29", status: "released", actual: "+3.4%", previous: "+2.2%", summary: "Real GDP increased at an annual rate of 3.4 percent." }]);
+    expect(results).toMatchObject([{ id: "bea:us_gdp:2026-10-29", status: "released", actual: "+3.4%", previous: "+2.2%", summary: "Real GDP increased at an annual rate of 3.4 percent." }]);
     expect(beaFigure(null)).toBeNull();
     // the trade balance is an amount (BEA's feed of 4 November 2026), not a percent
     expect(beaFigure("<current><percentChange>-$105.0 billion</percentChange></current>")).toBe("−$105.0B");
@@ -237,7 +237,7 @@ describe("BLS figures from the official API", () => {
         JTS000000000000000JOL: [["2026", "M09", "7520"], ["2026", "M08", "7190"]],
       })
     );
-    expect(blsResults(["bls:us_nfp:2026-11-06", "bls:us_cpi:2026-11-10", "bls:us_ppi:2026-11-13", "bls:us_jolts:2026-11-03"], data)).toEqual([
+    expect(blsResults(["bls:us_nfp:2026-11-06", "bls:us_cpi:2026-11-10", "bls:us_ppi:2026-11-13", "bls:us_jolts:2026-11-03"], data)).toMatchObject([
       { id: "bls:us_nfp:2026-11-06", status: "released", actual: "+29K · 4.3%", previous: "+29K", summary: null },
       { id: "bls:us_cpi:2026-11-10", status: "released", actual: "+0.3%", previous: "+0.3%", summary: null },
       { id: "bls:us_jolts:2026-11-03", status: "released", actual: "7.52M", previous: "7.19M", summary: null },

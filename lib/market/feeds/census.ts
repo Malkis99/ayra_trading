@@ -73,13 +73,14 @@ function figureOf(code: CensusCode, month: string, data: Map<string, Map<string,
 }
 
 /** This month's figure and the month before's, or null until the API has the reference month. */
-export function censusResult(id: string, data: Map<string, Map<string, number>>): EventResult | null {
-  const [, code, day] = id.split(":") as [string, CensusCode, string];
-  const ref = CENSUS_RELEASES[code]?.dates[day];
+export function censusResult(id: string, data: Map<string, Map<string, number>>, referencePeriod?: string | null, codeOverride?: string | null): EventResult | null {
+  const code = (codeOverride || id.split(":")[1]) as CensusCode;
+  const ref = referencePeriod || CENSUS_RELEASES[code]?.dates[id.split(":")[2]];
   if (!ref) return null;
   const actual = figureOf(code, ref, data);
   if (actual === null) return null;
-  return { id, status: "released", actual, previous: figureOf(code, monthsBefore(ref, 1), data), summary: null };
+  return { id, status: "released", actual, previous: figureOf(code, monthsBefore(ref, 1), data), summary: null,
+    result_meta: { period: ref, series: `${CENSUS_SERIES[code].program}:${CENSUS_SERIES[code].category}`, unit: CENSUS_SERIES[code].unit, adjustment: "SA" } };
 }
 
 /** The «previous» of the release covering `ref`: the figure of the month before. */

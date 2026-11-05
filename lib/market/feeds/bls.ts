@@ -1,5 +1,6 @@
 import type { EventResult } from "./types";
 import { BLS_RELEASES } from "./schedules";
+import { previousPeriod } from "./identity";
 
 /**
  * The published figures of the main BLS releases, from the official BLS API (api.bls.gov). The site's own pages and
@@ -28,7 +29,7 @@ export function parseBlsResponse(json: unknown): Map<string, SeriesValues> {
   const series = (json as { Results?: { series?: { seriesID: string; data: { year: string; period: string; value: string }[] }[] } })?.Results?.series ?? [];
   for (const s of series) {
     const values = (s.data ?? [])
-      .filter((d) => /^M(0[1-9]|1[0-2])$/.test(d.period) && Number.isFinite(Number(d.value)))
+      .filter((d) => /^M(0[1-9]|1[0-2])$/.test(d.period) && d.value !== null && String(d.value).trim() !== "" && Number.isFinite(Number(d.value)))
       .map((d) => ({ period: `${d.year}-${d.period.slice(1)}`, value: Number(d.value) }))
       .sort((a, b) => (a.period < b.period ? 1 : -1));
     out.set(s.seriesID, values);
@@ -37,7 +38,7 @@ export function parseBlsResponse(json: unknown): Map<string, SeriesValues> {
 }
 
 const signed = (n: number, digits: number, unit: string) => `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(digits)}${unit}`;
-const monthOverMonth = (v: SeriesValues, i: number) => (v[i] && v[i + 1] ? (v[i].value / v[i + 1].value - 1) * 100 : null);
+const monthOverMonth = (v: SeriesValues, i: number) => (v[i] && v[i + 1] && v[i + 1].period === previousPeriod(v[i].period) && v[i + 1].value !== 0 ? (v[i].value / v[i + 1].value - 1) * 100 : null);
 
 /** The releases a figure is computed for (ECI is quarterly: the calendar shows it without a figure). */
 export const BLS_FIGURE_CODES = ["us_nfp", "us_cpi", "us_ppi", "us_jolts"] as const;
@@ -52,9 +53,9 @@ function figure(code: keyof typeof BLS_RELEASES, ref: string, data: Map<string, 
   if (code === "us_nfp") {
     const v = pick(BLS_SERIES.payrolls);
     const i = at(v);
-    if (i < 0 || !v[i + 1]) return null;
+    if (i < 0 || !v[i + 1] || v[i + 1].period !== previousPeriod(ref)) return null;
     const change = v[i].value - v[i + 1].value;
-    const before = v[i + 2] ? v[i + 1].value - v[i + 2].value : null;
+    const before = v[i + 2]?.period === previousPeriod(v[i + 1].period) ? v[i + 1].value - v[i + 2].value : null;
     const rate = pick(BLS_SERIES.unemployment).find((x) => x.period === ref);
     return { actual: `${signed(change, 0, "K")}${rate ? ` · ${rate.value.toFixed(1)}%` : ""}`, previous: before === null ? null : signed(before, 0, "K") };
   }
@@ -70,17 +71,17 @@ function figure(code: keyof typeof BLS_RELEASES, ref: string, data: Map<string, 
     const v = pick(BLS_SERIES.jolts);
     const i = at(v);
     if (i < 0) return null;
-    return { actual: `${(v[i].value / 1000).toFixed(2)}M`, previous: v[i + 1] ? `${(v[i + 1].value / 1000).toFixed(2)}M` : null };
+    return { actual: `${(v[i].value / 1000).toFixed(2)}M`, previous: v[i + 1]?.period === previousPeriod(ref) ? `${(v[i + 1].value / 1000).toFixed(2)}M` : null };
   }
   return null; // ECI: quarterly, the status shows it is out but no figure is computed here
 }
 
 /** The figure of each release's newest month in the API: the «previous» of its next release. */
-export function blsLatest(data: Map<string, SeriesValues>): Map<string, string> {
+export function blsLatest(data: Map<string, SeriesValues>, expected?: Record<string, string | null | undefined>): Map<string, string> {
   const out = new Map<string, string>();
   const series: Record<(typeof BLS_FIGURE_CODES)[number], SeriesId> = { us_nfp: BLS_SERIES.payrolls, us_cpi: BLS_SERIES.cpi, us_ppi: BLS_SERIES.ppi, us_jolts: BLS_SERIES.jolts };
   for (const code of BLS_FIGURE_CODES) {
-    const ref = data.get(series[code])?.[0]?.period;
+    const ref = expected ? (expected[code] ? previousPeriod(expected[code]!) : null) : data.get(series[code])?.[0]?.period;
     const f = ref ? figure(code, ref, data) : null;
     if (f) out.set(code, f.actual);
   }
@@ -88,14 +89,16 @@ export function blsLatest(data: Map<string, SeriesValues>): Map<string, string> 
 }
 
 /** Figures for the given due events (`bls:<code>:<day>`) that the API already has. */
-export function blsResults(dueIds: string[], data: Map<string, SeriesValues>): EventResult[] {
+export function blsResults(dueIds: string[], data: Map<string, SeriesValues>, contexts: { id: string; code: string | null; reference_period?: string | null }[] = []): EventResult[] {
   const out: EventResult[] = [];
   for (const id of dueIds) {
-    const [, code, day] = id.split(":") as [string, keyof typeof BLS_RELEASES, string];
-    const ref = BLS_RELEASES[code]?.dates[day];
+    const context = contexts.find((e) => e.id === id);
+    const code = (context?.code || id.split(":")[1]) as keyof typeof BLS_RELEASES;
+    const ref = context?.reference_period || BLS_RELEASES[code]?.dates[id.split(":")[2]];
     if (!ref) continue;
     const f = figure(code, ref, data);
-    if (f) out.push({ id, status: "released", actual: f.actual, previous: f.previous, summary: null });
+    if (f) out.push({ id, status: "released", actual: f.actual, previous: f.previous, summary: null,
+      result_meta: { period: ref, series: code, unit: code === "us_nfp" ? "thousand-change-and-percent" : code === "us_jolts" ? "million" : "percent-mom", adjustment: "SA" } });
   }
   return out;
 }

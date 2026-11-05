@@ -20,6 +20,27 @@ export interface EventRow {
   starts_at: string;
   time_tbd: boolean;
   url: string | null;
+  identity_key?: string | null;
+  source_uid?: string | null;
+  reference_period?: string | null;
+  release_stage?: string | null;
+  schedule_meta?: ScheduleMeta;
+}
+
+export interface ScheduleMeta {
+  sequence?: number;
+  modified?: string;
+  cancelled?: boolean;
+  /** Internal restoration state, never inferred from an upstream missing number. */
+  prior_status?: "scheduled" | "released";
+}
+
+export interface ResultMeta {
+  period: string;
+  series: string;
+  unit: string;
+  adjustment: string;
+  source_updated?: string;
 }
 
 /** A published figure for an event (from BEA's feed or the BLS API). */
@@ -29,6 +50,9 @@ export interface EventResult {
   actual: string | null;
   previous: string | null;
   summary: string | null;
+  reference_period?: string | null;
+  release_stage?: string | null;
+  result_meta?: ResultMeta;
 }
 
 export interface NewsRow {

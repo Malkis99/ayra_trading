@@ -80,7 +80,7 @@ const EIA_GAS = { response: { data: [{ period: "2026-10-23", value: "3724" }, { 
 
 describe("EIA figures", () => {
   it("the week's change and the one before: crude in million barrels, gas in Bcf", () => {
-    expect(eiaResult("eia:us_eia_crude:2026-10-28", parseEia(EIA_CRUDE))).toEqual({ id: "eia:us_eia_crude:2026-10-28", status: "released", actual: "−1.9M", previous: "−3.1M", summary: null });
+    expect(eiaResult("eia:us_eia_crude:2026-10-28", parseEia(EIA_CRUDE))).toMatchObject({ id: "eia:us_eia_crude:2026-10-28", status: "released", actual: "−1.9M", previous: "−3.1M", summary: null });
     expect(eiaResult("eia:us_eia_gas:2026-10-29", parseEia(EIA_GAS))).toMatchObject({ actual: "+80 Bcf", previous: "+77 Bcf" });
   });
   it("nothing until the API has the week the release covers", () => {
@@ -117,13 +117,13 @@ describe("DOL weekly claims from the release (PDF)", () => {
     expect(pdfText(pdfOf(["Hello (world)", "second line"]))).toBe("Hello (world) second line");
   });
   it("the release day, this week's figure and the revised one before", () => {
-    expect(parseClaims(pdfText(pdfOf(RELEASE)))).toEqual({ day: "2026-10-29", actual: "194K", previous: "195K" });
+    expect(parseClaims(pdfText(pdfOf(RELEASE)))).toMatchObject({ day: "2026-10-29", actual: "194K", previous: "195K" });
     expect(parseClaims(RELEASE.join(" ").replace("revised up by 1,000 from 194,000 to 195,000", "unrevised at 201,000"))).toMatchObject({ previous: "201K" });
   });
   it("an old release is never taken for a new one; other wording gives nothing", () => {
     const release = parseClaims(RELEASE.join(" "));
     expect(claimsResult(["dol:us_jobless_claims:2026-11-05"], release)).toEqual([]);
-    expect(claimsResult(["dol:us_jobless_claims:2026-10-29"], release)).toEqual([{ id: "dol:us_jobless_claims:2026-10-29", status: "released", actual: "194K", previous: "195K", summary: null }]);
+    expect(claimsResult(["dol:us_jobless_claims:2026-10-29"], release)).toMatchObject([{ id: "dol:us_jobless_claims:2026-10-29", status: "released", actual: "194K", previous: "195K", summary: null }]);
     expect(parseClaims("News Release. Something else entirely.")).toBeNull();
   });
 });

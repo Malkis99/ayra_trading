@@ -277,3 +277,31 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
     ? ok("K: grants and status") : fail(`K: status ${JSON.stringify(chk)}`);
   await db.close();
 }
+
+// L. 0012: additive calendar integrity with realistic legacy values, ambiguity, versioning and service-only writes.
+{
+  const db = await fresh();
+  for (const f of ["0001_init", "0002_profile_defaults", "0009_market_feeds", "0010_market_feeds_sources"]) await db.exec(read(`supabase/migrations/${f}.sql`));
+  await db.exec(`INSERT INTO public.market_events(id,source,country,kind,code,title,importance,starts_at,status,actual,previous,hidden) VALUES
+    ('bea:legacy:2026-11-01','bea','us','release','us_pce','Legacy',3,'2026-11-01T13:30Z','released','3.0','2.0',true),
+    ('bea:dup-a','bea','us','release','us_pce','Ambiguous',3,'2026-11-10T13:30Z','scheduled',NULL,NULL,false),
+    ('bea:dup-b','bea','us','release','us_pce','Ambiguous',3,'2026-11-10T13:30Z','released','0.2','0.3',false);
+    INSERT INTO public.market_news(id,source,kind,country,title,url,published_at,importance,dedupe_key,event_id) VALUES
+    ('bea:keep-link','bea','data','us','Keep news','https://www.bea.gov/',now(),3,'keep-link','bea:legacy:2026-11-01');`);
+  const before = JSON.stringify(await db.exec(read('supabase/checks/0012_preflight.sql')));
+  const absent = (await db.query(`SELECT to_regprocedure('public.market_events_apply(jsonb,text)') IS NULL AS absent`)).rows[0].absent;
+  const legacyRead = (await db.query(`SELECT id,status,actual,previous,starts_at FROM public.market_events`)).rows.length;
+  absent && legacyRead === 3 ? ok('L: legacy calendar readable before migration, new writer absent') : fail('L: pre-migration compatibility');
+  await db.exec(read('supabase/migrations/0012_market_event_integrity.sql'));
+  await db.exec(read('supabase/migrations/0012_market_event_integrity.sql')); ok('L: 0012 applied twice over populated legacy data');
+  const after = JSON.stringify(await db.exec(read('supabase/checks/0012_preflight.sql')));
+  before === after ? ok('L: IDs, status, values, counts and duplicates preserved') : fail('L: additive migration changed legacy data');
+  try { await db.exec(read('supabase/tests/market_event_integrity.sql')); ok('L: stable identity, move, cancel/restore, revisions, stale/null/ambiguous data and grants'); }
+  catch (e) { fail(`L: ${e.code} ${e.message}`); }
+  const check = (await db.query(read('supabase/checks/0012_status.sql'))).rows[0];
+  check.columns_ready && check.writer_ready && check.rls_enabled && check.server_can_write && !check.client_can_write ? ok('L: status and grants') : fail(`L: status ${JSON.stringify(check)}`);
+  (await db.query(`SELECT id,status,actual,previous,starts_at FROM public.market_events`)).rows.length === 3 ? ok('L: legacy calendar readable after migration') : fail('L: post-migration compatibility');
+  const link = (await db.query(`SELECT event_id FROM public.market_news WHERE id='bea:keep-link'`)).rows[0];
+  link.event_id === 'bea:legacy:2026-11-01' ? ok('L: news FK unchanged') : fail('L: news FK changed');
+  await db.close();
+}

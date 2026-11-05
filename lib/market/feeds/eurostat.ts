@@ -1,6 +1,8 @@
 import type { EventResult, EventRow, Importance } from "./types";
 import { parseIcsDays } from "./ics";
 import { isoUtc, wallToUtc } from "./time";
+import { scheduleIdentity, previousPeriod, latestSchedules } from "./identity";
+import { EUROSTAT_PERIODS } from "./eurostat-periods";
 
 /**
  * Eurostat (docs/market-feeds-plan.md, section 9, PR 2): the euro area's main releases.
@@ -17,6 +19,11 @@ import { isoUtc, wallToUtc } from "./time";
  *   footnote says «Source: Eurostat».
  */
 export const EUROSTAT_ICS = "https://ec.europa.eu/eurostat/o/calendars/eventsIcal?theme=0&category=2";
+export const EUROSTAT_CALENDAR = "https://ec.europa.eu/eurostat/o/calendars/eventsJson";
+/** Same daily schedule request, richer official format used by Eurostat's own calendar. */
+export function eurostatCalendarUrl(now: number): string {
+  return `${EUROSTAT_CALENDAR}?${new URLSearchParams({ theme: "0", category: "2", start: isoUtc(now - 14 * 86_400_000), end: isoUtc(now + 120 * 86_400_000) })}`;
+}
 export const EUROSTAT_API = "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data";
 export const EUROSTAT_PAGE = "https://ec.europa.eu/eurostat/news/euro-indicators";
 export const LUXEMBOURG = "Europe/Luxembourg";
@@ -35,19 +42,50 @@ const RELEASES: { code: EurostatCode; title: RegExp; importance: Importance }[] 
 
 /** The calendar → rows of the releases we show, from `now` minus a week on (older ones are already stored). */
 export function eurostatSchedule(ics: string, now: number): EventRow[] {
+  if (ics.trimStart().startsWith("[")) return eurostatJsonSchedule(JSON.parse(ics), now);
+  if (!ics.includes("BEGIN:VCALENDAR")) throw new Error("Eurostat calendar: invalid schedule format");
   const from = now - 7 * 86_400_000;
   const rows: EventRow[] = [];
-  const seen = new Set<string>();
   for (const e of parseIcsDays(ics)) {
     const r = RELEASES.find((x) => x.title.test(e.summary));
     if (!r) continue;
     const at = wallToUtc(e.day, RELEASE_TIME, LUXEMBOURG);
     const id = `eurostat:${r.code}:${e.day}`;
-    if (at < from || seen.has(id)) continue;
-    seen.add(id);
-    rows.push({ id, source: "eurostat", kind: "release", code: r.code, country: "eu", title: e.summary, importance: r.importance, starts_at: isoUtc(at), time_tbd: false, url: EUROSTAT_PAGE });
+    const row = scheduleIdentity({ id, source: "eurostat", kind: "release", code: r.code, country: "eu", title: e.summary, importance: r.importance, starts_at: isoUtc(at), time_tbd: false, url: EUROSTAT_PAGE }, EUROSTAT_PERIODS[`${r.code}:${e.day}`]?.period || null, r.code === "eu_gdp_prelim" ? "preliminary" : r.code.endsWith("flash") ? "flash" : "regular", e.uid, e.meta);
+    if (at < from) continue;
+    rows.push(row);
   }
-  return rows;
+  return latestSchedules(rows);
+}
+
+export function eurostatJsonSchedule(json: unknown, now: number): EventRow[] {
+  if (!Array.isArray(json)) throw new Error("Eurostat calendar: expected official records array");
+  const rows: EventRow[] = [];
+  for (const item of json as Record<string, unknown>[]) {
+    if (!item || typeof item !== "object" || item.euroind !== true || item.euroindAuthor !== "estat") continue;
+    const r = RELEASES.find((r) => typeof item.title === "string" && r.title.test(item.title));
+    if (!r || typeof item.start !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(item.start) || !/^\d+$/.test(String(item.recordid))) continue;
+    const day = item.start.slice(0, 10);
+    const parsedDay = Date.parse(`${day}T00:00:00Z`);
+    if (!Number.isFinite(parsedDay) || isoUtc(parsedDay).slice(0,10) !== day) continue;
+    const at = item.allDay === true ? wallToUtc(day, RELEASE_TIME, LUXEMBOURG) : Date.parse(item.start);
+    if (!Number.isFinite(at) || at < now - 14 * 86_400_000 || at > now + 120 * 86_400_000) continue;
+    const periodText = typeof item.period === "string" ? item.period : "";
+    const quarter = /^Q([1-4])\/(\d{4})$/.exec(periodText);
+    const names = "January February March April May June July August September October November December".split(" ");
+    const month = /^(\w+) (\d{4})$/.exec(periodText);
+    const monthIndex = month ? names.findIndex((n) => n.toLowerCase() === month[1].toLowerCase()) : -1;
+    const period = quarter ? `${quarter[2]}-Q${quarter[1]}` : month && monthIndex >= 0 ? `${month[2]}-${String(monthIndex + 1).padStart(2, "0")}` : null;
+    const datasets = String(item.datasetCodes || "").split(",");
+    // The calendar's indicator must explicitly name the dataset we query. Flash HICP is intentionally unavailable.
+    const verified = period && datasets.includes(EUROSTAT_SERIES[r.code].dataset) ? period : null;
+    rows.push(scheduleIdentity({ id: `eurostat:${r.code}:${day}`, source: "eurostat", kind: "release", code: r.code, country: "eu", title: String(item.title), importance: r.importance, starts_at: isoUtc(at), time_tbd: false, url: EUROSTAT_PAGE },
+      verified, r.code === "eu_gdp_prelim" ? "preliminary" : r.code.includes("flash") ? "flash" : "regular", `recordid:${item.recordid}`,
+      { ...(Number.isInteger(item.sequence) ? { sequence: Number(item.sequence) } : {}),
+        ...(typeof item.lastModified === "string" && Number.isFinite(Date.parse(item.lastModified)) ? { modified: new Date(item.lastModified).toISOString() } : {}),
+        ...(item.status === "CANCELLED" ? { cancelled: true } : item.status === "CONFIRMED" ? { cancelled: false } : {}) }));
+  }
+  return latestSchedules(rows);
 }
 
 /**
@@ -85,6 +123,8 @@ export interface EurostatData {
   latest: string | null;
   /** newest-first values of the first euro area code it has */
   values: { period: string; value: number }[];
+  geo?: string;
+  dimensions?: Record<string, string[]>;
 }
 
 /** The answer → when the dataset was updated, its newest period, and the euro area's values. */
@@ -113,7 +153,7 @@ export function parseEurostat(json: unknown): EurostatData {
       const v = value(flat);
       if (v !== null) values.push({ period, value: v });
     }
-    if (values.length) return { ...empty, values };
+    if (values.length) return { ...empty, values, geo, dimensions: Object.fromEntries(ids.filter((id) => id !== "geo" && id !== "time").map((id) => [id, Object.keys(indexOf(id))])) };
   }
   return empty;
 }
@@ -123,10 +163,10 @@ export function parseEurostat(json: unknown): EurostatData {
  * preliminary flash, then the flash with employment about two weeks later), so a flash due within 20 days — after
  * the preliminary one — compares with the quarter before.
  */
-export function eurostatLatest(code: EurostatCode, data: EurostatData, nextStartsAt: string, now: number): string | null {
+export function eurostatLatest(code: EurostatCode, data: EurostatData, _nextStartsAt: string, _now: number, referencePeriod?: string | null): string | null {
   const s = EUROSTAT_SERIES[code];
-  const sameQuarter = code === "eu_gdp_flash" && Date.parse(nextStartsAt) - now <= 20 * 86_400_000;
-  const v = data.values[sameQuarter ? 1 : 0];
+  if (!referencePeriod || code.includes("gdp") || code === "eu_hicp_flash") return null;
+  const v = data.values.find((v) => v.period === previousPeriod(referencePeriod));
   return s && v ? fmt(v.value, s.signed) : null;
 }
 
@@ -137,11 +177,17 @@ const fmt = (n: number, signed: boolean) => `${signed && n >= 0 ? "+" : n < 0 ? 
  * after the release (Eurostat updates the API at 11:00 with the release), and the period before. Null while the
  * dataset still has the old data, or the newest period has some countries but not the euro area yet.
  */
-export function eurostatResult(id: string, startsAt: string, data: EurostatData): EventResult | null {
-  const code = id.split(":")[1] as EurostatCode;
+export function eurostatResult(id: string, startsAt: string, data: EurostatData, referencePeriod?: string | null, codeOverride?: string | null): EventResult | null {
+  const code = (codeOverride || id.split(":")[1]) as EurostatCode;
   const s = EUROSTAT_SERIES[code];
   if (!s || data.updated === null || data.updated < Date.parse(startsAt) - 60_000) return null;
-  const [now, before] = data.values;
-  if (!now || now.period !== data.latest) return null;
-  return { id, status: "released", actual: fmt(now.value, s.signed), previous: before ? fmt(before.value, s.signed) : null, summary: null };
+  const confirmed = referencePeriod || EUROSTAT_PERIODS[`${code}:${id.split(":")[2]}`]?.period;
+  // Latest-only datasets cannot prove the original preliminary/flash vintage, even when the period is known.
+  if (!confirmed || code.includes("gdp") || code === "eu_hicp_flash") return null;
+  if (!data.geo || !GEOS.includes(data.geo) || !data.dimensions || data.dimensions.freq?.[0] !== "M" || data.dimensions.freq.length !== 1 || !Object.entries(s.filters).every(([dim, value]) => data.dimensions![dim]?.length === 1 && data.dimensions![dim][0] === value)) return null;
+  const now = data.values.find((v) => v.period === confirmed);
+  if (!now) return null;
+  const before = data.values.find((v) => v.period === previousPeriod(now.period));
+  return { id, status: "released", actual: fmt(now.value, s.signed), previous: before ? fmt(before.value, s.signed) : null, summary: null,
+    result_meta: { period: now.period, series: `${s.dataset}:${data.geo}`, unit: s.filters.unit, adjustment: s.filters.s_adj || "NSA", source_updated: isoUtc(data.updated) } };
 }
