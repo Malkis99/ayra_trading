@@ -1,6 +1,8 @@
 import type { EventRow } from "./types";
 import { FRANKFURT, NEW_YORK, isoUtc, wallToUtc } from "./time";
 import { listedUsEvents } from "./schedules-us";
+import { scheduleIdentity } from "./identity";
+import { applyListedCorrections } from "./listed-corrections";
 
 /**
  * Schedules that have no machine-readable feed we may use, taken from the official pages (read 2026-11-03).
@@ -104,7 +106,9 @@ export function listedEvents(): EventRow[] {
     }
   }
   rows.push(...listedUsEvents());
-  return rows;
+  return applyListedCorrections(rows.map((r) => r.identity_key ? r : scheduleIdentity(r,
+    r.source === "bls" ? BLS_RELEASES[r.code as keyof typeof BLS_RELEASES]?.dates[r.id.split(":")[2]] || null : r.id.split(":")[2],
+    r.source === "bls" ? "regular" : r.kind, null, { sequence: 0 })));
 }
 
 /** The last listed FOMC / ECB decision (a test warns when it is less than two months ahead). */

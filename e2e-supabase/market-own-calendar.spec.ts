@@ -113,6 +113,26 @@ test.describe("Market — own calendar of official events", () => {
     await expect(el(page, "own-calendar-day-2")).toHaveAttribute("aria-selected", "true");
   });
 
+  for (const width of [1440,360]) {
+    test(`${width}: returning refreshes a stable moved event and revised values without resetting filters`, async ({ browser,request }) => {
+      const page = await calendar(browser,width);
+      let reads = 0;
+      page.on("request",r=>{ if(r.method()==="GET" && r.url().includes("/rest/v1/market_events")) reads++; });
+      await el(page,"market-calendar-importance-low").click();
+      await seed(request,EVENTS.map((row)=>(row as Record<string,unknown>).id==="bls:us_jolts:2026-11-03" ? {...row,actual:"7.53M",starts_at:"2026-11-03T16:00:00Z",updated_at:"2026-11-03T12:10:00Z"}:row));
+      await page.evaluate(()=>{window.dispatchEvent(new Event("blur"));window.dispatchEvent(new Event("focus"));window.dispatchEvent(new Event("focus"));});
+      await expect(el(page,"own-calendar-event-actual")).toHaveText("7.53M");
+      await expect(el(page,"own-calendar-event-time")).toHaveText("20:00");
+      await expect(el(page,"own-calendar-event")).toHaveAttribute("data-id","bls:us_jolts:2026-11-03");
+      expect(reads).toBe(1);
+      await el(page,"own-calendar-day-5").click();
+      await expect(el(page,"own-calendar-event")).toHaveCount(2);
+      expect(reads).toBe(1);
+      expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+      await page.close();
+    });
+  }
+
   test("filters apply: low importance shown on demand; only countries we do not cover → a clear message", async ({ browser }) => {
     const page = await calendar(browser, 1440);
     await el(page, "own-calendar-day-5").click();

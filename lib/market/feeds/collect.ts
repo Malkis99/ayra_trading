@@ -8,7 +8,9 @@ import { CENSUS_SERIES, censusLatest, censusResult, censusUrl, parseCensus } fro
 import { fetchCensus } from "./census-fetch";
 import { CENSUS_RELEASES } from "./schedules-us";
 import { pdfText } from "./pdf-text";
-import { EUROSTAT_ICS, EUROSTAT_SERIES, type EurostatCode, eurostatLatest, eurostatResult, eurostatSchedule, eurostatUrl, parseEurostat } from "./eurostat";
+import { icsCancellations } from "./ics";
+import { previousPeriod } from "./identity";
+import { eurostatCalendarUrl, EUROSTAT_SERIES, type EurostatCode, eurostatLatest, eurostatResult, eurostatSchedule, eurostatUrl, parseEurostat } from "./eurostat";
 
 /**
  * The collector (docs/market-feeds-plan.md, section 4): reads the official feeds, turns them into calendar events and
@@ -17,6 +19,9 @@ import { EUROSTAT_ICS, EUROSTAT_SERIES, type EurostatCode, eurostatLatest, euros
  */
 
 export interface FeedsDb {
+  cancelEvents(rows: { source: string; source_uid: string; schedule_meta: import("./types").ScheduleMeta }[]): Promise<void>;
+  revisionEvents(source: string, from: number, to: number): Promise<WaitingEvent[]>;
+  matchResults(rows: EventResult[]): Promise<EventResult[]>;
   /** Schedule columns only: a published figure, status or the owner's «hidden» are kept. */
   upsertEvents(rows: EventRow[]): Promise<void>;
   /** Figures for events that exist (never creates an event). */
@@ -30,7 +35,7 @@ export interface FeedsDb {
   /** Stored scheduled events (any source) starting between `from` and `to`, with their «previous». */
   scheduledEvents(from: number, to: number): Promise<ScheduledEvent[]>;
   /** Stored releases with a figure since `from` (the last figure of each indicator). */
-  releasedFigures(from: number): Promise<{ id: string; source: string; code: string | null; starts_at: string; actual: string | null }[]>;
+  releasedFigures(from: number): Promise<{ id: string; source: string; code: string | null; starts_at: string; actual: string | null; reference_period?: string | null }[]>;
   /** «Previous» of scheduled events (a published figure is never touched). */
   setPrevious(rows: { id: string; previous: string }[]): Promise<void>;
   /** When this source last ran (ms), for throttling. */
@@ -43,6 +48,8 @@ export interface WaitingEvent {
   id: string;
   code: string | null;
   starts_at: string;
+  reference_period?: string | null;
+  release_stage?: string | null;
 }
 
 export interface ScheduledEvent extends WaitingEvent {
@@ -161,6 +168,9 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
   const schedules = o.scope === "schedules" || o.scope === "all";
   const newsScope = o.scope === "news" || o.scope === "all";
   const releasesScope = newsScope || o.scope === "releases";
+  const isolated = async (name: string, job: () => Promise<void>) => {
+    try { await job(); } catch (err) { await run(name, async () => { throw err; }); }
+  };
 
   if (schedules) {
     await run("schedules-listed", async () => {
@@ -169,12 +179,16 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
       return rows.length;
     });
     await run("bea-schedule", async () => {
-      const rows = beaSchedule(await get(o.fetch, FEEDS.beaIcs), o.now);
+      const body = await get(o.fetch, FEEDS.beaIcs);
+      const rows = beaSchedule(body, o.now);
+      await o.db.cancelEvents(icsCancellations(body).map((e) => ({ source: "bea", source_uid: e.uid, schedule_meta: e.meta })));
       await o.db.upsertEvents(rows);
       return rows.length;
     });
     await run("eurostat-schedule", async () => {
-      const rows = eurostatSchedule(await get(o.fetch, EUROSTAT_ICS), o.now);
+      const body = await get(o.fetch, eurostatCalendarUrl(o.now));
+      const rows = eurostatSchedule(body, o.now);
+      await o.db.cancelEvents(icsCancellations(body).map((e) => ({ source: "eurostat", source_uid: e.uid, schedule_meta: e.meta })));
       await o.db.upsertEvents(rows);
       return rows.length;
     });
@@ -197,21 +211,21 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
 
   if (releasesScope) {
     await run("bea-releases", async () => {
-      const { news, results: figures } = beaReleases(await get(o.fetch, FEEDS.beaRss));
+      const { news, results: figures, issues } = beaReleases(await get(o.fetch, FEEDS.beaRss));
       const rows = dedupe(await linkable(o.db, recent(news, o.now)));
       await o.db.insertNews(rows);
-      const have = await o.db.existingEventIds(figures.map((f) => f.id));
-      const known = figures.filter((f) => have.has(f.id));
+      const known = await o.db.matchResults(figures);
       await o.db.saveResults(known);
       // BEA ids end with the release day: the next release of the same indicator is on a later day
-      await carryForward(o, known.filter((f) => f.actual).map((f) => ({ code: f.id.split(":")[1], actual: f.actual!, at: `${f.id.split(":")[2]}T23:59:59.999Z` })));
+      // BEA stages share periods: no stage-to-stage previous-value carry.
+      if (issues.length) throw new Error(Array.from(new Set(issues)).join("; "));
       return rows.length + known.length;
     });
-    await blsFigures(o, run);
-    await eiaFigures(o, run);
-    await censusFigures(o, run);
-    await dolFigures(o, run);
-    await eurostatFigures(o, run);
+    await isolated("bls-api", () => blsFigures(o, run));
+    await isolated("eia-api", () => eiaFigures(o, run));
+    await isolated("census-api", () => censusFigures(o, run));
+    await isolated("dol-claims", () => dolFigures(o, run));
+    await isolated("eurostat-api", () => eurostatFigures(o, run));
   }
 
   const pruned = o.prune ? await o.db.prune() : null;
@@ -255,7 +269,7 @@ async function json(o: CollectOptions, url: string, what: string): Promise<unkno
  * «Previous» before a release: the figure of the last release of the same indicator becomes the «previous» of its
  * next scheduled release (the source's own, possibly revised, value replaces it when that release comes out).
  */
-async function carryForward(o: CollectOptions, figures: { code: string; actual: string; at: string }[]): Promise<number> {
+async function carryForward(o: CollectOptions, figures: { code: string; actual: string; at: string; period?: string | null }[]): Promise<number> {
   const known = figures.filter((f) => f.actual);
   if (!known.length) return 0;
   const upcoming = await o.db.scheduledEvents(o.now - RETRY_DAYS * DAY, o.now + 120 * DAY);
@@ -263,7 +277,7 @@ async function carryForward(o: CollectOptions, figures: { code: string; actual: 
   for (const code of Array.from(new Set(known.map((f) => f.code)))) {
     const last = known.filter((f) => f.code === code).sort((a, b) => b.at.localeCompare(a.at))[0];
     const next = upcoming.filter((e) => e.code === code && e.starts_at > last.at).sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0];
-    if (next && next.previous !== last.actual) rows.push({ id: next.id, previous: last.actual });
+    if (next?.reference_period && last.period === previousPeriod(next.reference_period) && next.previous !== last.actual) rows.push({ id: next.id, previous: last.actual.split(" · ")[0] });
   }
   if (rows.length) await o.db.setPrevious(rows);
   return rows.length;
@@ -275,7 +289,7 @@ async function save(o: CollectOptions, results: EventResult[], waiting: WaitingE
   const at = new Map(waiting.map((e) => [e.id, e]));
   await carryForward(
     o,
-    results.filter((r) => r.actual && at.get(r.id)?.code).map((r) => ({ code: at.get(r.id)!.code!, actual: r.actual!, at: at.get(r.id)!.starts_at }))
+    results.filter((r) => r.actual && at.get(r.id)?.code).map((r) => ({ code: at.get(r.id)!.code!, actual: r.actual!, at: at.get(r.id)!.starts_at, period: r.result_meta?.period }))
   );
 }
 
@@ -298,7 +312,8 @@ async function blsFigures(o: CollectOptions, run: Run) {
   const waiting = await due(o, "bls", "bls-api", { fastMs: BLS_WINDOW_MS, slowMs: o.blsKey ? 30 * 60_000 : HOUR, codes: BLS_FIGURE_CODES });
   if (!waiting.length) return;
   await run("bls-api", async () => {
-    const figures = blsResults(waiting.map((e) => e.id), await blsData(o));
+    const candidates = [...waiting, ...await o.db.revisionEvents("bls", o.now - NEWS_DAYS * DAY, o.now)];
+    const figures = blsResults(candidates.map((e) => e.id), await blsData(o), candidates);
     await save(o, figures, waiting);
     return figures.length;
   });
@@ -311,11 +326,12 @@ async function eiaFigures(o: CollectOptions, run: Run) {
   await run("eia-api", async () => {
     if (!o.eiaKey) throw new Error("EIA_API_KEY is not set: EIA figures are not asked for");
     const out = [];
-    for (const code of Array.from(new Set(waiting.map((e) => e.id.split(":")[1] as EiaCode)))) {
+    const revisions = await o.db.revisionEvents("eia", o.now - NEWS_DAYS * DAY, o.now);
+    for (const code of Array.from(new Set(waiting.map((e) => e.code as EiaCode)))) {
       // the key is in the URL as EIA asks; the error message names the series, never the URL
       const values = parseEia(await json(o, eiaUrl(code, o.eiaKey), `EIA API ${code}`));
-      for (const e of waiting.filter((x) => x.id.split(":")[1] === code)) {
-        const r = eiaResult(e.id, values);
+      for (const e of [...waiting, ...revisions].filter((x) => x.code === code)) {
+        const r = eiaResult(e.id, values, e.reference_period, e.code);
         if (r) out.push(r);
       }
     }
@@ -330,17 +346,22 @@ async function censusFigures(o: CollectOptions, run: Run) {
   if (!waiting.length) return;
   await run("census-api", async () => {
     const out = [];
+    const revisions = await o.db.revisionEvents("census", o.now - NEWS_DAYS * DAY, o.now);
     const missing: string[] = [];
     const errors: string[] = [];
     // each release on its own: one failing never keeps the others' figures from being saved
     for (const e of waiting) {
-      const [, code, day] = e.id.split(":") as [string, keyof typeof CENSUS_RELEASES, string];
-      const ref = CENSUS_RELEASES[code]?.dates[day];
+      const code = e.code as keyof typeof CENSUS_RELEASES;
+      const ref = e.reference_period || CENSUS_RELEASES[code]?.dates[e.id.split(":")[2]];
       if (!ref) continue;
       try {
-        const r = censusResult(e.id, parseCensus(await fetchCensus(o.fetch, censusUrl(code, ref), o.censusKey, code), CENSUS_SERIES[code].category));
-        if (r) out.push(r);
-        else missing.push(`${code} ${ref}`);
+        const data = parseCensus(await fetchCensus(o.fetch, censusUrl(code, ref), o.censusKey, code), CENSUS_SERIES[code].category);
+        const r = censusResult(e.id, data, ref, code);
+        if (r) out.push(r); else missing.push(`${code} ${ref}`);
+        for (const old of revisions.filter((x) => x.code === code && x.reference_period)) {
+          const revision = censusResult(old.id, data, old.reference_period, code);
+          if (revision) out.push(revision);
+        }
       } catch (err) {
         errors.push(err instanceof Error ? err.message : String(err));
       }
@@ -368,7 +389,8 @@ async function dolFigures(o: CollectOptions, run: Run) {
   if (!waiting.length) return;
   await run("dol-claims", async () => {
     // DOL keeps only the current release online: an older week's figure cannot be read any more
-    const out = claimsResult(waiting.map((e) => e.id), await dolRelease(o));
+    const revisions = await o.db.revisionEvents("dol", o.now - NEWS_DAYS * DAY, o.now);
+    const out = claimsResult(waiting.map((e) => e.id), await dolRelease(o), [...waiting, ...revisions]);
     await save(o, out, waiting);
     return out.length;
   });
@@ -382,14 +404,22 @@ async function eurostatFigures(o: CollectOptions, run: Run) {
     const out = [];
     const errors: string[] = [];
     const asked = new Map<string, Promise<ReturnType<typeof parseEurostat>>>();
+    const revisions = await o.db.revisionEvents("eurostat", o.now - NEWS_DAYS * DAY, o.now);
     // each release on its own (two come out the same morning); one dataset is asked once
     for (const e of waiting) {
-      const code = e.id.split(":")[1] as EurostatCode;
+      const code = e.code as EurostatCode;
       const url = eurostatUrl(code);
       if (!asked.has(url)) asked.set(url, json(o, url, `Eurostat API ${code}`).then(parseEurostat));
       try {
-        const r = eurostatResult(e.id, e.starts_at, await asked.get(url)!);
+        const data = await asked.get(url)!;
+        const r = eurostatResult(e.id, e.starts_at, data, e.reference_period, e.code);
         if (r) out.push(r);
+        else errors.push(`Eurostat ${code}: confirmed period/stage/series unavailable`);
+        for (const old of revisions.filter((x) => x.code === code && x.reference_period)) {
+          const revision = eurostatResult(old.id, old.starts_at, data, old.reference_period, old.code);
+          // Flash/initial estimates are distinct vintages; latest-only API cannot revise those stages faithfully.
+          if (revision && !["preliminary", "flash"].includes(old.release_stage || "")) out.push(revision);
+        }
       } catch (err) {
         errors.push(err instanceof Error ? err.message : String(err));
       }
@@ -412,10 +442,13 @@ async function previousValues(o: CollectOptions, run: Run) {
     for (const e of upcoming.sort((a, b) => a.starts_at.localeCompare(b.starts_at))) if (!next.has(e.code!)) next.set(e.code!, e);
     const stored = await o.db.releasedFigures(o.now - 120 * DAY);
     const latest = new Map<string, string>();
-    for (const f of stored.sort((a, b) => b.starts_at.localeCompare(a.starts_at))) if (f.code && f.actual && !latest.has(f.code)) latest.set(f.code, f.actual);
+    for (const f of stored.sort((a, b) => b.starts_at.localeCompare(a.starts_at))) {
+      const upcoming = f.code ? next.get(f.code) : null;
+      if (f.code && f.actual && upcoming?.reference_period && f.reference_period === previousPeriod(upcoming.reference_period) && !latest.has(f.code)) latest.set(f.code, f.actual.split(" · ")[0]);
+    }
 
     // the first time: ask the sources for what they publish now (each on its own: one failing keeps the rest)
-    const missing = (codes: readonly string[]) => codes.filter((c) => next.has(c) && !latest.has(c));
+    const missing = (codes: readonly string[]) => codes.filter((c) => next.has(c) && next.get(c)!.previous === null && !latest.has(c));
     const errors: string[] = [];
     const tryAsk = async (what: string, job: () => Promise<void>) => {
       try {
@@ -424,22 +457,25 @@ async function previousValues(o: CollectOptions, run: Run) {
         errors.push(`${what}: ${e instanceof Error ? e.message : String(e)}`);
       }
     };
-    if (missing(BLS_FIGURE_CODES).length) await tryAsk("BLS", async () => setAll(latest, blsLatest(await blsData(o))));
+    if (missing(BLS_FIGURE_CODES).length) await tryAsk("BLS", async () => setAll(latest, blsLatest(await blsData(o), Object.fromEntries(Array.from(next).map(([code,e]) => [code,e.reference_period])))));
     if (o.eiaKey && missing(Object.keys(EIA_SERIES)).length) {
-      for (const code of missing(Object.keys(EIA_SERIES)) as EiaCode[]) await tryAsk("EIA", async () => setOne(latest, code, eiaLatest(code, parseEia(await json(o, eiaUrl(code, o.eiaKey!), `EIA API ${code}`)))));
+      for (const code of missing(Object.keys(EIA_SERIES)) as EiaCode[]) if (next.get(code)?.reference_period) await tryAsk("EIA", async () => setOne(latest, code, eiaLatest(code, parseEia(await json(o, eiaUrl(code, o.eiaKey!), `EIA API ${code}`)), next.get(code)!.reference_period)));
     }
     for (const code of missing(Object.keys(EUROSTAT_SERIES)) as EurostatCode[]) {
-      await tryAsk("Eurostat", async () => setOne(latest, code, eurostatLatest(code, parseEurostat(await json(o, eurostatUrl(code), `Eurostat API ${code}`)), next.get(code)!.starts_at, o.now)));
+      await tryAsk("Eurostat", async () => setOne(latest, code, eurostatLatest(code, parseEurostat(await json(o, eurostatUrl(code), `Eurostat API ${code}`)), next.get(code)!.starts_at, o.now, next.get(code)!.reference_period)));
     }
     for (const code of missing(Object.keys(CENSUS_RELEASES)) as (keyof typeof CENSUS_RELEASES)[]) {
-      const ref = CENSUS_RELEASES[code].dates[next.get(code)!.id.split(":")[2]];
+      const ref = next.get(code)!.reference_period;
       if (ref) await tryAsk("Census", async () => setOne(latest, code, censusLatest(code, ref, parseCensus(await fetchCensus(o.fetch, censusUrl(code, ref), o.censusKey, code), CENSUS_SERIES[code].category))));
     }
-    if (missing(["us_jobless_claims"]).length) await tryAsk("DOL", async () => setOne(latest, "us_jobless_claims", (await dolRelease(o)).actual));
+    if (missing(["us_jobless_claims"]).length) await tryAsk("DOL", async () => {
+      const release = await dolRelease(o);
+      if (release.period === previousPeriod(next.get("us_jobless_claims")?.reference_period || "")) setOne(latest, "us_jobless_claims", release.actual);
+    });
 
     const rows = Array.from(next.values())
       .filter((e) => latest.has(e.code!) && e.previous !== latest.get(e.code!))
-      .map((e) => ({ id: e.id, previous: latest.get(e.code!)! }));
+      .map((e) => ({ id: e.id, previous: latest.get(e.code!)!.split(" · ")[0] }));
     if (rows.length) await o.db.setPrevious(rows);
     if (errors.length) throw new Error(`${rows.length} set; ${Array.from(new Set(errors)).join("; ")}`.slice(0, 1900));
     return rows.length;

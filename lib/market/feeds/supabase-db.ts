@@ -18,20 +18,40 @@ const CHUNK = 200;
 const chunks = <T>(rows: T[]) => Array.from({ length: Math.ceil(rows.length / CHUNK) }, (_, i) => rows.slice(i * CHUNK, (i + 1) * CHUNK));
 
 export function supabaseFeedsDb(db: SupabaseClient): FeedsDb {
+  async function apply(rows: unknown[], mode: string) {
+    const conflicts: string[] = [];
+    for (const part of chunks(rows)) {
+      const { data, error } = await db.rpc("market_events_apply", { p_rows: part, p_mode: mode });
+      check(error, "calendar integrity (requires migration 0012)");
+      for (const item of (data ?? []) as { conflict?: string }[]) if (item.conflict) conflicts.push(item.conflict);
+    }
+    if (conflicts.length) throw new Error(`calendar conflict: ${Array.from(new Set(conflicts)).join("; ")}`);
+  }
   return {
-    async upsertEvents(rows: EventRow[]) {
-      for (const part of chunks(rows)) {
-        // only the schedule columns are sent, so status, actual, previous, summary and hidden stay as they are
-        const { error } = await db.from("market_events").upsert(part, { onConflict: "id" });
-        check(error, "market_events upsert");
+    async matchResults(rows) {
+      const matched: EventResult[] = [];
+      for (const r of rows) {
+        const [source, code] = r.id.split(":");
+        if (!r.reference_period || !r.release_stage) continue;
+        const { data, error } = await db.from("market_events").select("id").eq("source", source).eq("country", "us").eq("code", code)
+          .eq("reference_period", r.reference_period).eq("release_stage", r.release_stage);
+        check(error, "calendar result matching");
+        if (data?.length === 1) matched.push({ ...r, id: data[0].id });
+        else if (data?.length) throw new Error("calendar conflict: ambiguous publication period/stage");
       }
+      return matched;
+    },
+    async cancelEvents(rows) { await apply(rows, "cancel"); },
+    async revisionEvents(source, from, to) {
+      const { data, error } = await db.from("market_events").select("id,code,starts_at,reference_period,release_stage").eq("source", source).eq("kind", "release").eq("status", "released")
+        .gte("starts_at", new Date(from).toISOString()).lte("starts_at", new Date(to).toISOString());
+      check(error, "calendar revisions"); return (data ?? []) as WaitingEvent[];
+    },
+    async upsertEvents(rows: EventRow[]) {
+      await apply(rows, "schedule");
     },
     async saveResults(rows: EventResult[]) {
-      for (const r of rows) {
-        const { id, ...fields } = r;
-        const { error } = await db.from("market_events").update(fields).eq("id", id);
-        check(error, "market_events update");
-      }
+      await apply(rows, "result");
     },
     async insertNews(rows: NewsRow[]) {
       for (const part of chunks(rows)) {
@@ -54,7 +74,7 @@ export function supabaseFeedsDb(db: SupabaseClient): FeedsDb {
     async waitingEvents(source: string, from: number, to: number) {
       const { data, error } = await db
         .from("market_events")
-        .select("id,code,starts_at")
+        .select("id,code,starts_at,reference_period,release_stage")
         .eq("source", source)
         .eq("kind", "release")
         .eq("status", "scheduled")
@@ -66,7 +86,7 @@ export function supabaseFeedsDb(db: SupabaseClient): FeedsDb {
     async scheduledEvents(from: number, to: number) {
       const { data, error } = await db
         .from("market_events")
-        .select("id,source,code,starts_at,previous")
+        .select("id,source,code,starts_at,previous,reference_period,release_stage")
         .eq("status", "scheduled")
         .not("code", "is", null)
         .gte("starts_at", new Date(from).toISOString())
@@ -77,7 +97,7 @@ export function supabaseFeedsDb(db: SupabaseClient): FeedsDb {
     async releasedFigures(from: number) {
       const { data, error } = await db
         .from("market_events")
-        .select("id,source,code,starts_at,actual")
+        .select("id,source,code,starts_at,actual,reference_period")
         .eq("status", "released")
         .not("actual", "is", null)
         .gte("starts_at", new Date(from).toISOString());
@@ -85,11 +105,7 @@ export function supabaseFeedsDb(db: SupabaseClient): FeedsDb {
       return (data ?? []) as { id: string; source: string; code: string | null; starts_at: string; actual: string | null }[];
     },
     async setPrevious(rows: { id: string; previous: string }[]) {
-      for (const r of rows) {
-        // only a scheduled event: a published release keeps the source's own «previous»
-        const { error } = await db.from("market_events").update({ previous: r.previous }).eq("id", r.id).eq("status", "scheduled");
-        check(error, "market_events update");
-      }
+      await apply(rows, "previous");
     },
     async lastRun(source: string) {
       const { data, error } = await db.from("market_feed_runs").select("started_at").eq("source", source).order("started_at", { ascending: false }).limit(1);

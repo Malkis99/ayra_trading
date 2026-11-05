@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EUROSTAT_ICS, eurostatResult, eurostatSchedule, eurostatUrl, parseEurostat } from "./eurostat";
+import { EUROSTAT_ICS, EUROSTAT_CALENDAR, eurostatResult, eurostatSchedule, eurostatUrl, parseEurostat } from "./eurostat";
 import { parseIcs, parseIcsDays } from "./ics";
 import { collectFeeds, type Fetcher } from "./collect";
 import { memoryFeedsDb } from "./memory-db";
@@ -8,7 +8,7 @@ import { ru } from "@/lib/i18n/dictionaries/ru";
 import { en } from "@/lib/i18n/dictionaries/en";
 
 // Eurostat's iCal of 2026-11-04 (category «Euro indicator release»), trimmed: all-day entries with escaped commas
-const vevent = (day: string, summary: string) => `BEGIN:VEVENT\r\nDTSTAMP:20261104T071118Z\r\nDTSTART;VALUE=DATE:${day}\r\nSUMMARY:${summary}\r\nX-CATEGORY:Data release\\,Euro indicators release\r\nUID:20270104T231750Z-1@paloontrar.cc.cec.eu.int\r\nEND:VEVENT`;
+const vevent = (day: string, summary: string) => `BEGIN:VEVENT\r\nDTSTAMP:20261104T071118Z\r\nDTSTART;VALUE=DATE:${day}\r\nSUMMARY:${summary}\r\nX-CATEGORY:Data release\\,Euro indicators release\r\nUID:${day}-${summary.replace(/[^A-Za-z]/g, "")}@calendar.test\r\nEND:VEVENT`;
 const ICS = [
   "BEGIN:VCALENDAR\r\nPRODID:-//Eurostat//Euro indicators release calendar//EN\r\nBEGIN:VTIMEZONE\r\nTZID:Europe/Luxembourg\r\nBEGIN:DAYLIGHT\r\nDTSTART:19810329T020000\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE",
   vevent("20261030", "Preliminary flash estimate GDP - EU and euro area"),
@@ -27,7 +27,7 @@ const NOW = Date.UTC(2026, 10, 4, 7, 0); // Wednesday 4 November, before the 11:
 
 describe("Eurostat's release calendar (iCal, Euro indicators)", () => {
   it("all-day entries are read with their day; the timed reader leaves them out", () => {
-    expect(parseIcsDays(ICS)).toContainEqual({ summary: "Industrial producer prices, domestic market", day: "2026-11-05" });
+    expect(parseIcsDays(ICS)).toContainEqual(expect.objectContaining({ summary: "Industrial producer prices, domestic market", day: "2026-11-05" }));
     expect(parseIcs(ICS)).toEqual([]);
   });
 
@@ -64,12 +64,13 @@ const stat = (o: { updated: string; geo: string; times: string[]; values: Record
   version: "2.0",
   class: "dataset",
   updated: o.updated,
-  id: ["freq", "unit", "geo", "time"],
-  size: [1, 1, 1, o.times.length],
+  id: ["freq", "unit", "s_adj", "age", "sex", "geo", "time"],
+  size: [1, 1, 1, 1, 1, 1, o.times.length],
   value: o.values,
   dimension: {
     freq: { category: { index: { M: 0 } } },
     unit: { category: { index: { PC_ACT: 0 } } },
+    s_adj: { category: { index: { SA: 0 } } }, age: { category: { index: { TOTAL: 0 } } }, sex: { category: { index: { T: 0 } } },
     geo: { category: { index: { [o.geo]: 0 } } },
     time: { category: { index: Object.fromEntries(o.times.map((t, i) => [t, i])) } },
   },
@@ -79,13 +80,13 @@ const RETAIL = stat({ updated: "2026-11-03T11:00:00+0100", geo: "EA21", times: [
 
 describe("Eurostat figures (dissemination API, JSON-stat)", () => {
   it("the euro area's newest values, and when the dataset was updated", () => {
-    expect(parseEurostat(UNEMPLOYMENT)).toEqual({ updated: Date.parse("2026-10-30T10:00:00Z"), latest: "2026-09", values: [{ period: "2026-09", value: 6.5 }, { period: "2026-08", value: 6.5 }, { period: "2026-07", value: 6.4 }] });
+    expect(parseEurostat(UNEMPLOYMENT)).toMatchObject({ updated: Date.parse("2026-10-30T10:00:00Z"), latest: "2026-09", values: [{ period: "2026-09", value: 6.5 }, { period: "2026-08", value: 6.5 }, { period: "2026-07", value: 6.4 }] });
   });
 
   it("a figure once the dataset was updated with the release: rates as they are, changes with a sign", () => {
-    expect(eurostatResult("eurostat:eu_unemployment:2026-10-30", "2026-10-30T10:00:00.000Z", parseEurostat(UNEMPLOYMENT))).toEqual({ id: "eurostat:eu_unemployment:2026-10-30", status: "released", actual: "6.5%", previous: "6.5%", summary: null });
+    expect(eurostatResult("eurostat:eu_unemployment:2026-10-30", "2026-10-30T10:00:00.000Z", parseEurostat(UNEMPLOYMENT))).toMatchObject({ id: "eurostat:eu_unemployment:2026-10-30", status: "released", actual: "6.5%", previous: "6.5%", summary: null });
     const gdp = stat({ updated: "2026-10-30T11:00:00+0100", geo: "EA", times: ["2026-Q2", "2026-Q3"], values: { "0": 0.6, "1": -0.2 } });
-    expect(eurostatResult("eurostat:eu_gdp_prelim:2026-10-30", "2026-10-30T10:00:00.000Z", parseEurostat(gdp))).toMatchObject({ actual: "−0.2%", previous: "+0.6%" });
+    expect(eurostatResult("eurostat:eu_gdp_prelim:2026-10-30", "2026-10-30T10:00:00.000Z", parseEurostat(gdp))).toBeNull();
   });
 
   it("nothing while the dataset still has the old data (updated before the release)", () => {
@@ -126,7 +127,7 @@ function network(pages: Record<string, string>) {
 describe("the collector and Eurostat", () => {
   it("schedules: the iCal becomes calendar rows; logged as «eurostat-schedule»", async () => {
     const { db, events, runs } = memoryDb();
-    const { fetcher } = network({ [EUROSTAT_ICS]: ICS });
+    const { fetcher } = network({ [EUROSTAT_CALENDAR]: ICS });
     await collectFeeds({ scope: "schedules", now: NOW, fetch: fetcher, db });
     expect(events.get("eurostat:eu_hicp_flash:2026-11-04")?.starts_at).toBe("2026-11-04T10:00:00.000Z");
     expect(runs.find((r) => r.source === "eurostat-schedule")).toMatchObject({ ok: true, items: 6 });

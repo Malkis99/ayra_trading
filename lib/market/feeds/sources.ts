@@ -2,6 +2,7 @@ import type { EventResult, EventRow, Importance, NewsKind, NewsRow } from "./typ
 import { blocks, link, plainText, raw, text, texts } from "./xml";
 import { isoUtc, nyDay, parseFeedDate, utcDay } from "./time";
 import { parseIcs } from "./ics";
+import { beaPeriod, beaStage, scheduleIdentity, latestSchedules, previousPeriod } from "./identity";
 import { FOMC_DECISIONS } from "./schedules";
 
 const addDays = (date: string, n: number) => new Date(Date.parse(`${date}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
@@ -230,7 +231,7 @@ export function beaSchedule(ics: string, now: number): EventRow[] {
     if (e.start < from || e.start > to) continue;
     const k = beaKind(e.summary);
     const day = nyDay(e.start);
-    rows.push({
+      rows.push(scheduleIdentity({
       id: `bea:${k?.code ?? slug(e.summary).slice(0, 60)}:${day}`,
       source: "bea",
       kind: "release",
@@ -240,16 +241,16 @@ export function beaSchedule(ics: string, now: number): EventRow[] {
       importance: k?.importance ?? 1,
       starts_at: isoUtc(e.start),
       time_tbd: false,
-      url: "https://www.bea.gov/news/schedule",
-    });
+        url: "https://www.bea.gov/news/schedule",
+      }, beaPeriod(e.summary), beaStage(e.summary), e.uid, e.meta));
   }
   // the file repeats some dates: keep one row per id
-  return Array.from(new Map(rows.map((r) => [r.id, r])).values());
+  return latestSchedules(rows);
 }
 
 /** BEA's RSS: each release as news, and its figure for the matching calendar event. */
-export function beaReleases(xml: string): { news: NewsRow[]; results: EventResult[] } {
-  const out = { news: [] as NewsRow[], results: [] as EventResult[] };
+export function beaReleases(xml: string): { news: NewsRow[]; results: EventResult[]; issues: string[] } {
+  const out = { news: [] as NewsRow[], results: [] as EventResult[], issues: [] as string[] };
   for (const b of blocks(xml, "item")) {
     const title = text(b, "title");
     const url = cleanUrl(link(b));
@@ -264,7 +265,13 @@ export function beaReleases(xml: string): { news: NewsRow[]; results: EventResul
     if (eventId) {
       const current = raw(b, "current");
       const previous = raw(b, "previous");
-      out.results.push({ id: eventId, status: "released", actual: beaFigure(current), previous: beaFigure(previous), summary: clip(description) });
+      const period = beaPeriod(text(current ?? "", "infoDate") || title);
+      const titlePeriod = beaPeriod(title);
+      if (!period || (titlePeriod && titlePeriod !== period)) { out.issues.push("BEA: unconfirmed reference period"); continue; }
+      const prior = beaPeriod(text(previous ?? "", "infoDate") || "");
+      out.results.push({ id: eventId, status: "released", actual: beaFigure(current), previous: prior === previousPeriod(period) ? beaFigure(previous) : null, summary: clip(description),
+        reference_period: period, release_stage: beaStage(title),
+        ...(period ? { result_meta: { period, series: k!.code, unit: k!.code === "us_trade" ? "USD" : "percent", adjustment: "official-release", source_updated: isoUtc(ms) } } : {}) });
     }
   }
   return out;

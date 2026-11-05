@@ -10,7 +10,7 @@ export type EventsState =
   | { status: "error" }
   | { status: "ready"; events: CalendarEvent[] };
 
-/** Read once per week and kept for this visit (switching days or weeks back and forth does not ask again). */
+/** Cached content renders immediately; mounting/returning to the calendar refreshes only AYRA's own database. */
 const cache = new Map<string, CalendarEvent[]>();
 
 /**
@@ -25,25 +25,27 @@ export function useMarketEvents(from: number, to: number): [EventsState, () => v
   useEffect(() => {
     if (!from || !to) return; // the week is not known yet (the clock starts on the device)
     const cached = cache.get(key);
-    if (cached && attempt === 0) {
-      setState({ status: "ready", events: cached });
-      return;
-    }
+    if (cached) setState({ status: "ready", events: cached });
     const client = createSupabaseBrowserClient();
     if (!client) {
       setState({ status: "unavailable" });
       return;
     }
     let live = true;
-    setState({ status: "loading" });
-    client
+    let inFlight = false;
+    let away = false;
+    if (!cached) setState({ status: "loading" });
+    const read = async () => {
+      if (inFlight || !live) return;
+      inFlight = true;
+      try {
+        const { data, error } = await client
       .from("market_events")
       .select(EVENT_COLUMNS)
       .gte("starts_at", new Date(from).toISOString())
       .lt("starts_at", new Date(to).toISOString())
       .order("starts_at", { ascending: true })
-      .limit(500)
-      .then(({ data, error }) => {
+      .limit(500);
         if (!live) return;
         if (error) {
           setState({ status: "error" });
@@ -52,9 +54,26 @@ export function useMarketEvents(from: number, to: number): [EventsState, () => v
         const events = (data ?? []) as unknown as CalendarEvent[];
         cache.set(key, events);
         setState({ status: "ready", events });
-      });
+      } catch {
+        if (live) setState({ status: "error" });
+      } finally { inFlight = false; }
+    };
+    const leave = () => { away = true; };
+    const back = () => {
+      if (document.visibilityState === "hidden" || !away) return;
+      away = false;
+      void read();
+    };
+    const visibility = () => { if (document.visibilityState === "hidden") leave(); else back(); };
+    void read();
+    window.addEventListener("blur", leave);
+    window.addEventListener("focus", back);
+    document.addEventListener("visibilitychange", visibility);
     return () => {
       live = false;
+      window.removeEventListener("blur", leave);
+      window.removeEventListener("focus", back);
+      document.removeEventListener("visibilitychange", visibility);
     };
   }, [key, from, to, attempt]);
 

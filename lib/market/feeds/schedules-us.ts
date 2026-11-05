@@ -1,5 +1,6 @@
 import type { EventRow, Importance } from "./types";
 import { NEW_YORK, isoUtc, wallToUtc } from "./time";
+import { scheduleIdentity } from "./identity";
 
 /**
  * More US schedules (docs/market-feeds-plan.md, section 9, PR 1): EIA, Census, DOL. None of them offers a feed of
@@ -131,7 +132,12 @@ export function listedUsEvents(): EventRow[] {
   for (const day of dolClaimsDates()) {
     rows.push({ id: `dol:us_jobless_claims:${day}`, source: "dol", kind: "release", code: "us_jobless_claims", country: "us", title: "Unemployment Insurance Weekly Claims", importance: 3, starts_at: at(day, "08:30"), time_tbd: false, url: DOL_PAGE });
   }
-  return rows;
+  return rows.map((r) => {
+    const day = r.id.split(":")[2];
+    const period = r.source === "census" ? CENSUS_RELEASES[r.code as keyof typeof CENSUS_RELEASES].dates[day]
+      : r.source === "dol" ? claimsWeekEnding(day) : weekEnding(day);
+    return scheduleIdentity(r, period, "regular", null, { sequence: 0 });
+  });
 }
 
 /** The Friday that ends the week a weekly report covers: the last Friday before the release day. */
