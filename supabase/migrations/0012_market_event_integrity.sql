@@ -89,16 +89,19 @@ BEGIN
    UPDATE public.market_events SET
     identity_key=coalesce(identity_key,r->>'identity_key'), source_uid=coalesce(source_uid,r->>'source_uid'),
     reference_period=coalesce(reference_period,r->>'reference_period'), release_stage=coalesce(release_stage,r->>'release_stage'),
-    schedule_meta=coalesce(schedule_meta,'{}') || meta,
+    schedule_meta=coalesce(schedule_meta,'{}') || meta || CASE WHEN cancelled AND e.status <> 'cancelled' THEN jsonb_build_object('prior_status',e.status) ELSE '{}'::jsonb END,
     starts_at=CASE WHEN p_mode='schedule' THEN (r->>'starts_at')::timestamptz ELSE starts_at END,
     title=CASE WHEN p_mode='schedule' THEN r->>'title' ELSE title END,
     time_tbd=CASE WHEN p_mode='schedule' THEN (r->>'time_tbd')::boolean ELSE time_tbd END,
-    status=CASE WHEN cancelled THEN 'cancelled' WHEN e.status <> 'cancelled' THEN e.status WHEN actual IS NOT NULL OR result_meta IS NOT NULL THEN 'released' ELSE 'scheduled' END
+    status=CASE WHEN cancelled THEN 'cancelled' WHEN e.status <> 'cancelled' THEN e.status WHEN e.schedule_meta->>'prior_status'='released' OR actual IS NOT NULL THEN 'released' ELSE 'scheduled' END
     WHERE id=e.id;
   ELSIF p_mode='previous' THEN
    -- Preliminary previous is fill-only; it never competes with official published results.
    UPDATE public.market_events SET previous=r->>'previous' WHERE id=e.id AND status='scheduled' AND previous IS NULL AND r->>'previous' IS NOT NULL;
   ELSE
+   -- A partial response without its actual is not proof that a new result was published.
+   -- Do not change previous/provenance/status from such a response, including a pre-release row.
+   IF r->>'actual' IS NULL THEN answer := answer || jsonb_build_array(jsonb_build_object('id',e.id)); CONTINUE; END IF;
    meta := r->'result_meta';
    IF e.status='cancelled' THEN answer := answer || jsonb_build_array(jsonb_build_object('id',e.id,'conflict','event cancelled')); CONTINUE; END IF;
    IF meta IS NULL OR meta->>'period' IS NULL OR meta->>'series' IS NULL OR meta->>'unit' IS NULL OR meta->>'adjustment' IS NULL

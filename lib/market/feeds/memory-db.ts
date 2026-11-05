@@ -35,7 +35,7 @@ export function memoryFeedsDb(seed: { events?: EventRow[]; lastRuns?: Record<str
         if (found.length !== 1) throw new Error("calendar conflict: ambiguous cancellation UID");
         const e = found[0];
         if (!newerSchedule(r.schedule_meta, e.schedule_meta || {})) throw new Error("calendar conflict: schedule freshness unproven");
-        events.set(e.id, { ...e, schedule_meta: { ...e.schedule_meta, ...r.schedule_meta }, status: "cancelled" });
+        events.set(e.id, { ...e, schedule_meta: { ...e.schedule_meta, ...r.schedule_meta, ...(e.status !== "cancelled" ? { prior_status: e.status } : {}) }, status: "cancelled" });
       }
     },
     async upsertEvents(rows) {
@@ -62,8 +62,9 @@ export function memoryFeedsDb(seed: { events?: EventRow[]; lastRuns?: Record<str
         const meta = r.schedule_meta || {};
         const changed = e.starts_at !== r.starts_at || e.title !== r.title || (meta.cancelled !== undefined && (e.status === "cancelled") !== meta.cancelled);
         if ((changed && !newerSchedule(meta, e.schedule_meta || {})) || newerSchedule(e.schedule_meta || {}, meta)) { errors.push("schedule freshness unproven"); continue; }
-        const activeStatus = e.status === "cancelled" ? e.actual != null || e.result_meta ? "released" : "scheduled" : e.status;
-        events.set(e.id, { ...e, ...r, id: e.id, reference_period: e.reference_period || r.reference_period, schedule_meta: { ...e.schedule_meta, ...meta }, status: (meta.cancelled ?? (e.status === "cancelled")) ? "cancelled" : activeStatus });
+        const activeStatus = e.status === "cancelled" ? e.actual != null || e.schedule_meta?.prior_status === "released" ? "released" : "scheduled" : e.status;
+        const cancelled = meta.cancelled ?? (e.status === "cancelled");
+        events.set(e.id, { ...e, ...r, id: e.id, reference_period: e.reference_period || r.reference_period, schedule_meta: { ...e.schedule_meta, ...meta, ...(cancelled && e.status !== "cancelled" ? { prior_status: e.status } : {}) }, status: cancelled ? "cancelled" : activeStatus });
       }
       if (errors.length) throw new Error(`calendar conflict: ${Array.from(new Set(errors)).join("; ")}`);
     },
@@ -72,6 +73,7 @@ export function memoryFeedsDb(seed: { events?: EventRow[]; lastRuns?: Record<str
       for (const r of rows) {
         const e = events.get(r.id);
         if (!e) continue;
+        if (r.actual === null) continue;
         const meta = r.result_meta;
         if (e.status === "cancelled" || !meta || (e.reference_period && e.reference_period !== meta.period)) { errors.push("result provenance missing or mismatched"); continue; }
         const same = (m: typeof meta) => JSON.stringify([m.period, m.series, m.unit, m.adjustment]);

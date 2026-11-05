@@ -37,6 +37,14 @@ describe("stable calendar identity and version ordering", () => {
     await db.upsertEvents(beaSchedule(ics(undefined, 3), now));
     expect(events.get(base().id)).toMatchObject({ status: "released", actual: "+3.0%" });
   });
+  it("restores the legacy publication state even when that legacy release had no numeric actual", async () => {
+    const { db,events }=memoryFeedsDb({events:[base()]});
+    events.set(base().id,{...events.get(base().id)!,status:"released"});
+    await db.upsertEvents(beaSchedule(ics(undefined,2,"CANCELLED"),now));
+    await db.upsertEvents(beaSchedule(ics(undefined,3),now));
+    expect(events.get(base().id)?.status).toBe("released");
+    expect(events.get(base().id)?.actual).toBeUndefined();
+  });
   it("a cancellation notice can omit DTSTART; omission from a feed never cancels", () => {
     expect(icsCancellations("BEGIN:VEVENT\nUID:abc\nSTATUS:CANCELLED\nSEQUENCE:3\nEND:VEVENT")).toEqual([{ uid: "abc", meta: { cancelled: true, sequence: 3 } }]);
     expect(icsCancellations("BEGIN:VCALENDAR\nEND:VCALENDAR")).toEqual([]);
@@ -72,6 +80,9 @@ describe("stable calendar identity and version ordering", () => {
 describe("safe revisions and period arithmetic", () => {
   it("accepts a newer confirmed revision and rejects an older, unversioned or unit-mismatched response", async () => {
     const { db, events } = memoryFeedsDb({ events: [base()] });
+    await db.setPrevious([{id:base().id,previous:"+1.0%"}]);
+    await db.saveResults([{...result(base().id,null,"2026-11-10T13:30Z"),previous:"+9.0%"}]);
+    expect(events.get(base().id)).toMatchObject({status:"scheduled",previous:"+1.0%"});
     await db.saveResults([result(base().id, "+3.0%", "2026-11-10T13:30Z")]);
     await db.saveResults([result(base().id, "+3.1%", "2026-11-11T13:30Z")]);
     for (const r of [result(base().id, "+3.0%", "2026-11-10T13:30Z"), result(base().id, "+3.2%"), { ...result(base().id, "+3.2%", "2026-11-12T13:30Z"), result_meta: { ...result(base().id, null).result_meta!, unit: "USD" } }]) await expect(db.saveResults([r])).rejects.toThrow("calendar conflict");

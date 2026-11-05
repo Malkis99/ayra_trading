@@ -31,6 +31,8 @@ export interface ScheduleMeta {
   sequence?: number;
   modified?: string;
   cancelled?: boolean;
+  /** Internal restoration state, never inferred from an upstream missing number. */
+  prior_status?: "scheduled" | "released";
 }
 
 export interface ResultMeta {

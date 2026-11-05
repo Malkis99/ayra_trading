@@ -11,6 +11,9 @@ BEGIN
  row_json := '{"id":"bea:case:2026-11-10","source":"bea","country":"us","kind":"release","code":"us_gdp","title":"GDP Q3 2026 Second Estimate","importance":3,"starts_at":"2026-11-10T13:30:00Z","time_tbd":false,"url":"https://www.bea.gov/","identity_key":"case-stable","source_uid":"case-uid","reference_period":"2026-Q3","release_stage":"second","schedule_meta":{"sequence":1,"cancelled":false}}';
  PERFORM public.market_events_apply(jsonb_build_array(row_json), 'schedule');
  PERFORM public.market_events_apply(jsonb_build_array(row_json), 'schedule');
+ PERFORM public.market_events_apply('[{"id":"bea:case:2026-11-10","previous":"1.0"}]', 'previous');
+ PERFORM public.market_events_apply('[{"id":"bea:case:2026-11-10","actual":null,"previous":"9.0","result_meta":{"period":"2026-Q3","series":"us_gdp","unit":"percent","adjustment":"SA"}}]', 'result');
+ IF (SELECT previous FROM public.market_events WHERE identity_key='case-stable') <> '1.0' OR (SELECT status FROM public.market_events WHERE identity_key='case-stable') <> 'scheduled' THEN RAISE EXCEPTION 'partial pre-release response modified state'; END IF;
  IF (SELECT count(*) FROM public.market_events WHERE identity_key='case-stable') <> 1 THEN RAISE EXCEPTION 'repeat created duplicate'; END IF;
  row_json := jsonb_set(jsonb_set(row_json,'{id}','"bea:case:2026-11-11"'),'{starts_at}','"2026-11-11T14:00:00Z"');
  row_json := jsonb_set(row_json,'{schedule_meta,sequence}','2');
@@ -44,6 +47,14 @@ BEGIN
  row_json := row_json || '{"identity_key":"case-advance","source_uid":"advance-uid","release_stage":"advance","title":"GDP Q3 Advance Estimate"}';
  PERFORM public.market_events_apply(jsonb_build_array(row_json), 'schedule');
  IF (SELECT count(*) FROM public.market_events WHERE identity_key IN ('case-stable','case-advance')) <> 2 THEN RAISE EXCEPTION 'stages merged'; END IF;
+ -- Legacy released-without-number must be restored as released, not silently reset to scheduled.
+ row_json := row_json || '{"id":"bea:no-number","identity_key":"case-no-number","source_uid":"no-number","title":"Legacy no number","reference_period":"2026-Q2","schedule_meta":{"sequence":1,"cancelled":false}}';
+ PERFORM public.market_events_apply(jsonb_build_array(row_json),'schedule');
+ UPDATE public.market_events SET status='released' WHERE identity_key='case-no-number';
+ PERFORM public.market_events_apply('[{"source":"bea","source_uid":"no-number","schedule_meta":{"sequence":2,"cancelled":true}}]','cancel');
+ row_json := jsonb_set(row_json,'{schedule_meta,sequence}','3');
+ PERFORM public.market_events_apply(jsonb_build_array(row_json),'schedule');
+ IF (SELECT status FROM public.market_events WHERE identity_key='case-no-number') <> 'released' THEN RAISE EXCEPTION 'legacy publication state lost'; END IF;
  -- Ambiguous legacy duplicates are retained, unclaimed and unchanged.
  row_json := row_json || '{"id":"bea:dup-a","code":"us_pce","title":"Ambiguous","identity_key":"ambiguous-new","release_stage":"regular","reference_period":"2026-09"}';
  r := public.market_events_apply(jsonb_build_array(row_json), 'schedule');
