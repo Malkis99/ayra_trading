@@ -111,7 +111,10 @@ test("signed-in top bar: coins, then the bell, then the plan chip; avatar last o
   await expect(plan).toBeInViewport();
   const avatar = header.getByRole("button", { name: "Профиль" });
   await expect(avatar).toBeInViewport();
-  const [bx2, px2, ax] = await Promise.all([bell, plan, avatar].map(async (l) => (await l.boundingBox())!.x));
+  const mobileBell = header.getByRole("link", { name: "Уведомления", exact: true });
+  await expect(mobileBell).toBeInViewport();
+  await expect(mobileBell).toHaveAttribute("href", /^\/notifications\?from=/);
+  const [bx2, px2, ax] = await Promise.all([mobileBell, plan, avatar].map(async (l) => (await l.boundingBox())!.x));
   expect(bx2).toBeLessThan(px2);
   expect(px2).toBeLessThan(ax);
   const overflow = await header.evaluate((el) => el.scrollWidth - el.clientWidth);

@@ -2,7 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
-import { BookOpen, ChevronRight, Cloud, Monitor, ShieldCheck, User, UserCog, type LucideIcon } from "lucide-react";
+import { Bell, BookOpen, ChevronRight, Cloud, Monitor, ShieldCheck, User, UserCog, type LucideIcon } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useAuth } from "@/lib/auth/auth-context";
 import { useGame } from "@/lib/game-context";
@@ -16,6 +16,7 @@ export const SECTION_ICONS: Record<SettingsSection, LucideIcon> = {
   journal: BookOpen,
   cloud: Cloud,
   account: UserCog,
+  notifications: Bell,
   interface: Monitor,
   privacy: ShieldCheck,
 };
@@ -81,6 +82,7 @@ export function SettingsSectionList() {
           .filter(Boolean)
           .join(" · "),
     account: !user ? t.status.signedOut : user.hasPassword ? t.status.passwordSet : t.status.passwordNotSet,
+    notifications: t.notifications.description,
     interface: lang === "ru" ? dict.settings.languageRu : dict.settings.languageEn,
     privacy: gameState.aiConsent ? t.status.aiOn : t.status.aiOff,
   };

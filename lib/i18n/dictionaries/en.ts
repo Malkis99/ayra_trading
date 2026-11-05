@@ -1,6 +1,35 @@
 import { Dictionary } from "../types";
 
 export const en: Dictionary = {
+  notifications: {
+    title: "Notifications", close: "Close", back: "Back", settings: "Notification settings", all: "All", unread: "Unread",
+    read: "Mark as read", readAll: "Mark all as read", filterType: "Notification type", allTypes: "All types", more: "Load more",
+    empty: "No notifications yet", loading: "Loading…", retry: "Retry",
+    setup: "Notifications are unavailable right now. Please try again later.",
+    error: "Could not load or save notifications. Check your connection and try again.",
+    signIn: "Sign in to manage notifications.", generic: "AYRA notification", open: "Open", actual: "Actual", previous: "Previous", source: "Source",
+    retention: "Notification history covers 90 days.",
+    disclaimer: "Not financial advice",
+    disableAll: "All notifications", securityException: "Important security notifications stay on.",
+    quiet: "Quiet hours", quietHelp: "Notifications stay in your inbox without being sent to your devices or other channels.",
+    quietStart: "From", quietEnd: "To", timezone: "Time zone", importance: "Event importance",
+    importances: { 1: "All levels", 2: "Medium and high", 3: "High only" },
+    instruments: "Instruments", instrumentHelp: "No selection means all instruments. General economic events are always shown.",
+    matrix: "Notification channels", eventType: "Events",
+    groups: { market: "Market", price: "Price", product: "Progress", security: "Security", community: "Community" },
+    soon: "Coming soon", notConnected: "Not connected",
+    channels: { site: "On site", web_push: "Web Push", telegram: "Telegram", email: "Email", mobile_push: "Mobile notifications" },
+    types: {
+      market_actual: "Data and rates", market_revision: "Data revisions",
+      market_reminder_15: "15 minutes before", market_reminder_5: "5 minutes before", market_statement: "Statements",
+      session_open: "Session start", session_close: "Session end", price_trigger: "Price alerts",
+      quest: "Quests", streak: "Day streak", daily_reward: "Daily reward", journal: "Journal", weekly_review: "Weekly review",
+      security_new_device: "New device", security_suspicious: "Suspicious activity",
+      sync_incident: "Sync incident", community: "Community",
+    },
+    invalid: "Check the time zone and times. Enabled quiet hours must have different start and end times.",
+    save: "Save", saving: "Saving…", saved: "Saved to your account", unsaved: "Unsaved changes",
+  },
   brand: {
     name: "AYRA Trading",
     slogan: "Trade · Train · Evolve",
@@ -2825,6 +2854,7 @@ export const en: Dictionary = {
       journal: { title: "Journal", description: "Unit, main account, session, time zone" },
       cloud: { title: "Cloud and data", description: "Sync, data on this device, screenshots" },
       account: { title: "Account and security", description: "Email, password, sign out" },
+      notifications: { title: "Notifications", description: "Channels and preferences" },
       interface: { title: "Interface", description: "Language" },
       privacy: { title: "Privacy", description: "AI analysis, terms and policy" },
       status: {

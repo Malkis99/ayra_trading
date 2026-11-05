@@ -1,5 +1,9 @@
 # AYRA Trading — Supabase Instructions & Migration Setup
 
+## Уведомления: миграция 0011
+
+`migrations/0011_notifications.sql` подготовлена для ручного применения владельцем, не запускается приложением. Центр, настройки и RLS; без источников событий, cron и внешней отправки. Номер нужно сверить с ручным журналом перед применением. Пошаговая инструкция и ожидаемые результаты `checks/0011_status.sql`: [notifications-roadmap](../docs/notifications-roadmap.md#применение-миграции-0011-владельцем). SQL тест `tests/notifications_rls.sql` — только тестовая среда/PGlite, не production Auth.
+
 > **ВНИМАНИЕ / WARNING:** Внимательно проверьте SQL перед запуском в рабочей или тестовой базе данных Supabase!
 
 ## Порядок применения миграций (Migration Order)
