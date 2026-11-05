@@ -27,6 +27,11 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+function TestCenter() {
+  const trigger = React.useRef<HTMLButtonElement>(null);
+  return <><button ref={trigger}>Bell</button><NotificationCenter anchor={trigger} trigger={trigger} unreadCount={1} onClose={() => undefined} /></>;
+}
+
 describe("notification UI boundaries", () => {
   it("never saves defaults after initial cloud read failed", async () => {
     mock.settings.mockRejectedValue(new Error("offline"));
@@ -75,13 +80,25 @@ describe("notification UI boundaries", () => {
     expect(mock.save).toHaveBeenCalledWith("a", { ...stored, all_disabled: false }, []);
   });
   it("opening the center does not mark anything read", async () => {
-    render(<NotificationCenter onClose={() => undefined} />);
+    render(<TestCenter />);
     await screen.findByText(ru.notifications.empty);
     expect(mock.markRead).not.toHaveBeenCalled();
   });
+  it("renders the mobile page without a dialog and only leaves through Back", async () => {
+    const goBack = vi.fn();
+    render(<NotificationCenter presentation="page" unreadCount={0} onClose={goBack} />);
+    await screen.findByText(ru.notifications.empty);
+    expect(screen.getByRole("heading", { level: 1, name: "Уведомления" })).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.pointerDown(document.body);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(goBack).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    expect(goBack).toHaveBeenCalledTimes(1);
+  });
   it("reports missing migration without a fake empty-success state", async () => {
     mock.list.mockRejectedValue(new NotificationRepositoryError("setup"));
-    render(<NotificationCenter onClose={() => undefined} />);
+    render(<TestCenter />);
     await screen.findByText(ru.notifications.setup);
     expect(screen.queryByText(ru.notifications.empty)).toBeNull();
   });

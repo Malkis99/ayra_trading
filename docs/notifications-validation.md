@@ -4,6 +4,56 @@
 
 ## Успешные проверки
 
+### Одобренный центр: desktop Popover и мобильная страница
+
+5 ноября владелец одобрил новый интерфейс. Desktop: существующий Popover шириной 400 px под колокольчиком, без затемнения, прокрутка списка, Select AYRA. Mobile: обычная страница `/notifications`, «Назад» и browser Back. Список/фильтры/явное прочтение общие; backend, RLS, миграции и доставка не менялись. Неактивные внешние возможности остаются неактивными.
+
+Финально локально: **730/730 Vitest PASS**, TypeScript PASS, lint PASS (прежние предупреждения), расширенный browser **1/1 PASS** на dev-сервере. Проверены 1440/360, RU/EN, оба способа возврата со страницы, direct link, Esc/клик снаружи/Tab для Popover, вложенный фильтр с клавиатуры, счётчик, прокрутка, пагинация и явное прочтение. Production build локально по-прежнему ограничен Windows EPERM; Linux CI на новом коммите проверяется отдельно.
+
+Скриншоты содержат исключительно тестовые записи:
+
+- [Desktop](screens/notifications/notifications-popover-desktop.png)
+- [Пустой desktop](screens/notifications/notifications-popover-empty.png)
+- [Прочитанные и непрочитанные](screens/notifications/notifications-popover-test-list.png)
+- [Мобильная страница](screens/notifications/notifications-mobile-page.png)
+- [Пустая мобильная страница](screens/notifications/notifications-mobile-empty.png)
+
+### Ошибки при доработке центра
+
+Сценарий: `e2e-supabase/notifications.spec.ts > notifications: inbox, explicit read, pagination, filters, cloud settings, RU/EN and responsive layouts`.
+
+- Замер на анимации: `Error: expect(received).toBeLessThanOrEqual(expected)`, `Expected: <= 2`, `Received: 3.3231201171875`. Геометрия проверяется с reduced motion, допуск не ослаблен.
+- Фокус: `Error: expect(locator).toBeFocused() failed`, locator `getByTestId('notification-center').getByRole('button', { name: 'Все', exact: true })`, `Expected: focused`, `Received: inactive`. Исправлено ожидание видимости элемента перед фокусом.
+- Вложенный Esc: `Error: expect(locator).toBeVisible() failed`, locator `getByTestId('notification-center')`, `Expected: visible`, `Error: element(s) not found`. Исправлена граница Select portal и порядок Esc.
+- Выход по Tab: `Error: expect(locator).toHaveCount(expected) failed`, locator `getByTestId('notification-center')`, `Expected: 0`, `Received: 1`. На границе Popover окно закрывается с возвратом фокуса.
+- После добавления страницы: `Error: expect(locator).toContainText(expected) failed`, locator `getByTestId('notification-settings').getByRole('alert')`, `Expected substring: "unavailable right now"`, `Timeout: 5000ms`, `Error: element(s) not found`. Тест ожидал reload раньше завершения возврата; добавлено ожидание URL настроек.
+
+Повторные проверки прошли. Тестовый HEAD fixture дополнен `access-control-expose-headers: content-range`, как в реальном Supabase; логика счётчика не менялась.
+
+### Предыдущий CI до публикации одобренного центра
+
+[Run 41903769914](https://github.com/Malkis99/ayra_trading/actions/runs/41903769914), коммит `c7ca6b2`: `check` success, `e2e` failure. Mock-auth suite прошёл; в fake-Supabase suite 104 passed / 2 failed. Эти сценарии находятся вне центра уведомлений; их код не менялся, связь с PR не объявляется исключённой без повторной проверки.
+
+1. `e2e-supabase/guest-journal-transfer.spec.ts:48:7 > Guest journal into the account (variant A) > after onboarding: «Move the guest journal» → trades in the cloud, badge «saved»; level, XP and Coins stay with the guest`:
+
+   `Error: expect(received).toBe(expected) // Object.is equality`
+
+   `Expected: 2`
+
+   `Received: 0`
+
+   `Timeout 20000ms exceeded while waiting on the predicate`
+
+2. `e2e-supabase/journal-day-in-life.spec.ts:125:7 > Cloud journal: a day in the life (T7b-4f) > part 1: first upload → empty phone → create/edit/delete → offline → both conflict choices > 12: offline on B — badge «no network», 1 waiting; back online → sent, on A`:
+
+   `Error: expect(received).toEqual(expected) // deep equality`
+
+   Expected: `["NAS100", "USDJPY"]`; received: `["GBPUSDUSDJPY", "NAS100"]`.
+
+   `Timeout 30000ms exceeded while waiting on the predicate`
+
+Журнал и его тесты в этой доработке не изменялись. Результат нового CI фиксируется в описании PR.
+
 ### Доработка интерфейса по решению владельца 5 ноября
 
 Технические тексты убраны из UI; оставлены в roadmap/PR. Названия сокращены, «Все уведомления» инвертирует только представление `all_disabled`, quiet/filter/retention правила не меняются. Вместо карточек — таблица четырёх каналов с неактивными переключателями и кратким «Скоро»; мобильный канал остаётся в архитектуре/roadmap. Общие компоненты, другие страницы, Supabase/RLS/доставка не изменены.

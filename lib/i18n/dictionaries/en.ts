@@ -2,7 +2,7 @@ import { Dictionary } from "../types";
 
 export const en: Dictionary = {
   notifications: {
-    title: "Notifications", close: "Close", settings: "Notification settings", all: "All", unread: "Unread",
+    title: "Notifications", close: "Close", back: "Back", settings: "Notification settings", all: "All", unread: "Unread",
     read: "Mark as read", readAll: "Mark all as read", filterType: "Notification type", allTypes: "All types", more: "Load more",
     empty: "No notifications yet", loading: "Loading…", retry: "Retry",
     setup: "Notifications are unavailable right now. Please try again later.",

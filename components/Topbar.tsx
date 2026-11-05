@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Logo } from "@/components/brand/Logo";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Search, Plus, Bell, LogIn } from "lucide-react";
 import { NotificationCenter } from "@/components/notifications/NotificationCenter";
 import { useUnreadCount } from "@/lib/notifications/use-notifications";
@@ -15,6 +16,7 @@ import { SyncBadge } from "@/components/SyncBadge";
 import { FRAMES } from "@/lib/items";
 
 export function Topbar() {
+  const pathname = usePathname();
   const {
     dict,
     focusMode,
@@ -29,7 +31,17 @@ export function Topbar() {
   const { gameState } = useGame();
   const { isPublicVisitor, authState, isConfigured, user } = useAuth();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const notificationTrigger = useRef<HTMLButtonElement>(null);
+  const notificationAnchor = useRef<HTMLSpanElement>(null);
+  const closeNotifications = useCallback(() => setNotificationsOpen(false), []);
   const unreadCount = useUnreadCount(user?.id);
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const desktop = window.matchMedia("(min-width: 768px)");
+    const closeOnPhone = () => { if (!desktop.matches) setNotificationsOpen(false); };
+    desktop.addEventListener("change", closeOnPhone);
+    return () => desktop.removeEventListener("change", closeOnPhone);
+  }, []);
   // Personal badges (coins, plan, notifications) exist only for a signed-in account.
   const isSignedIn = authState === "authenticated";
   const [isProfileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -91,17 +103,28 @@ export function Topbar() {
           {/* Cloud sync (only with sync on for this account): coins → cloud → bell → plan → avatar */}
           <SyncBadge />
 
+          <div className="relative flex-none">
+          <Link href={`/notifications?from=${encodeURIComponent(pathname || "/")}`} aria-label={dict.topbar.notifications}
+            aria-current={pathname === "/notifications" ? "page" : undefined} onClick={(event) => { if (pathname === "/notifications") event.preventDefault(); }}
+            className="relative block rounded-xl border border-line bg-s1 p-2 text-mu hover:text-tx focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi md:hidden">
+            <Bell size={16} aria-hidden="true" />
+            {unreadCount > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-pri px-1 text-[10px] text-white" aria-label={`${dict.notifications.unread}: ${unreadCount}`}>{unreadCount > 99 ? "99+" : unreadCount}</span>}
+          </Link>
+          <span ref={notificationAnchor} aria-hidden="true" className="pointer-events-none absolute bottom-0 right-0 h-0 w-[400px]" />
           <button
-            onClick={() => setNotificationsOpen(true)}
-            className="relative rounded-xl border border-line bg-s1 p-2 text-mu transition-colors hover:border-vi hover:text-tx focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
+            ref={notificationTrigger}
+            onClick={() => setNotificationsOpen((open) => !open)}
+            className="relative hidden rounded-xl border border-line bg-s1 p-2 text-mu transition-colors hover:border-vi hover:text-tx focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi md:block"
             aria-label={dict.topbar.notifications}
             aria-haspopup="dialog"
             aria-expanded={notificationsOpen}
+            aria-controls={notificationsOpen ? "notification-center-popover" : undefined}
           >
             <Bell size={16} />
             {unreadCount > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-pri px-1 text-[10px] text-white" aria-label={`${dict.notifications.unread}: ${unreadCount}`}>{unreadCount > 99 ? "99+" : unreadCount}</span>}
           </button>
-          {notificationsOpen && <NotificationCenter key={user?.id} onClose={() => setNotificationsOpen(false)} />}
+          {notificationsOpen && <NotificationCenter key={user?.id} anchor={notificationAnchor} trigger={notificationTrigger} unreadCount={unreadCount} onClose={closeNotifications} />}
+          </div>
 
           {/* Plan chip after the bell; on phones the avatar stays last */}
           <Link
