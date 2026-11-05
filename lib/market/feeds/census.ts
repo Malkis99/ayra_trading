@@ -3,10 +3,8 @@ import { CENSUS_RELEASES } from "./schedules-us";
 
 /**
  * Census figures from its official API, the Economic Indicators time series (https://api.census.gov/data/timeseries/eits,
- * public domain). Without a key Census allows 500 requests a day per address; the collector asks only around a
- * release. census.gov and its API refused every read from the developer's machine (Cloudflare «you have been
- * blocked», 2026-11-04), so the answer format below follows Census's documentation and is checked in the collector's
- * log after the first release: a missing row is reported as an error, never shown as a figure.
+ * public domain). Data queries now require a free server-side API key (official EITS guidance, revised May 2026).
+ * Successful live series validation is required before claiming coverage; documented fixtures are not live data.
  *
  * The answer is a table: the first row names the columns, e.g.
  *   [["cell_value","data_type_code","category_code","seasonally_adj","time","us"], ["0.4","MPCSM","44X72","yes","2026-10","1"], …]
@@ -32,7 +30,7 @@ const monthsBefore = (ym: string, n: number) => {
 /** The months from three before the reference month: enough for this month's change and the one before. */
 export function censusUrl(code: CensusCode, ref: string): string {
   const s = CENSUS_SERIES[code];
-  const q = new URLSearchParams({ get: "cell_value,data_type_code,category_code,seasonally_adj", time: `from ${monthsBefore(ref, 3)}`, for: "us:*" });
+  const q = new URLSearchParams({ get: "cell_value,data_type_code,category_code,seasonally_adj", time: `from ${monthsBefore(ref, 3)} to ${ref}`, for: "us:*" });
   return `${CENSUS_API}/${s.program}?${q.toString()}`;
 }
 
@@ -43,10 +41,10 @@ export function parseCensus(json: unknown, category: string): Map<string, Map<st
   const head = (json[0] as unknown[]).map(String);
   const col = (name: string) => head.indexOf(name);
   const [v, type, cat, sa, time] = ["cell_value", "data_type_code", "category_code", "seasonally_adj", "time"].map(col);
-  if ([v, type, cat, time].some((i) => i < 0)) return out;
+  if ([v, type, cat, sa, time].some((i) => i < 0)) return out;
   for (const row of json.slice(1) as unknown[][]) {
     if (!Array.isArray(row) || String(row[cat]) !== category) continue;
-    if (sa >= 0 && String(row[sa]).toLowerCase() !== "yes") continue;
+    if (String(row[sa]).toLowerCase() !== "yes" || !/^\d{4}-\d{2}$/.test(String(row[time]))) continue;
     const value = Number(String(row[v]).replace(/,/g, ""));
     if (!Number.isFinite(value) || String(row[v]).trim() === "") continue;
     const t = String(row[type]);
@@ -71,7 +69,7 @@ function figureOf(code: CensusCode, month: string, data: Map<string, Map<string,
   }
   const v = level?.get(month);
   if (v === undefined) return null;
-  return s.unit === "millions" ? `${(v / 1000).toFixed(2)}M` : `${Math.round(v)}K`;
+  return s.unit === "millions" ? `${(v / 1000).toFixed(3)}M` : `${v}K`;
 }
 
 /** This month's figure and the month before's, or null until the API has the reference month. */

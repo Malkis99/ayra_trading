@@ -140,7 +140,7 @@ describe("Census figures (Economic Indicators API, documented format)", () => {
   });
   it("housing starts in millions, new home sales in thousands (annual rate)", () => {
     const starts = [head, ["1312", "TOTAL", "STARTS", "yes", "2026-10", "1"], ["1,290", "TOTAL", "STARTS", "yes", "2026-09", "1"]];
-    expect(censusResult("census:us_housing_starts:2026-11-18", parseCensus(starts, "STARTS"))).toMatchObject({ actual: "1.31M", previous: "1.29M" });
+    expect(censusResult("census:us_housing_starts:2026-11-18", parseCensus(starts, "STARTS"))).toMatchObject({ actual: "1.312M", previous: "1.290M" });
     const sold = [head, ["693", "TOTAL", "SOLD", "yes", "2026-10", "1"]];
     expect(censusResult("census:us_new_home_sales:2026-11-25", parseCensus(sold, "SOLD"))).toMatchObject({ actual: "693K", previous: null });
   });
@@ -151,7 +151,7 @@ describe("Census figures (Economic Indicators API, documented format)", () => {
   it("asks one program from three months before the reference month", () => {
     const u = new URL(censusUrl("us_retail_sales", "2026-10"));
     expect(u.pathname).toBe("/data/timeseries/eits/marts");
-    expect(u.searchParams.get("time")).toBe("from 2026-07");
+    expect(u.searchParams.get("time")).toBe("from 2026-07 to 2026-10");
   });
 });
 
@@ -248,8 +248,8 @@ describe("the collector asks EIA, Census and DOL only around their releases", ()
   it("Census refusing (403): the error is logged, the other sources go on", async () => {
     const { db } = memoryDb(allEvents);
     const { fetcher } = network({});
-    const out = await collectFeeds({ scope: "releases", now: Date.UTC(2026, 10, 17, 13, 45), fetch: fetcher, db });
-    expect(out.results.find((r) => r.source === "census-api")).toMatchObject({ ok: false, error: "HTTP 404 Census API us_retail_sales" });
+    const out = await collectFeeds({ scope: "releases", now: Date.UTC(2026, 10, 17, 13, 45), fetch: fetcher, db, censusKey: "TEST-CENSUS-KEY" });
+    expect(out.results.find((r) => r.source === "census-api")).toMatchObject({ ok: false, error: "Census API us_retail_sales: HTTP 404; request failed" });
     expect(out.results.find((r) => r.source === "bea-releases")).toBeDefined();
   });
 
@@ -257,7 +257,7 @@ describe("the collector asks EIA, Census and DOL only around their releases", ()
     const { db, events } = memoryDb(allEvents);
     const json = [head, ["0.4", "MPCSM", "44X72", "yes", "2026-10", "1"], ["-0.2", "MPCSM", "44X72", "yes", "2026-09", "1"]];
     const { fetcher } = network({ "https://api.census.gov/data/timeseries/eits/marts": JSON.stringify(json) });
-    await collectFeeds({ scope: "releases", now: Date.UTC(2026, 10, 17, 13, 45), fetch: fetcher, db });
+    await collectFeeds({ scope: "releases", now: Date.UTC(2026, 10, 17, 13, 45), fetch: fetcher, db, censusKey: "TEST-CENSUS-KEY" });
     expect(events.get("census:us_retail_sales:2026-11-17")).toMatchObject({ status: "released", actual: "+0.4%", previous: "−0.2%" });
   });
 });

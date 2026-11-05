@@ -8,7 +8,7 @@ import { sameSecret } from "@/lib/market/feeds/secret";
  * The Market feeds collector (docs/market-feeds-plan.md, section 4). Called on a schedule by Supabase (pg_cron +
  * pg_net) with `Authorization: Bearer <MARKET_FEEDS_SECRET>`; anyone else gets 401. Server-only variables:
  * SUPABASE_SERVICE_ROLE_KEY (writes the 0009 tables), MARKET_FEEDS_SECRET, optional BLS_API_KEY, EIA_API_KEY
- * (EIA's weekly figures; without it EIA events show without figures).
+ * (EIA's weekly figures), CENSUS_API_KEY (required for Census data queries). Missing keys leave figures empty.
  *   POST /api/market-feeds/collect?scope=news|releases|schedules|all&prune=1
  */
 export const dynamic = "force-dynamic";
@@ -40,6 +40,7 @@ async function handle(req: Request) {
     db: supabaseFeedsDb(serviceClient(url, serviceKey)),
     blsKey: cleanApiKey(process.env.BLS_API_KEY || "") || undefined,
     eiaKey: cleanApiKey(process.env.EIA_API_KEY || "") || undefined,
+    censusKey: cleanApiKey(process.env.CENSUS_API_KEY || "") || undefined,
   });
   const failed = results.filter((r) => !r.ok).length;
   return NextResponse.json({ scope, ok: failed === 0, failed, results, pruned }, { status: 200 });

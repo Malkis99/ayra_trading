@@ -5,6 +5,7 @@ import { BLS_API_V1, BLS_API_V2, BLS_FIGURE_CODES, blsLatest, blsRequestBody, bl
 import { EIA_SERIES, type EiaCode, eiaLatest, eiaResult, eiaUrl, parseEia } from "./eia";
 import { DOL_RELEASE_URL, claimsResult, parseClaims } from "./dol";
 import { CENSUS_SERIES, censusLatest, censusResult, censusUrl, parseCensus } from "./census";
+import { fetchCensus } from "./census-fetch";
 import { CENSUS_RELEASES } from "./schedules-us";
 import { pdfText } from "./pdf-text";
 import { EUROSTAT_ICS, EUROSTAT_SERIES, type EurostatCode, eurostatLatest, eurostatResult, eurostatSchedule, eurostatUrl, parseEurostat } from "./eurostat";
@@ -58,7 +59,7 @@ export interface RunLog {
   error: string | null;
 }
 
-export type Fetcher = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<{ ok: boolean; status: number; text(): Promise<string>; arrayBuffer?(): Promise<ArrayBuffer> }>;
+export type Fetcher = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string; redirect?: "manual"; signal?: AbortSignal }) => Promise<{ ok: boolean; status: number; headers?: { get(name: string): string | null }; text(): Promise<string>; arrayBuffer?(): Promise<ArrayBuffer> }>;
 
 /**
  * news — every news feed and the figures; releases — only BEA's releases and the BLS figures (the frequent run
@@ -76,6 +77,8 @@ export interface CollectOptions {
   blsKey?: string;
   /** Free EIA key (`EIA_API_KEY`): without it the EIA figures are not asked for, and the log says so. */
   eiaKey?: string;
+  /** Required by the official Census Data API; server-only, never logged. */
+  censusKey?: string;
 }
 
 export interface SourceResult {
@@ -335,7 +338,7 @@ async function censusFigures(o: CollectOptions, run: Run) {
       const ref = CENSUS_RELEASES[code]?.dates[day];
       if (!ref) continue;
       try {
-        const r = censusResult(e.id, parseCensus(await json(o, censusUrl(code, ref), `Census API ${code}`), CENSUS_SERIES[code].category));
+        const r = censusResult(e.id, parseCensus(await fetchCensus(o.fetch, censusUrl(code, ref), o.censusKey, code), CENSUS_SERIES[code].category));
         if (r) out.push(r);
         else missing.push(`${code} ${ref}`);
       } catch (err) {
@@ -430,7 +433,7 @@ async function previousValues(o: CollectOptions, run: Run) {
     }
     for (const code of missing(Object.keys(CENSUS_RELEASES)) as (keyof typeof CENSUS_RELEASES)[]) {
       const ref = CENSUS_RELEASES[code].dates[next.get(code)!.id.split(":")[2]];
-      if (ref) await tryAsk("Census", async () => setOne(latest, code, censusLatest(code, ref, parseCensus(await json(o, censusUrl(code, ref), `Census API ${code}`), CENSUS_SERIES[code].category))));
+      if (ref) await tryAsk("Census", async () => setOne(latest, code, censusLatest(code, ref, parseCensus(await fetchCensus(o.fetch, censusUrl(code, ref), o.censusKey, code), CENSUS_SERIES[code].category))));
     }
     if (missing(["us_jobless_claims"]).length) await tryAsk("DOL", async () => setOne(latest, "us_jobless_claims", (await dolRelease(o)).actual));
 
