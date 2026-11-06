@@ -42,7 +42,7 @@ Error: EPERM: operation not permitted, mkdir 'C:\Users\malki\Documents\ayra_trad
   Добавлен тип результата PGlite query, без `any`. Повтор PASS.
 - `npx vitest run lib/market/feeds/cpi.test.ts`,
   `CPI dated BLS release > reads four explicitly published changes, their period and release vintage from the real archive`:
-  `AssertionError: expected { actual: '3.7%', previous: '3.4%' } to deeply equal { actual: '3.7%', previous: null }`.
+  Различие из вывода Vitest: `- "previous": null`, `+ "previous": "3.4%"` при `actual: "3.7%"`.
   Ожидание обновлено после добавления строгого чтения явно опубликованного previous г/г.
 - `npx vitest run lib/market/feeds/cpi.test.ts lib/market/feeds/cpi-db.test.ts`,
   `CPI dated BLS release > uses only a proven adjacent release for missing annual previous, never an unversioned legacy figure`:
@@ -52,3 +52,18 @@ Error: EPERM: operation not permitted, mkdir 'C:\Users\malki\Documents\ayra_trad
 
 Полные unit и миграционные тесты, TypeScript, lint, build и browser suites запускаются перед завершением.
 Lint предупреждения в login/journal и React act warnings существующих unit не исправляются в этом PR.
+
+## Browser: связанные ожидания названия CPI
+
+Первый полный `npx playwright test -c playwright.supabase.config.ts` выявил три старых ожидания:
+`Market — «Today important» and official news > 1440: Overview — the nearest event with a countdown; today's important items by time; trust mark, source, status`,
+тот же тест для `360`, и
+`«Today important» is on the Overview only (owner 2026-11-04): the Calendar opens on the world calendar without it`.
+Во всех трёх:
+```text
+Error: expect(locator).toHaveText(expected) failed
+Expected: "Индекс потребительских цен (CPI)"
+Received: "CPI, м/м"
+Timeout:  5000ms
+```
+Обновлены только связанные с CPI текстовые ожидания теста, без изменения Overview/новостей приложения.

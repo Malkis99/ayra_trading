@@ -51,7 +51,7 @@ test.describe("Market — «Today important» and official news", () => {
     test(`${width}: Overview — the nearest event with a countdown; today's important items by time; trust mark, source, status`, async ({ browser }) => {
       const page = await open(browser, width, "/market");
       const block = el(page, "today-important");
-      await expect(block.getByTestId("today-next-title")).toHaveText("Индекс потребительских цен (CPI)");
+      await expect(block.getByTestId("today-next-title")).toHaveText("CPI, м/м");
       await expect(block.getByTestId("today-next-time")).toHaveText("21:00"); // 17:00 UTC in Tbilisi
       await expect(block.getByTestId("today-next-countdown")).toContainText("через 5 ч");
       await expect(block.getByTestId("today-zone")).toContainText("Грузия");
@@ -60,7 +60,7 @@ test.describe("Market — «Today important» and official news", () => {
       await expect(titles).toHaveCount(3);
       await expect(titles.nth(0)).toHaveText("Jefferson, The U.S. Economy and Monetary Policy");
       await expect(titles.nth(1)).toHaveText("Adjusting imports of steel into the United States");
-      await expect(titles.nth(2)).toContainText("Индекс потребительских цен (CPI)");
+      await expect(titles.nth(2)).toContainText("CPI, м/м");
       await expect(block.getByTestId("today-item-time").nth(1)).toHaveText("14:00");
       await expect(block.getByTestId("today-trust").first()).toHaveText("Официальный");
       await expect(block.getByTestId("today-item-status").nth(2)).toHaveText("Ожидается");
@@ -122,7 +122,7 @@ test.describe("Market — «Today important» and official news", () => {
     await expect(el(page, "market-calendar")).toHaveAttribute("data-view", "world");
     await expect(el(page, "today-important")).toHaveCount(0);
     await page.goto("/market");
-    await expect(el(page, "today-important").getByTestId("today-next-title")).toHaveText("Индекс потребительских цен (CPI)");
+    await expect(el(page, "today-important").getByTestId("today-next-title")).toHaveText("CPI, м/м");
   });
 
   for (const width of [1440, 360]) {
