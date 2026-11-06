@@ -34,6 +34,7 @@ async function accountWithCloud(browser: Browser, request: APIRequestContext, ta
   await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${q(email)}&on=1`);
   await A.page.goto("/journal");
   await expect.poll(async () => (await cloudProfile(request, email)).timezone, { timeout: 20000 }).toBe("Asia/Tbilisi");
+  await expect.poll(() => A.page.evaluate((id) => JSON.parse(localStorage.getItem(`ayra:${id}:ayra_locale_sync`) || "{}").synced, userId)).toBe("ru");
   return { A, email };
 }
 
@@ -44,9 +45,18 @@ test.describe("Language and sessions settings follow the account", () => {
   test("the language chosen on the laptop comes to the phone; changed on the phone → back on the laptop", async ({ browser, request }) => {
     const { A, email } = await accountWithCloud(browser, request, "Lang");
     await A.page.goto("/settings/interface");
+    const userId = (await cloudProfile(request, email)).id;
+    // Wait for the completed initial profile exchange, not just the journal's parallel upload.
+    // This removes the race that used to let an unrelated exchange save the first choice by accident.
+    await expect.poll(() => A.page.evaluate((id) => {
+      const state = JSON.parse(localStorage.getItem(`ayra:${id}:ayra_locale_sync`) || "null");
+      return state?.synced;
+    }, userId)).toBe("ru");
     await A.page.getByRole("button", { name: "English" }).click();
     await expect(A.page.locator("html")).toHaveAttribute("lang", "en");
     await expect.poll(async () => (await cloudProfile(request, email)).locale, { timeout: 20000 }).toBe("en");
+    await A.page.reload();
+    await expect(A.page.locator("html")).toHaveAttribute("lang", "en");
 
     // the phone: never chose a language → takes the account's
     const B = await device(browser, 360);
@@ -61,6 +71,11 @@ test.describe("Language and sessions settings follow the account", () => {
     await expect.poll(async () => (await cloudProfile(request, email)).locale, { timeout: 20000 }).toBe("ru");
     await A.page.goto("/journal");
     await expect(A.page.locator("html")).toHaveAttribute("lang", "ru", { timeout: 20000 });
+    // A real second sign-in on the same device keeps the account language.
+    await A.ctx.clearCookies();
+    await signIn(A.page, email);
+    await A.page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 10000 });
+    await expect(A.page.locator("html")).toHaveAttribute("lang", "ru");
     await A.ctx.close();
     await B.ctx.close();
   });
@@ -109,5 +124,84 @@ test.describe("Language and sessions settings follow the account", () => {
     await expect(B.page.getByTestId("market-news-instrument")).toContainText("Золото", { timeout: 20000 });
     await A.ctx.close();
     await B.ctx.close();
+  });
+});
+
+// Locale regressions deliberately wait for the initial profile baseline before choosing a language.
+test.describe("Locale sync request ordering", () => {
+  test.setTimeout(150_000);
+  test.use({ reducedMotion: "reduce" });
+
+  test("manual language stays local through reload until explicit Synchronise", async ({ browser, request }) => {
+    const { A, email } = await accountWithCloud(browser, request, "LangManual");
+    const userId = (await cloudProfile(request, email)).id;
+    await A.page.goto("/settings/cloud");
+    await A.page.getByTestId("cloud-sync-mode").getByRole("radio", { name: "Вручную" }).click();
+    await A.page.goto("/settings/interface");
+    await A.page.getByRole("button", { name: "English" }).click();
+    await expect.poll(() => A.page.evaluate((id) => JSON.parse(localStorage.getItem(`ayra:${id}:ayra_locale_sync`) || "{}").pending, userId)).toBe("en");
+    await A.page.reload();
+    await expect(A.page.locator("html")).toHaveAttribute("lang", "en");
+    expect((await cloudProfile(request, email)).locale).toBe("ru");
+    await A.page.goto("/settings/cloud");
+    await A.page.getByTestId("cloud-sync-now").click();
+    await expect.poll(async () => (await cloudProfile(request, email)).locale, { timeout: 20000 }).toBe("en");
+    await A.ctx.close();
+  });
+
+  test("manual failed PATCH keeps local EN pending; explicit retry saves it", async ({ browser, request }) => {
+    const { A, email } = await accountWithCloud(browser, request, "LangError");
+    const userId = (await cloudProfile(request, email)).id;
+    await A.page.goto("/settings/cloud");
+    await A.page.getByTestId("cloud-sync-mode").getByRole("radio", { name: "Вручную" }).click();
+    await A.page.goto("/settings/interface");
+    let failures = 0;
+    const failLocale = async (route: import("@playwright/test").Route) => {
+      if (route.request().method() === "PATCH" && route.request().postDataJSON()?.locale) {
+        failures++;
+        await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ message: "test network failure" }) });
+      } else await route.continue();
+    };
+    await A.page.route("**/rest/v1/profiles?**", failLocale);
+    await A.page.getByRole("button", { name: "English" }).click();
+    expect(failures).toBe(0);
+    await A.page.goto("/settings/cloud");
+    await A.page.getByTestId("cloud-sync-now").click();
+    await expect.poll(() => failures).toBe(1);
+    await expect(A.page.locator("html")).toHaveAttribute("lang", "en");
+    expect((await cloudProfile(request, email)).locale).toBe("ru");
+    expect(await A.page.evaluate((id) => JSON.parse(localStorage.getItem(`ayra:${id}:ayra_locale_sync`) || "{}"), userId)).toMatchObject({ pending: "en", dirty: true, synced: "ru" });
+    await A.page.unroute("**/rest/v1/profiles?**", failLocale);
+    await A.page.getByTestId("cloud-sync-now").click();
+    await expect.poll(async () => (await cloudProfile(request, email)).locale, { timeout: 20000 }).toBe("en");
+    await expect.poll(() => A.page.evaluate((id) => JSON.parse(localStorage.getItem(`ayra:${id}:ayra_locale_sync`) || "{}").dirty, userId)).toBe(false);
+    await A.ctx.close();
+  });
+
+  test("a delayed EN PATCH cannot erase a later RU choice", async ({ browser, request }) => {
+    const { A, email } = await accountWithCloud(browser, request, "LangRapid");
+    await A.page.goto("/settings/interface");
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const values: string[] = [];
+    await A.page.route("**/rest/v1/profiles?**", async (route) => {
+      const value = route.request().method() === "PATCH" ? route.request().postDataJSON()?.locale : undefined;
+      if (value) {
+        values.push(value);
+        if (values.length === 1) await gate;
+      }
+      await route.continue();
+    });
+    await A.page.getByRole("button", { name: "English" }).click();
+    await expect.poll(() => values).toEqual(["en"]);
+    await A.page.getByRole("button", { name: "Russian" }).click();
+    await expect(A.page.locator("html")).toHaveAttribute("lang", "ru");
+    release();
+    await expect.poll(() => values).toEqual(["en", "ru"]);
+    await expect.poll(async () => (await cloudProfile(request, email)).locale).toBe("ru");
+    await A.page.reload();
+    await expect(A.page.locator("html")).toHaveAttribute("lang", "ru");
+    expect(values).toEqual(["en", "ru"]);
+    await A.ctx.close();
   });
 });

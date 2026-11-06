@@ -74,12 +74,42 @@ function readSync(key: string, userId: string): TimezoneSyncState {
 }
 
 export const readTimezoneSync = (userId: string) => readSync(KEY, userId);
-export const readLocaleSync = (userId: string) => readSync(LOCALE_KEY, userId);
+export interface LocaleSyncState extends TimezoneSyncState {
+  pending?: "ru" | "en";
+  revision?: number;
+}
+
+export const LOCALE_CHOICE_EVENT = "ayra:locale-choice";
+
+export function readLocaleSync(userId: string): LocaleSyncState {
+  const state = readSync(LOCALE_KEY, userId);
+  try {
+    const raw = JSON.parse(AppStorage.getItem(LOCALE_KEY, userId) || "null");
+    return { ...state,
+      pending: raw?.pending === "ru" || raw?.pending === "en" ? raw.pending : undefined,
+      revision: Number.isSafeInteger(raw?.revision) && raw.revision >= 0 ? raw.revision : 0 };
+  } catch { return state; }
+}
+
+/** Persist intent even before the first cloud read, including a return to the baseline. */
+export function recordLocaleChoice(userId: string, value: "ru" | "en"): void {
+  const state = readLocaleSync(userId);
+  writeLocaleSync(userId, { ...state, pending: value, revision: (state.revision ?? 0) + 1,
+    dirty: true, changedAt: new Date().toISOString() });
+}
+
+/** Acknowledging an older request must not discard a newer local choice. */
+export function acknowledgeLocale(userId: string, value: string, revision: number): void {
+  const state = readLocaleSync(userId);
+  writeLocaleSync(userId, state.revision === revision
+    ? { synced: value, dirty: false, revision }
+    : { ...state, synced: value });
+}
 
 export function writeTimezoneSync(userId: string, state: TimezoneSyncState): void {
   AppStorage.setItem(KEY, JSON.stringify(state), userId);
 }
 
-export function writeLocaleSync(userId: string, state: TimezoneSyncState): void {
+export function writeLocaleSync(userId: string, state: LocaleSyncState): void {
   AppStorage.setItem(LOCALE_KEY, JSON.stringify(state), userId);
 }
