@@ -22,9 +22,31 @@ Error: page.goto: net::ERR_ABORTED at http://localhost:3001/settings/interface
 ```
 Строка теста 46 — переход в interface, до клика English. Это **не** воспроизведение исходного locale assertion.
 Сервер остановился на компиляции `/settings/[section]`; другой раздел ради этого PR не менялся.
-Чтение `ProfileTimezoneSync` выявляет возможный race: вызов exchange во время running пропускается,
-повтор после завершения не ставится в очередь. Это гипотеза, не доказанная причина прежнего CI падения.
-Сам locale/auth/journal-код не входит в diff CPI; исходная ошибка существовала до этой ветки.
+### Подтверждённая причина locale (06.11.2026)
+
+Полный локальный production e2e затем прошёл исходный locale-тест. Отдельная диагностическая копия
+того же сценария с записью profile requests тоже PASS. После добавления только двухсекундного ожидания
+завершения первоначального обмена перед первым выбором English ошибка воспроизведена:
+```text
+Error: expect(received).toBe(expected) // Object.is equality
+Expected: "en"
+Received: "ru"
+- Timeout 20000ms exceeded while waiting on the predicate
+```
+В браузере `ayra_lang=en`, HTML `lang=en`, в облаке locale остаётся `ru`; запрос PATCH locale после
+клика отсутствует. Состояние `ayra_locale_sync` отсутствует и до, и после клика. Код приложения не менялся.
+
+Причина в существующей цепочке `ProfileTimezoneSync` / `profile-timezone.ts`:
+1. Пока язык не выбран, `localLang=null`, облако содержит default ru, synced=null.
+   `decideLocale` возвращает none. `settle` сохраняет baseline только при truthy mine, поэтому baseline не записан.
+2. При первом выборе English эффект выставляет dirty только если synced!==null. Условие ложно.
+3. Автоматический эффект запускает exchange только при dirty; PATCH locale не отправляется.
+4. Если около клика успевает завершиться новый обмен журнала, он независимо вызывает exchange и отправляет en.
+   В PASS-трассе `lastSyncAt` меняется около клика; в FAIL-трассе остаётся прежним. Это объясняет timing-зависимость.
+
+Ранее предполагавшийся running-guard race не нужен для объяснения этого воспроизведения.
+Диагностические сценарии остались локальными scratch-файлами; locale/auth/journal не входят в diff.
+Исправление первой синхронизации языка требует отдельного разрешённого этапа, не относится к CPI.
 
 ## Сборка
 
@@ -67,3 +89,24 @@ Received: "CPI, м/м"
 Timeout:  5000ms
 ```
 Обновлены только связанные с CPI текстовые ожидания теста, без изменения Overview/новостей приложения.
+
+## Итог локальных проверок
+
+- TypeScript и lint PASS (существующие lint warnings сохранены).
+- Build PASS вне песочницы. Unit: 96 файлов, 774 теста PASS. Source tests: 130 PASS.
+- `node scripts/test-migrations.mjs`: A–L PASS, включая повторное применение0012 и старые дубли/значения.
+- Полный fake-Supabase прогон: 99 PASS / 9 FAIL. Три связанных CPI-ожидания исправлены выше.
+- Остальные шесть FAIL — отсутствующий локальный WebKit:
+  `Error: browserType.launch: Executable doesn't exist at C:\Users\malki\Documents\Codex\work\playwright\webkit-2359\Playwright.exe`.
+  Точные тесты:
+  - `Number of screenshots follows deletions on another device > webkit: deleted on the phone in the trade card → the laptop's list shows the live number`
+  - `Number of screenshots follows deletions on another device > webkit: deleted on the phone in the edit form, closed WITHOUT saving → the laptop's list shows the live number`
+  - `Number of screenshots follows deletions on another device > webkit: the trade still lists a screenshot deleted elsewhere (its own update waits, e.g. a conflict) → the list counts only live screenshots`
+  - `0005-C: old screenshots go up; the cloud folder is cleaned once a day > webkit: old screenshots upload with progress, «Stop» holds, «Continue» finishes`
+  - `0005-C: old screenshots go up; the cloud folder is cleaned once a day > webkit: daily cleanup removes only what the rules allow`
+  - `Screenshots in the cloud on WebKit (0005-B) > added on desktop Chromium → on a WebKit phone the preview and the full picture are drawn, also after a reload`.
+- Повтор связанных browser suites:
+  `npx playwright test -c playwright.supabase.config.ts market-own-calendar.spec.ts market-today-news.spec.ts`:
+  **28 PASS**, включая новые четыре CPI сценария RU/EN × 1440/360 и отсутствие overflow.
+- Оба полных browser набора выполняются в Linux CI с установленным WebKit. Их итог и ссылку на run
+  фиксируем в PR; отсутствие локального браузера не выдаётся за зелёный полный локальный e2e.
