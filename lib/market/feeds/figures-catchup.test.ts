@@ -89,7 +89,7 @@ describe("«previous» before the release", () => {
     expect(events.get("bls:us_nfp:2026-12-04")?.previous).toBeUndefined();
     // the sources that did not answer here are named in the log, the rest is saved
     expect(runs.find((r) => r.source === "previous-values")).toMatchObject({ ok: false });
-    expect(runs.find((r) => r.source === "previous-values")?.error).toMatch(/^3 set; /);
+    expect(runs.find((r) => r.source === "previous-values")?.error).toMatch(/^2 set; /);
   });
 
   it("a published release keeps the source's own «previous» (never overwritten)", async () => {
@@ -115,7 +115,7 @@ describe("«previous» before the release", () => {
   });
 
   it("each source's latest figure: BLS, EIA, Census (the month before the release), Eurostat (GDP twice a quarter)", () => {
-    expect(blsLatest(parseBlsResponse(JSON.parse(BLS_NOV4)))).toEqual(new Map([["us_nfp", "+29K · 4.2%"], ["us_ppi", "+1.3%"], ["us_jolts", "7.52M"]]));
+    expect(blsLatest(parseBlsResponse(JSON.parse(BLS_NOV4)))).toEqual(new Map([["us_nfp", "+29K · 4.2%"], ["us_jolts", "7.52M"]]));
     expect(eiaLatest("us_eia_gas", parseEia({ response: { data: [{ period: "2026-10-23", value: "3724" }, { period: "2026-10-16", value: "3644" }] } }))).toBe("+80 Bcf");
     const head = ["cell_value", "data_type_code", "category_code", "seasonally_adj", "time"];
     expect(censusLatest("us_retail_sales", "2026-10", parseCensus([head, ["0.6", "MPCSM", "44X72", "yes", "2026-09"]], "44X72"))).toBe("+0.6%");

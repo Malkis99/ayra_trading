@@ -60,6 +60,26 @@ test.describe("Market — own calendar of official events", () => {
   });
 
   for (const width of [1440, 360]) for (const language of ["ru", "en"]) {
+    test(`${width} ${language}: four PPI metrics keep initial published values and fit the existing calendar`, async ({ browser, request }) => {
+      const metrics = [
+        ["us_ppi", "+1.3%", "+0.5%", "PPI, м/м", "PPI, m/m"],
+        ["us_ppi_yoy", "6.3%", "5.6%", "PPI, г/г", "PPI, y/y"],
+        ["us_core_ppi", "+0.7%", "+0.2%", "Базовый PPI, м/м", "Core PPI, m/m"],
+        ["us_core_ppi_yoy", "5.0%", null, "Базовый PPI, г/г", "Core PPI, y/y"],
+      ];
+      await seed(request, metrics.map(([code, actual, previous]) => ev({ id: `bls:${code}:2026-10-15`, source: "bls", code, title: code, importance: 2, starts_at: "2026-10-15T12:30:00Z", status: "released", actual, previous, reference_period: "2026-09", url: "https://www.bls.gov/news.release/archives/ppi_10152026.htm" })));
+      const page = await calendar(browser, width, undefined, "2026-10-15T14:00:00Z", language);
+      await expect(el(page, "own-calendar-event")).toHaveCount(4);
+      for (const [code, actual, previous, ru, en] of metrics) {
+        const row = page.locator(`[data-testid="own-calendar-event"][data-id="bls:${code}:2026-10-15"]`);
+        await expect(row.getByTestId("own-calendar-event-title")).toHaveText((language === "ru" ? ru : en)!);
+        await expect(row.getByTestId("own-calendar-event-actual")).toHaveText(actual!);
+        if (previous) await expect(row.getByTestId("own-calendar-event-previous")).toHaveText(previous);
+        else await expect(row.getByTestId("own-calendar-event-previous")).toHaveText("—");
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await page.close();
+    });
     test(`${width} ${language}: four distinct CPI metrics with published values and no overflow`, async ({ browser, request }) => {
       const metrics = [
         ["us_cpi", "+0.6%", "+0.4%", "CPI, м/м", "CPI, m/m"],
