@@ -3,8 +3,8 @@ import { BLS_RELEASES } from "./schedules";
 import { previousPeriod } from "./identity";
 
 /**
- * Current series for non-CPI BLS releases from the official API (api.bls.gov). CPI uses the dated release archive
- * (cpi.ts), because current seasonally adjusted indexes do not prove the original vintage. Without a key: 25 requests a day
+ * Current series for NFP/unemployment and JOLTS from the official API (api.bls.gov). CPI/PPI use dated releases
+ * (cpi.ts/ppi.ts), because current indexes do not prove the original vintage. Without a key: 25 requests a day
  * (v1); with a free registered key (`BLS_API_KEY`): 500 (v2). One request asks for every series at once, and only
  * around a release (see collect.ts), so a day never needs more than a few.
  */
@@ -38,10 +38,9 @@ export function parseBlsResponse(json: unknown): Map<string, SeriesValues> {
 }
 
 const signed = (n: number, digits: number, unit: string) => `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(digits)}${unit}`;
-const monthOverMonth = (v: SeriesValues, i: number) => (v[i] && v[i + 1] && v[i + 1].period === previousPeriod(v[i].period) && v[i + 1].value !== 0 ? (v[i].value / v[i + 1].value - 1) * 100 : null);
 
 /** The releases a figure is computed for (ECI is quarterly: the calendar shows it without a figure). */
-export const BLS_FIGURE_CODES = ["us_nfp", "us_ppi", "us_jolts"] as const;
+export const BLS_FIGURE_CODES = ["us_nfp", "us_jolts"] as const;
 
 /**
  * The figure for a reference month and the month before, or null when that month is not in the API yet. Found by
@@ -59,14 +58,6 @@ function figure(code: keyof typeof BLS_RELEASES, ref: string, data: Map<string, 
     const rate = pick(BLS_SERIES.unemployment).find((x) => x.period === ref);
     return { actual: `${signed(change, 0, "K")}${rate ? ` · ${rate.value.toFixed(1)}%` : ""}`, previous: before === null ? null : signed(before, 0, "K") };
   }
-  if (code === "us_ppi") {
-    const v = pick(BLS_SERIES.ppi);
-    const i = at(v);
-    if (i < 0) return null;
-    const now = monthOverMonth(v, i);
-    const before = monthOverMonth(v, i + 1);
-    return now === null ? null : { actual: signed(now, 1, "%"), previous: before === null ? null : signed(before, 1, "%") };
-  }
   if (code === "us_jolts") {
     const v = pick(BLS_SERIES.jolts);
     const i = at(v);
@@ -79,7 +70,7 @@ function figure(code: keyof typeof BLS_RELEASES, ref: string, data: Map<string, 
 /** The figure of each release's newest month in the API: the «previous» of its next release. */
 export function blsLatest(data: Map<string, SeriesValues>, expected?: Record<string, string | null | undefined>): Map<string, string> {
   const out = new Map<string, string>();
-  const series: Record<(typeof BLS_FIGURE_CODES)[number], SeriesId> = { us_nfp: BLS_SERIES.payrolls, us_ppi: BLS_SERIES.ppi, us_jolts: BLS_SERIES.jolts };
+  const series: Record<(typeof BLS_FIGURE_CODES)[number], SeriesId> = { us_nfp: BLS_SERIES.payrolls, us_jolts: BLS_SERIES.jolts };
   for (const code of BLS_FIGURE_CODES) {
     const ref = expected ? (expected[code] ? previousPeriod(expected[code]!) : null) : data.get(series[code])?.[0]?.period;
     const f = ref ? figure(code, ref, data) : null;
@@ -105,7 +96,7 @@ export function blsResults(dueIds: string[], data: Map<string, SeriesValues>, co
 
 export const blsRequestBody = (key: string | undefined, year: number) =>
   JSON.stringify({
-    seriesid: Object.values(BLS_SERIES).filter(id => id !== BLS_SERIES.cpi),
+    seriesid: Object.values(BLS_SERIES).filter(id => id !== BLS_SERIES.cpi && id !== BLS_SERIES.ppi),
     startyear: String(year - 1),
     endyear: String(year),
     ...(key ? { registrationkey: key } : {}),

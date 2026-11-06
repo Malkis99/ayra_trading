@@ -2,6 +2,10 @@
 
 ## Актуальное решение владельца — 2026-11-05
 
+После #151: [PPI/Core PPI и автоматическое расписание PPI](market-us-ppi.md), один согласованный daily GET,
+без изменения cron. [План автоматизации всех источников](market-schedule-automation.md): следующий JOLTS,
+затем CPI/Core CPI. Прямой BLS403 остаётся ограничением; runtime-загрузка из Vercel не подтверждена.
+
 После merge #150: [CPI/Core CPI США, м/м и г/г](market-us-cpi.md). Датированный архив BLS
 заменяет CPI из latest-only API в существующем request slot. Другие показатели BLS остаются в batch.
 

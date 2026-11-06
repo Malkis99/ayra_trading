@@ -43,6 +43,8 @@ export interface ResultMeta {
   source_updated?: string;
   release_url?: string;
   vintage?: "release";
+  estimate_status?: "preliminary";
+  previous_source?: { period: string; release_url: string; source_updated: string; basis: "reported-in-release" | "initial-prior-release" };
 }
 
 /** A published figure for an event (from BEA's feed or the BLS API). */
