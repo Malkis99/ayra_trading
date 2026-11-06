@@ -3,6 +3,7 @@ import { FRANKFURT, NEW_YORK, isoUtc, wallToUtc } from "./time";
 import { listedUsEvents } from "./schedules-us";
 import { scheduleIdentity } from "./identity";
 import { applyListedCorrections } from "./listed-corrections";
+import { CPI_METRICS, isCpiCode } from "./cpi";
 
 /**
  * Schedules that have no machine-readable feed we may use, taken from the official pages (read 2026-11-03).
@@ -102,12 +103,13 @@ export function listedEvents(): EventRow[] {
   }
   for (const [code, r] of Object.entries(BLS_RELEASES)) {
     for (const day of Object.keys(r.dates)) {
-      rows.push({ id: `bls:${code}:${day}`, source: "bls", kind: "release", code, country: "us", title: r.name, importance: r.importance, starts_at: isoUtc(wallToUtc(day, r.time, NEW_YORK)), time_tbd: false, url: BLS_PAGE });
+      const metrics = code === "us_cpi" ? Object.entries(CPI_METRICS).map(([code, m]) => ({ code, name: m.title })) : [{ code, name: r.name }];
+      for (const metric of metrics) rows.push({ id: `bls:${metric.code}:${day}`, source: "bls", kind: "release", code: metric.code, country: "us", title: metric.name, importance: r.importance, starts_at: isoUtc(wallToUtc(day, r.time, NEW_YORK)), time_tbd: false, url: BLS_PAGE });
     }
   }
   rows.push(...listedUsEvents());
   return applyListedCorrections(rows.map((r) => r.identity_key ? r : scheduleIdentity(r,
-    r.source === "bls" ? BLS_RELEASES[r.code as keyof typeof BLS_RELEASES]?.dates[r.id.split(":")[2]] || null : r.id.split(":")[2],
+    r.source === "bls" ? BLS_RELEASES[isCpiCode(r.code) ? "us_cpi" : r.code as keyof typeof BLS_RELEASES]?.dates[r.id.split(":")[2]] || null : r.id.split(":")[2],
     r.source === "bls" ? "regular" : r.kind, null, { sequence: 0 })));
 }
 

@@ -2077,7 +2077,10 @@ export const en: Dictionary = {
         sources: { fed: "Fed", ecb: "ECB", whitehouse: "White House", bls: "BLS", bea: "BEA", eia: "EIA", census: "Census", dol: "US Dept. of Labor", eurostat: "Eurostat" },
         events: {
           us_nfp: "Nonfarm payrolls (NFP) and unemployment",
-          us_cpi: "Consumer Price Index (CPI)",
+          us_cpi: "CPI, m/m",
+          us_cpi_yoy: "CPI, y/y",
+          us_core_cpi: "Core CPI, m/m",
+          us_core_cpi_yoy: "Core CPI, y/y",
           us_ppi: "Producer Price Index (PPI)",
           us_jolts: "JOLTS job openings",
           us_eci: "Employment Cost Index (ECI)",

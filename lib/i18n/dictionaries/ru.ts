@@ -2075,7 +2075,10 @@ export const ru = {
         sources: { fed: "ФРС", ecb: "ЕЦБ", whitehouse: "Белый дом", bls: "BLS", bea: "BEA", eia: "EIA", census: "Census", dol: "Минтруд США", eurostat: "Eurostat" },
         events: {
           us_nfp: "Занятость вне с/х (NFP) и безработица",
-          us_cpi: "Индекс потребительских цен (CPI)",
+          us_cpi: "CPI, м/м",
+          us_cpi_yoy: "CPI, г/г",
+          us_core_cpi: "Базовый CPI, м/м",
+          us_core_cpi_yoy: "Базовый CPI, г/г",
           us_ppi: "Индекс цен производителей (PPI)",
           us_jolts: "Вакансии JOLTS",
           us_eci: "Индекс стоимости рабочей силы (ECI)",
