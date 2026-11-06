@@ -97,12 +97,12 @@ export function supabaseFeedsDb(db: SupabaseClient): FeedsDb {
     async releasedFigures(from: number) {
       const { data, error } = await db
         .from("market_events")
-        .select("id,source,code,starts_at,actual,reference_period")
+        .select("id,source,code,starts_at,actual,reference_period,result_meta")
         .eq("status", "released")
         .not("actual", "is", null)
         .gte("starts_at", new Date(from).toISOString());
       check(error, "market_events read");
-      return (data ?? []) as { id: string; source: string; code: string | null; starts_at: string; actual: string | null }[];
+      return (data ?? []) as Awaited<ReturnType<FeedsDb["releasedFigures"]>>;
     },
     async setPrevious(rows: { id: string; previous: string }[]) {
       await apply(rows, "previous");

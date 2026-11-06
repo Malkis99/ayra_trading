@@ -41,6 +41,8 @@ export interface ResultMeta {
   unit: string;
   adjustment: string;
   source_updated?: string;
+  release_url?: string;
+  vintage?: "release";
 }
 
 /** A published figure for an event (from BEA's feed or the BLS API). */

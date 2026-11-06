@@ -10,6 +10,8 @@ import { CENSUS_RELEASES } from "./schedules-us";
 import { pdfText } from "./pdf-text";
 import { icsCancellations } from "./ics";
 import { previousPeriod } from "./identity";
+import { CPI_METRICS, cpiReleaseUrl, cpiResults, isCpiCode, parseCpiRelease, verifiedCpiMeta } from "./cpi";
+import { nyDay } from "./time";
 import { eurostatCalendarUrl, EUROSTAT_SERIES, type EurostatCode, eurostatLatest, eurostatResult, eurostatSchedule, eurostatUrl, parseEurostat } from "./eurostat";
 
 /**
@@ -35,7 +37,7 @@ export interface FeedsDb {
   /** Stored scheduled events (any source) starting between `from` and `to`, with their «previous». */
   scheduledEvents(from: number, to: number): Promise<ScheduledEvent[]>;
   /** Stored releases with a figure since `from` (the last figure of each indicator). */
-  releasedFigures(from: number): Promise<{ id: string; source: string; code: string | null; starts_at: string; actual: string | null; reference_period?: string | null }[]>;
+  releasedFigures(from: number): Promise<{ id: string; source: string; code: string | null; starts_at: string; actual: string | null; reference_period?: string | null; result_meta?: import("./types").ResultMeta | null }[]>;
   /** «Previous» of scheduled events (a published figure is never touched). */
   setPrevious(rows: { id: string; previous: string }[]): Promise<void>;
   /** When this source last ran (ms), for throttling. */
@@ -251,11 +253,12 @@ export function retryEvery(ageMs: number, fastMs: number, slowMs = 30 * 60_000):
 }
 
 /** The source's stored releases of the last week still without a figure — empty when it is not time to ask again. */
-async function due(o: CollectOptions, source: string, runName: string, opts: { fastMs: number; slowMs?: number; codes?: readonly string[] }): Promise<WaitingEvent[]> {
+async function due(o: CollectOptions, source: string, runName: string, opts: { fastMs: number; slowMs?: number; codes?: readonly string[]; otherRunNames?: string[] }): Promise<WaitingEvent[]> {
   const waiting = (await o.db.waitingEvents(source, o.now - RETRY_DAYS * DAY, o.now)).filter((e) => !opts.codes || (e.code !== null && opts.codes.includes(e.code)));
   if (!waiting.length) return [];
   const every = Math.min(...waiting.map((e) => retryEvery(o.now - Date.parse(e.starts_at), opts.fastMs, opts.slowMs)));
-  const last = await o.db.lastRun(runName);
+  const runs = await Promise.all([runName, ...opts.otherRunNames || []].map(name => o.db.lastRun(name)));
+  const last = runs.reduce<number | null>((a, b) => b === null ? a : a === null ? b : Math.max(a, b), null);
   return last !== null && o.now - last < every ? [] : waiting;
 }
 
@@ -309,12 +312,36 @@ async function blsData(o: CollectOptions) {
 }
 
 async function blsFigures(o: CollectOptions, run: Run) {
-  const waiting = await due(o, "bls", "bls-api", { fastMs: BLS_WINDOW_MS, slowMs: o.blsKey ? 30 * 60_000 : HOUR, codes: BLS_FIGURE_CODES });
+  const waiting = await due(o, "bls", "bls-api", { fastMs: BLS_WINDOW_MS, slowMs: o.blsKey ? 30 * 60_000 : HOUR, codes: [...BLS_FIGURE_CODES, ...Object.keys(CPI_METRICS)], otherRunNames: ["bls-cpi-release"] });
   if (!waiting.length) return;
+  const cpi = waiting.filter(e => isCpiCode(e.code));
+  const api = waiting.filter(e => !isCpiCode(e.code));
+  // One upstream request per existing BLS slot, including mixed-release days and failed retries.
+  const lastCpi = await o.db.lastRun("bls-cpi-release");
+  const lastApi = await o.db.lastRun("bls-api");
+  if (cpi.length && (!api.length || (lastCpi ?? -Infinity) <= (lastApi ?? -Infinity))) {
+    await run("bls-cpi-release", async () => {
+      const day = nyDay(Date.parse(cpi.slice().sort((a,b) => a.starts_at.localeCompare(b.starts_at))[0].starts_at));
+      const group = cpi.filter(e => nyDay(Date.parse(e.starts_at)) === day);
+      const release = parseCpiRelease(await get(o.fetch, cpiReleaseUrl(day)), day);
+      const figures = cpiResults(group, release);
+      const stored = await o.db.releasedFigures(o.now - 120 * DAY);
+      for (const figure of figures) {
+        const event = group.find(e => e.id === figure.id)!;
+        if (figure.previous !== null) continue;
+        const prior = stored.filter(e => e.code === event.code && isCpiCode(e.code) && e.reference_period === previousPeriod(release.period) && verifiedCpiMeta(e.code, e.reference_period, e.result_meta));
+        if (prior.length === 1) figure.previous = prior[0].actual;
+      }
+      await save(o, figures, group);
+      if (figures.length !== group.length) throw new Error("CPI: confirmed release period or published values unavailable for some events");
+      return figures.length;
+    });
+    return;
+  }
   await run("bls-api", async () => {
-    const candidates = [...waiting, ...await o.db.revisionEvents("bls", o.now - NEWS_DAYS * DAY, o.now)];
+    const candidates = [...api, ...await o.db.revisionEvents("bls", o.now - NEWS_DAYS * DAY, o.now)].filter(e => !isCpiCode(e.code));
     const figures = blsResults(candidates.map((e) => e.id), await blsData(o), candidates);
-    await save(o, figures, waiting);
+    await save(o, figures, api);
     return figures.length;
   });
 }
@@ -444,7 +471,7 @@ async function previousValues(o: CollectOptions, run: Run) {
     const latest = new Map<string, string>();
     for (const f of stored.sort((a, b) => b.starts_at.localeCompare(a.starts_at))) {
       const upcoming = f.code ? next.get(f.code) : null;
-      if (f.code && f.actual && upcoming?.reference_period && f.reference_period === previousPeriod(upcoming.reference_period) && !latest.has(f.code)) latest.set(f.code, f.actual.split(" · ")[0]);
+      if (f.code && f.actual && (!isCpiCode(f.code) || verifiedCpiMeta(f.code, f.reference_period, f.result_meta)) && upcoming?.reference_period && f.reference_period === previousPeriod(upcoming.reference_period) && !latest.has(f.code)) latest.set(f.code, f.actual.split(" · ")[0]);
     }
 
     // the first time: ask the sources for what they publish now (each on its own: one failing keeps the rest)

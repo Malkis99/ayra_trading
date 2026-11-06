@@ -227,7 +227,7 @@ describe("BLS figures from the official API", () => {
     Results: { series: Object.entries(series).map(([seriesID, data]) => ({ seriesID, data: data.map(([year, period, value]) => ({ year, period, value })) })) },
   });
 
-  it("payrolls change and the unemployment rate, CPI month over month; nothing before the reference month is out", () => {
+  it("payrolls change and the unemployment rate; latest CPI is excluded; nothing before the reference month is out", () => {
     const data = parseBlsResponse(
       api({
         CES0000000001: [["2026", "M10", "159073"], ["2026", "M09", "159044"], ["2026", "M08", "159015"]],
@@ -239,7 +239,6 @@ describe("BLS figures from the official API", () => {
     );
     expect(blsResults(["bls:us_nfp:2026-11-06", "bls:us_cpi:2026-11-10", "bls:us_ppi:2026-11-13", "bls:us_jolts:2026-11-03"], data)).toMatchObject([
       { id: "bls:us_nfp:2026-11-06", status: "released", actual: "+29K · 4.3%", previous: "+29K", summary: null },
-      { id: "bls:us_cpi:2026-11-10", status: "released", actual: "+0.3%", previous: "+0.3%", summary: null },
       { id: "bls:us_jolts:2026-11-03", status: "released", actual: "7.52M", previous: "7.19M", summary: null },
     ]);
   });

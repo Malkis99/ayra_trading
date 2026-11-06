@@ -48,7 +48,7 @@ describe("catching up: a release without a figure is asked again for a week", ()
     const data = parseBlsResponse(JSON.parse(bls({ CUSR0000SA0: [["2026-10", "337.0"], ["2026-09", "336.298"], ["2026-08", "334.131"]] })));
     expect(blsResults(["bls:us_cpi:2026-10-14"], data)).toEqual([]); // no such listed day
     // CPI of 10 November covers October; the API already has October and September
-    expect(blsResults(["bls:us_cpi:2026-11-10"], data)[0]).toMatchObject({ actual: "+0.2%", previous: "+0.6%" });
+    expect(blsResults(["bls:us_cpi:2026-11-10"], data)).toEqual([]); // latest series cannot establish the initial CPI release
   });
 
   it("EIA: the week is found by its date, not as the newest", () => {
@@ -83,13 +83,13 @@ describe("«previous» before the release", () => {
     const { db, events, runs } = memoryFeedsDb();
     await collectFeeds({ scope: "schedules", now: NOV4, fetch: network({ [BLS_API_V1]: BLS_NOV4 }).fetcher, db });
     expect(events.get("bls:us_nfp:2026-11-06")).toMatchObject({ previous: "+29K" });
-    expect(events.get("bls:us_cpi:2026-11-10")).toMatchObject({ previous: "+0.6%" });
+    expect(events.get("bls:us_cpi:2026-11-10")?.previous).toBeUndefined();
     expect(events.get("bls:us_jolts:2026-12-01")).toMatchObject({ previous: "7.52M" });
     // only the nearest release of an indicator: the December NFP still waits for November's
     expect(events.get("bls:us_nfp:2026-12-04")?.previous).toBeUndefined();
     // the sources that did not answer here are named in the log, the rest is saved
     expect(runs.find((r) => r.source === "previous-values")).toMatchObject({ ok: false });
-    expect(runs.find((r) => r.source === "previous-values")?.error).toMatch(/^4 set; /);
+    expect(runs.find((r) => r.source === "previous-values")?.error).toMatch(/^3 set; /);
   });
 
   it("a published release keeps the source's own «previous» (never overwritten)", async () => {
@@ -115,7 +115,7 @@ describe("«previous» before the release", () => {
   });
 
   it("each source's latest figure: BLS, EIA, Census (the month before the release), Eurostat (GDP twice a quarter)", () => {
-    expect(blsLatest(parseBlsResponse(JSON.parse(BLS_NOV4)))).toEqual(new Map([["us_nfp", "+29K · 4.2%"], ["us_cpi", "+0.6%"], ["us_ppi", "+1.3%"], ["us_jolts", "7.52M"]]));
+    expect(blsLatest(parseBlsResponse(JSON.parse(BLS_NOV4)))).toEqual(new Map([["us_nfp", "+29K · 4.2%"], ["us_ppi", "+1.3%"], ["us_jolts", "7.52M"]]));
     expect(eiaLatest("us_eia_gas", parseEia({ response: { data: [{ period: "2026-10-23", value: "3724" }, { period: "2026-10-16", value: "3644" }] } }))).toBe("+80 Bcf");
     const head = ["cell_value", "data_type_code", "category_code", "seasonally_adj", "time"];
     expect(censusLatest("us_retail_sales", "2026-10", parseCensus([head, ["0.6", "MPCSM", "44X72", "yes", "2026-09"]], "44X72"))).toBe("+0.6%");

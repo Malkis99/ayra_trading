@@ -42,10 +42,11 @@ async function guest(browser: Browser, width: number) {
   return page;
 }
 
-async function calendar(browser: Browser, width: number, url = "/market?tab=calendar&view=own") {
+async function calendar(browser: Browser, width: number, url = "/market?tab=calendar&view=own", now = NOW, language = "ru") {
   const page = await guest(browser, width);
-  await page.clock.install({ time: new Date(NOW) });
-  await page.clock.pauseAt(new Date(NOW));
+  await page.addInitScript(lang => localStorage.setItem("ayra_lang", lang), language);
+  await page.clock.install({ time: new Date(now) });
+  await page.clock.pauseAt(new Date(now));
   await page.goto(url);
   await expect(el(page, "own-calendar-list")).toBeVisible();
   return page;
@@ -57,6 +58,28 @@ test.describe("Market — own calendar of official events", () => {
     await request.get(`${FAKE_SUPABASE}/__test/market-events-fail?on=0`);
     await seed(request);
   });
+
+  for (const width of [1440, 360]) for (const language of ["ru", "en"]) {
+    test(`${width} ${language}: four distinct CPI metrics with published values and no overflow`, async ({ browser, request }) => {
+      const metrics = [
+        ["us_cpi", "+0.6%", "+0.4%", "CPI, м/м", "CPI, m/m"],
+        ["us_cpi_yoy", "3.7%", "3.4%", "CPI, г/г", "CPI, y/y"],
+        ["us_core_cpi", "+0.3%", "+0.3%", "Базовый CPI, м/м", "Core CPI, m/m"],
+        ["us_core_cpi_yoy", "2.6%", "2.4%", "Базовый CPI, г/г", "Core CPI, y/y"],
+      ];
+      await seed(request, metrics.map(([code, actual, previous]) => ev({ id: `bls:${code}:2026-10-14`, source: "bls", code, title: code, starts_at: "2026-10-14T12:30:00Z", status: "released", actual, previous, reference_period: "2026-09", url: "https://www.bls.gov/news.release/archives/cpi_10142026.htm" })));
+      const page = await calendar(browser, width, undefined, "2026-10-14T14:00:00Z", language);
+      await expect(el(page, "own-calendar-event")).toHaveCount(4);
+      for (const [code, actual, previous, ru, en] of metrics) {
+        const row = page.locator(`[data-testid="own-calendar-event"][data-id="bls:${code}:2026-10-14"]`);
+        await expect(row.getByTestId("own-calendar-event-title")).toHaveText(language === "ru" ? ru : en);
+        await expect(row.getByTestId("own-calendar-event-actual")).toHaveText(actual);
+        await expect(row.getByTestId("own-calendar-event-previous")).toHaveText(previous);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await page.close();
+    });
+  }
 
   for (const width of [1440, 360]) {
     test(`${width}: this week's days, today first; times in the profile's zone; the figure, status, trust mark and source`, async ({ browser }) => {
@@ -105,7 +128,7 @@ test.describe("Market — own calendar of official events", () => {
     await expect(el(page, "own-calendar-range")).toHaveText("9 ноября – 13 ноября");
     await expect(el(page, "own-calendar-day-1")).toHaveAttribute("aria-selected", "true");
     await el(page, "own-calendar-day-2").click();
-    await expect(el(page, "own-calendar-event").getByTestId("own-calendar-event-title")).toHaveText("Индекс потребительских цен (CPI)");
+    await expect(el(page, "own-calendar-event").getByTestId("own-calendar-event-title")).toHaveText("CPI, м/м");
     await el(page, "own-calendar-day-4").click();
     await expect(el(page, "own-calendar-event").getByTestId("own-calendar-event-time")).toHaveText("17:15");
     await expect(el(page, "own-calendar-event").getByTestId("own-calendar-event-title")).toHaveText("Решение ЕЦБ по ставке");

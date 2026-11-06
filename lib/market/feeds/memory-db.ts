@@ -107,7 +107,7 @@ export function memoryFeedsDb(seed: { events?: EventRow[]; lastRuns?: Record<str
     async releasedFigures(from) {
       return Array.from(events.values())
         .filter((e) => e.status === "released" && e.actual && Date.parse(e.starts_at) >= from)
-        .map((e) => ({ id: e.id, source: e.source, code: e.code, starts_at: e.starts_at, actual: e.actual ?? null, reference_period: e.reference_period }));
+        .map((e) => ({ id: e.id, source: e.source, code: e.code, starts_at: e.starts_at, actual: e.actual ?? null, reference_period: e.reference_period, result_meta: e.result_meta }));
     },
     async setPrevious(rows) {
       for (const r of rows) {
