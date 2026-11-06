@@ -194,4 +194,20 @@ describe("profile locale synchronisation", () => {
     expect(readLocaleSync(id).synced).toBeNull();
     expect(state.patch).not.toHaveBeenCalled();
   });
+
+  it("relogin during an old GET retries pending intent in the new session", async () => {
+    const get = deferred<ReturnType<typeof response>>();
+    state.get.mockReturnValueOnce(get.promise);
+    const view = render(tree());
+    fireEvent.click(screen.getByText("EN"));
+    state.auth.user = null;
+    view.rerender(tree());
+    state.auth.user = { id };
+    view.rerender(tree());
+    await act(async () => get.resolve(response("ru")));
+    await waitFor(() => expect(readLocaleSync(id)).toMatchObject({ synced: "en", dirty: false }));
+    expect(state.get).toHaveBeenCalledTimes(2);
+    expect(state.patch.mock.calls).toEqual([[{ locale: "en" }]]);
+    expect(screen.getByTestId("lang").textContent).toBe("en");
+  });
 });

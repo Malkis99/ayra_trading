@@ -125,7 +125,7 @@ export function ProfileTimezoneSync() {
       if (next && mounted.current && latest.current.ready && latest.current.cloudActive && latest.current.userId === next.userId) {
         // Coalesce duplicate triggers; failures do not start a retry loop.
         const pending = readLocaleSync(next.userId);
-        if (!next.localeOnly || (pending.dirty && (next.userId !== id || (pending.revision ?? 0) > handledRevision))) {
+        if (!next.localeOnly || (pending.dirty && (session.current.version !== sessionVersion || next.userId !== id || (pending.revision ?? 0) > handledRevision))) {
           void exchangeRef.current(next.localeOnly, latest.current.syncMode === "manual" ? next.intent : undefined);
         }
       }
