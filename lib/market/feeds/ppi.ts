@@ -37,7 +37,7 @@ export function parsePpiRelease(html: string, expectedDay: string): PpiRelease {
   const day = month && date ? `${month}-${date[2].padStart(2,"0")}` : null;
   const period = ref && blsPeriod(ref[1],ref[2]);
   if (!day || day !== expectedDay || !period) throw new Error("PPI: release date/reference period not verified");
-  if (/\b(corrected release|reissued release|this release (?:has been|was) corrected)\b/i.test(header)) throw new Error("PPI: corrected release requires review");
+  if (/\b(corrected release|reissued release|this release (?:has been|was) (?:corrected|reissued))\b/i.test(plainText(html))) throw new Error("PPI: corrected release requires review");
   const tables = htmlTables(html);
   const candidates = tables.filter(t => /^Table 1\./i.test(t.caption) && /percentage changes and weights for Final Demand-Intermediate Demand/i.test(t.caption));
   if (candidates.length !== 1) throw new Error("PPI: original Table 1 missing or ambiguous");

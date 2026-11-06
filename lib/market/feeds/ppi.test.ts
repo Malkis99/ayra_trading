@@ -34,6 +34,7 @@ describe("PPI published release", () => {
     expect(()=>parsePpiRelease(releaseHtml.replace("<td>49104</td>","<td>49116</td>"),"2026-10-15")).toThrow("grouping");
     expect(()=>parsePpiRelease(releaseHtml.replaceAll("<sup>(p)</sup>",""),"2026-10-15")).toThrow("preliminary");
     expect(()=>parsePpiRelease("<html>Access Denied</html>","2026-10-15")).toThrow("not verified");
+    expect(()=>parsePpiRelease(`<p>This release has been corrected</p>${releaseHtml}`,"2026-10-15")).toThrow("requires review");
   });
   it("preserves missing values as null and will not manufacture current-series PPI", () => {
     expect(parsePpiRelease(releaseHtml.replace("<td>1.3</td>","<td>-</td>"),"2026-10-15").values.us_ppi.actual).toBeNull();
