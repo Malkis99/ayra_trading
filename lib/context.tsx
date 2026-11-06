@@ -1,13 +1,14 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { Language, Dictionary } from "@/lib/i18n/types";
 import { getDictionary } from "@/lib/i18n";
 import { AppStorage } from "@/lib/storage";
+import { LOCALE_CHOICE_EVENT } from "@/lib/profile-timezone";
 
 interface AppContextType {
   lang: Language;
-  setLanguage: (l: Language) => void;
+  setLanguage: (l: Language, origin?: "user" | "cloud") => void;
   dict: Dictionary;
   focusMode: boolean;
   setFocusMode: (f: boolean | ((prev: boolean) => boolean)) => void;
@@ -57,7 +58,7 @@ export function AppProvider({
 
   const dict = getDictionary(lang);
 
-  const setLanguage = (newLang: Language) => {
+  const setLanguage = useCallback((newLang: Language, origin: "user" | "cloud" = "user") => {
     setLangState(newLang);
     try {
       AppStorage.setItem("ayra_lang", newLang);
@@ -66,7 +67,8 @@ export function AppProvider({
     } catch {
       // ignore storage errors
     }
-  };
+    if (origin === "user") window.dispatchEvent(new CustomEvent(LOCALE_CHOICE_EVENT, { detail: newLang }));
+  }, []);
 
   useEffect(() => {
     try {
