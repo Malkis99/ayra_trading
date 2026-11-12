@@ -32,7 +32,7 @@ export function dayOf(now: number, zone: string): { from: number; to: number } {
 }
 
 /** Calendar events that matter on their own: high importance, and every rate decision and press conference. */
-export const isImportantEvent = (e: CalendarEvent) => e.status !== "cancelled" && (e.importance === 3 || e.kind === "decision" || e.kind === "press_conference");
+export const isImportantEvent = (e: CalendarEvent) => e.source !== "ons" && e.status !== "cancelled" && (e.importance === 3 || e.kind === "decision" || e.kind === "press_conference");
 
 /**
  * News that matter today: decisions and press conferences; speeches and testimony of medium or high importance

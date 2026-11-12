@@ -22,6 +22,7 @@ describe("«Today important»", () => {
     expect(isImportantEvent(ev("c", "x", { importance: 2, kind: "decision" }))).toBe(true);
     expect(isImportantEvent(ev("d", "x", { importance: 1, kind: "press_conference" }))).toBe(true);
     expect(isImportantEvent(ev("e", "x", { status: "cancelled" }))).toBe(false);
+    expect(isImportantEvent(ev("uk-gdp", "x", { source: "ons", country: "gb" }))).toBe(false);
   });
 
   it("news: decisions and press conferences always; policy speeches (medium or high); the rest only when high", () => {
