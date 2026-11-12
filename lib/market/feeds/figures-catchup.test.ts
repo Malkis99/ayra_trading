@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { joltsReleaseUrl } from "./jolts";
 import { describe, expect, it } from "vitest";
 import { collectFeeds, retryEvery, type Fetcher } from "./collect";
 import { memoryFeedsDb } from "./memory-db";
@@ -34,14 +36,15 @@ function network(pages: Record<string, string>) {
   return { fetcher, asked };
 }
 
+const JOLTS_INITIAL = readFileSync("lib/market/feeds/fixtures/jolts-2026-11-03.html","utf8");
 const NOV4 = Date.UTC(2026, 10, 4, 14, 0); // Wednesday, the day after JOLTS
 
 describe("catching up: a release without a figure is asked again for a week", () => {
   it("JOLTS of 3 November (the collector started after it): filled in the next day, by its own month", async () => {
     const { db, events } = memoryFeedsDb({ events: listedEvents() });
-    const { fetcher } = network({ [BLS_API_V1]: BLS_NOV4 });
+    const { fetcher } = network({ [BLS_API_V1]: BLS_NOV4, [joltsReleaseUrl("2026-11-03")]: JOLTS_INITIAL });
     await collectFeeds({ scope: "releases", now: NOV4, fetch: fetcher, db });
-    expect(events.get("bls:us_jolts:2026-11-03")).toMatchObject({ status: "released", actual: "7.52M", previous: "7.19M" });
+    expect(events.get("bls:us_jolts:2026-11-03")).toMatchObject({ status: "released", actual: "7.523M", previous: "7.190M" });
   });
 
   it("the month is found even when a newer one is in the API (asked days later)", () => {
@@ -73,23 +76,23 @@ describe("catching up: a release without a figure is asked again for a week", ()
 describe("«previous» before the release", () => {
   it("a figure, once in, becomes the «previous» of the same indicator's next release", async () => {
     const { db, events } = memoryFeedsDb({ events: listedEvents() });
-    await collectFeeds({ scope: "releases", now: NOV4, fetch: network({ [BLS_API_V1]: BLS_NOV4 }).fetcher, db });
+    await collectFeeds({ scope: "releases", now: NOV4, fetch: network({ [BLS_API_V1]: BLS_NOV4, [joltsReleaseUrl("2026-11-03")]: JOLTS_INITIAL }).fetcher, db });
     // JOLTS of 3 November → the next JOLTS, 1 December
-    expect(events.get("bls:us_jolts:2026-12-01")).toMatchObject({ status: "scheduled", previous: "7.52M" });
+    expect(events.get("bls:us_jolts:2026-12-01")).toMatchObject({ status: "scheduled", previous: "7.523M" });
     expect(events.get("bls:us_jolts:2026-12-01")?.actual).toBeUndefined();
   });
 
   it("the daily schedules run fills «previous» of every indicator's next release from what the sources publish now", async () => {
     const { db, events, runs } = memoryFeedsDb();
-    await collectFeeds({ scope: "schedules", now: NOV4, fetch: network({ [BLS_API_V1]: BLS_NOV4 }).fetcher, db });
+    await collectFeeds({ scope: "schedules", now: NOV4, fetch: network({ [BLS_API_V1]: BLS_NOV4, [joltsReleaseUrl("2026-11-03")]: JOLTS_INITIAL }).fetcher, db });
     expect(events.get("bls:us_nfp:2026-11-06")).toMatchObject({ previous: "+29K" });
     expect(events.get("bls:us_cpi:2026-11-10")?.previous).toBeUndefined();
-    expect(events.get("bls:us_jolts:2026-12-01")).toMatchObject({ previous: "7.52M" });
+    expect(events.get("bls:us_jolts:2026-12-01")?.previous).toBeUndefined(); // latest API cannot prove an initial JOLTS value
     // only the nearest release of an indicator: the December NFP still waits for November's
     expect(events.get("bls:us_nfp:2026-12-04")?.previous).toBeUndefined();
     // the sources that did not answer here are named in the log, the rest is saved
     expect(runs.find((r) => r.source === "previous-values")).toMatchObject({ ok: false });
-    expect(runs.find((r) => r.source === "previous-values")?.error).toMatch(/^2 set; /);
+    expect(runs.find((r) => r.source === "previous-values")?.error).toMatch(/^1 set; /);
   });
 
   it("a published release keeps the source's own «previous» (never overwritten)", async () => {
@@ -115,7 +118,7 @@ describe("«previous» before the release", () => {
   });
 
   it("each source's latest figure: BLS, EIA, Census (the month before the release), Eurostat (GDP twice a quarter)", () => {
-    expect(blsLatest(parseBlsResponse(JSON.parse(BLS_NOV4)))).toEqual(new Map([["us_nfp", "+29K · 4.2%"], ["us_jolts", "7.52M"]]));
+    expect(blsLatest(parseBlsResponse(JSON.parse(BLS_NOV4)))).toEqual(new Map([["us_nfp", "+29K · 4.2%"]]));
     expect(eiaLatest("us_eia_gas", parseEia({ response: { data: [{ period: "2026-10-23", value: "3724" }, { period: "2026-10-16", value: "3644" }] } }))).toBe("+80 Bcf");
     const head = ["cell_value", "data_type_code", "category_code", "seasonally_adj", "time"];
     expect(censusLatest("us_retail_sales", "2026-10", parseCensus([head, ["0.6", "MPCSM", "44X72", "yes", "2026-09"]], "44X72"))).toBe("+0.6%");

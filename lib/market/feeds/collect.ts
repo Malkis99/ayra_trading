@@ -13,7 +13,8 @@ import { previousPeriod } from "./identity";
 import { CPI_METRICS, cpiReleaseUrl, cpiResults, isCpiCode, parseCpiRelease, verifiedCpiMeta } from "./cpi";
 import { nyDay } from "./time";
 import { PPI_METRICS, PPI_SCHEDULE_URL, isPpiCode, parsePpiRelease, ppiReleaseUrl, ppiResults, verifiedPpiMeta } from "./ppi";
-import { ppiSchedule } from "./bls-schedule";
+import { JOLTS_CODE, JOLTS_SCHEDULE_URL, joltsReleaseUrl, parseJoltsRelease, joltsResults, verifiedJoltsMeta } from "./jolts";
+import { joltsSchedule, ppiSchedule } from "./bls-schedule";
 import { eurostatCalendarUrl, EUROSTAT_SERIES, type EurostatCode, eurostatLatest, eurostatResult, eurostatSchedule, eurostatUrl, parseEurostat } from "./eurostat";
 
 /**
@@ -123,8 +124,8 @@ function withTimeout<T>(p: Promise<T>): Promise<T> {
   });
 }
 
-/** PPI HTML: one deadline covers headers AND body; abandon the request when it expires. */
-async function getPpiText(fetcher: Fetcher, url: string): Promise<string> {
+/** BLS publication HTML: one deadline covers headers AND body; abandon the request when it expires. */
+async function getBlsText(fetcher: Fetcher, url: string): Promise<string> {
   const abort = new AbortController();
   try {
     return await withTimeout((async () => {
@@ -190,7 +191,7 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
 
   if (schedules) {
     await run("schedules-listed", async () => {
-      const rows = listedEvents().filter(e => !isPpiCode(e.code));
+      const rows = listedEvents().filter(e => !isPpiCode(e.code) && e.code !== JOLTS_CODE);
       await o.db.upsertEvents(rows);
       return rows.length;
     });
@@ -200,10 +201,30 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
       await run("bls-ppi-schedule", async () => {
         // Existing reviewed dates are a one-time bootstrap, never a daily writer reverting a live move.
         if (last === null) await o.db.upsertEvents(listedEvents().filter(e => isPpiCode(e.code)));
-        const rows = ppiSchedule(await getPpiText(o.fetch, PPI_SCHEDULE_URL));
+        const rows = ppiSchedule(await getBlsText(o.fetch, PPI_SCHEDULE_URL));
         await o.db.upsertEvents(rows);
         if (!rows.some(e => Date.parse(e.starts_at) > o.now)) throw new Error("BLS PPI schedule: official future horizon exhausted; existing events retained");
         return rows.length;
+      });
+    });
+    await isolated("bls-jolts-schedule", async () => {
+      const last = await o.db.lastRun("bls-jolts-schedule");
+      if (last !== null && new Date(last).toISOString().slice(0,10) === new Date(o.now).toISOString().slice(0,10)) return;
+      await run("bls-jolts-schedule", async () => {
+        if (last === null) await o.db.upsertEvents(listedEvents().filter(e => e.code === JOLTS_CODE));
+        const rows = joltsSchedule(await getBlsText(o.fetch,JOLTS_SCHEDULE_URL));
+        await o.db.upsertEvents(rows);
+        if (!rows.some(e => Date.parse(e.starts_at)>o.now)) throw new Error("BLS JOLTS schedule: official future horizon exhausted; existing events retained");
+        return rows.length;
+      });
+    });
+    await isolated("bls-jolts-history", async () => {
+      const last = await o.db.lastRun("bls-jolts-history");
+      if (last !== null && new Date(last).toISOString().slice(0,10) === new Date(o.now).toISOString().slice(0,10)) return;
+      await run("bls-jolts-history", async () => {
+        const legacy = (await o.db.releasedFigures(o.now - 120 * DAY)).filter(e => e.code === JOLTS_CODE && e.actual && !verifiedJoltsMeta(e.reference_period,e.result_meta));
+        if (legacy.length) throw new Error(`JOLTS: legacy values preserved; initial provenance unverified for ${legacy.map(e=>e.id).join(", ")}`);
+        return 0;
       });
     });
     await run("bea-schedule", async () => {
@@ -338,13 +359,14 @@ async function blsData(o: CollectOptions) {
 }
 
 async function blsFigures(o: CollectOptions, run: Run) {
-  const waiting = await due(o, "bls", "bls-api", { fastMs: BLS_WINDOW_MS, slowMs: o.blsKey ? 30 * 60_000 : HOUR, codes: [...BLS_FIGURE_CODES, ...Object.keys(CPI_METRICS), ...Object.keys(PPI_METRICS)], otherRunNames: ["bls-cpi-release", "bls-ppi-release"] });
+  const waiting = await due(o, "bls", "bls-api", { fastMs: BLS_WINDOW_MS, slowMs: o.blsKey ? 30 * 60_000 : HOUR, codes: [...BLS_FIGURE_CODES, ...Object.keys(CPI_METRICS), ...Object.keys(PPI_METRICS), JOLTS_CODE], otherRunNames: ["bls-cpi-release", "bls-ppi-release", "bls-jolts-release"] });
   if (!waiting.length) return;
   const cpi = waiting.filter(e => isCpiCode(e.code));
   const ppi = waiting.filter(e => isPpiCode(e.code));
-  const api = waiting.filter(e => !isCpiCode(e.code) && !isPpiCode(e.code));
+  const jolts = waiting.filter(e => e.code === JOLTS_CODE);
+  const api = waiting.filter(e => !isCpiCode(e.code) && !isPpiCode(e.code) && e.code !== JOLTS_CODE);
   // One upstream request per existing BLS slot, including mixed-release days and failed retries.
-  const slots = await Promise.all([{name:"bls-cpi-release",rows:cpi},{name:"bls-ppi-release",rows:ppi},{name:"bls-api",rows:api}].filter(s => s.rows.length).map(async s => ({...s,last:await o.db.lastRun(s.name)})));
+  const slots = await Promise.all([{name:"bls-cpi-release",rows:cpi},{name:"bls-ppi-release",rows:ppi},{name:"bls-api",rows:api},{name:"bls-jolts-release",rows:jolts}].filter(s => s.rows.length).map(async s => ({...s,last:await o.db.lastRun(s.name)})));
   const chosen = slots.sort((a,b) => (a.last ?? -Infinity) - (b.last ?? -Infinity))[0].name;
   if (chosen === "bls-cpi-release") {
     await run("bls-cpi-release", async () => {
@@ -369,7 +391,7 @@ async function blsFigures(o: CollectOptions, run: Run) {
     await run(chosen, async () => {
       const day = nyDay(Date.parse(ppi.slice().sort((a,b) => a.starts_at.localeCompare(b.starts_at))[0].starts_at));
       const group = ppi.filter(e => nyDay(Date.parse(e.starts_at)) === day);
-      const release = parsePpiRelease(await getPpiText(o.fetch, ppiReleaseUrl(day)), day);
+      const release = parsePpiRelease(await getBlsText(o.fetch, ppiReleaseUrl(day)), day);
       const figures = ppiResults(group,release);
       const stored = await o.db.releasedFigures(o.now - 120 * DAY);
       for (const figure of figures) {
@@ -387,8 +409,27 @@ async function blsFigures(o: CollectOptions, run: Run) {
     });
     return;
   }
+  if (chosen === "bls-jolts-release") {
+    await run(chosen, async () => {
+      const day = nyDay(Date.parse(jolts.slice().sort((a,b)=>a.starts_at.localeCompare(b.starts_at))[0].starts_at));
+      const group = jolts.filter(e=>nyDay(Date.parse(e.starts_at))===day);
+      const release = parseJoltsRelease(await getBlsText(o.fetch,joltsReleaseUrl(day)),day);
+      const figures = joltsResults(group,release);
+      if (figures.some(f=>f.previous===null)) {
+        const prior = (await o.db.releasedFigures(o.now - 120 * DAY)).filter(e=>e.code===JOLTS_CODE && e.actual && e.reference_period===previousPeriod(release.period) && verifiedJoltsMeta(e.reference_period,e.result_meta));
+        if (prior.length===1) for (const f of figures) if (f.previous===null) {
+          f.previous=prior[0].actual;
+          f.result_meta!.previous_source={period:prior[0].reference_period!,release_url:prior[0].result_meta!.release_url!,source_updated:prior[0].result_meta!.source_updated!,basis:"initial-prior-release"};
+        }
+      }
+      await save(o,figures,group);
+      if (figures.length!==group.length) throw new Error("JOLTS: confirmed initial release period/value unavailable");
+      return figures.length;
+    });
+    return;
+  }
   await run("bls-api", async () => {
-    const candidates = [...api, ...await o.db.revisionEvents("bls", o.now - NEWS_DAYS * DAY, o.now)].filter(e => !isCpiCode(e.code) && !isPpiCode(e.code));
+    const candidates = [...api, ...await o.db.revisionEvents("bls", o.now - NEWS_DAYS * DAY, o.now)].filter(e => !isCpiCode(e.code) && !isPpiCode(e.code) && e.code !== JOLTS_CODE);
     const figures = blsResults(candidates.map((e) => e.id), await blsData(o), candidates);
     await save(o, figures, api);
     return figures.length;
@@ -520,7 +561,7 @@ async function previousValues(o: CollectOptions, run: Run) {
     const latest = new Map<string, string>();
     for (const f of stored.sort((a, b) => b.starts_at.localeCompare(a.starts_at))) {
       const upcoming = f.code ? next.get(f.code) : null;
-      if (f.code && f.actual && (!isCpiCode(f.code) || verifiedCpiMeta(f.code, f.reference_period, f.result_meta)) && (!isPpiCode(f.code) || verifiedPpiMeta(f.code,f.reference_period,f.result_meta)) && upcoming?.reference_period && f.reference_period === previousPeriod(upcoming.reference_period) && !latest.has(f.code)) latest.set(f.code, f.actual.split(" · ")[0]);
+      if (f.code && f.actual && (!isCpiCode(f.code) || verifiedCpiMeta(f.code, f.reference_period, f.result_meta)) && (!isPpiCode(f.code) || verifiedPpiMeta(f.code,f.reference_period,f.result_meta)) && (f.code!==JOLTS_CODE || verifiedJoltsMeta(f.reference_period,f.result_meta)) && upcoming?.reference_period && f.reference_period === previousPeriod(upcoming.reference_period) && !latest.has(f.code)) latest.set(f.code, f.actual.split(" · ")[0]);
     }
 
     // the first time: ask the sources for what they publish now (each on its own: one failing keeps the rest)

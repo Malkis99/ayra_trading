@@ -239,7 +239,6 @@ describe("BLS figures from the official API", () => {
     );
     expect(blsResults(["bls:us_nfp:2026-11-06", "bls:us_cpi:2026-11-10", "bls:us_ppi:2026-11-13", "bls:us_jolts:2026-11-03"], data)).toMatchObject([
       { id: "bls:us_nfp:2026-11-06", status: "released", actual: "+29K · 4.3%", previous: "+29K", summary: null },
-      { id: "bls:us_jolts:2026-11-03", status: "released", actual: "7.52M", previous: "7.19M", summary: null },
     ]);
   });
 });

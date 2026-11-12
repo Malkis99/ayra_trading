@@ -3,7 +3,7 @@ import { BLS_RELEASES } from "./schedules";
 import { previousPeriod } from "./identity";
 
 /**
- * Current series for NFP/unemployment and JOLTS from the official API (api.bls.gov). CPI/PPI use dated releases
+ * Current series for NFP/unemployment from the official API (api.bls.gov). CPI/PPI/JOLTS use dated releases
  * (cpi.ts/ppi.ts), because current indexes do not prove the original vintage. Without a key: 25 requests a day
  * (v1); with a free registered key (`BLS_API_KEY`): 500 (v2). One request asks for every series at once, and only
  * around a release (see collect.ts), so a day never needs more than a few.
@@ -40,7 +40,7 @@ export function parseBlsResponse(json: unknown): Map<string, SeriesValues> {
 const signed = (n: number, digits: number, unit: string) => `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(digits)}${unit}`;
 
 /** The releases a figure is computed for (ECI is quarterly: the calendar shows it without a figure). */
-export const BLS_FIGURE_CODES = ["us_nfp", "us_jolts"] as const;
+export const BLS_FIGURE_CODES = ["us_nfp"] as const;
 
 /**
  * The figure for a reference month and the month before, or null when that month is not in the API yet. Found by
@@ -58,19 +58,13 @@ function figure(code: keyof typeof BLS_RELEASES, ref: string, data: Map<string, 
     const rate = pick(BLS_SERIES.unemployment).find((x) => x.period === ref);
     return { actual: `${signed(change, 0, "K")}${rate ? ` · ${rate.value.toFixed(1)}%` : ""}`, previous: before === null ? null : signed(before, 0, "K") };
   }
-  if (code === "us_jolts") {
-    const v = pick(BLS_SERIES.jolts);
-    const i = at(v);
-    if (i < 0) return null;
-    return { actual: `${(v[i].value / 1000).toFixed(2)}M`, previous: v[i + 1]?.period === previousPeriod(ref) ? `${(v[i + 1].value / 1000).toFixed(2)}M` : null };
-  }
   return null; // ECI: quarterly, the status shows it is out but no figure is computed here
 }
 
 /** The figure of each release's newest month in the API: the «previous» of its next release. */
 export function blsLatest(data: Map<string, SeriesValues>, expected?: Record<string, string | null | undefined>): Map<string, string> {
   const out = new Map<string, string>();
-  const series: Record<(typeof BLS_FIGURE_CODES)[number], SeriesId> = { us_nfp: BLS_SERIES.payrolls, us_jolts: BLS_SERIES.jolts };
+  const series: Record<(typeof BLS_FIGURE_CODES)[number], SeriesId> = { us_nfp: BLS_SERIES.payrolls };
   for (const code of BLS_FIGURE_CODES) {
     const ref = expected ? (expected[code] ? previousPeriod(expected[code]!) : null) : data.get(series[code])?.[0]?.period;
     const f = ref ? figure(code, ref, data) : null;
@@ -96,7 +90,7 @@ export function blsResults(dueIds: string[], data: Map<string, SeriesValues>, co
 
 export const blsRequestBody = (key: string | undefined, year: number) =>
   JSON.stringify({
-    seriesid: Object.values(BLS_SERIES).filter(id => id !== BLS_SERIES.cpi && id !== BLS_SERIES.ppi),
+    seriesid: Object.values(BLS_SERIES).filter(id => id !== BLS_SERIES.cpi && id !== BLS_SERIES.ppi && id !== BLS_SERIES.jolts),
     startyear: String(year - 1),
     endyear: String(year),
     ...(key ? { registrationkey: key } : {}),
