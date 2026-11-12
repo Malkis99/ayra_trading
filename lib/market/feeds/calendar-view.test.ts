@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clockIn, countByDay, eventStatus, eventsOfDay, initialDay, lastUpdate, noOwnCountry, visibleEvents, workWeek, type CalendarEvent } from "./calendar-view";
+import { clockIn, countByDay, eventStatus, eventsOfDay, initialDay, isScheduleOnly, lastUpdate, nextReleaseRead, noOwnCountry, visibleEvents, workWeek, type CalendarEvent } from "./calendar-view";
 
 const ev = (id: string, starts_at: string, o: Partial<CalendarEvent> = {}): CalendarEvent => ({
   id,
@@ -17,6 +17,18 @@ const ev = (id: string, starts_at: string, o: Partial<CalendarEvent> = {}): Cale
   url: null,
   updated_at: "2026-11-03T10:00:00Z",
   ...o,
+});
+
+it("keeps ONS on the schedule before and after release time and gives a stored result precedence", () => {
+  const at = Date.parse("2026-11-12T07:00:00Z");
+  const event = ev("ons:gb_gdp_monthly:2026-09", new Date(at).toISOString(), { source: "ons", country: "gb" });
+  expect(eventStatus(event, at - 1)).toBe("scheduleOnly");
+  expect(eventStatus(event, at + 86_400_000)).toBe("scheduleOnly");
+  expect(nextReleaseRead([event], at)).toBeNull();
+  expect(eventStatus({ ...event, status: "cancelled" }, at)).toBe("cancelled");
+  const published = { ...event, status: "released", actual: "+0.2%", previous: "0.0%" } as const;
+  expect(eventStatus(published, at)).toBe("released");
+  expect(isScheduleOnly(published)).toBe(false);
 });
 
 it("distinguishes release status, source delay, and confirmed absence", () => {
@@ -76,7 +88,8 @@ describe("own calendar: the week in the user's zone", () => {
     const rows = [ev("a", "2026-11-06T13:30:00Z"), ev("b", "2026-11-06T13:30:00Z", { importance: 2 }), ev("c", "2026-11-06T13:30:00Z", { country: "eu", importance: 1 })];
     expect(visibleEvents(rows, { importance: ["high", "medium"], countries: ["us", "eu"] }).map((e) => e.id)).toEqual(["a", "b"]);
     expect(visibleEvents(rows, { importance: ["low"], countries: ["eu"] }).map((e) => e.id)).toEqual(["c"]);
-    expect(noOwnCountry(["gb", "jp"])).toBe(true);
+    expect(noOwnCountry(["jp", "de"])).toBe(true);
+    expect(noOwnCountry(["gb", "jp"])).toBe(false);
     expect(noOwnCountry(["gb", "eu"])).toBe(false);
   });
 

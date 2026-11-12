@@ -12,6 +12,7 @@ import {
   eventStatus,
   eventsOfDay,
   initialDay,
+  isScheduleOnly,
   lastUpdate,
   levelOf,
   noOwnCountry,
@@ -203,7 +204,7 @@ function EventRow({ e, zone, now, names }: { e: CalendarEvent; zone: string; now
         {status === "notPublished" ? (
           <FigureMissing url={e.release_official_url ?? e.url} note={t.missingComparisonBase} />
         ) : (
-          e.kind === "release" && (
+          e.kind === "release" && !isScheduleOnly(e) && (
             <span className="tabular-nums">
               <span className="text-mu">{t.actual} </span>
               <span className={cn("font-semibold", e.actual ? "text-tx" : "text-mu")} data-testid="own-calendar-event-actual">
@@ -212,7 +213,7 @@ function EventRow({ e, zone, now, names }: { e: CalendarEvent; zone: string; now
             </span>
           )
         )}
-        {e.kind === "release" && (
+        {e.kind === "release" && !isScheduleOnly(e) && (
           <span className="tabular-nums">
             <span className="text-mu">{t.previous} </span>
             <span className="text-tx" data-testid="own-calendar-event-previous">
@@ -242,6 +243,7 @@ export const STATUS_TONE: Record<EventStatus, string> = {
   notPublished: "bg-s2 text-tx",
   held: "bg-s2 text-mu",
   scheduled: "bg-s2 text-mu",
+  scheduleOnly: "bg-s2 text-mu",
 };
 
 /** No figure from the source: said plainly, with the official page to look at. */

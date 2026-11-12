@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { FeedsDb, RunLog, ScheduledEvent, WaitingEvent } from "./collect";
 import type { EventResult, EventRow, NewsRow } from "./types";
+import type { StoredOnsSchedule } from "./ons-gdp";
 
 /**
  * The collector's database access with the service role (server only: the key never reaches a browser).
@@ -65,6 +66,12 @@ export function supabaseFeedsDb(db: SupabaseClient, releaseChecks = false): Feed
     },
     async upsertEvents(rows: EventRow[]) {
       await apply(rows, "schedule");
+    },
+    async onsSchedules() {
+      const { data, error } = await db.from("market_events").select("id,source_uid,starts_at,status,schedule_meta")
+        .eq("source", "ons").eq("country", "gb").not("source_uid", "is", null);
+      check(error, "ONS GDP schedule read");
+      return (data ?? []) as StoredOnsSchedule[];
     },
     async saveResults(rows: EventResult[]) {
       await apply(rows, "result");

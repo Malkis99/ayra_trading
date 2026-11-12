@@ -15,6 +15,7 @@ import { nyDay } from "./time";
 import { PPI_METRICS, PPI_SCHEDULE_URL, isPpiCode, parsePpiRelease, ppiReleaseUrl, ppiResults, verifiedPpiMeta } from "./ppi";
 import { JOLTS_CODE, JOLTS_SCHEDULE_URL, joltsReleaseUrl, parseJoltsRelease, joltsResults, verifiedJoltsMeta } from "./jolts";
 import { joltsSchedule, ppiSchedule } from "./bls-schedule";
+import { ONS_LISTS, onsCalendarUrl, onsMoveSequence, onsSchedules, type StoredOnsSchedule } from "./ons-gdp";
 import { eurostatCalendarUrl, EUROSTAT_SERIES, type EurostatCode, eurostatLatest, eurostatResult, eurostatSchedule, eurostatUrl, parseEurostat } from "./eurostat";
 
 /**
@@ -31,6 +32,7 @@ export interface FeedsDb {
   matchResults(rows: EventResult[]): Promise<EventResult[]>;
   /** Schedule columns only: a published figure, status or the owner's «hidden» are kept. */
   upsertEvents(rows: EventRow[]): Promise<void>;
+  onsSchedules(): Promise<StoredOnsSchedule[]>;
   /** Figures for events that exist (never creates an event). */
   saveResults(rows: EventResult[]): Promise<void>;
   /** New news only: an item already stored (perhaps hidden by the owner) is left as it is. */
@@ -119,9 +121,9 @@ async function get(fetcher: Fetcher, url: string): Promise<string> {
   return res.text();
 }
 
-function withTimeout<T>(p: Promise<T>): Promise<T> {
+function withTimeout<T>(p: Promise<T>, timeout = TIMEOUT_MS): Promise<T> {
   return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error("timeout")), TIMEOUT_MS);
+    const t = setTimeout(() => reject(new Error("timeout")), timeout);
     p.then((v) => (clearTimeout(t), resolve(v)), (e) => (clearTimeout(t), reject(e)));
   });
 }
@@ -192,6 +194,11 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
   };
 
   if (schedules) {
+    const ons = isolated("ons-gdp-schedule", async () => {
+      const last = await o.db.lastRun("ons-gdp-schedule");
+      if (last !== null && new Date(last).toISOString().slice(0, 10) === new Date(o.now).toISOString().slice(0, 10)) return;
+      await run("ons-gdp-schedule", () => collectOnsSchedules(o));
+    });
     await run("schedules-listed", async () => {
       const rows = listedEvents().filter(e => !isPpiCode(e.code) && e.code !== JOLTS_CODE);
       await o.db.upsertEvents(rows);
@@ -243,6 +250,7 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
       await o.db.upsertEvents(rows);
       return rows.length;
     });
+    await ons;
     await previousValues(o, run);
   }
 
@@ -285,6 +293,76 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
 }
 
 type Run = (source: string, job: () => Promise<number>) => Promise<void>;
+
+async function collectOnsSchedules(o: CollectOptions): Promise<number> {
+  const lists = await Promise.all(ONS_LISTS.map(async list => onsSchedules(
+    await getOns(o.fetch, onsCalendarUrl(list, o.now)), list, o.now,
+  )));
+  if (!lists[0].some(row => Date.parse(row.starts_at) > o.now)) throw new Error("ONS GDP: confirmed future horizon unavailable");
+  const stored = new Map((await o.db.onsSchedules()).map(row => [row.id, row]));
+  const rows: EventRow[] = [];
+  const issues: string[] = [];
+  const found = new Map<string, EventRow>();
+  const ambiguous = new Set<string>();
+  for (const row of lists.flat()) {
+    const other = found.get(row.id);
+    if (other && (other.source_uid !== row.source_uid || other.starts_at !== row.starts_at || other.schedule_meta?.cancelled !== row.schedule_meta?.cancelled)) ambiguous.add(row.id);
+    else found.set(row.id, row);
+  }
+  let detailRequests = 0;
+  for (const [id, row] of found) {
+    if (ambiguous.has(id)) {
+      issues.push("ONS GDP: conflicting official listings");
+      continue;
+    }
+    const old = stored.get(id);
+    if (!old) {
+      if (!row.schedule_meta?.cancelled) rows.push(row);
+      continue;
+    }
+    if (old.source_uid !== row.source_uid) {
+      issues.push("ONS GDP: conflicting official release path for the saved period");
+      continue;
+    }
+    const sameTime = Date.parse(old.starts_at) === Date.parse(row.starts_at);
+    if (row.schedule_meta?.cancelled) {
+      if (old.status === "cancelled") continue;
+      if (sameTime && old.status === "scheduled" && old.schedule_meta?.sequence !== undefined) {
+        rows.push({ ...row, schedule_meta: { sequence: old.schedule_meta.sequence + 1, cancelled: true } });
+      } else issues.push("ONS GDP: cancellation does not match the saved release");
+      continue;
+    }
+    if (sameTime || old.status !== "scheduled") continue;
+    if (detailRequests >= 2) {
+      issues.push("ONS GDP: remaining changes deferred to the next daily run");
+      continue;
+    }
+    detailRequests++;
+    try {
+      const sequence = onsMoveSequence(await getOns(o.fetch, row.url!), row, old);
+      if (sequence === null) issues.push("ONS GDP: date change not verified");
+      else rows.push({ ...row, schedule_meta: { sequence, cancelled: false } });
+    } catch (error) {
+      issues.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+  await o.db.upsertEvents(rows);
+  if (issues.length) throw new Error(Array.from(new Set(issues)).join("; "));
+  return rows.length;
+}
+
+async function getOns(fetcher: Fetcher, url: string): Promise<string> {
+  const abort = new AbortController();
+  try {
+    return await withTimeout((async () => {
+      const response = await fetcher(url, { headers: { Accept: "text/html", "User-Agent": USER_AGENT }, redirect: "manual", signal: abort.signal });
+      if (!response.ok) throw new Error(`ONS GDP: HTTP ${response.status}`);
+      return response.text();
+    })(), 8_000);
+  } finally {
+    abort.abort();
+  }
+}
 
 const HOUR = 60 * 60_000;
 const DAY = 24 * HOUR;

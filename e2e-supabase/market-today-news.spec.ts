@@ -31,9 +31,10 @@ const seed = async (request: APIRequestContext, events: unknown[], news: unknown
   await request.post(`${FAKE_SUPABASE}/__test/market-news`, { data: news });
 };
 
-async function open(browser: Browser, width: number, url: string) {
+async function open(browser: Browser, width: number, url: string, language = "ru") {
   const { page } = await marketGuest(browser, width);
   await page.addInitScript(() => localStorage.setItem("ayra_guest_dismissed", "1"));
+  await page.addInitScript(lang => localStorage.setItem("ayra_lang", lang), language);
   await page.clock.install({ time: new Date(NOW) });
   await page.clock.pauseAt(new Date(NOW));
   await page.goto(url);
@@ -46,6 +47,48 @@ test.describe("Market — «Today important» and official news", () => {
     await request.get(`${FAKE_SUPABASE}/__test/market-events-fail?on=0`);
     await seed(request, TODAY_EVENTS, NEWS);
   });
+
+  for (const [width, language] of [[1440, "ru"], [360, "en"]] as const) {
+    test(`${width} ${language}: ONS GDP appears today and next, follows calendar filters, and keeps its schedule status`, async ({ browser, request }) => {
+      const id = "ons:gb_gdp_monthly:2026-09";
+      await seed(request, [
+        ...TODAY_EVENTS,
+        ev({ id, source: "ons", country: "gb", code: "gb_gdp_monthly", title: "GDP monthly estimate", starts_at: "2026-11-03T13:00:00Z" }),
+        ev({ id: "ons:gb_gdp_qna:2026-q3", source: "ons", country: "gb", code: "gb_gdp_qna", title: "GDP quarterly national accounts", importance: 2, starts_at: "2026-11-03T12:30:00Z" }),
+        ev({ id: "ecb:test:2026-11-03", source: "ecb", country: "eu", kind: "decision", title: "ECB decision test", starts_at: "2026-11-03T18:00:00Z" }),
+      ], []);
+      const page = await open(browser, width, "/market", language);
+      const block = el(page, "today-important");
+      const uk = block.locator(`[data-testid="today-item"][data-id="${id}"]`);
+      const status = language === "ru" ? "По расписанию" : "On the schedule";
+      await expect(uk).toHaveCount(1);
+      await expect(uk.getByTestId("today-item-title")).toHaveText(language === "ru" ? "ВВП Великобритании (месячная оценка)" : "UK GDP (monthly estimate)");
+      await expect(uk.getByTestId("today-item-status")).toHaveText(status);
+      await expect(uk.getByTestId("today-item-figures")).toHaveCount(0);
+      await expect(block.getByTestId("today-next")).toHaveAttribute("data-id", id);
+      await expect(block.getByTestId("today-next-status")).toHaveText(status);
+      await expect(block.getByTestId("today-item")).toHaveCount(3);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await page.clock.fastForward(3_660_000);
+      await expect(uk.getByTestId("today-item-status")).toHaveText(status);
+      await expect(block.getByTestId("today-next")).toHaveAttribute("data-id", "bls:us_cpi:2026-11-03");
+
+      await page.goto("/market?tab=calendar&view=own");
+      if (width === 360) await el(page, "market-calendar-countries-toggle").click();
+      await el(page, "market-calendar-country-gb").click();
+      await page.goto("/market");
+      await expect(block.getByTestId("today-item")).toHaveCount(2);
+      await expect(uk).toHaveCount(0);
+      await page.goto("/market?tab=calendar&view=own");
+      if (width === 360) await el(page, "market-calendar-countries-toggle").click();
+      await el(page, "market-calendar-country-gb").click();
+      await el(page, "market-calendar-importance-high").click();
+      await page.goto("/market");
+      await expect(block.getByTestId("today-item")).toHaveCount(2);
+      await expect(uk).toHaveCount(0);
+      await page.close();
+    });
+  }
 
   for (const width of [1440, 360]) {
     test(`${width}: Overview — the nearest event with a countdown; today's important items by time; trust mark, source, status`, async ({ browser }) => {

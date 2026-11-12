@@ -16,6 +16,10 @@ export function memoryFeedsDb(seed: { events?: EventRow[]; lastRuns?: Record<str
   const scheduled = (e: StoredEvent) => (e.status ?? "scheduled") === "scheduled";
   const within = (e: StoredEvent, from: number, to: number) => Date.parse(e.starts_at) >= from && Date.parse(e.starts_at) <= to;
   const db: FeedsDb = {
+    async onsSchedules() {
+      return Array.from(events.values()).flatMap(e => e.source === "ons" && e.source_uid
+        ? [{ id: e.id, source_uid: e.source_uid, starts_at: e.starts_at, status: e.status, schedule_meta: e.schedule_meta ?? null }] : []);
+    },
     async matchResults(rows) {
       const out: EventResult[] = [];
       for (const r of rows) {

@@ -22,6 +22,28 @@ describe("«Today important»", () => {
     expect(isImportantEvent(ev("c", "x", { importance: 2, kind: "decision" }))).toBe(true);
     expect(isImportantEvent(ev("d", "x", { importance: 1, kind: "press_conference" }))).toBe(true);
     expect(isImportantEvent(ev("e", "x", { status: "cancelled" }))).toBe(false);
+    expect(isImportantEvent(ev("uk-gdp", "x", { source: "ons", country: "gb" }))).toBe(true);
+  });
+
+  it("includes eligible ONS GDP today and next, respecting UK filters while keeping US and EA coverage", () => {
+    const now = Date.parse("2026-11-12T06:30:00Z");
+    const day = dayOf(now, "Europe/London");
+    const uk = ev("ons:gb_gdp_monthly:2026-09", "2026-11-12T07:00:00Z", { source: "ons", country: "gb" });
+    const events = [
+      uk,
+      ev("ons:gb_gdp_qna:2026-q3", "2026-11-12T06:45:00Z", { source: "ons", country: "gb", importance: 2 }),
+      ev("ons:gb_gdp_first:2026-q3", "2026-11-12T06:50:00Z", { source: "ons", country: "gb", status: "cancelled" }),
+      ev("us", "2026-11-12T13:30:00Z"),
+      ev("eu", "2026-11-12T14:30:00Z", { source: "ecb", country: "eu" }),
+    ];
+    expect(nextImportant(events, now, { countries: ["gb"], importance: ["high"] })).toBe(uk);
+    for (const filters of [{ countries: ["us"] as const, importance: ["high"] as const }, { countries: ["gb"] as const, importance: ["medium"] as const }]) {
+      const prefs = { countries: [...filters.countries], importance: [...filters.importance] };
+      expect(nextImportant(events, now, prefs)?.id).toBe("us");
+      expect(todayItems(events, [], day, prefs).map(item => item.type === "event" && item.event.id)).toEqual(["us", "eu"]);
+    }
+    expect(todayItems(events, [], day, { countries: ["gb"], importance: ["high"] }).map(item => item.type === "event" && item.event.id))
+      .toEqual([uk.id, "us", "eu"]);
   });
 
   it("news: decisions and press conferences always; policy speeches (medium or high); the rest only when high", () => {
