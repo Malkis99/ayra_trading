@@ -82,8 +82,9 @@ describe("JOLTS dated initial facts",()=>{
 });
 describe("JOLTS automatic official schedule",()=>{
  it("learns the new published October month, preserves old IDs and deduplicates repeated daily runs",async()=>{
-  const memory=memoryFeedsDb({events:[september()]});
+  const memory=memoryFeedsDb({events:[september()],lastRuns:{"bls-jolts-schedule":now-86_400_000}});
   const net=network({[JOLTS_SCHEDULE_URL]:schedule});
+  expect(memory.events.has("bls:us_jolts:2026-12-01")).toBe(false);
   await collectFeeds({scope:"schedules",now,db:memory.db,fetch:net.fetch});
   await collectFeeds({scope:"schedules",now:now+60_000,db:memory.db,fetch:net.fetch});
   expect([...memory.events.values()].filter(e=>e.code===JOLTS_CODE).map(e=>e.id).sort()).toEqual([september().id,"bls:us_jolts:2026-12-01"].sort());
