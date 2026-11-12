@@ -121,13 +121,18 @@ export const RELEASE_REFRESH_WINDOW = 20 * 60_000;
 
 export type EventStatus = "scheduled" | "due" | "released" | "cancelled" | "held" | "checking" | "delayed" | "notPublished" | "scheduleOnly";
 
+/** An ONS schedule row stays schedule-only until the existing event is published with a result. */
+export function isScheduleOnly(e: Pick<CalendarEvent, "source" | "status">): boolean {
+  return e.source === "ons" && e.status !== "released";
+}
+
 export function eventStatus(e: Pick<CalendarEvent, "source" | "status" | "kind" | "starts_at" | "time_tbd" | "release_outcome" | "release_phase" | "release_check_until">, now: number): EventStatus {
   if (e.status === "released") return "released";
   if (e.status === "cancelled") return "cancelled";
+  if (isScheduleOnly(e)) return "scheduleOnly";
   const at = Date.parse(e.starts_at);
   if (at > now || e.time_tbd) return "scheduled";
   if (e.kind !== "release") return "held";
-  if (e.source === "ons") return "scheduleOnly";
   if (e.release_outcome === "not_published") return "notPublished";
   if (e.release_phase === "checking" && Date.parse(e.release_check_until ?? "") > now) return "checking";
   if (e.release_phase || now - at >= RELEASE_REFRESH_WINDOW) return "delayed";
@@ -151,6 +156,6 @@ export function hasPendingRelease(events: CalendarEvent[], now: number): boolean
 }
 
 function pendingReleaseTime(event: CalendarEvent): number {
-  return event.source !== "ons" && event.importance === 3 && event.kind === "release" && !event.time_tbd && event.status === "scheduled" && !event.actual && !event.release_outcome
+  return !isScheduleOnly(event) && event.importance === 3 && event.kind === "release" && !event.time_tbd && event.status === "scheduled" && !event.actual && !event.release_outcome
     ? Date.parse(event.starts_at) : NaN;
 }

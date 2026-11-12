@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clockIn, countByDay, eventStatus, eventsOfDay, initialDay, lastUpdate, noOwnCountry, visibleEvents, workWeek, type CalendarEvent } from "./calendar-view";
+import { clockIn, countByDay, eventStatus, eventsOfDay, initialDay, isScheduleOnly, lastUpdate, nextReleaseRead, noOwnCountry, visibleEvents, workWeek, type CalendarEvent } from "./calendar-view";
 
 const ev = (id: string, starts_at: string, o: Partial<CalendarEvent> = {}): CalendarEvent => ({
   id,
@@ -17,6 +17,18 @@ const ev = (id: string, starts_at: string, o: Partial<CalendarEvent> = {}): Cale
   url: null,
   updated_at: "2026-11-03T10:00:00Z",
   ...o,
+});
+
+it("keeps ONS on the schedule before and after release time and gives a stored result precedence", () => {
+  const at = Date.parse("2026-11-12T07:00:00Z");
+  const event = ev("ons:gb_gdp_monthly:2026-09", new Date(at).toISOString(), { source: "ons", country: "gb" });
+  expect(eventStatus(event, at - 1)).toBe("scheduleOnly");
+  expect(eventStatus(event, at + 86_400_000)).toBe("scheduleOnly");
+  expect(nextReleaseRead([event], at)).toBeNull();
+  expect(eventStatus({ ...event, status: "cancelled" }, at)).toBe("cancelled");
+  const published = { ...event, status: "released", actual: "+0.2%", previous: "0.0%" } as const;
+  expect(eventStatus(published, at)).toBe("released");
+  expect(isScheduleOnly(published)).toBe(false);
 });
 
 it("distinguishes release status, source delay, and confirmed absence", () => {

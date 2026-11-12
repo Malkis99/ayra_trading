@@ -119,6 +119,18 @@ describe("ONS GDP official calendar", () => {
       expect(await apply(row)).toEqual([{ id: monthlyId, conflict: "schedule freshness unproven" }]);
       expect((await db.query("SELECT id,status,actual,previous,result_meta FROM public.market_events")).rows)
         .toEqual([{ id: monthlyId, status: "cancelled", actual: null, previous: null, result_meta: null }]);
+
+      // Contract for UK-2: an approved result writer targets the existing schedule ID.
+      const scheduled = onsSchedules(published, "published", now).find(e => e.code === "gb_gdp_monthly")!;
+      expect(await apply(scheduled)).toEqual([{ id: scheduled.id }]);
+      const result = {
+        id: scheduled.id, actual: "+0.2%", previous: "0.0%", release_stage: scheduled.release_stage,
+        result_meta: { period: scheduled.reference_period, series: "ECYX", unit: "percent-mom", adjustment: "SA", release_url: scheduled.url },
+      };
+      await db.query("SELECT public.market_events_apply($1::jsonb,'result')", [JSON.stringify([result])]);
+      expect(await apply(scheduled)).toEqual([{ id: scheduled.id }]);
+      expect((await db.query("SELECT id,status,actual,previous FROM public.market_events WHERE reference_period='2026-09'")).rows)
+        .toEqual([{ id: scheduled.id, status: "released", actual: "+0.2%", previous: "0.0%" }]);
     } finally {
       await db.close();
     }

@@ -7,7 +7,8 @@ import { useOptionalGame } from "@/lib/game-context";
 import { formatString } from "@/lib/i18n";
 import { browserTimeZone, timeZoneLabel } from "@/lib/timezones";
 import { cn } from "@/components/ui";
-import { clockIn, eventStatus, levelOf, type CalendarEvent } from "@/lib/market/feeds/calendar-view";
+import { clockIn, eventStatus, isScheduleOnly, levelOf, type CalendarEvent } from "@/lib/market/feeds/calendar-view";
+import { useCalendarNews } from "@/lib/market/watchlist-store";
 import { FigureMissing, STATUS_TONE } from "@/components/market/OwnCalendar";
 import { dayOf, nextImportant, todayItems, type NewsItem, type TodayItem } from "@/lib/market/feeds/today";
 import { useMarketEvents } from "@/lib/market/feeds/use-market-events";
@@ -60,6 +61,7 @@ export function TodayImportant() {
   const zone = useUserZone();
   const now = useNow();
   const [open, setOpen] = useState<NewsItem | null>(null);
+  const [filters, , filtersLoaded] = useCalendarNews();
 
   const day = now === null ? null : dayOf(now, zone);
   const [events] = useMarketEvents(day?.from ?? 0, day ? day.from + LOOK_AHEAD_DAYS * 86_400_000 : 0);
@@ -67,12 +69,12 @@ export function TodayImportant() {
 
   if (now === null || !day) return <section className="min-h-[160px]" data-testid="today-important" aria-busy="true" />;
 
-  const ready = events.status === "ready" && news.status === "ready";
+  const ready = events.status === "ready" && news.status === "ready" && filtersLoaded;
   const unavailable = events.status === "unavailable" || news.status === "unavailable";
   const failed = events.status === "error" || news.status === "error";
   const eventRows = events.status === "ready" ? events.events : [];
-  const items = ready ? todayItems(eventRows, news.items, day) : [];
-  const next = ready ? nextImportant(eventRows, now) : null;
+  const items = ready ? todayItems(eventRows, news.items, day, filters) : [];
+  const next = ready ? nextImportant(eventRows, now, filters) : null;
   const nextToday = next && Date.parse(next.starts_at) < day.to ? next : null;
   const eventTitle = (e: CalendarEvent) => (e.code && (own.events as Record<string, string>)[e.code]) || e.title;
 
@@ -104,6 +106,11 @@ export function TodayImportant() {
           <span className="text-xs font-semibold text-vi" data-testid="today-next-countdown">
             {t.in} <Countdown to={Date.parse(next.starts_at)} format="human" />
           </span>
+          {isScheduleOnly(next) && (
+            <span className={cn("rounded px-1.5 py-px text-[10px] font-semibold", STATUS_TONE.scheduleOnly)} data-testid="today-next-status">
+              {own.status.scheduleOnly}
+            </span>
+          )}
         </div>
       )}
 
@@ -176,7 +183,7 @@ function TodayRow({ item, zone, now, onOpen, eventTitle }: { item: TodayItem; zo
             </span>
           )}
           {isEvent && !item.event.actual && status === "notPublished" && <FigureMissing url={item.event.release_official_url ?? item.event.url} note={own.missingComparisonBase} testId="today-item-missing" />}
-          {isEvent && !item.event.actual && status !== "notPublished" && item.event.previous && (
+          {isEvent && !item.event.actual && status !== "notPublished" && !isScheduleOnly(item.event) && item.event.previous && (
             <span className="tabular-nums" data-testid="today-item-figures">
               {own.previous} <span className="text-tx">{item.event.previous}</span>
             </span>

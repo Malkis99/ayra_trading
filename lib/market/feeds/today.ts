@@ -1,5 +1,6 @@
 import { instantOf, wallAt } from "../sessions";
-import type { CalendarEvent } from "./calendar-view";
+import type { CalendarNewsPrefs } from "../calendar-news";
+import { levelOf, type CalendarEvent } from "./calendar-view";
 import type { FeedSource } from "./types";
 
 /**
@@ -32,7 +33,14 @@ export function dayOf(now: number, zone: string): { from: number; to: number } {
 }
 
 /** Calendar events that matter on their own: high importance, and every rate decision and press conference. */
-export const isImportantEvent = (e: CalendarEvent) => e.source !== "ons" && e.status !== "cancelled" && (e.importance === 3 || e.kind === "decision" || e.kind === "press_conference");
+type EventFilters = Pick<CalendarNewsPrefs, "countries" | "importance">;
+
+export function isImportantEvent(e: CalendarEvent, filters?: EventFilters): boolean {
+  if (e.status === "cancelled") return false;
+  // UK-1 shares the calendar's filters for ONS. Existing overview coverage keeps its current selection.
+  if (e.source === "ons" && filters && (!filters.countries.includes(e.country) || !filters.importance.includes(levelOf(e.importance)))) return false;
+  return e.importance === 3 || e.kind === "decision" || e.kind === "press_conference";
+}
 
 /**
  * News that matter today: decisions and press conferences; speeches and testimony of medium or high importance
@@ -54,18 +62,18 @@ export function dedupeNews(items: NewsItem[]): NewsItem[] {
 export type TodayItem = { type: "event"; at: number; event: CalendarEvent } | { type: "news"; at: number; news: NewsItem };
 
 /** Today's important events and news in one timeline, by time. */
-export function todayItems(events: CalendarEvent[], news: NewsItem[], day: { from: number; to: number }): TodayItem[] {
+export function todayItems(events: CalendarEvent[], news: NewsItem[], day: { from: number; to: number }, filters?: EventFilters): TodayItem[] {
   const within = (at: number) => at >= day.from && at < day.to;
   const items: TodayItem[] = [
-    ...events.filter(isImportantEvent).map((event) => ({ type: "event" as const, at: Date.parse(event.starts_at), event })),
+    ...events.filter(e => isImportantEvent(e, filters)).map((event) => ({ type: "event" as const, at: Date.parse(event.starts_at), event })),
     ...dedupeNews(news.filter(isImportantNews)).map((n) => ({ type: "news" as const, at: Date.parse(n.published_at), news: n })),
   ].filter((i) => within(i.at));
   return items.sort((a, b) => a.at - b.at);
 }
 
 /** The nearest important event still to come (today first, otherwise the next days). */
-export function nextImportant(events: CalendarEvent[], now: number): CalendarEvent | null {
-  return events.filter((e) => isImportantEvent(e) && e.status === "scheduled" && Date.parse(e.starts_at) > now).sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0] ?? null;
+export function nextImportant(events: CalendarEvent[], now: number, filters?: EventFilters): CalendarEvent | null {
+  return events.filter(e => isImportantEvent(e, filters) && e.status === "scheduled" && Date.parse(e.starts_at) > now).sort((a, b) => a.starts_at.localeCompare(b.starts_at))[0] ?? null;
 }
 
 /** The feed: importance chosen by the user (high only by default), newest first, repeats merged. */
