@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quests 2.0 — концепция</title>
+<!--
+  AYRA · Quests & Discipline 2.0 — static visual concept (NOT production code).
+  Port to React by the plan in docs/quests-2.0-plan.md. All numbers on this page are DEMO data.
+  Character = real <Character/> SVG rendered from components/Character.tsx; logo = public/brand/mark-flat.svg.
+  View switch: ?view=today|week|path|discipline|history
+-->
+<style>
+@font-face { font-family: Manrope; src: url("../../public/fonts/manrope/manrope-cyrillic.woff2") format("woff2"); unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; font-weight: 200 800; }
+@font-face { font-family: Manrope; src: url("../../public/fonts/manrope/manrope-latin.woff2") format("woff2"); font-weight: 200 800; }
+:root {
+  --ink: #121117; --s1: #18171f; --s2: #201f29; --s3: #26243a; --line: #2c2a38; --edge: #4e4b66;
+  --tx: #ebe9f3; --mu: #a09eb2; --vi: #a38ad1; --pri: #50348f; --go: #d6a94a; --ok: #6fcf97; --warn: #e5b98a; --danger: #e58a8a;
+  --analyst: #7fb8e6; --executor: #a38ad1; --guardian: #7fcfa6; --scholar: #c3a6f0;
+  --serif: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--ink); color: var(--tx); font: 400 14px/1.5 Manrope, system-ui, sans-serif; -webkit-font-smoothing: antialiased;
+  background-image: radial-gradient(900px 480px at 78% -8%, rgb(80 52 143 / .16), transparent 70%); min-height: 100vh; }
+.app { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+/* sidebar (existing shell, simplified) */
+.side { border-right: 1px solid var(--line); padding: 20px 14px; display: flex; flex-direction: column; gap: 4px; background: rgb(18 17 23 / .6); }
+.brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 18px; font: 700 18px var(--serif); letter-spacing: .14em; }
+.brand svg { width: 30px; height: auto; }
+.nav a { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; color: var(--mu); text-decoration: none; font-weight: 600; font-size: 14px; }
+.nav a.on { background: var(--s2); color: var(--tx); box-shadow: inset 2px 0 0 var(--vi); }
+.nav i { width: 18px; height: 18px; border: 1.6px solid currentColor; border-radius: 5px; display: inline-block; opacity: .8; }
+.side .grow { flex: 1; }
+.pcard { display: flex; gap: 10px; align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--s1); }
+.pcard .av { width: 36px; height: 44px; overflow: hidden; display: grid; place-items: center; }
+.pcard .av svg { width: 36px; height: 44px; }
+.main { padding: 28px 36px 64px; max-width: 1180px; min-width: 0; }
+.hero > *, .grid2 > *, .nameRow > div:last-child { min-width: 0; }
+.top { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 18px; }
+h1 { font: 700 30px/1.15 var(--serif); margin: 0; }
+.sub { color: var(--mu); font-size: 13px; margin-top: 4px; }
+.demo { font-size: 12px; color: var(--warn); border: 1px dashed rgb(229 185 138 / .5); padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+
+/* hero */
+.hero { position: relative; display: grid; grid-template-columns: 150px 1fr 300px; gap: 22px; padding: 20px 22px; border: 1px solid var(--line); border-radius: 20px;
+  background: linear-gradient(120deg, rgb(80 52 143 / .22), rgb(24 23 31 / .9) 42%, rgb(24 23 31 / .96)); overflow: hidden; }
+.hero::after { content: ""; position: absolute; inset: auto -60px -120px auto; width: 380px; height: 260px; background: radial-gradient(closest-side, rgb(163 138 209 / .16), transparent); pointer-events: none; }
+.stage { position: relative; display: grid; place-items: end center; height: 196px; }
+.stage::before { content: ""; position: absolute; bottom: 4px; width: 128px; height: 26px; border-radius: 50%; background: radial-gradient(closest-side, rgb(163 138 209 / .35), transparent); }
+.stage::after { content: ""; position: absolute; bottom: 10px; width: 108px; height: 16px; border-radius: 50%; border: 1px solid rgb(163 138 209 / .35); }
+.stage svg { position: relative; z-index: 1; height: 190px; width: auto; }
+.who { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.nameRow { display: flex; align-items: center; gap: 14px; }
+.lv { width: 52px; height: 52px; display: grid; place-items: center; font: 700 21px var(--serif); color: #efe9ff; background: linear-gradient(135deg, #a38ad1, #50348f);
+  clip-path: polygon(30% 0, 70% 0, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0 70%, 0 30%); flex: none; }
+.name { font: 700 22px var(--serif); }
+.title { color: var(--mu); font-size: 13px; }
+.bar { height: 8px; border-radius: 99px; background: rgb(255 255 255 / .07); overflow: hidden; }
+.bar > b { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--pri), var(--vi)); }
+.barLbl { display: flex; justify-content: space-between; font-size: 12px; color: var(--mu); margin-bottom: 6px; }
+.mission { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-radius: 14px; background: rgb(18 17 23 / .55); border: 1px solid var(--line); }
+.kicker { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--vi); font-weight: 700; }
+.mission .m { font: 600 16px var(--serif); }
+.pips { display: flex; gap: 6px; margin-top: 4px; }
+.pips span { flex: 1; height: 4px; border-radius: 4px; background: rgb(255 255 255 / .08); }
+.pips span.on { background: var(--vi); }
+.side3 { display: flex; flex-direction: column; gap: 10px; position: relative; z-index: 1; }
+.stat { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; background: rgb(18 17 23 / .55); border: 1px solid var(--line); }
+.ring { --p: 72; width: 46px; height: 46px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  background: conic-gradient(var(--vi) calc(var(--p) * 1%), rgb(255 255 255 / .08) 0); }
+.ring::before { content: attr(data-v); width: 36px; height: 36px; border-radius: 50%; background: var(--s1); display: grid; place-items: center; font: 700 14px var(--serif); }
+.stat .l { font-size: 12px; color: var(--mu); }
+.stat .v { font-weight: 700; font-size: 14px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: 12px; border: 0; font: 700 14px Manrope, sans-serif; cursor: pointer; }
+.btn.pri { background: var(--pri); color: #fff; box-shadow: 0 0 0 1px rgb(163 138 209 / .35) inset; }
+.btn.sec { background: transparent; color: var(--tx); border: 1px solid var(--edge); }
+.btn.ghost { background: transparent; color: var(--mu); }
+.btn.sm { min-height: 36px; padding: 0 12px; font-size: 13px; }
+
+/* tabs */
+.tabs { display: flex; gap: 4px; margin: 22px 0 18px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs a { padding: 12px 14px; color: var(--mu); text-decoration: none; font-weight: 600; white-space: nowrap; border-bottom: 2px solid transparent; margin-bottom: -1px; min-height: 44px; }
+.tabs a.on { color: var(--tx); border-color: var(--vi); }
+
+.grid2 { display: grid; grid-template-columns: 1fr 340px; gap: 20px; align-items: start; }
+.col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.sec-h { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin: 6px 0 -4px; }
+.sec-h h2 { font: 600 15px Manrope, sans-serif; margin: 0; }
+.sec-h .r { font-size: 13px; color: var(--mu); }
+.card { background: var(--s1); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; }
+.card.quiet { background: transparent; }
+
+/* mode switch */
+.modes { display: flex; gap: 6px; padding: 4px; border-radius: 14px; background: var(--s1); border: 1px solid var(--line); }
+.modes span { flex: 1; text-align: center; padding: 9px 10px; border-radius: 10px; font-weight: 600; font-size: 13px; color: var(--mu); min-height: 40px; display: grid; place-items: center; }
+.modes span.on { background: var(--s3); color: var(--tx); box-shadow: inset 0 0 0 1px rgb(163 138 209 / .4); }
+.hint { font-size: 12px; color: var(--mu); }
+
+/* quest */
+.q { display: grid; grid-template-columns: 44px 1fr auto; gap: 14px; align-items: center; padding: 14px 16px; border-radius: 14px; background: var(--s1); border: 1px solid var(--line); }
+.q.done { background: linear-gradient(90deg, rgb(111 207 151 / .07), var(--s1) 40%); border-color: rgb(111 207 151 / .25); }
+.sig { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 12px; font: 700 15px var(--serif); color: var(--c, var(--vi)); background: color-mix(in srgb, var(--c, var(--vi)) 14%, transparent);
+  clip-path: polygon(25% 0, 75% 0, 100% 25%, 100% 75%, 75% 100%, 25% 100%, 0 75%, 0 25%); }
+.q .t { font-weight: 700; font-size: 14px; }
+.q .d { font-size: 13px; color: var(--mu); margin-top: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--mu); white-space: nowrap; }
+.chip.auto { color: var(--ok); border-color: rgb(111 207 151 / .35); }
+.chip.self { color: var(--warn); border-color: rgb(229 185 138 / .35); }
+.chip.br { color: var(--c); border-color: color-mix(in srgb, var(--c) 40%, transparent); }
+.chip.rw { color: var(--tx); background: var(--s2); border-color: transparent; }
+.chip.gold { color: var(--go); border-color: rgb(214 169 74 / .45); }
+.state { font-size: 13px; font-weight: 700; color: var(--ok); white-space: nowrap; }
+.state.wait { color: var(--mu); font-weight: 600; }
+
+/* composite protocol */
+.proto { padding: 18px 20px; border-radius: 18px; border: 1px solid rgb(163 138 209 / .28);
+  background: linear-gradient(160deg, rgb(80 52 143 / .18), var(--s1) 55%); }
+.proto-h { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.proto-h .n { font: 700 18px var(--serif); }
+.steps { margin-top: 14px; display: grid; gap: 8px; }
+.step { display: grid; grid-template-columns: 22px 1fr auto; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 12px; background: rgb(18 17 23 / .5); }
+.tick { width: 22px; height: 22px; border-radius: 7px; border: 1.6px solid var(--edge); display: grid; place-items: center; font-size: 13px; color: var(--ink); }
+.tick.on { background: var(--ok); border-color: var(--ok); }
+.tick.on::before { content: "✓"; font-weight: 800; }
+.step .s { font-size: 14px; }
+.step .src { font-size: 12px; color: var(--mu); }
+
+/* right rail */
+.code li { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.code li:last-child { border-bottom: 0; }
+.code ul { list-style: none; margin: 10px 0 0; padding: 0; }
+.ok { color: var(--ok); } .warn { color: var(--warn); } .mu { color: var(--mu); } .gold { color: var(--go); }
+.note { font-size: 12px; color: var(--mu); padding: 10px 12px; border-radius: 12px; background: var(--s2); }
+
+/* discipline */
+.score { display: grid; grid-template-columns: 170px 1fr; gap: 24px; align-items: center; }
+.bigring { --p: 72; width: 160px; height: 160px; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(var(--vi) calc(var(--p) * 1%), rgb(255 255 255 / .07) 0); }
+.bigring > div { width: 136px; height: 136px; border-radius: 50%; background: var(--s1); display: grid; place-items: center; text-align: center; }
+.bigring b { font: 700 42px/1 var(--serif); display: block; }
+.bigring small { font-size: 12px; color: var(--mu); }
+.comp { display: grid; grid-template-columns: 1fr 64px; gap: 4px 12px; align-items: center; margin-bottom: 10px; }
+.comp .n { font-size: 13px; font-weight: 600; }
+.comp .src { font-size: 12px; color: var(--mu); text-align: right; }
+.comp .bar { grid-column: 1 / -1; height: 6px; }
+.comp .bar b.self { background: repeating-linear-gradient(90deg, var(--warn) 0 6px, transparent 6px 9px); }
+.comp.nd .n { color: var(--mu); }
+.heat { display: grid; grid-template-columns: 28px repeat(12, minmax(0, 32px)); gap: 5px; align-items: center; }
+.heat .dl { font-size: 11px; color: var(--mu); }
+.cell { aspect-ratio: 1; border-radius: 5px; background: var(--s2); }
+.c4 { background: #8d6fd0; } .c3 { background: #6b52a8; } .c2 { background: #4a3a78; } .c1 { background: #33294f; }
+.cs { background: repeating-linear-gradient(135deg, #6b52a8 0 3px, #33294f 3px 6px); }
+.cr { background: transparent; border: 1.5px solid rgb(127 207 166 / .55); }
+.cn { background: transparent; border: 1px dashed var(--edge); }
+.cx { background: rgb(255 255 255 / .03); }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; font-size: 12px; color: var(--mu); }
+.legend span { display: inline-flex; gap: 6px; align-items: center; }
+.legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.jr { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 8px; }
+.jr span { text-align: center; padding: 8px 4px; border-radius: 10px; background: var(--s2); font-size: 13px; font-weight: 600; color: var(--mu); }
+.jr span.on { background: var(--s3); color: var(--tx); box-shadow: inset 0 0 0 1px var(--vi); }
+.rl { font-size: 13px; font-weight: 600; margin-top: 12px; }
+
+/* week */
+.boss { position: relative; padding: 22px; border-radius: 20px; border: 1px solid rgb(163 138 209 / .35); overflow: hidden;
+  background: radial-gradient(500px 200px at 85% 0%, rgb(163 138 209 / .18), transparent 70%), linear-gradient(180deg, #1d1b2a, var(--s1)); }
+.boss .crest { width: 64px; height: 64px; display: grid; place-items: center; font: 700 26px var(--serif); color: #efe9ff; background: linear-gradient(135deg, #6d55a8, #2c2148);
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); flex: none; }
+.boss h3 { font: 700 22px var(--serif); margin: 0; }
+.conds { margin-top: 14px; display: grid; gap: 8px; }
+.cond { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 10px 12px; border-radius: 12px; background: rgb(18 17 23 / .55); font-size: 13px; }
+.days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+.day { padding: 10px 6px; border-radius: 12px; background: var(--s1); border: 1px solid var(--line); text-align: center; }
+.day .w { font-size: 12px; color: var(--mu); }
+.day .i { font-size: 13px; font-weight: 700; margin-top: 4px; }
+.day.today { border-color: var(--vi); }
+.obj { display: grid; grid-template-columns: 1fr 120px; gap: 6px 14px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.obj:last-child { border-bottom: 0; }
+.obj .bar { height: 6px; }
+
+/* path / skill tree */
+.branches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.branch { padding: 16px; border-radius: 18px; background: var(--s1); border: 1px solid var(--line); position: relative; }
+.branch .bh { display: flex; gap: 10px; align-items: center; }
+.branch .bn { font: 700 17px var(--serif); }
+.branch .bs { font-size: 12px; color: var(--mu); }
+.tree { margin-top: 16px; display: grid; gap: 0; justify-items: center; }
+.node { width: 100%; display: grid; grid-template-columns: 40px 1fr; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 12px; font-size: 13px; }
+.node .g { width: 36px; height: 36px; display: grid; place-items: center; font: 700 13px var(--serif); color: var(--c);
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); background: color-mix(in srgb, var(--c) 18%, transparent); }
+.node.done .g { background: var(--c); color: var(--ink); }
+.node.now { background: color-mix(in srgb, var(--c) 9%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 45%, transparent); }
+.node.lock { opacity: .45; }
+.node .nt { font-weight: 600; }
+.node .ns { font-size: 12px; color: var(--mu); }
+.link { width: 2px; height: 14px; background: var(--line); }
+.mastery { margin-top: 10px; font-size: 12px; color: var(--mu); }
+
+/* history */
+.tl { position: relative; padding-left: 26px; }
+.tl::before { content: ""; position: absolute; left: 8px; top: 6px; bottom: 6px; width: 2px; background: var(--line); }
+.tday { font-weight: 700; font-size: 13px; margin: 16px 0 8px; color: var(--mu); }
+.ev { position: relative; display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--s1); border: 1px solid var(--line); margin-bottom: 8px; }
+.ev::before { content: ""; position: absolute; left: -23px; top: 18px; width: 10px; height: 10px; border-radius: 50%; background: var(--c, var(--vi)); box-shadow: 0 0 0 3px var(--ink); }
+.ev .et { font-weight: 600; font-size: 14px; }
+.ev .es { font-size: 12px; color: var(--mu); margin-top: 2px; }
+.ev .amt { font-size: 13px; font-weight: 700; text-align: right; white-space: nowrap; }
+.filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.filters span { padding: 7px 12px; border-radius: 10px; background: var(--s2); color: var(--mu); font-size: 13px; font-weight: 600; }
+.filters span.on { background: var(--s3); color: var(--tx); box-shadow: inset 0 0 0 1px var(--vi); }
+
+.bottom { display: none; }
+.view { display: none; } .view.on { display: block; }
+
+@media (max-width: 1100px) { .hero { grid-template-columns: 130px 1fr; } .side3 { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; } .side3 > * { flex: 1 1 200px; } .grid2 { grid-template-columns: 1fr; } .branches { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; }
+  .side { display: none; }
+  .main { padding: 16px 16px 32px; }
+  h1 { font-size: 24px; }
+  .top .demo { display: none; }
+  .hero { grid-template-columns: 92px 1fr; gap: 14px; padding: 14px; border-radius: 18px; }
+  .stage { height: 132px; } .stage svg { height: 128px; } .stage::before { width: 84px; } .stage::after { width: 70px; }
+  .name { font-size: 18px; } .lv { width: 42px; height: 42px; font-size: 17px; }
+  .mission .m { font-size: 14px; }
+  .side3 { flex-direction: column; grid-area: side; } .side3 > * { flex: none; } .side3 .btn { width: 100%; }
+  .hero { grid-template-areas: "stage name" "stage bar" "mission mission" "side side"; } .stage { grid-area: stage; } .who { display: contents; } .nameRow { grid-area: name; align-self: end; } .who > div:nth-child(2) { grid-area: bar; } .mission { grid-area: mission; }
+  .score { grid-template-columns: 1fr; justify-items: center; }
+  .branches { grid-template-columns: 1fr; }
+  .q { grid-template-columns: 40px 1fr; } .q .state, .q .btn { grid-column: 2; justify-self: start; }
+  .days { gap: 4px; } .day { padding: 8px 2px; } .day .i { font-size: 12px; }
+  .modes span { font-size: 12px; padding: 8px 4px; }
+  .jr { grid-template-columns: repeat(5, 1fr); }
+  .bottom { display: grid; grid-template-columns: repeat(5, 1fr); position: sticky; bottom: 0; z-index: 5; background: rgb(18 17 23 / .96); border-top: 1px solid var(--line); padding: 6px 4px 10px; }
+  .bottom a { display: grid; justify-items: center; gap: 3px; font-size: 11px; color: var(--mu); text-decoration: none; padding: 6px 0; min-height: 44px; }
+  .bottom a i { width: 20px; height: 20px; border: 1.6px solid currentColor; border-radius: 6px; }
+  .bottom a.on { color: var(--tx); } .bottom a.on i { border-color: var(--vi); background: rgb(163 138 209 / .15); }
+  .heat { grid-template-columns: 22px repeat(12, 1fr); gap: 3px; }
+}
+@media (prefers-reduced-motion: no-preference) { .q, .step, .node { transition: background-color .18s, box-shadow .18s; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand"><svg xmlns="http://www.w3.org/2000/svg" viewBox="-24 -24 1156 856" width="1156" height="856"><defs><linearGradient id="lfa" gradientUnits="userSpaceOnUse" x1="480" y1="50" x2="60" y2="744"><stop offset="0.000" stop-color="#f9f4ff"/><stop offset="0.333" stop-color="#d4bdfa"/><stop offset="0.667" stop-color="#a678ee"/><stop offset="1.000" stop-color="#7c42da"/></linearGradient><linearGradient id="rfa" gradientUnits="userSpaceOnUse" x1="491" y1="50" x2="700" y2="480"><stop offset="0.000" stop-color="#4d12b6"/><stop offset="0.500" stop-color="#6824d6"/><stop offset="1.000" stop-color="#8d41f4"/></linearGradient><linearGradient id="lla" gradientUnits="userSpaceOnUse" x1="640" y1="480" x2="930" y2="757"><stop offset="0.000" stop-color="#4e14b7"/><stop offset="0.500" stop-color="#6c2bdc"/><stop offset="1.000" stop-color="#9248f6"/></linearGradient><linearGradient id="ara" gradientUnits="userSpaceOnUse" x1="68" y1="748" x2="1027" y2="196"><stop offset="0.000" stop-color="#7424ec"/><stop offset="0.333" stop-color="#a74dff"/><stop offset="0.667" stop-color="#dbb9ff"/><stop offset="1.000" stop-color="#fcf7ff"/></linearGradient><linearGradient id="wa" gradientUnits="userSpaceOnUse" x1="0" y1="48" x2="0" y2="270"><stop offset="0.000" stop-color="#fbf8ff"/><stop offset="0.500" stop-color="#d8c4fa"/><stop offset="1.000" stop-color="#a97ef0"/></linearGradient><linearGradient id="ta" gradientUnits="userSpaceOnUse" x1="540" y1="0" x2="1492" y2="0"><stop offset="0.000" stop-color="#b45cff"/><stop offset="1.000" stop-color="#a24df5"/></linearGradient><linearGradient id="ln1a" x1="0" x2="1"><stop offset="0" stop-color="#b45cff" stop-opacity="0"/><stop offset="1" stop-color="#b45cff" stop-opacity=".95"/></linearGradient><linearGradient id="ln2a" x1="0" x2="1"><stop offset="0" stop-color="#b45cff" stop-opacity=".95"/><stop offset="1" stop-color="#b45cff" stop-opacity="0"/></linearGradient><linearGradient id="sha" gradientUnits="userSpaceOnUse" x1="120" y1="800" x2="980" y2="60"><stop offset="0" stop-color="#6f8bff" stop-opacity="0"/><stop offset=".30" stop-color="#7f9bff" stop-opacity=".30"/><stop offset=".52" stop-color="#ff7ae8" stop-opacity=".34"/><stop offset=".74" stop-color="#b58cff" stop-opacity=".18"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient><linearGradient id="shwa" gradientUnits="userSpaceOnUse" x1="226" y1="0" x2="1779" y2="0"><stop offset="0" stop-color="#7f9bff" stop-opacity=".0"/><stop offset=".35" stop-color="#8aa2ff" stop-opacity=".22"/><stop offset=".62" stop-color="#ff7ae8" stop-opacity=".2"/><stop offset="1" stop-color="#b58cff" stop-opacity=".0"/></linearGradient></defs><polygon points="490,50 489,330 359,521 52,744" fill="url(#lfa)" stroke="#ffffff" stroke-opacity="0.38" stroke-width="2.2" stroke-linejoin="miter"/><polygon points="491,50 702,398 588,482 491,330" fill="url(#rfa)" stroke="#ffffff" stroke-opacity="0.38" stroke-width="2.2" stroke-linejoin="miter"/><polygon points="756,478 931,757 738,757 628,573" fill="url(#lla)" stroke="#ffffff" stroke-opacity="0.38" stroke-width="2.2" stroke-linejoin="miter"/><polygon points="68,748 517,447 577,529 912,284 853,272 1027,196 962,352 938,303 568,583 509,497" fill="url(#ara)" stroke="#ffffff" stroke-opacity="0.38" stroke-width="2.2" stroke-linejoin="miter"/><g style="mix-blend-mode:screen"><polygon points="490,50 489,330 359,521 52,744" fill="url(#sha)"/><polygon points="491,50 702,398 588,482 491,330" fill="url(#sha)"/><polygon points="756,478 931,757 738,757 628,573" fill="url(#sha)"/><polygon points="68,748 517,447 577,529 912,284 853,272 1027,196 962,352 938,303 568,583 509,497" fill="url(#sha)"/></g></svg><span>AYRA</span></div>
+    <nav class="nav">
+      <a><i></i>Главная</a><a><i></i>Журнал</a><a><i></i>Рынок</a><a class="on"><i></i>Задания</a><a><i></i>Сообщество</a><a><i></i>Академия</a>
+    </nav>
+    <div class="grow"></div>
+    <div class="pcard"><div class="av"><svg viewBox="0 0 100 230" width="64" height="110" preserveAspectRatio="xMidYMid meet" class="motion-safe:animate-[breath_4s_easeInOut_infinite]  " xmlns="http://www.w3.org/2000/svg" data-character="skin_medium hair_short_fade hair_brown outfit_obsidian" data-equipment="Верх:0,Низ:3,Обувь:5"><defs><style>
+            @keyframes breath {
+              0%, 100% { transform: translateY(0px); }
+              50% { transform: translateY(-2px); }
+            }
+            @keyframes slowRotate {
+              0% { transform: rotateY(0deg); }
+              50% { transform: rotateY(180deg); }
+              100% { transform: rotateY(360deg); }
+            }
+          </style></defs><path d="M32 140L68 140L66 222L53 222L50 165L47 222L34 222Z" fill="#2b2b36"></path><ellipse cx="42" cy="224" rx="10" ry="4" fill="#cfcfd8"></ellipse><ellipse cx="58" cy="224" rx="10" ry="4" fill="#cfcfd8"></ellipse><rect x="45" y="48" width="10" height="12" rx="2" fill="#d1a886"></rect><path d="M22 68Q50 54 78 68L86 148L72 148L70 100L68 148L32 148L30 100L28 148L14 148Z" fill="#3a3a48"></path><circle cx="14" cy="148" r="4.5" fill="#d1a886"></circle><circle cx="86" cy="148" r="4.5" fill="#d1a886"></circle><circle cx="33" cy="37" r="3.5" fill="#d1a886"></circle><circle cx="67" cy="37" r="3.5" fill="#d1a886"></circle><circle cx="50" cy="36" r="16" fill="#d1a886"></circle><path d="M33 32Q50 12 67 32C62 24 38 24 33 32Z" fill="#634027"></path><path d="M41 31Q44 29 47 31" stroke="#634027" stroke-width="1.2" fill="none"></path><path d="M53 31Q56 29 59 31" stroke="#634027" stroke-width="1.2" fill="none"></path><circle cx="44" cy="35" r="1.5" fill="#1f1f28"></circle><circle cx="56" cy="35" r="1.5" fill="#1f1f28"></circle><path d="M50 37L49 40H51" stroke="#b08b6e" stroke-width="1" stroke-linecap="round" fill="none"></path></svg></div><div><div style="font:700 14px var(--serif)">TraderOne</div><div class="hint">Ур. 7 · Дисциплинированный</div></div></div>
+    <nav class="nav" style="margin-top:6px"><a><i></i>Настройки</a><a><i></i>Помощь</a></nav>
+  </aside>
+
+  <main class="main">
+    <div class="top">
+      <div><h1>Задания и дисциплина</h1><div class="sub">Trade · Train · Evolve — награды за процесс, а не за количество сделок.</div></div>
+      <span class="demo">Концепция · данные для примера</span>
+    </div>
+
+    <!-- HERO: character, level, mission, discipline, week focus, next action -->
+    <section class="hero">
+      <div class="stage"><svg viewBox="0 0 100 230" width="180" height="300" preserveAspectRatio="xMidYMid meet" class="motion-safe:animate-[breath_4s_easeInOut_infinite]  " xmlns="http://www.w3.org/2000/svg" data-character="skin_medium hair_short_fade hair_brown outfit_obsidian" data-equipment="Верх:0,Низ:3,Обувь:5"><defs><style>
+            @keyframes breath {
+              0%, 100% { transform: translateY(0px); }
+              50% { transform: translateY(-2px); }
+            }
+            @keyframes slowRotate {
+              0% { transform: rotateY(0deg); }
+              50% { transform: rotateY(180deg); }
+              100% { transform: rotateY(360deg); }
+            }
+          </style></defs><path d="M32 140L68 140L66 222L53 222L50 165L47 222L34 222Z" fill="#2b2b36"></path><ellipse cx="42" cy="224" rx="10" ry="4" fill="#cfcfd8"></ellipse><ellipse cx="58" cy="224" rx="10" ry="4" fill="#cfcfd8"></ellipse><rect x="45" y="48" width="10" height="12" rx="2" fill="#d1a886"></rect><path d="M22 68Q50 54 78 68L86 148L72 148L70 100L68 148L32 148L30 100L28 148L14 148Z" fill="#3a3a48"></path><circle cx="14" cy="148" r="4.5" fill="#d1a886"></circle><circle cx="86" cy="148" r="4.5" fill="#d1a886"></circle><circle cx="33" cy="37" r="3.5" fill="#d1a886"></circle><circle cx="67" cy="37" r="3.5" fill="#d1a886"></circle><circle cx="50" cy="36" r="16" fill="#d1a886"></circle><path d="M33 32Q50 12 67 32C62 24 38 24 33 32Z" fill="#634027"></path><path d="M41 31Q44 29 47 31" stroke="#634027" stroke-width="1.2" fill="none"></path><path d="M53 31Q56 29 59 31" stroke="#634027" stroke-width="1.2" fill="none"></path><circle cx="44" cy="35" r="1.5" fill="#1f1f28"></circle><circle cx="56" cy="35" r="1.5" fill="#1f1f28"></circle><path d="M50 37L49 40H51" stroke="#b08b6e" stroke-width="1" stroke-linecap="round" fill="none"></path></svg></div>
+      <div class="who">
+        <div class="nameRow"><div class="lv">7</div><div><div class="name">TraderOne</div><div class="title">Дисциплинированный · путь Guardian</div></div></div>
+        <div><div class="barLbl"><span>Опыт уровня</span><span>164 / 360 XP</span></div><div class="bar"><b style="width:46%"></b></div></div>
+        <div class="mission">
+          <span class="kicker">Миссия дня · Торговый день</span>
+          <span class="m">Подготовиться до сессии и записать решения</span>
+          <span class="hint">Основные: 2 из 3 · бонусные не обязательны</span>
+          <div class="pips"><span class="on"></span><span class="on"></span><span></span></div>
+        </div>
+      </div>
+      <div class="side3">
+        <div class="stat"><div class="ring" style="--p:72" data-v="72"></div><div><div class="v">Индекс дисциплины</div><div class="l">предварительный · 9 дней с данными из 14</div></div></div>
+        <div class="stat"><div class="sig" style="--c:var(--guardian);width:46px;height:46px">G</div><div><div class="v">Испытание недели</div><div class="l">Уважай свой стоп · 3 из 4 условий</div></div></div>
+        <button class="btn pri">Следующий шаг: вечерний разбор →</button>
+      </div>
+    </section>
+
+    <nav class="tabs" role="tablist">
+      <a data-v="today">Сегодня</a><a data-v="week">Неделя</a><a data-v="path">Путь</a><a data-v="discipline">Дисциплина</a><a data-v="history">История</a>
+    </nav>
+
+    <!-- ============ TODAY ============ -->
+    <section class="view" id="today">
+      <div class="grid2">
+        <div class="col">
+          <div>
+            <div class="modes"><span class="on">Торговля</span><span>Учёба</span><span>Отдых</span><span>Восстановление</span></div>
+            <div class="hint" style="margin-top:6px">Режим выбирается до первой награды дня; потом — только «Отдых» (без потери наград и серии).</div>
+          </div>
+
+          <div class="proto">
+            <div class="proto-h">
+              <div><span class="kicker">Составная миссия</span><div class="n">Утренний протокол</div><div class="hint">Одна награда за весь протокол, а не за каждый шаг</div></div>
+              <span class="chip rw">+40 XP · +10 Coins</span>
+            </div>
+            <div class="steps">
+              <div class="step"><span class="tick on"></span><div><div class="s">Daily Bias по инструментам</div><div class="src">План дня · 2 инструмента</div></div><span class="chip auto">Журнал ✓</span></div>
+              <div class="step"><span class="tick on"></span><div><div class="s">Разметить POI / уровни</div><div class="src">План дня · 3 уровня</div></div><span class="chip auto">Журнал ✓</span></div>
+              <div class="step"><span class="tick"></span><div><div class="s">Проверить экономический календарь</div><div class="src">Сегодня 2 важных события · 15:30, 17:00</div></div><span class="chip self">Отметить</span></div>
+              <div class="step"><span class="tick"></span><div><div class="s">Дневной риск и лимит сделок</div><div class="src">Из Кодекса трейдера: ≤ 1% · ≤ 3 сделки</div></div><span class="chip auto">Журнал</span></div>
+            </div>
+          </div>
+
+          <div class="sec-h"><h2>Основные задания</h2><span class="r">2 из 3</span></div>
+          <div class="q done"><div class="sig" style="--c:var(--executor)">E</div><div><div class="t">Чек-лист входа по стратегии</div><div class="d">Отметь правила сетапа у сделки — так видно, что ты торговал по плану.</div>
+            <div class="chips"><span class="chip br" style="--c:var(--executor)">Executor</span><span class="chip auto">Проверяет журнал</span><span class="chip rw">+40 XP · +10 Coins</span></div></div><span class="state">Выполнено</span></div>
+          <div class="q"><div class="sig" style="--c:var(--guardian)">G</div><div><div class="t">Вечерний разбор сессии</div><div class="d">3 вопроса: план соблюдён? лучшее решение? ошибка дня?</div>
+            <div class="chips"><span class="chip br" style="--c:var(--guardian)">Guardian</span><span class="chip auto">Проверяет журнал</span><span class="chip rw">+40 XP · +10 Coins</span></div></div><button class="btn sec sm">Открыть разбор</button></div>
+          <div class="q"><div class="sig" style="--c:var(--scholar)">S</div><div><div class="t">20 минут бэктеста одного сетапа</div><div class="d">Самоотчёт: приложение не может это проверить, поэтому только XP.</div>
+            <div class="chips"><span class="chip br" style="--c:var(--scholar)">Scholar</span><span class="chip self">Самоотчёт · только XP</span><span class="chip rw">+50 XP</span></div></div><button class="btn sec sm">Отметить</button></div>
+
+          <div class="sec-h"><h2>No Trade Victory</h2><span class="r">не обязательно</span></div>
+          <div class="q"><div class="sig" style="--c:var(--guardian)">✕</div><div><div class="t">Осознанно пропустил плохой сетап?</div><div class="d">Запиши «Не вошёл» с причиной — это тоже дисциплина. Торговать не обязательно.</div>
+            <div class="chips"><span class="chip auto">Журнал «Не вошёл»</span><span class="chip rw">+10 XP</span></div></div><button class="btn ghost sm">Записать</button></div>
+        </div>
+
+        <div class="col">
+          <div class="card code">
+            <div class="sec-h" style="margin:0"><h2>Кодекс трейдера</h2><span class="r">v3 · с 04.11</span></div>
+            <ul>
+              <li><span>Риск на сделку ≤ 1%</span><span class="ok">соблюдено</span></li>
+              <li><span>Не больше 3 сделок в день</span><span class="ok">1 из 3</span></li>
+              <li><span>Пауза 30 мин после стопа</span><span class="mu">не применимо</span></li>
+              <li><span>Без входов за 10 мин до новостей</span><span class="warn">нет данных</span></li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="sec-h" style="margin:0 0 10px"><h2>Перед сессией</h2><span class="r">20 сек</span></div>
+            <div class="hint">Состояние</div>
+            <div class="jr"><span>1</span><span>2</span><span class="on">3</span><span>4</span><span>5</span></div>
+            <div class="hint" style="margin-top:10px">Готовность</div>
+            <div class="jr"><span>1</span><span>2</span><span>3</span><span class="on">4</span><span>5</span></div>
+            <div class="note" style="margin-top:12px">Самооценка влияет на аналитику, но не на награды. Изменить можно до конца дня — в индекс идёт первая сохранённая версия.</div>
+          </div>
+          <div class="card quiet" style="padding:4px 2px">
+            <div class="hint">Бонусные задания (2) · замен сегодня: 0 из 2</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ WEEK ============ -->
+    <section class="view" id="week">
+      <div class="grid2">
+        <div class="col">
+          <div class="boss">
+            <div style="display:flex;gap:16px;align-items:center">
+              <div class="crest">G</div>
+              <div><span class="kicker">Испытание недели · ветка Guardian</span><h3>Уважай свой стоп</h3><div class="hint">Подобрано по повторяющейся ошибке прошлой недели: «сдвиг стопа» ×2.</div></div>
+            </div>
+            <div class="conds">
+              <div class="cond"><span>Каждая сделка недели имеет стоп-лосс при входе</span><span class="ok">4 из 4 сделок</span></div>
+              <div class="cond"><span>Стоп ни разу не сдвинут против позиции</span><span class="ok">выполняется</span></div>
+              <div class="cond"><span>Риск каждой сделки в пределах Кодекса</span><span class="ok">выполняется</span></div>
+              <div class="cond"><span>Weekly Review в воскресенье</span><span class="mu">впереди</span></div>
+            </div>
+            <div class="note" style="margin-top:12px">Без сделок испытание не проваливается: условия проверяются только по совершённым сделкам. Награда — косметическая (рамка недели) и XP по правилам, после закрытия недели.</div>
+          </div>
+
+          <div class="sec-h"><h2>Неделя 10–16 ноября</h2><span class="r">реальные дни, часовой пояс аккаунта</span></div>
+          <div class="days">
+            <div class="day"><div class="w">Пн</div><div class="i ok">3/3</div></div>
+            <div class="day"><div class="w">Вт</div><div class="i ok">2/3</div></div>
+            <div class="day today"><div class="w">Ср</div><div class="i">2/3</div></div>
+            <div class="day"><div class="w">Чт</div><div class="i mu">—</div></div>
+            <div class="day"><div class="w">Пт</div><div class="i mu">—</div></div>
+            <div class="day"><div class="w">Сб</div><div class="i" style="color:var(--guardian)">отдых</div></div>
+            <div class="day"><div class="w">Вс</div><div class="i mu">разбор</div></div>
+          </div>
+
+          <div class="card">
+            <div class="sec-h" style="margin:0 0 4px"><h2>Цели недели</h2><span class="r">из плана недели в журнале</span></div>
+            <div class="obj"><div><div style="font-weight:600">Разобрать все сделки недели</div><div class="hint">разбор = заполнены причина, эмоции, оценка исполнения</div></div><div><div class="barLbl"><span></span><span>3 / 4</span></div><div class="bar"><b style="width:75%"></b></div></div></div>
+            <div class="obj"><div><div style="font-weight:600">Работа над ошибкой: вход без подтверждения</div><div class="hint">цель — 0 повторов; сейчас 1</div></div><div><div class="barLbl"><span></span><span>1 повтор</span></div><div class="bar"><b style="width:30%;background:var(--warn)"></b></div></div></div>
+            <div class="obj"><div><div style="font-weight:600">Бэктест: 2 сессии</div><div class="hint">самоотчёт · только XP</div></div><div><div class="barLbl"><span></span><span>1 / 2</span></div><div class="bar"><b style="width:50%"></b></div></div></div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card">
+            <div class="sec-h" style="margin:0 0 10px"><h2>Weekly Review</h2><span class="r">воскресенье</span></div>
+            <div class="hint">Итог недели собирается сам из журнала: сделки, нарушения Кодекса, «Не вошёл», дисциплина по дням. Ты добавляешь вывод и одну цель на следующую неделю.</div>
+            <button class="btn sec" style="margin-top:12px;width:100%">Открыть черновик отчёта</button>
+          </div>
+          <div class="note">Неделя не требует торговать каждый день. Дни отдыха не ломают серию и не уменьшают награду недели.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PATH (skill tree + goals) ============ -->
+    <section class="view" id="path">
+      <div class="sec-h" style="margin-bottom:12px"><h2>Ветви мастерства</h2><span class="r">прогресс ветви = подтверждённые действия, не XP</span></div>
+      <div class="branches">
+        <div class="branch" style="--c:var(--analyst)">
+          <div class="bh"><div class="sig" style="--c:var(--analyst)">A</div><div><div class="bn">The Analyst</div><div class="bs">Анализ рынка · мастерство II</div></div></div>
+          <div class="tree">
+            <div class="node done"><div class="g">I</div><div><div class="nt">Карта дня</div><div class="ns">10 планов с Bias</div></div></div><div class="link"></div>
+            <div class="node now"><div class="g">II</div><div><div class="nt">Зоны интереса</div><div class="ns">POI в 7 из 10 планов · 5/7</div></div></div><div class="link"></div>
+            <div class="node lock"><div class="g">III</div><div><div class="nt">Сценарии</div><div class="ns">план A/B до сессии</div></div></div><div class="link"></div>
+            <div class="node lock"><div class="g">IV</div><div><div class="nt">Контекст событий</div><div class="ns">календарь + подготовка</div></div></div>
+          </div>
+        </div>
+        <div class="branch" style="--c:var(--executor)">
+          <div class="bh"><div class="sig" style="--c:var(--executor)">E</div><div><div class="bn">The Executor</div><div class="bs">Исполнение плана · мастерство I</div></div></div>
+          <div class="tree">
+            <div class="node now"><div class="g">I</div><div><div class="nt">По чек-листу</div><div class="ns">чек-лист у 12 сделок · 8/12</div></div></div><div class="link"></div>
+            <div class="node lock"><div class="g">II</div><div><div class="nt">Process Score 80+</div><div class="ns">медиана за 20 сделок</div></div></div><div class="link"></div>
+            <div class="node lock"><div class="g">III</div><div><div class="nt">Чистый выход</div><div class="ns">выход по плану</div></div></div><div class="link"></div>
+            <div class="node lock"><div class="g">IV</div><div><div class="nt">Мастер сетапа</div><div class="ns">стабильность 4 недели</div></div></div>
+          </div>
+        </div>
+        <div class="branch" style="--c:var(--guardian)">
+          <div class="bh"><div class="sig" style="--c:var(--guardian)">G</div><div><div class="bn">The Guardian</div><div class="bs">Риск и самоконтроль · мастерство III</div></div></div>
+          <div class="tree">
+            <div class="node done"><div class="g">I</div><div><div class="nt">Лимит риска</div><div class="ns">риск задан у 10 сделок</div></div></div><div class="link"></div>
+            <div class="node done"><div class="g">II</div><div><div class="nt">Без тильта</div><div class="ns">пауза после стопа ×5</div></div></div><div class="link"></div>
+            <div class="node now"><div class="g">III</div><div><div class="nt">Хранитель стопа</div><div class="ns">испытание недели · 3/4</div></div></div><div class="link"></div>
+            <div class="node lock"><div class="g">IV</div><div><div class="nt">Сила отказа</div><div class="ns">10 обоснованных «Не вошёл»</div></div></div>
+          </div>
+        </div>
+        <div class="branch" style="--c:var(--scholar)">
+          <div class="bh"><div class="sig" style="--c:var(--scholar)">S</div><div><div class="bn">The Scholar</div><div class="bs">Исследование · мастерство I</div></div></div>
+          <div class="tree">
+            <div class="node now"><div class="g">I</div><div><div class="nt">Первые выводы</div><div class="ns">5 заметок-уроков · 2/5</div></div></div><div class="link"></div>
+            <div class="node lock"><div class="g">II</div><div><div class="nt">Бэктестер</div><div class="ns">после Академии/бэктеста</div></div></div><div class="link"></div>
+            <div class="node lock"><div class="g">III</div><div><div class="nt">Исследователь</div><div class="ns">отчёт по своей статистике</div></div></div><div class="link"></div>
+            <div class="node lock"><div class="g">IV</div><div><div class="nt">Наставник</div><div class="ns">после Сообщества</div></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="mastery">Названия глав — рабочие. Открытие главы даёт косметическую награду и запись в Хронике; общий уровень персонажа остаётся один (текущий XP).</div>
+
+      <div class="sec-h" style="margin:26px 0 12px"><h2>Мои цели</h2><span class="r">до 5 · пользовательские цели дают только XP в пределах дневного лимита</span></div>
+      <div class="card">
+        <div class="obj"><div><div style="font-weight:600">Не рисковать больше 1% за сделку</div><div class="hint">привязана к правилу Кодекса · проверяется журналом</div></div><div><div class="barLbl"><span></span><span>14 дней</span></div><div class="bar"><b style="width:70%"></b></div></div></div>
+        <div class="obj"><div><div style="font-weight:600">Читать 10 страниц в день</div><div class="hint">самоотчёт · только XP</div></div><div><div class="barLbl"><span></span><span>4 / 7</span></div><div class="bar"><b style="width:57%"></b></div></div></div>
+      </div>
+    </section>
+
+    <!-- ============ DISCIPLINE ============ -->
+    <section class="view" id="discipline">
+      <div class="grid2">
+        <div class="col">
+          <div class="card">
+            <div class="score">
+              <div class="bigring" style="--p:72"><div><div><b>72</b><small>из 100 · 14 дней</small></div></div></div>
+              <div>
+                <div class="comp"><span class="n">Подготовка</span><span class="src">журнал</span><div class="bar"><b style="width:85%"></b></div></div>
+                <div class="comp"><span class="n">Соблюдение риска</span><span class="src">журнал</span><div class="bar"><b style="width:90%"></b></div></div>
+                <div class="comp"><span class="n">Следование стратегии</span><span class="src">чек-листы</span><div class="bar"><b style="width:64%"></b></div></div>
+                <div class="comp"><span class="n">Контроль импульсивности</span><span class="src">смешанно</span><div class="bar"><b class="self" style="width:58%"></b></div></div>
+                <div class="comp nd"><span class="n">Качество журнала</span><span class="src">мало данных</span><div class="bar"><b style="width:0"></b></div></div>
+                <div class="hint">Не учитываются: прибыль, количество сделок. Дни без сделок — «не применимо», а не 100% и не 0%.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="sec-h" style="margin:0 0 12px"><h2>Карта дисциплины · 12 недель</h2><span class="r">из сохранённых дней</span></div>
+            <div class="heat" id="heat"></div>
+            <div class="legend">
+              <span><i class="c4"></i>высокая (подтверждено)</span><span><i class="c2"></i>средняя</span><span><i class="cs"></i>только самооценка</span><span><i class="cr"></i>отдых</span><span><i class="cn"></i>нет данных</span><span><i class="cx"></i>до начала</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="sec-h" style="margin:0 0 6px"><h2>Повторяющиеся нарушения · 14 дней</h2></div>
+            <div class="obj"><div><div style="font-weight:600">Вход без подтверждения сетапа</div><div class="hint">правило Кодекса «Подтверждение» · 3 раза · чаще по вторникам</div></div><div class="warn" style="text-align:right;font-weight:700">×3</div></div>
+            <div class="obj"><div><div style="font-weight:600">Сделка после дневного лимита</div><div class="hint">1 раз · 07.11</div></div><div class="warn" style="text-align:right;font-weight:700">×1</div></div>
+            <div class="note" style="margin-top:10px">Сильная сторона: риск задан у 100% сделок за 14 дней.</div>
+          </div>
+        </div>
+        <div class="col">
+          <div class="card code">
+            <div class="sec-h" style="margin:0"><h2>Кодекс трейдера</h2><span class="r">версия 3</span></div>
+            <ul>
+              <li><span>Макс. риск на сделку</span><span>1%</span></li>
+              <li><span>Лимит сделок в день</span><span>3</span></li>
+              <li><span>Мин. RR</span><span>1 : 2</span></li>
+              <li><span>Сессии</span><span>Лондон, Нью-Йорк</span></li>
+              <li><span>Пауза после стопа</span><span>30 мин</span></li>
+              <li><span>Новости</span><span>нет входов за 10 мин</span></li>
+            </ul>
+            <div class="note" style="margin-top:12px">Изменения действуют со следующего торгового дня. Прошлые дни оцениваются по версии, которая тогда действовала.</div>
+            <button class="btn sec" style="margin-top:12px;width:100%">Изменить кодекс</button>
+          </div>
+          <div class="card">
+            <div class="sec-h" style="margin:0 0 6px"><h2>После сессии</h2><span class="r">~40 сек</span></div>
+            <div class="rl">План соблюдён?</div>
+            <div class="jr" style="grid-template-columns:repeat(3,1fr)"><span class="on">Да</span><span>Частично</span><span>Нет</span></div>
+            <div class="rl">Эмоциональный триггер</div>
+            <div class="chips"><span class="chip">FOMO</span><span class="chip">Страх</span><span class="chip">Скука</span><span class="chip">Месть рынку</span><span class="chip">Нет</span></div>
+            <div class="rl">Ошибка дня и план улучшения</div>
+            <div class="note">одна строка · до 300 символов</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ HISTORY ============ -->
+    <section class="view" id="history">
+      <div class="filters" style="margin-bottom:6px"><span class="on">Всё</span><span>Задания</span><span>Испытания</span><span>Отдых</span><span>Кодекс</span><span>Навыки</span><span>XP и Coins</span></div>
+      <div class="tl">
+        <div class="tday">Сегодня, 12 ноября</div>
+        <div class="ev" style="--c:var(--ok)"><div><div class="et">Утренний протокол</div><div class="es">4 шага · подтверждено журналом · 08:42</div></div><div class="amt">+40 XP · +10 Coins</div></div>
+        <div class="ev" style="--c:var(--ok)"><div><div class="et">Чек-лист входа по стратегии</div><div class="es">сделка EURUSD · подтверждено журналом · 11:05</div></div><div class="amt">+40 XP · +10 Coins</div></div>
+        <div class="tday">Вторник, 11 ноября</div>
+        <div class="ev" style="--c:var(--warn)"><div><div class="et">Бэктест сетапа</div><div class="es">самоотчёт · 19:20</div></div><div class="amt">+50 XP</div></div>
+        <div class="ev" style="--c:var(--mu)"><div><div class="et">Задание пропущено: «Прогулка»</div><div class="es">«Не сегодня» · без штрафа</div></div><div class="amt mu">—</div></div>
+        <div class="ev" style="--c:var(--danger)"><div><div class="et">Нарушение Кодекса: вход без подтверждения</div><div class="es">видно только тебе · идёт в аналитику, не в штрафы</div></div><div class="amt mu">—</div></div>
+        <div class="tday">Воскресенье, 9 ноября</div>
+        <div class="ev" style="--c:var(--go)"><div><div class="et">Глава открыта: Guardian II «Без тильта»</div><div class="es">ветка Guardian · рамка «Хранитель»</div></div><div class="amt gold">достижение</div></div>
+        <div class="ev" style="--c:var(--vi)"><div><div class="et">Кодекс трейдера: версия 3</div><div class="es">«Пауза после стопа» 15 → 30 мин · действует с 10.11</div></div><div class="amt mu">—</div></div>
+        <div class="ev" style="--c:var(--guardian)"><div><div class="et">День отдыха</div><div class="es">серия сохранена</div></div><div class="amt mu">—</div></div>
+      </div>
+    </section>
+  </main>
+</div>
+<nav class="bottom"><a><i></i>Главная</a><a><i></i>Журнал</a><a><i></i>Рынок</a><a class="on"><i></i>Задания</a><a><i></i>Профиль</a></nav>
+<script>
+  // concept-only: view switch + demo heatmap pattern (deterministic, clearly DEMO)
+  const v = new URLSearchParams(location.search).get("view") || "today";
+  document.getElementById(v)?.classList.add("on");
+  document.querySelectorAll(".tabs a").forEach(a => { a.href = "?view=" + a.dataset.v; if (a.dataset.v === v) a.classList.add("on"); });
+  const heat = document.getElementById("heat");
+  if (heat) {
+    const names = ["Пн", "", "Ср", "", "Пт", "", "Вс"];
+    const pattern = "xxxxxxxxxxxxxx" + "n2r3cs4" + "3n2sr4c" + "42s3rn4" + "c3n24r3" + "44s23r4" + "3432sr4" + "4423cr4" + "s4n32r4" + "4434sr4" + "44c3".padEnd(7, "-");
+    for (let d = 0; d < 7; d++) {
+      const l = document.createElement("span"); l.className = "dl"; l.textContent = names[d]; heat.appendChild(l);
+      for (let w = 0; w < 12; w++) {
+        const ch = pattern[w * 7 + d] || "-"; const c = document.createElement("span");
+        c.className = "cell " + ({ "4": "c4", "3": "c3", "2": "c2", "1": "c1", s: "cs", r: "cr", n: "cn", x: "cx", c: "c4", "-": "cx" }[ch] || "cx");
+        heat.appendChild(c);
+      }
+    }
+  }
+</script>
+</body>
+</html>
