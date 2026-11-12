@@ -46,7 +46,7 @@ vi.mock("@/lib/journal/context", () => ({
     restoreAttachmentRecord: vi.fn(),
   }),
 }));
-vi.mock("@/lib/game-context", () => ({ useGame: () => ({ gameState: {}, setGameState: vi.fn() }) }));
+vi.mock("@/lib/game-context", () => ({ useGame: () => ({ recordScreenshot: vi.fn(async () => ({ xpAwarded: 0, leveledUp: false, newlyUnlocked: [] })) }) }));
 
 import { AttachmentManager } from "./AttachmentManager";
 

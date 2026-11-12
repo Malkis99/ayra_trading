@@ -10,11 +10,13 @@ import { Sparkline } from "@/components/Sparkline";
 import { DEMO_MARKETS, DEMO_EVENTS } from "@/lib/demo-data";
 import { ACADEMY_TOPICS } from "@/lib/academy-topics";
 import { getDeterministicDailyQuests } from "@/lib/quests";
+import { deviceDayKey } from "@/lib/day-key";
 
 /** Blocks shared by every visitor of Home (signed in or not). Each renders once per page. */
 
+/** A visitor without an account: the calendar date of this device (an account uses its own time zone, lib/day-key.ts). */
 function todayIso(): string {
-  return new Date().toISOString().split("T")[0];
+  return deviceDayKey(new Date());
 }
 
 function DemoBadge({ label }: { label: string }) {

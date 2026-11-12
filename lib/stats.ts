@@ -272,7 +272,7 @@ export function recordDailyStatEvent(
   dailyStats: Record<string, DailyStatRecord>,
   dateStr: string,
   event: {
-    type: "questDone" | "questSkipped" | "questReplaced" | "restDay" | "shieldUsed" | "rewardClaimed";
+    type: "questDone" | "questSkipped" | "questReplaced" | "restDay" | "restDayOff" | "shieldUsed" | "rewardClaimed";
     category?: string;
     xp?: number;
     coins?: number;
@@ -309,6 +309,8 @@ export function recordDailyStatEvent(
     updatedRecord.questsReplaced += 1;
   } else if (event.type === "restDay") {
     updatedRecord.isRestDay = true;
+  } else if (event.type === "restDayOff") {
+    updatedRecord.isRestDay = false;
   } else if (event.type === "shieldUsed") {
     updatedRecord.shieldUsed = true;
   } else if (event.type === "rewardClaimed") {
