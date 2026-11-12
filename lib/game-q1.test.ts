@@ -280,7 +280,7 @@ describe("Q1: screenshot XP through the shared store", () => {
         return { state: r.state, result: r.xpAwarded };
       });
       memory = out.state;
-      return out.result;
+      return out.saved ? out.result : 0;
     };
     const [a, b] = await Promise.all([give(), give()]);
     expect(a + b).toBe(GAME_CONFIG.SCREENSHOT_XP);
@@ -310,7 +310,7 @@ describe("Q1: screenshot XP through the shared store", () => {
     ]);
     memA = ra.state;
     memB = rb.state;
-    expect(ra.result + rb.result).toBe(GAME_CONFIG.SCREENSHOT_XP * GAME_CONFIG.SCREENSHOT_DAILY_XP_CAP);
+    expect((ra.saved ? ra.result : 0) + (rb.saved ? rb.result : 0)).toBe(GAME_CONFIG.SCREENSHOT_XP * GAME_CONFIG.SCREENSHOT_DAILY_XP_CAP);
   });
 });
 

@@ -40,7 +40,7 @@ import { AppStorage } from "@/lib/storage";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
 import { dayKeyInZone } from "@/lib/day-key";
 import { GameStore, browserLock, revOf, type Change } from "@/lib/game-store";
-import { browserRevCounter } from "@/lib/storage/game-rev-counter";
+import { browserCommitLog } from "@/lib/storage/game-rev-counter";
 
 const STORAGE_KEY = "ayra_demo_v1";
 /** One copy of the game state as it was before the Quests 2.0 (Q1) version first ran on this device; never overwritten. */
@@ -56,16 +56,19 @@ function parseSaved(raw: string): GameState {
 function makeStore(spaceId: string): GameStore<GameState> {
   return new GameStore<GameState>({
     read: () => (AppStorage.getActiveSpaceId() === spaceId ? AppStorage.getItem(STORAGE_KEY) : null),
+    // AppStorage swallows a failed write (quota, storage off) and only logs it: the value is read back, and the write
+    // counts only if it is really there
     write: (raw) => {
       try {
-        return AppStorage.guardedSetItem(STORAGE_KEY, raw, spaceId);
+        if (!AppStorage.guardedSetItem(STORAGE_KEY, raw, spaceId)) return false;
+        return AppStorage.getActiveSpaceId() === spaceId && AppStorage.getItem(STORAGE_KEY) === raw;
       } catch {
         return false;
       }
     },
     parse: parseSaved,
     lock: browserLock(`ayra-game:${spaceId}`),
-    counter: browserRevCounter(spaceId),
+    commits: browserCommitLog(spaceId),
   });
 }
 
@@ -93,7 +96,7 @@ interface GameContextType {
   /** One-time reward for the first action of a kind on this account (coins and XP given; 0 if already given). */
   grantFirstAction: (kind: FirstActionKind) => { coins: number; xp: number };
   passQuest: (questId: string) => void;
-  replaceQuest: (questId: string, shownQuestIds: string[]) => Promise<{ success: boolean; replacementId?: string; reason?: ReplaceQuestFailure }>;
+  replaceQuest: (questId: string, shownQuestIds: string[]) => Promise<{ success: boolean; replacementId?: string; reason?: ReplaceQuestFailure | "notSaved" }>;
   toggleRestDay: () => void;
   claimDailyReward: () => number;
   setPlan: (plan: "Free" | "Pro" | "Elite") => void;
@@ -158,6 +161,8 @@ interface GameContextType {
 
 export interface QuestCompletion {
   completed: boolean;
+  /** The change could not be saved: nothing was given (try again). */
+  saveFailed?: boolean;
   xp: number;
   leveledUp: boolean;
   newLevel?: number;
@@ -165,6 +170,7 @@ export interface QuestCompletion {
 }
 
 const NOT_COMPLETED: QuestCompletion = { completed: false, xp: 0, leveledUp: false, newlyUnlocked: [] };
+const SAVE_FAILED: QuestCompletion = { ...NOT_COMPLETED, saveFailed: true };
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
 
@@ -192,36 +198,44 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     setGameStateRaw(next);
   }, []);
 
-  /** Every change: on the freshest saved state, written at once (lib/game-store.ts). */
+  /**
+   * Every change: on the freshest saved state, written at once (lib/game-store.ts). When it could not be saved (no
+   * storage, refused, no room, another space, a late copy from another tab), `failed` is returned: nothing is reported
+   * as given and the screen keeps the saved state.
+   */
   const applySync = useCallback(
-    <R,>(fn: (fresh: GameState) => Change<GameState, R>): R => {
+    <R,>(fn: (fresh: GameState) => Change<GameState, R>, failed: R): R => {
       const store = storeRef.current;
-      const out = store ? store.applySync(gameStateRef.current, fn) : fn(gameStateRef.current);
+      if (!store) return failed; // not loaded yet: nothing is saved, nothing is given
+      const out = store.applySync(gameStateRef.current, fn);
       showState(out.state);
-      return out.result;
+      return out.saved ? out.result : failed;
     },
     [showState]
   );
 
   /** Changes that give rewards from the Quests page and screenshots: also under the lock shared by all tabs. */
   const applyLocked = useCallback(
-    async <R,>(fn: (fresh: GameState) => Change<GameState, R>): Promise<R> => {
+    async <R,>(fn: (fresh: GameState) => Change<GameState, R>, failed: R): Promise<R> => {
       const store = storeRef.current;
-      if (!store) return applySync(fn);
+      if (!store) return failed;
       const out = await store.applyLocked(() => gameStateRef.current, fn);
       showState(out.state);
-      return out.result;
+      return out.saved ? out.result : failed;
     },
-    [applySync, showState]
+    [showState]
   );
 
+  /** A change without a reward; returns false when it could not be saved. */
   const update = useCallback(
-    (fn: (fresh: GameState) => GameState) => applySync((s) => ({ state: fn(s), result: undefined })),
+    (fn: (fresh: GameState) => GameState): boolean => applySync((s) => ({ state: fn(s), result: true }), false),
     [applySync]
   );
 
   const setGameState = useCallback<React.Dispatch<React.SetStateAction<GameState>>>(
-    (value) => update((s) => (typeof value === "function" ? (value as (p: GameState) => GameState)(s) : value)),
+    (value) => {
+      update((s) => (typeof value === "function" ? (value as (p: GameState) => GameState)(s) : value));
+    },
     [update]
   );
 
@@ -242,6 +256,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       }
       const loaded = saved ? parseSaved(saved) : checkAndApplyDateResets(INITIAL_GAME_STATE, new Date());
       // keep the migrated state saved, as before (through the store: the freshest copy wins)
+      // (if it cannot be written now, the loaded state is shown as it is: nothing is lost, nothing is added)
       const next = storeRef.current.applySync(loaded, (fresh) => ({ state: fresh === loaded ? { ...loaded } : fresh, result: null })).state;
       gameStateRef.current = next;
       setGameStateRaw(next);
@@ -492,7 +507,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const completeQuest = useCallback(
     (questId: string, title: string, category: string, xp?: number, _coins?: number): QuestCompletion => {
       if (APP_CLOSED_QUESTS.has(questId)) return NOT_COMPLETED;
-      return applySync(questChange(questId, title, category, xp));
+      return applySync(questChange(questId, title, category, xp), SAVE_FAILED);
     },
     [applySync, questChange]
   );
@@ -500,7 +515,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const completeQuestSafe = useCallback(
     async (questId: string, title: string, category: string, xp?: number): Promise<QuestCompletion> => {
       if (APP_CLOSED_QUESTS.has(questId)) return NOT_COMPLETED;
-      return applyLocked(questChange(questId, title, category, xp));
+      return applyLocked(questChange(questId, title, category, xp), SAVE_FAILED);
     },
     [applyLocked, questChange]
   );
@@ -510,7 +525,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     return applySync((s) => {
       const res = grantFirstActionLogic(s, kind, new Date());
       return { state: res.state, result: { coins: res.coins, xp: res.xp } };
-    });
+    }, { coins: 0, xp: 0 });
   }, [applySync]);
 
   const passQuest = useCallback((questId: string) => {
@@ -521,8 +536,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     (questId: string, shownQuestIds: string[]) =>
       applyLocked((s) => {
         const res = replaceQuestLogic(s, questId, shownQuestIds, new Date());
-        return { state: res.success ? res.state : s, result: { success: res.success, replacementId: res.replacementId, reason: res.reason } };
-      }),
+        return { state: res.success ? res.state : s, result: { success: res.success, replacementId: res.replacementId, reason: res.reason as ReplaceQuestFailure | "notSaved" | undefined } };
+      }, { success: false, replacementId: undefined, reason: "notSaved" as const }),
     [applyLocked]
   );
 
@@ -534,7 +549,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     return applySync((s) => {
       const res = claimDailyRewardLogic(s, new Date());
       return { state: res.state, result: res.claimedCoins };
-    });
+    }, 0);
   }, [applySync]);
 
   const setPlan = useCallback((plan: "Free" | "Pro" | "Elite") => {
@@ -556,7 +571,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     const newlyUnlocked = applySync((s) => {
       const res = equipItemLogic(s, itemId);
       return { state: res.state, result: res.newlyUnlocked };
-    });
+    }, [] as string[]);
     setPreviewItem(null);
     return newlyUnlocked;
   }, [applySync]);
@@ -565,7 +580,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     const newlyUnlocked = applySync((s) => {
       const res = unequipSlotLogic(s, slot);
       return { state: res.state, result: res.newlyUnlocked };
-    });
+    }, [] as string[]);
     setPreviewItem(null);
     return newlyUnlocked;
   }, [applySync]);
@@ -574,7 +589,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     const newlyUnlocked = applySync((s) => {
       const res = applyLoadoutLogic(s, loadoutName);
       return { state: res.state, result: res.newlyUnlocked };
-    });
+    }, [] as string[]);
     setPreviewItem(null);
     return newlyUnlocked;
   }, [applySync]);
@@ -587,7 +602,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     return applySync((s) => {
       const res = addPostLogic(s, content);
       return { state: res.state, result: res.newlyUnlocked };
-    });
+    }, [] as string[]);
   }, [applySync]);
 
   const deletePost = useCallback((postIndex: number) => {
@@ -601,14 +616,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         state: res.state,
         result: { xpAwarded: res.xpAwarded, questClosed: res.questClosed, leveledUp: res.leveledUp, newLevel: res.newLevel, newlyUnlocked: res.newlyUnlocked },
       };
-    });
+    }, { ...{ xpAwarded: 0, leveledUp: false, newLevel: undefined as number | undefined, newlyUnlocked: [] as string[] }, questClosed: false });
   }, [applySync]);
 
   const recordNoteSaved = useCallback((note: any, allNotes: any[]) => {
     return applySync((s) => {
       const res = recordNoteSavedLogic(s, note, allNotes, new Date());
       return { state: res.state, result: { xpAwarded: res.xpAwarded, leveledUp: res.leveledUp, newLevel: res.newLevel, newlyUnlocked: res.newlyUnlocked } };
-    });
+    }, { xpAwarded: 0, leveledUp: false, newLevel: undefined as number | undefined, newlyUnlocked: [] as string[] });
   }, [applySync]);
 
   const recordScreenshot = useCallback(
@@ -616,7 +631,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       applyLocked((s) => {
         const res = recordScreenshotAdded(s, screenshot, new Date());
         return { state: res.state, result: { xpAwarded: res.xpAwarded, leveledUp: res.leveledUp, newLevel: res.newLevel, newlyUnlocked: res.newlyUnlocked } };
-      }),
+      }, { xpAwarded: 0, leveledUp: false, newLevel: undefined as number | undefined, newlyUnlocked: [] as string[] }),
     [applyLocked]
   );
 
@@ -625,7 +640,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       return applySync((s) => {
         const res = evaluatePlanQuestClosure(s, plan, todayTrades, allPlans, allNotes, new Date());
         return { state: res.state, result: { closedQuests: res.closedQuests, xpAwarded: res.xpAwarded, newlyUnlocked: res.newlyUnlocked } };
-      });
+      }, { closedQuests: [] as string[], xpAwarded: 0, newlyUnlocked: [] as string[] });
     },
     [applySync]
   );
@@ -634,7 +649,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     return applySync((s) => {
       const res = recordNoTradeEntry(s, entry, allNoTrades, new Date());
       return { state: res.state, result: { xpAwarded: res.xpAwarded, leveledUp: res.leveledUp, newLevel: res.newLevel, newlyUnlocked: res.newlyUnlocked } };
-    });
+    }, { xpAwarded: 0, leveledUp: false, newLevel: undefined as number | undefined, newlyUnlocked: [] as string[] });
   }, [applySync]);
 
   const setFrame = useCallback((frame: number) => {
@@ -697,7 +712,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     return applySync((s) => {
       const next = addCustomGoalLogic(s, title, category, new Date());
       return { state: next, result: next.customGoals.length > s.customGoals.length };
-    });
+    }, false);
   }, [applySync]);
 
   const removeCustomGoal = useCallback((goalId: string) => {

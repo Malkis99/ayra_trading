@@ -38,7 +38,7 @@ export function PathTab() {
     setTouched(true);
     if (!clean) return;
     if (!addCustomGoal(clean, category)) {
-      showToast(formatString(p.errorLimit, { max }));
+      showToast(full ? formatString(p.errorLimit, { max }) : dict.questsPage.q1.today.notSaved);
       return;
     }
     setTitle("");

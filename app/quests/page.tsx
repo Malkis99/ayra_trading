@@ -53,6 +53,10 @@ export default function QuestsPage() {
     runOnce(q.id, async () => {
       const title = questTitle(dict, lang, q);
       const res = await completeQuestSafe(q.id, title, q.category, q.xpReward);
+      if (res.saveFailed) {
+        showToast(t.q1.today.notSaved);
+        return;
+      }
       if (!res.completed) return;
       showToast(res.leveledUp ? formatString(dict.chronicleEvents.levelUp, { level: res.newLevel ?? gameState.level }) : formatString(t.todayTab.rewardXp, { xp: res.xp }));
     });
@@ -69,6 +73,8 @@ export default function QuestsPage() {
       if (res.success) {
         const to = QUEST_POOL.find((x) => x.id === res.replacementId);
         showToast(formatString(t.q1.today.replaceDone, { title: to ? questTitle(dict, lang, to) : "" }));
+      } else if (res.reason === "notSaved") {
+        showToast(t.q1.today.notSaved);
       } else if (res.reason === "limit") {
         showToast(formatString(t.q1.today.replaceLimit, { max }));
       } else {

@@ -152,6 +152,34 @@ test.describe("Quests page (Q1)", () => {
     expect((await readGame(page)).customGoals).toHaveLength(0);
   });
 
+  test("storage full: no reward is shown or kept; after space is back the quest gives XP once", async ({ context, page }) => {
+    await seedGame(context, baseGame({ lastQuestDate: today, xp: 50 }));
+    await page.goto("/quests");
+    const q = await firstSelfQuest(page);
+    const before = totalXp(await readGame(page));
+    await page.evaluate(() => {
+      const w = window as unknown as { __origSetItem?: typeof Storage.prototype.setItem };
+      w.__origSetItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key: string, value: string) {
+        if (key.endsWith("ayra_demo_v1")) throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+        return w.__origSetItem!.call(this, key, value);
+      };
+    });
+    await q.card.getByRole("button", { name: "Выполнить" }).click();
+    await expect(page.getByText("Не удалось сохранить — ничего не начислено. Попробуйте ещё раз.")).toBeVisible();
+    await expect(page.getByTestId(`quest-card-${q.id}`).getByRole("button", { name: "Выполнить" })).toBeVisible();
+    expect(totalXp(await readGame(page))).toBe(before);
+    await page.evaluate(() => {
+      const w = window as unknown as { __origSetItem?: typeof Storage.prototype.setItem };
+      Storage.prototype.setItem = w.__origSetItem!;
+    });
+    await page.getByTestId(`quest-card-${q.id}`).getByRole("button", { name: "Выполнить" }).click();
+    await expect(page.getByTestId(`quest-card-${q.id}`).getByTestId("quest-done")).toBeVisible();
+    const g = await readGame(page);
+    expect(g.history.filter((h) => h.questId === q.id)).toHaveLength(1);
+    expect(totalXp(g) - before).toBe(g.history.find((h) => h.questId === q.id)!.xp);
+  });
+
   test("the page says honestly where progress is kept", async ({ context, page }) => {
     await seedGame(context, baseGame({ lastQuestDate: today }));
     await page.goto("/quests");

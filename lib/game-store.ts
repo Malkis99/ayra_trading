@@ -2,25 +2,36 @@
  * One place where the game state is read, changed and written on this device (docs/quests-2.0-plan.md, 4.1).
  *
  * Every change runs on the freshest saved state (not on a possibly stale copy kept by this tab) and is written at once,
- * with a growing `rev`. Changes that give rewards can also run under a lock shared by all tabs of the site (Web Locks):
- * inside it the condition («already done today?») is checked on fresh data, so two tabs cannot both give it.
+ * with a growing `rev` and a unique `commitId`. A change counts only when it was saved: if the write fails (no storage,
+ * refused, no room, the user's space changed), nothing is reported as given and this tab keeps the last saved state.
  *
- * The browser copies saved values between tabs asynchronously, so a tab that takes the lock right after another one
- * may still read the old value for a moment. A tiny counter in the browser database (transactional for all tabs,
- * lib/storage/game-rev-counter.ts) keeps the last `rev` written under the lock; the next holder waits briefly until
- * the saved value shows at least that `rev`.
+ * Changes that give rewards also run under a lock shared by all tabs of the site (Web Locks): inside it the condition
+ * («already done today?») is checked on fresh data, so two tabs cannot both give it. The browser copies saved values
+ * between tabs asynchronously, so a tab that takes the lock right after another one may still read an older value for a
+ * moment. A small commit log in the browser database (transactional for all tabs, lib/storage/game-rev-counter.ts)
+ * keeps the latest commit. The lock holder waits until the saved value is that commit (or a newer one). If after the
+ * wait it still shows anything older — a late copy, or an old save without a commit id — the change is cancelled
+ * (nothing written, nothing given) rather than written over a newer state; a waiting time is never taken as proof that
+ * the older value is meant. The next page load writes a fresh commit, so a cancelled action works again after it.
  *
  * Limits (honest, until the server economy Q4): without Web Locks the check-and-write is one synchronous step, not a
- * lock; other browsers, private windows and devices have their own storage; editing the saved value by hand is not
- * prevented.
+ * lock; changes made outside the lock (journal actions, Home, wardrobe) are one synchronous step too; other browsers,
+ * private windows and devices have their own storage; editing the saved value by hand is not prevented.
  */
 
 export interface Revisioned {
   rev?: number;
+  commitId?: string;
+}
+
+/** The latest commit written into a space. */
+export interface CommitLog {
+  rev: number;
+  id: string;
 }
 
 export interface GameStoreDeps<S extends Revisioned> {
-  /** Saved raw value of the active space (null if none or not readable). */
+  /** Saved raw value of the active space (null if none, not readable or another space is active). */
   read(): string | null;
   /** Writes the raw value into the active space (false if it could not be written). */
   write(raw: string): boolean;
@@ -28,18 +39,17 @@ export interface GameStoreDeps<S extends Revisioned> {
   parse(raw: string): S;
   /** Web Locks (or a test double); absent → the synchronous path only. */
   lock?: <T>(fn: () => Promise<T>) => Promise<T>;
-  /** Last `rev` written under the lock (browser database, or a test double); absent → no waiting. */
-  counter?: {
-    get(): Promise<number | null>;
-    /** Moves the counter forward only. */
-    put(rev: number): Promise<void>;
-    /** Sets it to this value (the saved state was replaced on purpose, for example the space was cleared). */
-    reset(rev: number): Promise<void>;
+  /** Commit log (browser database, or a test double); absent → no waiting. */
+  commits?: {
+    get(): Promise<CommitLog | null>;
+    /** Records a commit that was written (it becomes the latest). */
+    record(rev: number, id: string): Promise<void>;
   };
   sleep?: (ms: number) => Promise<void>;
+  newId?: () => string;
 }
 
-/** How long a lock holder waits for the saved value to show the `rev` the previous holder wrote (technical, not a game rule). */
+/** How long a lock holder waits for the saved value to become the latest commit (technical, not a game rule). */
 export const SETTLE_TRIES = 50;
 export const SETTLE_STEP_MS = 10;
 
@@ -52,12 +62,29 @@ export interface Change<S, R> {
   result: R;
 }
 
+/** The outcome of a change: `saved` false means nothing was written and nothing may be reported as given. */
+export type Applied<S, R> = { saved: true; state: S; result: R } | { saved: false; state: S; reason: "writeFailed" | "staleCopy" };
+
+function defaultId(): string {
+  const c = typeof globalThis !== "undefined" ? (globalThis as { crypto?: Crypto }).crypto : undefined;
+  if (c?.randomUUID) return c.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+/**
+ * The log after a commit: the last write becomes the latest, whatever its rev (after the data was cleared the rev starts
+ * again). A record that arrives late with an older commit is harmless: the saved value is then newer and passes.
+ */
+export function withCommit(_log: CommitLog | null, rev: number, id: string): CommitLog {
+  return { rev, id };
+}
+
 export class GameStore<S extends Revisioned> {
   /** The raw value this tab last read or wrote: a different saved value means another tab (or code) wrote it. */
   private lastRaw: string | null = null;
   /**
-   * The latest state this store wrote or took. A caller's copy may lag behind it (for example the next change waiting
-   * for the lock runs before the caller has stored the result of the previous one), so it is never used as the base.
+   * The latest state this store saved or took. A caller's copy may lag behind it (for example the next change waiting
+   * for the lock runs before the caller has stored the result of the previous one), so it is used when it is newer.
    */
   private lastState: S | null = null;
 
@@ -69,10 +96,10 @@ export class GameStore<S extends Revisioned> {
     if (state && (!this.lastState || revOf(state) >= revOf(this.lastState))) this.lastState = state;
   }
 
-  /** The freshest of the caller's copy, what this store last wrote, and the saved value. */
+  /** The freshest of the caller's copy, what this store last saved, and the saved value. */
   freshest(memory: S): S {
     const known = this.lastState && revOf(this.lastState) > revOf(memory) ? this.lastState : memory;
-    const raw = this.deps.read();
+    const raw = this.safeRead();
     if (raw == null || raw === this.lastRaw) return known;
     let saved: S;
     try {
@@ -90,55 +117,80 @@ export class GameStore<S extends Revisioned> {
   }
 
   /** Check, change and write in one synchronous step (no awaiting between reading and writing). */
-  applySync<R>(memory: S, fn: (fresh: S) => Change<S, R>): Change<S, R> {
+  applySync<R>(memory: S, fn: (fresh: S) => Change<S, R>): Applied<S, R> {
+    return this.applyOnce(memory, fn, true);
+  }
+
+  private applyOnce<R>(memory: S, fn: (fresh: S) => Change<S, R>, recordNow: boolean): Applied<S, R> {
     const fresh = this.freshest(memory);
     const out = fn(fresh);
-    if (out.state === fresh) return out; // nothing changed: nothing to write
-    const next = { ...out.state, rev: Math.max(revOf(fresh), revOf(memory)) + 1 } as S;
+    if (out.state === fresh) return { saved: true, state: fresh, result: out.result }; // nothing changed: nothing to write
+    const id = (this.deps.newId ?? defaultId)();
+    const next = { ...out.state, rev: Math.max(revOf(fresh), revOf(memory)) + 1, commitId: id } as S;
     const raw = JSON.stringify(next);
-    this.lastState = next; // even if the write failed: this tab goes on from its newest state
-    if (this.deps.write(raw)) this.lastRaw = raw;
-    // a write made without the lock still moves the counter, so a later lock holder waits for it
-    this.deps.counter?.put(revOf(next)).catch(() => undefined);
-    return { state: next, result: out.result };
+    let written = false;
+    try {
+      written = this.deps.write(raw);
+    } catch {
+      written = false;
+    }
+    if (!written) return { saved: false, state: fresh, reason: "writeFailed" }; // nothing given, the saved state stays
+    this.lastRaw = raw;
+    this.lastState = next;
+    // outside the lock the log is updated in the background (the lock path awaits it below)
+    if (recordNow) this.deps.commits?.record(revOf(next), id).catch(() => undefined);
+    return { saved: true, state: next, result: out.result };
   }
 
   /** The same under the lock shared by all tabs (falls back to `applySync` without Web Locks). */
-  async applyLocked<R>(getMemory: () => S, fn: (fresh: S) => Change<S, R>): Promise<Change<S, R>> {
-    const { lock, counter } = this.deps;
+  async applyLocked<R>(getMemory: () => S, fn: (fresh: S) => Change<S, R>): Promise<Applied<S, R>> {
+    const { lock, commits } = this.deps;
     if (!lock) return this.applySync(getMemory(), fn);
     return lock(async () => {
-      if (counter) await this.settle(counter);
-      const out = this.applySync(getMemory(), fn);
-      if (counter && out.state !== getMemory()) await counter.put(revOf(out.state)).catch(() => undefined);
+      if (commits && !(await this.settle(commits))) return { saved: false, state: getMemory(), reason: "staleCopy" } as Applied<S, R>;
+      const before = getMemory();
+      const out = this.applyOnce(before, fn, false);
+      if (commits && out.saved && out.state.commitId && out.state !== before) {
+        await commits.record(revOf(out.state), out.state.commitId).catch(() => undefined);
+      }
       return out;
     });
   }
 
-  /** Waits until the saved value shows the rev of the previous lock holder (or gives up: someone wrote an older value on purpose). */
-  private async settle(counter: NonNullable<GameStoreDeps<S>["counter"]>) {
-    let target: number | null = null;
+  private safeRead(): string | null {
     try {
-      target = await counter.get();
+      return this.deps.read();
     } catch {
-      return;
+      return null;
     }
-    if (target == null) return;
+  }
+
+  /**
+   * Waits until the saved value is the latest commit (or newer). true → safe to change. false → after the wait it is
+   * still older: do not write over the newer state (a timeout never means the older value is meant).
+   */
+  private async settle(commits: NonNullable<GameStoreDeps<S>["commits"]>): Promise<boolean> {
+    let log: CommitLog | null = null;
+    try {
+      log = await commits.get();
+    } catch {
+      return true; // no log available: the synchronous check-and-write still applies
+    }
+    if (!log) return true;
     const sleep = this.deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-    let seen = 0;
     for (let i = 0; i < SETTLE_TRIES; i++) {
-      const raw = this.deps.read();
-      if (raw == null) return;
+      const raw = this.safeRead();
+      if (raw == null) return true; // nothing saved (or another space): nothing older can be written over a newer state
+      let saved: S;
       try {
-        seen = revOf(this.deps.parse(raw));
+        saved = this.deps.parse(raw);
       } catch {
-        return;
+        return true;
       }
-      if (seen >= target) return;
-      await sleep(SETTLE_STEP_MS);
+      if (saved.commitId === log.id || revOf(saved) > log.rev) return true; // the latest commit (or newer)
+      await sleep(SETTLE_STEP_MS); // older: the newer copy may still be on its way
     }
-    // the saved value stays older: it was replaced on purpose (cleared space, restored copy) — follow it from now on
-    await counter.reset(seen).catch(() => undefined);
+    return false;
   }
 }
 

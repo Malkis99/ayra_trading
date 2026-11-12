@@ -2408,6 +2408,7 @@ export const en: Dictionary = {
         noTradeDesc: "Log «No trade» with a reason in the journal — that is discipline too. Trading is never required.",
         noTradeCta: "Open the journal",
         allClear: "All set for today: core quests are done or put off.",
+        notSaved: "Could not save — nothing was given. Please try again.",
       },
       week: {
         title: "Week {from} — {to}",
