@@ -1,7 +1,7 @@
 /** Rows of the 0009 tables, as the collector writes them (columns the server sets itself are left out). */
 
 /** The sources the tables accept (0009, widened by 0010; the 0010 sources not collected yet are added with their PR). */
-export type FeedSource = "fed" | "ecb" | "whitehouse" | "bls" | "bea" | "eia" | "census" | "dol" | "eurostat";
+export type FeedSource = "fed" | "ecb" | "whitehouse" | "bls" | "bea" | "eia" | "census" | "dol" | "eurostat" | "ons";
 export type Importance = 1 | 2 | 3;
 
 export type EventKind = "release" | "meeting" | "decision" | "press_conference" | "speech" | "testimony" | "minutes" | "statement";
@@ -13,7 +13,7 @@ export interface EventRow {
   source: FeedSource;
   kind: EventKind;
   code: string | null;
-  country: "us" | "eu";
+  country: "us" | "eu" | "gb";
   title: string;
   importance: Importance;
   /** ISO, UTC */

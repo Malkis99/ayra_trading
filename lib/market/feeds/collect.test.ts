@@ -30,7 +30,8 @@ describe("the collector", () => {
     const { db, events, runs } = memoryDb();
     const { fetcher } = network({ [FEEDS.beaIcs]: "BEGIN:VEVENT\nSUMMARY:Personal Income and Outlays\\, October 2026\nDTSTART:20261125T133000Z\nEND:VEVENT" });
     const out = await collectFeeds({ scope: "schedules", now: NOW, fetch: fetcher, db });
-    expect(out.results.map((r) => [r.source, r.ok])).toEqual([
+    expect(out.results.find(r => r.source === "ons-gdp-schedule")).toMatchObject({ ok: false });
+    expect(out.results.filter(r => r.source !== "ons-gdp-schedule").map((r) => [r.source, r.ok])).toEqual([
       ["schedules-listed", true],
       ["bls-ppi-schedule", false], // the official schedule is not in this test's network
       ["bls-jolts-schedule", false],
@@ -41,7 +42,8 @@ describe("the collector", () => {
     ]);
     expect(events.has("fed:fomc:2026-12-09:decision")).toBe(true);
     expect(events.has("bea:us_pce:2026-11-25")).toBe(true);
-    expect(runs.map((r) => r.source)).toEqual(["schedules-listed", "bls-ppi-schedule", "bls-jolts-schedule", "bls-jolts-history", "bea-schedule", "eurostat-schedule", "previous-values"]);
+    expect(runs.some(r => r.source === "ons-gdp-schedule")).toBe(true);
+    expect(runs.filter(r => r.source !== "ons-gdp-schedule").map(r => r.source)).toEqual(["schedules-listed", "bls-ppi-schedule", "bls-jolts-schedule", "bls-jolts-history", "bea-schedule", "eurostat-schedule", "previous-values"]);
   });
 
   it("news: a failing source never stops the others; its error is logged", async () => {

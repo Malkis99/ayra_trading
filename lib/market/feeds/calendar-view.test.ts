@@ -76,7 +76,8 @@ describe("own calendar: the week in the user's zone", () => {
     const rows = [ev("a", "2026-11-06T13:30:00Z"), ev("b", "2026-11-06T13:30:00Z", { importance: 2 }), ev("c", "2026-11-06T13:30:00Z", { country: "eu", importance: 1 })];
     expect(visibleEvents(rows, { importance: ["high", "medium"], countries: ["us", "eu"] }).map((e) => e.id)).toEqual(["a", "b"]);
     expect(visibleEvents(rows, { importance: ["low"], countries: ["eu"] }).map((e) => e.id)).toEqual(["c"]);
-    expect(noOwnCountry(["gb", "jp"])).toBe(true);
+    expect(noOwnCountry(["jp", "de"])).toBe(true);
+    expect(noOwnCountry(["gb", "jp"])).toBe(false);
     expect(noOwnCountry(["gb", "eu"])).toBe(false);
   });
 

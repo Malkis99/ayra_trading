@@ -60,6 +60,36 @@ test.describe("Market — own calendar of official events", () => {
   });
 
   for (const width of [1440, 360]) for (const language of ["ru", "en"]) {
+    test(`${width} ${language}: ONS GDP schedule shows three distinct release stages without figures`, async ({ browser, request }, testInfo) => {
+      const metrics = [
+        ["gb_gdp_monthly", "ВВП Великобритании (месячная оценка)", "UK GDP (monthly estimate)", 3],
+        ["gb_gdp_first", "ВВП Великобритании (первая квартальная оценка)", "UK GDP (first quarterly estimate)", 3],
+        ["gb_gdp_qna", "ВВП Великобритании (квартальные национальные счета)", "UK GDP (quarterly national accounts)", 2],
+      ] as const;
+      await seed(request, metrics.map(([code, , , importance]) => ev({
+        id: `ons:${code}:2026-11-12`, source: "ons", country: "gb", code, title: code,
+        starts_at: "2026-11-12T07:00:00Z", importance,
+        url: "https://www.ons.gov.uk/releases/gdpmonthlyestimateukseptember2026",
+      })));
+      const page = await calendar(browser, width, undefined, "2026-11-12T14:00:00Z", language);
+      await el(page, "market-calendar-importance-medium").click();
+      await expect(el(page, "own-calendar-event")).toHaveCount(3);
+      for (const [code, ru, en, importance] of metrics) {
+        const row = page.locator(`[data-testid="own-calendar-event"][data-id="ons:${code}:2026-11-12"]`);
+        await expect(row.getByTestId("own-calendar-event-title")).toHaveText(language === "ru" ? ru : en);
+        await expect(row.getByTestId("own-calendar-event-source")).toHaveText("ONS");
+        await expect(row.getByTestId("own-calendar-event-status")).toHaveText(language === "ru" ? "По расписанию" : "On the schedule");
+        await expect(row).toHaveAttribute("data-level", importance === 3 ? "high" : "medium");
+        await expect(row.getByTestId("own-calendar-event-actual")).toHaveCount(0);
+        await expect(row.getByTestId("own-calendar-event-previous")).toHaveCount(0);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      if (language === "ru") await testInfo.attach(`uk-gdp-${width}`, { body: await el(page, "own-calendar").screenshot(), contentType: "image/png" });
+      await el(page, "market-calendar-country-gb").click();
+      await expect(el(page, "own-calendar-event")).toHaveCount(0);
+      await page.close();
+    });
+
     test(`${width} ${language}: four PPI metrics keep initial published values and fit the existing calendar`, async ({ browser, request }) => {
       const metrics = [
         ["us_ppi", "+1.3%", "+0.5%", "PPI, м/м", "PPI, m/m"],
@@ -182,9 +212,9 @@ test.describe("Market — own calendar of official events", () => {
     await el(page, "market-calendar-importance-low").click();
     await expect(el(page, "own-calendar-event")).toHaveCount(2);
     await expect(el(page, "own-calendar-event").nth(1)).toHaveAttribute("data-level", "low");
-    // countries: only Japan and the UK
+    // Leave only Japan selected.
     for (const c of ["us", "eu", "gb"]) await el(page, `market-calendar-country-${c}`).click();
-    await expect(el(page, "own-calendar-no-country")).toContainText("Официальные события есть только для США и еврозоны");
+    await expect(el(page, "own-calendar-no-country")).toContainText("Официальные события доступны для США, еврозоны и Великобритании");
   });
 
   test("the profile's zone moves the times (New York: NFP at 08:30)", async ({ browser }) => {

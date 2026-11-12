@@ -14,7 +14,7 @@ export interface CalendarEvent {
   source: FeedSource;
   kind: string;
   code: string | null;
-  country: "us" | "eu";
+  country: "us" | "eu" | "gb";
   title: string;
   importance: 1 | 2 | 3;
   starts_at: string;
@@ -82,8 +82,7 @@ export function initialDay(days: CalendarDay[], now: number): string {
 const LEVEL: Record<1 | 2 | 3, Level> = { 3: "high", 2: "medium", 1: "low" };
 export const levelOf = (importance: 1 | 2 | 3): Level => LEVEL[importance];
 
-/** Our sources cover the USA and the euro area only. */
-export const OWN_COUNTRIES = ["us", "eu"] as const;
+export const OWN_COUNTRIES = ["us", "eu", "gb"] as const;
 
 /** The events the filters let through (importance, and the two countries we have). */
 export function visibleEvents(events: CalendarEvent[], prefs: Pick<CalendarNewsPrefs, "importance" | "countries">): CalendarEvent[] {
@@ -120,14 +119,15 @@ export function lastUpdate(events: CalendarEvent[]): number | null {
 
 export const RELEASE_REFRESH_WINDOW = 20 * 60_000;
 
-export type EventStatus = "scheduled" | "due" | "released" | "cancelled" | "held" | "checking" | "delayed" | "notPublished";
+export type EventStatus = "scheduled" | "due" | "released" | "cancelled" | "held" | "checking" | "delayed" | "notPublished" | "scheduleOnly";
 
-export function eventStatus(e: Pick<CalendarEvent, "status" | "kind" | "starts_at" | "time_tbd" | "release_outcome" | "release_phase" | "release_check_until">, now: number): EventStatus {
+export function eventStatus(e: Pick<CalendarEvent, "source" | "status" | "kind" | "starts_at" | "time_tbd" | "release_outcome" | "release_phase" | "release_check_until">, now: number): EventStatus {
   if (e.status === "released") return "released";
   if (e.status === "cancelled") return "cancelled";
   const at = Date.parse(e.starts_at);
   if (at > now || e.time_tbd) return "scheduled";
   if (e.kind !== "release") return "held";
+  if (e.source === "ons") return "scheduleOnly";
   if (e.release_outcome === "not_published") return "notPublished";
   if (e.release_phase === "checking" && Date.parse(e.release_check_until ?? "") > now) return "checking";
   if (e.release_phase || now - at >= RELEASE_REFRESH_WINDOW) return "delayed";
@@ -151,6 +151,6 @@ export function hasPendingRelease(events: CalendarEvent[], now: number): boolean
 }
 
 function pendingReleaseTime(event: CalendarEvent): number {
-  return event.importance === 3 && event.kind === "release" && !event.time_tbd && event.status === "scheduled" && !event.actual && !event.release_outcome
+  return event.source !== "ons" && event.importance === 3 && event.kind === "release" && !event.time_tbd && event.status === "scheduled" && !event.actual && !event.release_outcome
     ? Date.parse(event.starts_at) : NaN;
 }
