@@ -84,6 +84,7 @@ test.describe("Market — own calendar of official events", () => {
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       if (language === "ru") await testInfo.attach(`uk-gdp-${width}`, { body: await el(page, "own-calendar").screenshot(), contentType: "image/png" });
+      if (width === 360) await el(page, "market-calendar-countries-toggle").click();
       await el(page, "market-calendar-country-gb").click();
       await expect(el(page, "own-calendar-event")).toHaveCount(0);
       await page.close();
