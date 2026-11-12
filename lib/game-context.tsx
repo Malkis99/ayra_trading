@@ -9,6 +9,7 @@ import {
   claimDailyReward as claimDailyRewardLogic,
   changePlan as changePlanLogic,
   getCharacterStatus,
+  gameDayKey,
   passQuest as passQuestLogic,
   replaceQuest as replaceQuestLogic,
   toggleRestDay as toggleRestDayLogic,
@@ -25,23 +26,59 @@ import {
   recordNoTradeEntry,
   evaluatePlanQuestClosure,
   recordNoteSaved as recordNoteSavedLogic,
+  recordScreenshotAdded,
   grantFirstAction as grantFirstActionLogic,
   type FirstActionKind,
+  type ReplaceQuestFailure,
 } from "@/lib/game";
 import { APP_CLOSED_QUESTS } from "@/lib/quests";
 import { ITEMS, FRAMES, TITLES, BACKGROUNDS } from "@/lib/items";
 import { AvatarAppearance, validateAvatarAppearance } from "@/lib/avatar";
 import type { ProfileDetails } from "@/lib/profile";
-import { OnboardingState, generateProgram } from "@/lib/awakening";
+import { generateProgram } from "@/lib/awakening";
 import { AppStorage } from "@/lib/storage";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
+import { dayKeyInZone } from "@/lib/day-key";
+import { GameStore, browserLock, revOf, type Change } from "@/lib/game-store";
+import { browserCommitLog } from "@/lib/storage/game-rev-counter";
 
 const STORAGE_KEY = "ayra_demo_v1";
+/** One copy of the game state as it was before the Quests 2.0 (Q1) version first ran on this device; never overwritten. */
+export const GAME_BACKUP_KEY = "ayra_demo_v1_backup_q1";
+/** How often an open tab checks whether a new game day has begun (midnight in the account's time zone). */
+const DAY_CHECK_MS = 60 * 1000;
+
+/** Saved JSON → state of today (migrations and the day change applied). */
+function parseSaved(raw: string): GameState {
+  return checkAndApplyDateResets(JSON.parse(raw), new Date());
+}
+
+function makeStore(spaceId: string): GameStore<GameState> {
+  return new GameStore<GameState>({
+    read: () => (AppStorage.getActiveSpaceId() === spaceId ? AppStorage.getItem(STORAGE_KEY) : null),
+    // AppStorage swallows a failed write (quota, storage off) and only logs it: the value is read back, and the write
+    // counts only if it is really there
+    write: (raw) => {
+      try {
+        if (!AppStorage.guardedSetItem(STORAGE_KEY, raw, spaceId)) return false;
+        return AppStorage.getActiveSpaceId() === spaceId && AppStorage.getItem(STORAGE_KEY) === raw;
+      } catch {
+        return false;
+      }
+    },
+    parse: parseSaved,
+    lock: browserLock(`ayra-game:${spaceId}`),
+    commits: browserCommitLog(spaceId),
+  });
+}
 
 interface GameContextType {
   gameState: GameState;
+  /** Kept for old callers: the change is applied to the freshest saved state, like every other change. */
   setGameState: React.Dispatch<React.SetStateAction<GameState>>;
   isLoaded: boolean;
+  /** The game day (account time zone): the same «today» for Quests, Home and Profile. */
+  gameDay: string;
   previewItem: number | null;
   setPreviewItem: (itemId: number | null) => void;
   wardrobeFilter: string;
@@ -53,11 +90,13 @@ interface GameContextType {
     category: string,
     xp?: number,
     coins?: number
-  ) => { completed: boolean; xp: number; leveledUp: boolean; newLevel?: number; newlyUnlocked: string[] };
+  ) => QuestCompletion;
+  /** The same as completeQuest, under the lock shared by all tabs (the Quests page). */
+  completeQuestSafe: (questId: string, title: string, category: string, xp?: number) => Promise<QuestCompletion>;
   /** One-time reward for the first action of a kind on this account (coins and XP given; 0 if already given). */
   grantFirstAction: (kind: FirstActionKind) => { coins: number; xp: number };
   passQuest: (questId: string) => void;
-  replaceQuest: (questId: string) => boolean;
+  replaceQuest: (questId: string, shownQuestIds: string[]) => Promise<{ success: boolean; replacementId?: string; reason?: ReplaceQuestFailure | "notSaved" }>;
   toggleRestDay: () => void;
   claimDailyReward: () => number;
   setPlan: (plan: "Free" | "Pro" | "Elite") => void;
@@ -81,6 +120,13 @@ interface GameContextType {
     note: any,
     allNotes: any[]
   ) => { xpAwarded: number; leveledUp: boolean; newLevel?: number; newlyUnlocked: string[] };
+  /** XP for a screenshot of a trade (same rules and limits as before), under the lock shared by all tabs. */
+  recordScreenshot: (screenshot: { hash: string; width: number; height: number; tradeOpenedAt?: string }) => Promise<{
+    xpAwarded: number;
+    leveledUp: boolean;
+    newLevel?: number;
+    newlyUnlocked: string[];
+  }>;
   checkAndClosePlanQuests: (
     plan: any,
     todayTrades: any[],
@@ -93,7 +139,8 @@ interface GameContextType {
   cycleFrame: () => void;
   cycleBackground: () => void;
   cycleTitle: () => void;
-  addCustomGoal: (title: string, category: string) => void;
+  /** false when the title is empty or too long, or 5 goals already exist. */
+  addCustomGoal: (title: string, category: string) => boolean;
   removeCustomGoal: (goalId: string) => void;
   characterStatus: "Training" | "Resting";
 
@@ -112,19 +159,30 @@ interface GameContextType {
   syncCloudNickname: (nickname: string) => void;
 }
 
+export interface QuestCompletion {
+  completed: boolean;
+  /** The change could not be saved: nothing was given (try again). */
+  saveFailed?: boolean;
+  xp: number;
+  leveledUp: boolean;
+  newLevel?: number;
+  newlyUnlocked: string[];
+}
+
+const NOT_COMPLETED: QuestCompletion = { completed: false, xp: 0, leveledUp: false, newlyUnlocked: [] };
+const SAVE_FAILED: QuestCompletion = { ...NOT_COMPLETED, saveFailed: true };
+
 const GameContext = createContext<GameContextType | undefined>(undefined);
 
 export function GameProvider({ children }: { children: React.ReactNode }) {
-  const [gameState, setGameState] = useState<GameState>(INITIAL_GAME_STATE);
+  const [gameState, setGameStateRaw] = useState<GameState>(INITIAL_GAME_STATE);
   const [isLoaded, setIsLoaded] = useState<boolean>(false);
   const [previewItem, setPreviewItem] = useState<number | null>(null);
   const [wardrobeFilter, setWardrobeFilter] = useState<string>("all");
+  const [now, setNow] = useState<Date>(() => new Date());
 
+  // This tab's copy, always the latest one it knows (updated together with the React state)
   const gameStateRef = React.useRef(gameState);
-  useEffect(() => {
-    gameStateRef.current = gameState;
-  }, [gameState]);
-
   const isLoadedRef = React.useRef(isLoaded);
   useEffect(() => {
     isLoadedRef.current = isLoaded;
@@ -132,21 +190,79 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   // Space the in-memory state was loaded from. State is never written into any other space.
   const loadedSpaceRef = React.useRef<string | null>(null);
+  const storeRef = React.useRef<GameStore<GameState> | null>(null);
+
+  const showState = useCallback((next: GameState) => {
+    if (next === gameStateRef.current) return;
+    gameStateRef.current = next;
+    setGameStateRaw(next);
+  }, []);
+
+  /**
+   * Every change: on the freshest saved state, written at once (lib/game-store.ts). When it could not be saved (no
+   * storage, refused, no room, another space, a late copy from another tab), `failed` is returned: nothing is reported
+   * as given and the screen keeps the saved state.
+   */
+  const applySync = useCallback(
+    <R,>(fn: (fresh: GameState) => Change<GameState, R>, failed: R): R => {
+      const store = storeRef.current;
+      if (!store) return failed; // not loaded yet: nothing is saved, nothing is given
+      const out = store.applySync(gameStateRef.current, fn);
+      showState(out.state);
+      return out.saved ? out.result : failed;
+    },
+    [showState]
+  );
+
+  /** Changes that give rewards from the Quests page and screenshots: also under the lock shared by all tabs. */
+  const applyLocked = useCallback(
+    async <R,>(fn: (fresh: GameState) => Change<GameState, R>, failed: R): Promise<R> => {
+      const store = storeRef.current;
+      if (!store) return failed;
+      const out = await store.applyLocked(() => gameStateRef.current, fn);
+      showState(out.state);
+      return out.saved ? out.result : failed;
+    },
+    [showState]
+  );
+
+  /** A change without a reward; returns false when it could not be saved. */
+  const update = useCallback(
+    (fn: (fresh: GameState) => GameState): boolean => applySync((s) => ({ state: fn(s), result: true }), false),
+    [applySync]
+  );
+
+  const setGameState = useCallback<React.Dispatch<React.SetStateAction<GameState>>>(
+    (value) => {
+      update((s) => (typeof value === "function" ? (value as (p: GameState) => GameState)(s) : value));
+    },
+    [update]
+  );
 
   const reloadGameState = useCallback(() => {
     try {
-      loadedSpaceRef.current = AppStorage.getActiveSpaceId();
+      const spaceId = AppStorage.getActiveSpaceId();
+      loadedSpaceRef.current = spaceId;
+      storeRef.current = makeStore(spaceId);
       const saved = AppStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const resetted = checkAndApplyDateResets(parsed, new Date());
-        setGameState(resetted);
-      } else {
-        const resetted = checkAndApplyDateResets(INITIAL_GAME_STATE, new Date());
-        setGameState(resetted);
+      storeRef.current.noteLoaded(saved);
+      // one untouched copy of the progress from before this version (removed with the space data like any other key)
+      if (saved && !AppStorage.getItem(GAME_BACKUP_KEY)) {
+        try {
+          AppStorage.guardedSetItem(GAME_BACKUP_KEY, saved, spaceId);
+        } catch {
+          // no room: the progress itself is not touched
+        }
       }
+      const loaded = saved ? parseSaved(saved) : checkAndApplyDateResets(INITIAL_GAME_STATE, new Date());
+      // keep the migrated state saved, as before (through the store: the freshest copy wins)
+      // (if it cannot be written now, the loaded state is shown as it is: nothing is lost, nothing is added)
+      const next = storeRef.current.applySync(loaded, (fresh) => ({ state: fresh === loaded ? { ...loaded } : fresh, result: null })).state;
+      gameStateRef.current = next;
+      setGameStateRaw(next);
     } catch {
-      setGameState(INITIAL_GAME_STATE);
+      gameStateRef.current = INITIAL_GAME_STATE;
+      setGameStateRaw(INITIAL_GAME_STATE);
     } finally {
       setPreviewItem(null);
       setWardrobeFilter("all");
@@ -154,18 +270,20 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Register flush handler to write state to active space before switching
+  // Before switching space: write this tab's copy only if it is newer than the saved one
   useEffect(() => {
     const unregister = AppStorage.registerFlushHandler((targetSpaceId) => {
-      if (targetSpaceId !== loadedSpaceRef.current) {
-        return;
-      }
-      if (gameStateRef.current && isLoadedRef.current) {
-        AppStorage.guardedSetItem(
-          STORAGE_KEY,
-          JSON.stringify(gameStateRef.current),
-          targetSpaceId
-        );
+      if (targetSpaceId !== loadedSpaceRef.current || !isLoadedRef.current) return;
+      try {
+        const raw = AppStorage.getItem(STORAGE_KEY);
+        const savedRev = raw ? revOf(JSON.parse(raw)) : -1;
+        // only when this tab's copy is strictly newer (a failed write is retried); an equal rev may be another
+        // writer's newer content (for example the onboarding page) and is never overwritten
+        if (revOf(gameStateRef.current) > savedRev) {
+          AppStorage.guardedSetItem(STORAGE_KEY, JSON.stringify(gameStateRef.current), targetSpaceId);
+        }
+      } catch {
+        // ignore storage errors
       }
     });
     return unregister;
@@ -174,11 +292,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   // Load from AppStorage on client mount with fallback timer
   useEffect(() => {
     reloadGameState();
-
     const timer = setTimeout(() => {
       setIsLoaded(true);
     }, 1500);
-
     return () => clearTimeout(timer);
   }, [reloadGameState]);
 
@@ -190,26 +306,53 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe();
   }, [reloadGameState]);
 
-  // Save to AppStorage whenever state changes after mount with space write guard
+  // Another tab saved the game: take its copy when it is newer (nothing is written back)
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (!e.key || !e.key.endsWith(STORAGE_KEY) || e.newValue == null) return;
+      if (AppStorage.getActiveSpaceId() !== loadedSpaceRef.current) return;
+      const raw = AppStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      try {
+        const saved = parseSaved(raw);
+        if (revOf(saved) > revOf(gameStateRef.current)) {
+          storeRef.current?.noteLoaded(raw, saved);
+          showState(saved);
+        }
+      } catch {
+        // ignore a broken value: the next change reads the store again
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [showState]);
+
+  // Midnight in the account's time zone while the tab is open: start the new game day once
   useEffect(() => {
     if (!isLoaded) return;
-    try {
-      const activeSpaceId = AppStorage.getActiveSpaceId();
-      if (activeSpaceId !== loadedSpaceRef.current) {
-        return;
+    const check = () => {
+      const t = new Date();
+      const s = gameStateRef.current;
+      if (s.lastQuestDate && dayKeyInZone(t, s.profile?.timezone) > s.lastQuestDate) {
+        update((fresh) => checkAndApplyDateResets(fresh, t));
+        setNow(t); // re-render only when the day changes
       }
-      AppStorage.guardedSetItem(
-        STORAGE_KEY,
-        JSON.stringify(gameState),
-        activeSpaceId
-      );
-    } catch {
-      // ignore storage errors
-    }
-  }, [gameState, isLoaded]);
+    };
+    const timer = setInterval(check, DAY_CHECK_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", check);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", check);
+    };
+  }, [isLoaded, update]);
 
   const saveOnboardingAnswer = useCallback((key: string, value: any) => {
-    setGameState((prev) => {
+    update((prev) => {
       const newAnswers = { ...prev.onboarding.answers, [key]: value };
       const currentStatus = prev.onboarding.status;
       const newStatus =
@@ -255,10 +398,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         },
       };
     });
-  }, []);
+  }, [update]);
 
   const setOnboardingStep = useCallback((step: number, subStep: number) => {
-    setGameState((prev) => ({
+    update((prev) => ({
       ...prev,
       onboarding: {
         ...prev.onboarding,
@@ -271,10 +414,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         startedAt: prev.onboarding.startedAt || new Date().toISOString(),
       },
     }));
-  }, []);
+  }, [update]);
 
   const completeOnboarding = useCallback(() => {
-    setGameState((prev) => {
+    update((prev) => {
       generateProgram(prev.onboarding.answers);
       return {
         ...prev,
@@ -287,28 +430,28 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         },
       };
     });
-  }, []);
+  }, [update]);
 
   const dismissLegacyBanner = useCallback(() => {
-    setGameState((prev) => ({
+    update((prev) => ({
       ...prev,
       onboarding: {
         ...prev.onboarding,
         legacyDismissed: true,
       },
     }));
-  }, []);
+  }, [update]);
 
   const setAiConsent = useCallback((aiConsent: boolean) => {
-    setGameState((prev) => ({
+    update((prev) => ({
       ...prev,
       aiConsent,
     }));
-  }, []);
+  }, [update]);
 
   const updateAvatarAppearance = useCallback((appearance: AvatarAppearance) => {
     const valid = validateAvatarAppearance(appearance);
-    setGameState((prev) => ({
+    update((prev) => ({
       ...prev,
       profile: {
         ...prev.profile,
@@ -322,289 +465,218 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         },
       },
     }));
-  }, []);
+  }, [update]);
 
   const updateMinorMode = useCallback((minorMode: boolean) => {
-    setGameState((prev) => ({
+    update((prev) => ({
       ...prev,
       profile: {
         ...prev.profile,
         minorMode,
       },
     }));
-  }, []);
+  }, [update]);
 
   const saveProfileEdits = useCallback((edits: { name: string; bio: string; details: ProfileDetails }) => {
-    setGameState((prev) => ({ ...updateProfileInfoLogic(prev, edits.name, edits.bio), profileDetails: edits.details }));
-  }, []);
+    update((prev) => ({ ...updateProfileInfoLogic(prev, edits.name, edits.bio), profileDetails: edits.details }));
+  }, [update]);
 
   const syncCloudNickname = useCallback((nickname: string) => {
-    setGameState((prev) => (prev.name === nickname || !nickname ? prev : { ...prev, name: nickname }));
-  }, []);
+    update((prev) => (prev.name === nickname || !nickname ? prev : { ...prev, name: nickname }));
+  }, [update]);
 
+  // A new zone never moves the game day back and never takes earned rewards (docs/quests-2.0-plan.md, 4.2)
   const updateTimezone = useCallback((timezone: string) => {
-    setGameState((prev) => ({
-      ...prev,
-      profile: {
-        ...prev.profile,
-        timezone,
-      },
-    }));
-  }, []);
+    update((prev) => (prev.profile.timezone === timezone ? prev : checkAndApplyDateResets({ ...prev, profile: { ...prev.profile, timezone } }, new Date())));
+  }, [update]);
 
   // A quest ticked by the person (Quests, Home). Quests the app checks itself close only by themselves; a
   // self-reported quest gives XP, never coins (owner decision 2026-10-27).
-  const completeQuest = useCallback(
-    (
-      questId: string,
-      title: string,
-      category: string,
-      xp?: number,
-      _coins?: number
-    ) => {
-      let result = {
-        completed: false,
-        xp: 0,
-        leveledUp: false,
-        newLevel: undefined as number | undefined,
-        newlyUnlocked: [] as string[],
-      };
-      if (APP_CLOSED_QUESTS.has(questId)) return result;
-      setGameState((prev) => {
-        const res = completeQuestLogic(prev, questId, title, category, xp, 0, new Date());
-        const completed = res.state.completedQuestsToday[questId] === true && !prev.completedQuestsToday[questId];
-        result = {
-          completed,
-          xp: completed ? res.state.history[0]?.xp ?? 0 : 0,
-          leveledUp: res.leveledUp,
-          newLevel: res.newLevel,
-          newlyUnlocked: res.newlyUnlocked,
+  const questChange = useCallback(
+    (questId: string, title: string, category: string, xp?: number) =>
+      (fresh: GameState): Change<GameState, QuestCompletion> => {
+        const res = completeQuestLogic(fresh, questId, title, category, xp, 0, new Date());
+        const completed = res.state.completedQuestsToday[questId] === true && !fresh.completedQuestsToday[questId];
+        if (!completed) return { state: fresh, result: NOT_COMPLETED };
+        return {
+          state: res.state,
+          result: { completed, xp: res.state.history[0]?.xp ?? 0, leveledUp: res.leveledUp, newLevel: res.newLevel, newlyUnlocked: res.newlyUnlocked },
         };
-        return res.state;
-      });
-      return result;
-    },
+      },
     []
+  );
+
+  const completeQuest = useCallback(
+    (questId: string, title: string, category: string, xp?: number, _coins?: number): QuestCompletion => {
+      if (APP_CLOSED_QUESTS.has(questId)) return NOT_COMPLETED;
+      return applySync(questChange(questId, title, category, xp), SAVE_FAILED);
+    },
+    [applySync, questChange]
+  );
+
+  const completeQuestSafe = useCallback(
+    async (questId: string, title: string, category: string, xp?: number): Promise<QuestCompletion> => {
+      if (APP_CLOSED_QUESTS.has(questId)) return NOT_COMPLETED;
+      return applyLocked(questChange(questId, title, category, xp), SAVE_FAILED);
+    },
+    [applyLocked, questChange]
   );
 
   // One-time reward for the first action of a kind on this account (the journal decides it is the first)
   const grantFirstAction = useCallback((kind: FirstActionKind) => {
-    let granted = { coins: 0, xp: 0 };
-    setGameState((prev) => {
-      const res = grantFirstActionLogic(prev, kind, new Date());
-      granted = { coins: res.coins, xp: res.xp };
-      return res.state;
-    });
-    return granted;
-  }, []);
+    return applySync((s) => {
+      const res = grantFirstActionLogic(s, kind, new Date());
+      return { state: res.state, result: { coins: res.coins, xp: res.xp } };
+    }, { coins: 0, xp: 0 });
+  }, [applySync]);
 
   const passQuest = useCallback((questId: string) => {
-    setGameState((prev) => passQuestLogic(prev, questId, new Date()));
-  }, []);
+    update((prev) => passQuestLogic(prev, questId, new Date()));
+  }, [update]);
 
-  const replaceQuest = useCallback((questId: string) => {
-    let success = false;
-    setGameState((prev) => {
-      const res = replaceQuestLogic(prev, questId, new Date());
-      success = res.success;
-      return res.state;
-    });
-    return success;
-  }, []);
+  const replaceQuest = useCallback(
+    (questId: string, shownQuestIds: string[]) =>
+      applyLocked((s) => {
+        const res = replaceQuestLogic(s, questId, shownQuestIds, new Date());
+        return { state: res.success ? res.state : s, result: { success: res.success, replacementId: res.replacementId, reason: res.reason as ReplaceQuestFailure | "notSaved" | undefined } };
+      }, { success: false, replacementId: undefined, reason: "notSaved" as const }),
+    [applyLocked]
+  );
 
   const toggleRestDay = useCallback(() => {
-    setGameState((prev) => toggleRestDayLogic(prev, new Date()));
-  }, []);
+    update((prev) => toggleRestDayLogic(prev, new Date()));
+  }, [update]);
 
   const claimDailyReward = useCallback(() => {
-    let claimedCoins = 0;
-    setGameState((prev) => {
-      const res = claimDailyRewardLogic(prev, new Date());
-      claimedCoins = res.claimedCoins;
-      return res.state;
-    });
-    return claimedCoins;
-  }, []);
+    return applySync((s) => {
+      const res = claimDailyRewardLogic(s, new Date());
+      return { state: res.state, result: res.claimedCoins };
+    }, 0);
+  }, [applySync]);
 
   const setPlan = useCallback((plan: "Free" | "Pro" | "Elite") => {
-    setGameState((prev) => changePlanLogic(prev, plan));
-  }, []);
+    update((prev) => changePlanLogic(prev, plan));
+  }, [update]);
 
   const updateProfile = useCallback((name: string, bio: string) => {
-    setGameState((prev) => updateProfileInfoLogic(prev, name, bio));
-  }, []);
+    update((prev) => updateProfileInfoLogic(prev, name, bio));
+  }, [update]);
 
   const selectTitle = useCallback((titleId: string) => {
-    setGameState((prev) => {
+    update((prev) => {
       if (!prev.unlockedTitles.includes(titleId)) return prev;
       return { ...prev, selectedTitle: titleId };
     });
-  }, []);
+  }, [update]);
 
   const equipItem = useCallback((itemId: number) => {
-    let newlyUnlocked: string[] = [];
-    setGameState((prev) => {
-      const res = equipItemLogic(prev, itemId);
-      newlyUnlocked = res.newlyUnlocked;
-      return res.state;
-    });
+    const newlyUnlocked = applySync((s) => {
+      const res = equipItemLogic(s, itemId);
+      return { state: res.state, result: res.newlyUnlocked };
+    }, [] as string[]);
     setPreviewItem(null);
     return newlyUnlocked;
-  }, []);
+  }, [applySync]);
 
   const unequipSlot = useCallback((slot: string) => {
-    let newlyUnlocked: string[] = [];
-    setGameState((prev) => {
-      const res = unequipSlotLogic(prev, slot);
-      newlyUnlocked = res.newlyUnlocked;
-      return res.state;
-    });
+    const newlyUnlocked = applySync((s) => {
+      const res = unequipSlotLogic(s, slot);
+      return { state: res.state, result: res.newlyUnlocked };
+    }, [] as string[]);
     setPreviewItem(null);
     return newlyUnlocked;
-  }, []);
+  }, [applySync]);
 
   const applyLoadout = useCallback((loadoutName: string) => {
-    let newlyUnlocked: string[] = [];
-    setGameState((prev) => {
-      const res = applyLoadoutLogic(prev, loadoutName);
-      newlyUnlocked = res.newlyUnlocked;
-      return res.state;
-    });
+    const newlyUnlocked = applySync((s) => {
+      const res = applyLoadoutLogic(s, loadoutName);
+      return { state: res.state, result: res.newlyUnlocked };
+    }, [] as string[]);
     setPreviewItem(null);
     return newlyUnlocked;
-  }, []);
+  }, [applySync]);
 
   const saveLoadout = useCallback((loadoutName: string) => {
-    setGameState((prev) => saveLoadoutLogic(prev, loadoutName));
-  }, []);
+    update((prev) => saveLoadoutLogic(prev, loadoutName));
+  }, [update]);
 
   const addPost = useCallback((content: string) => {
-    let newlyUnlocked: string[] = [];
-    setGameState((prev) => {
-      const res = addPostLogic(prev, content);
-      newlyUnlocked = res.newlyUnlocked;
-      return res.state;
-    });
-    return newlyUnlocked;
-  }, []);
+    return applySync((s) => {
+      const res = addPostLogic(s, content);
+      return { state: res.state, result: res.newlyUnlocked };
+    }, [] as string[]);
+  }, [applySync]);
 
   const deletePost = useCallback((postIndex: number) => {
-    setGameState((prev) => deletePostLogic(prev, postIndex));
-  }, []);
+    update((prev) => deletePostLogic(prev, postIndex));
+  }, [update]);
 
   const recordTrade = useCallback((trade: any, allTrades: any[]) => {
-    let result = {
-      xpAwarded: 0,
-      questClosed: false,
-      leveledUp: false,
-      newLevel: undefined as number | undefined,
-      newlyUnlocked: [] as string[],
-    };
-    setGameState((prev) => {
-      const res = recordLoggedTrade(prev, trade, allTrades, new Date());
-      result = {
-        xpAwarded: res.xpAwarded,
-        questClosed: res.questClosed,
-        leveledUp: res.leveledUp,
-        newLevel: res.newLevel,
-        newlyUnlocked: res.newlyUnlocked,
+    return applySync((s) => {
+      const res = recordLoggedTrade(s, trade, allTrades, new Date());
+      return {
+        state: res.state,
+        result: { xpAwarded: res.xpAwarded, questClosed: res.questClosed, leveledUp: res.leveledUp, newLevel: res.newLevel, newlyUnlocked: res.newlyUnlocked },
       };
-      return res.state;
-    });
-    return result;
-  }, []);
+    }, { ...{ xpAwarded: 0, leveledUp: false, newLevel: undefined as number | undefined, newlyUnlocked: [] as string[] }, questClosed: false });
+  }, [applySync]);
 
   const recordNoteSaved = useCallback((note: any, allNotes: any[]) => {
-    let result = {
-      xpAwarded: 0,
-      leveledUp: false,
-      newLevel: undefined as number | undefined,
-      newlyUnlocked: [] as string[],
-    };
-    setGameState((prev) => {
-      const res = recordNoteSavedLogic(prev, note, allNotes, new Date());
-      result = {
-        xpAwarded: res.xpAwarded,
-        leveledUp: res.leveledUp,
-        newLevel: res.newLevel,
-        newlyUnlocked: res.newlyUnlocked,
-      };
-      return res.state;
-    });
-    return result;
-  }, []);
+    return applySync((s) => {
+      const res = recordNoteSavedLogic(s, note, allNotes, new Date());
+      return { state: res.state, result: { xpAwarded: res.xpAwarded, leveledUp: res.leveledUp, newLevel: res.newLevel, newlyUnlocked: res.newlyUnlocked } };
+    }, { xpAwarded: 0, leveledUp: false, newLevel: undefined as number | undefined, newlyUnlocked: [] as string[] });
+  }, [applySync]);
+
+  const recordScreenshot = useCallback(
+    (screenshot: { hash: string; width: number; height: number; tradeOpenedAt?: string }) =>
+      applyLocked((s) => {
+        const res = recordScreenshotAdded(s, screenshot, new Date());
+        return { state: res.state, result: { xpAwarded: res.xpAwarded, leveledUp: res.leveledUp, newLevel: res.newLevel, newlyUnlocked: res.newlyUnlocked } };
+      }, { xpAwarded: 0, leveledUp: false, newLevel: undefined as number | undefined, newlyUnlocked: [] as string[] }),
+    [applyLocked]
+  );
 
   const checkAndClosePlanQuests = useCallback(
     (plan: any, todayTrades: any[], allPlans: any[] = [], allNotes: any[] = []) => {
-      let result = {
-        closedQuests: [] as string[],
-        xpAwarded: 0,
-        newlyUnlocked: [] as string[],
-      };
-      setGameState((prev) => {
-        const res = evaluatePlanQuestClosure(
-          prev,
-          plan,
-          todayTrades,
-          allPlans,
-          allNotes,
-          new Date()
-        );
-        result = {
-          closedQuests: res.closedQuests,
-          xpAwarded: res.xpAwarded,
-          newlyUnlocked: res.newlyUnlocked,
-        };
-        return res.state;
-      });
-      return result;
+      return applySync((s) => {
+        const res = evaluatePlanQuestClosure(s, plan, todayTrades, allPlans, allNotes, new Date());
+        return { state: res.state, result: { closedQuests: res.closedQuests, xpAwarded: res.xpAwarded, newlyUnlocked: res.newlyUnlocked } };
+      }, { closedQuests: [] as string[], xpAwarded: 0, newlyUnlocked: [] as string[] });
     },
-    []
+    [applySync]
   );
 
   const recordNoTrade = useCallback((entry: any, allNoTrades: any[]) => {
-    let result = {
-      xpAwarded: 0,
-      leveledUp: false,
-      newLevel: undefined as number | undefined,
-      newlyUnlocked: [] as string[],
-    };
-    setGameState((prev) => {
-      const res = recordNoTradeEntry(prev, entry, allNoTrades, new Date());
-      result = {
-        xpAwarded: res.xpAwarded,
-        leveledUp: res.leveledUp,
-        newLevel: res.newLevel,
-        newlyUnlocked: res.newlyUnlocked,
-      };
-      return res.state;
-    });
-    return result;
-  }, []);
+    return applySync((s) => {
+      const res = recordNoTradeEntry(s, entry, allNoTrades, new Date());
+      return { state: res.state, result: { xpAwarded: res.xpAwarded, leveledUp: res.leveledUp, newLevel: res.newLevel, newlyUnlocked: res.newlyUnlocked } };
+    }, { xpAwarded: 0, leveledUp: false, newLevel: undefined as number | undefined, newlyUnlocked: [] as string[] });
+  }, [applySync]);
 
   const setFrame = useCallback((frame: number) => {
-    setGameState((prev) => ({
+    update((prev) => ({
       ...prev,
       frame,
     }));
-  }, []);
+  }, [update]);
 
   const setTitle = useCallback((title: number) => {
-    setGameState((prev) => ({
+    update((prev) => ({
       ...prev,
       title,
     }));
-  }, []);
+  }, [update]);
 
   const setBackground = useCallback((background: number) => {
-    setGameState((prev) => ({
+    update((prev) => ({
       ...prev,
       background,
     }));
-  }, []);
+  }, [update]);
 
   const cycleFrame = useCallback(() => {
-    setGameState((prev) => {
+    update((prev) => {
       let nextFrame = prev.frame;
       for (let i = 1; i <= FRAMES.length; i++) {
         const idx = (prev.frame + i) % FRAMES.length;
@@ -615,17 +687,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       }
       return { ...prev, frame: nextFrame };
     });
-  }, []);
+  }, [update]);
 
   const cycleBackground = useCallback(() => {
-    setGameState((prev) => ({
+    update((prev) => ({
       ...prev,
       background: (prev.background + 1) % BACKGROUNDS.length,
     }));
-  }, []);
+  }, [update]);
 
   const cycleTitle = useCallback(() => {
-    setGameState((prev) => {
+    update((prev) => {
       let nextTitle = prev.title;
       for (let i = 1; i <= TITLES.length; i++) {
         const idx = (prev.title + i) % TITLES.length;
@@ -636,15 +708,18 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       }
       return { ...prev, title: nextTitle };
     });
-  }, []);
+  }, [update]);
 
   const addCustomGoal = useCallback((title: string, category: string) => {
-    setGameState((prev) => addCustomGoalLogic(prev, title, category));
-  }, []);
+    return applySync((s) => {
+      const next = addCustomGoalLogic(s, title, category, new Date());
+      return { state: next, result: next.customGoals.length > s.customGoals.length };
+    }, false);
+  }, [applySync]);
 
   const removeCustomGoal = useCallback((goalId: string) => {
-    setGameState((prev) => removeCustomGoalLogic(prev, goalId));
-  }, []);
+    update((prev) => removeCustomGoalLogic(prev, goalId));
+  }, [update]);
 
   const effectiveEquipment = useMemo(() => {
     const eq = { ...gameState.equipment };
@@ -653,6 +728,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     }
     return eq;
   }, [gameState.equipment, previewItem]);
+
+  const gameDay = gameDayKey(gameState, now);
 
   const completedTodayCount = Object.keys(gameState.completedQuestsToday).length;
   const characterStatus = getCharacterStatus(
@@ -666,12 +743,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         gameState,
         setGameState,
         isLoaded,
+        gameDay,
         previewItem,
         setPreviewItem,
         wardrobeFilter,
         setWardrobeFilter,
         effectiveEquipment,
         completeQuest,
+        completeQuestSafe,
         grantFirstAction,
         passQuest,
         replaceQuest,
@@ -689,6 +768,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         recordTrade,
         recordNoTrade,
         recordNoteSaved,
+        recordScreenshot,
         checkAndClosePlanQuests,
         setFrame,
         setTitle,

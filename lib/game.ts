@@ -1,5 +1,7 @@
 import type { ProfileDetails } from "./profile";
 import { GAME_CONFIG } from "./game-config";
+import { dayKeyInZone, mondayOfKey } from "./day-key";
+import { APP_CLOSED_QUESTS, pickReplacement } from "./quests";
 import { ITEMS } from "./items";
 import { TITLES_CATALOG } from "./titles";
 import {
@@ -72,7 +74,9 @@ export interface GameState {
   completedQuestsToday: Record<string, boolean>;
   passedQuestsToday: Record<string, boolean>;
   replacementsUsedToday: number;
-  lastQuestDate: string; // YYYY-MM-DD
+  /** Replaced quest id → the quest shown instead of it today (reset with the day). */
+  questReplacements?: Record<string, string>;
+  lastQuestDate: string; // YYYY-MM-DD, the game day (account time zone)
   weeklyQuestCount: number;
   lastWeeklyResetDate: string; // YYYY-MM-DD of Monday
   dailyRewardIndex: number; // 0..6
@@ -102,7 +106,9 @@ export interface GameState {
     category: string;
     xp: number;
     coins: number;
-    completedAt: string;
+    completedAt: string; // game day YYYY-MM-DD
+    /** Exact time (ISO); older entries have only the day. */
+    at?: string;
   }>;
   customGoals: CustomGoal[];
   statSnapshots: StatSnapshot[];
@@ -120,6 +126,8 @@ export interface GameState {
   coinLog?: CoinLogEntry[];
   /** When this device started keeping the coin history (ISO). */
   coinLogSince?: string;
+  /** Grows with every saved change: the freshest copy wins between tabs (lib/game-store.ts). */
+  rev?: number;
 }
 
 /** One coin credit: what gave it, when, how much. */
@@ -384,6 +392,7 @@ export function migrateState(rawState: any): GameState {
     chronicle: chronicleMigrated,
     completedQuestsToday: rawState.completedQuestsToday || {},
     passedQuestsToday: rawState.passedQuestsToday || {},
+    questReplacements: rawState.questReplacements && typeof rawState.questReplacements === "object" ? rawState.questReplacements : {},
     history: rawState.history || [],
     customGoals: rawState.customGoals || [],
     statSnapshots: Array.isArray(rawState.statSnapshots) ? rawState.statSnapshots : [],
@@ -397,27 +406,43 @@ export function migrateState(rawState: any): GameState {
   };
 }
 
+/**
+ * The game day: the calendar date in the account's time zone, never earlier than the day already started
+ * (docs/quests-2.0-plan.md, 4.2). A closed day is never opened again: after midnight, a time zone change,
+ * a restart or in another tab.
+ */
+export function gameDayKey(state: Pick<GameState, "lastQuestDate" | "profile">, currentDate: Date): string {
+  const key = dayKeyInZone(currentDate, state.profile?.timezone);
+  return state.lastQuestDate && key < state.lastQuestDate ? state.lastQuestDate : key;
+}
+
 export function checkAndApplyDateResets(
   state: GameState,
   currentDate: Date
 ): GameState {
-  const todayStr = getIsoDateString(currentDate);
-  const mondayStr = getMondayIsoDateString(currentDate);
-
   let updated = migrateState(state);
   // Clock moved back: no new day (quests and the daily reward are not renewed) until real time catches up
   if (isClockBehind(updated, currentDate)) return updated;
   updated.lastSeenAt = Math.max(updated.lastSeenAt || 0, currentDate.getTime());
 
+  // A time zone «behind» the current game day keeps that day (its quests stay open); the next day starts when the date
+  // in the new zone passes it. A zone «ahead» starts the next day as usual.
+  const todayStr = gameDayKey(updated, currentDate);
+  const mondayStr = mondayOfKey(todayStr);
+
   if (updated.lastQuestDate && updated.lastQuestDate !== todayStr) {
     const yesterdayDoneCount = Object.keys(updated.completedQuestsToday).length;
-    const wasActive = yesterdayDoneCount >= 1 || updated.isRestDay;
+    const wasActive = yesterdayDoneCount >= 1;
+    // A rest day keeps the streak but does not grow it and does not spend a shield (owner decision 2026-11-12)
+    const restedOnly = !wasActive && updated.isRestDay;
 
     let newStreak = updated.currentStreak;
     let newShields = updated.streakShieldsAvailable;
 
     if (wasActive) {
       newStreak += 1;
+    } else if (restedOnly) {
+      // the streak stays as it is
     } else {
       if (newShields > 0) {
         newShields -= 1;
@@ -436,6 +461,7 @@ export function checkAndApplyDateResets(
     updated.streakShieldsAvailable = newShields;
     updated.completedQuestsToday = {};
     updated.passedQuestsToday = {};
+    updated.questReplacements = {};
     updated.replacementsUsedToday = 0;
     updated.isRestDay = false;
     updated.lastQuestDate = todayStr;
@@ -494,7 +520,7 @@ export function recordPropDisciplineDay(
   currentDate: Date = new Date()
 ): PropDisciplineRewardResult {
   let newState = checkAndApplyDateResets(state, currentDate);
-  const todayStr = getIsoDateString(currentDate);
+  const todayStr = gameDayKey(newState, currentDate);
 
   const todayRecord = newState.dailyStats[todayStr];
   const planDisciplineXp = todayRecord?.questsCompleted?.["discipline_plan"] || 0;
@@ -748,7 +774,7 @@ export function recordScreenshotAdded(
   currentDate: Date = new Date()
 ): ScreenshotRewardResult {
   let newState = checkAndApplyDateResets(state, currentDate);
-  const todayStr = getIsoDateString(currentDate);
+  const todayStr = gameDayKey(newState, currentDate);
 
   let isPlausible = !isClockBehind(newState, currentDate);
 
@@ -851,7 +877,7 @@ export function evaluatePlanQuestClosure(
   newlyUnlocked: string[];
 } {
   let newState = checkAndApplyDateResets(state, currentDate);
-  const todayStr = getIsoDateString(currentDate);
+  const todayStr = gameDayKey(newState, currentDate);
 
   // Only close quests if plan date is today
   if (plan.date !== todayStr) {
@@ -917,7 +943,7 @@ export function evaluatePlanQuestClosure(
   const isReviewDone = plan.review?.completedAt != null && reviewTextLen >= 40;
 
   const isSessionNoteDone = allNotes.some((n: any) => {
-    const isTodayNote = n.createdAt.startsWith(todayStr);
+    const isTodayNote = typeof n.createdAt === "string" && dayKeyInZone(new Date(n.createdAt), newState.profile?.timezone) === todayStr;
     const isSessionTemplate = n.templateKey === "session_review";
     return isTodayNote && isSessionTemplate && (n.body || "").length >= 80;
   });
@@ -1046,7 +1072,7 @@ export function recordNoTradeEntry(
   currentDate: Date = new Date()
 ): NoTradeRewardResult {
   let newState = checkAndApplyDateResets(state, currentDate);
-  const todayStr = getIsoDateString(currentDate);
+  const todayStr = gameDayKey(newState, currentDate);
 
   let isPlausible = !isClockBehind(newState, currentDate);
 
@@ -1157,9 +1183,11 @@ export function completeQuest(
   newlyUnlocked: string[];
 } {
   let newState = checkAndApplyDateResets(state, currentDate);
-  const todayStr = getIsoDateString(currentDate);
+  const todayStr = gameDayKey(newState, currentDate);
 
-  if (newState.completedQuestsToday[questId] || isClockBehind(newState, currentDate)) {
+  // a replaced quest cannot be done any more today
+  const replaced = !!newState.questReplacements && Object.prototype.hasOwnProperty.call(newState.questReplacements, questId);
+  if (newState.completedQuestsToday[questId] || replaced || isClockBehind(newState, currentDate)) {
     return { state: newState, leveledUp: false, newlyUnlocked: [] };
   }
   coinsAmount = Math.min(coinsAmount, remainingDailyCoins(newState, todayStr));
@@ -1198,6 +1226,7 @@ export function completeQuest(
       xp: xpAmount,
       coins: coinsAmount,
       completedAt: todayStr,
+      at: currentDate.toISOString(),
     },
     ...newState.history,
   ];
@@ -1240,7 +1269,7 @@ export function passQuest(
   currentDate: Date = new Date()
 ): GameState {
   let newState = checkAndApplyDateResets(state, currentDate);
-  const todayStr = getIsoDateString(currentDate);
+  const todayStr = gameDayKey(newState, currentDate);
   const updatedDailyStats = recordDailyStatEvent(newState.dailyStats, todayStr, {
     type: "questSkipped",
   });
@@ -1255,17 +1284,42 @@ export function passQuest(
   };
 }
 
+export type ReplaceQuestFailure = "limit" | "notReplaceable" | "noAlternative";
+
+/**
+ * Replaces a quest of today by another one from the pool: not already shown today, not one the app closes from the
+ * journal, with no more XP than the replaced one (lib/quests.ts: pickReplacement). The choice is stable for the day.
+ * Quests the app closes cannot be replaced: they keep closing from the journal anyway, so a swap would add a quest.
+ */
 export function replaceQuest(
   state: GameState,
   questId: string,
+  shownQuestIds: string[],
   currentDate: Date = new Date()
-): { state: GameState; success: boolean } {
+): { state: GameState; success: boolean; replacementId?: string; reason?: ReplaceQuestFailure } {
   let newState = checkAndApplyDateResets(state, currentDate);
-  const todayStr = getIsoDateString(currentDate);
+  const todayStr = gameDayKey(newState, currentDate);
 
   if (newState.replacementsUsedToday >= GAME_CONFIG.QUEST_REPLACEMENTS_PER_DAY) {
-    return { state: newState, success: false };
+    return { state: newState, success: false, reason: "limit" };
   }
+  const replacements = newState.questReplacements || {};
+  if (
+    APP_CLOSED_QUESTS.has(questId) ||
+    newState.completedQuestsToday[questId] ||
+    Object.prototype.hasOwnProperty.call(replacements, questId) ||
+    isClockBehind(newState, currentDate)
+  ) {
+    return { state: newState, success: false, reason: "notReplaceable" };
+  }
+  const excluded = new Set<string>([
+    ...shownQuestIds,
+    ...Object.keys(replacements),
+    ...Object.values(replacements),
+    ...Object.keys(newState.completedQuestsToday),
+  ]);
+  const replacement = pickReplacement(todayStr, questId, excluded);
+  if (!replacement) return { state: newState, success: false, reason: "noAlternative" };
 
   const updatedDailyStats = recordDailyStatEvent(newState.dailyStats, todayStr, {
     type: "questReplaced",
@@ -1274,6 +1328,7 @@ export function replaceQuest(
   newState = {
     ...newState,
     replacementsUsedToday: newState.replacementsUsedToday + 1,
+    questReplacements: { ...replacements, [questId]: replacement.id },
     passedQuestsToday: {
       ...newState.passedQuestsToday,
       [questId]: true,
@@ -1281,7 +1336,7 @@ export function replaceQuest(
     dailyStats: updatedDailyStats,
   };
 
-  return { state: newState, success: true };
+  return { state: newState, success: true, replacementId: replacement.id };
 }
 
 export function toggleRestDay(
@@ -1289,15 +1344,13 @@ export function toggleRestDay(
   currentDate: Date = new Date()
 ): GameState {
   let newState = checkAndApplyDateResets(state, currentDate);
-  const todayStr = getIsoDateString(currentDate);
+  const todayStr = gameDayKey(newState, currentDate);
   const nextRestDayState = !newState.isRestDay;
 
-  let updatedDailyStats = newState.dailyStats;
-  if (nextRestDayState) {
-    updatedDailyStats = recordDailyStatEvent(newState.dailyStats, todayStr, {
-      type: "restDay",
-    });
-  }
+  // the day keeps its final state; switching gives no reward and does not touch earlier days
+  const updatedDailyStats = recordDailyStatEvent(newState.dailyStats, todayStr, {
+    type: nextRestDayState ? "restDay" : "restDayOff",
+  });
 
   return {
     ...newState,
@@ -1311,7 +1364,7 @@ export function claimDailyReward(
   currentDate: Date = new Date()
 ): { state: GameState; claimedCoins: number } {
   let newState = checkAndApplyDateResets(state, currentDate);
-  const todayStr = getIsoDateString(currentDate);
+  const todayStr = gameDayKey(newState, currentDate);
 
   // once a day; never for a day before the last claim; nothing while the clock is behind
   if (
@@ -1561,17 +1614,33 @@ export function updateProfileInfo(
   };
 }
 
+/** Trims, joins repeated spaces; null when empty or longer than the limit (owner decision 2026-11-12: 80). */
+export function normalizeGoalTitle(title: string): string | null {
+  const t = (title || "").replace(/\s+/g, " ").trim();
+  if (!t || t.length > GAME_CONFIG.CUSTOM_GOAL_TITLE_MAX) return null;
+  return t;
+}
+
+function newGoalId(): string {
+  const c = typeof globalThis !== "undefined" ? (globalThis as { crypto?: Crypto }).crypto : undefined;
+  if (c?.randomUUID) return `goal_${c.randomUUID()}`;
+  return `goal_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function addCustomGoal(
   state: GameState,
   title: string,
-  category: string
+  category: string,
+  currentDate: Date = new Date()
 ): GameState {
   if (state.customGoals.length >= GAME_CONFIG.MAX_CUSTOM_GOALS) return state;
+  const clean = normalizeGoalTitle(title);
+  if (!clean) return state;
   const newGoal: CustomGoal = {
-    id: `goal_${Date.now()}`,
-    title,
+    id: newGoalId(),
+    title: clean,
     category,
-    createdAt: getIsoDateString(new Date()),
+    createdAt: gameDayKey(state, currentDate),
   };
   return {
     ...state,
@@ -1601,7 +1670,7 @@ export function recordNoteSaved(
   currentDate: Date = new Date()
 ): NoteRewardResult {
   let newState = checkAndApplyDateResets(state, currentDate);
-  const todayStr = getIsoDateString(currentDate);
+  const todayStr = gameDayKey(newState, currentDate);
 
   let isPlausible = !isClockBehind(newState, currentDate);
   const bodyText = (note.body || "").trim();
@@ -1730,7 +1799,7 @@ export function recordLoggedTrade(
   currentDate: Date = new Date()
 ): TradeRewardResult {
   let newState = checkAndApplyDateResets(state, currentDate);
-  const todayStr = getIsoDateString(currentDate);
+  const todayStr = gameDayKey(newState, currentDate);
 
   // Trades from an import file never give rewards (no XP, no quest, no achievement): rewards are only for actions
   // inside AYRA, otherwise a level could be farmed by uploading a file (owner decision 2026-10-14).
@@ -1808,11 +1877,13 @@ export function recordLoggedTrade(
     }
   }
 
-  // 2. Auto-close q_tradelog quest idempotently
+  // 2. Auto-close q_tradelog quest idempotently, and only with a believable trade: not a duplicate, not dated in the
+  // future (the daily XP cap above does not matter here: the quest closes once a day anyway)
   let questClosed = false;
   let questUnlocked: string[] = [];
+  const isGenuineTrade = !isNaN(tradeOpenedMs) && tradeOpenedMs <= currentDate.getTime() + 24 * 60 * 60 * 1000 && !isDuplicate;
 
-  if (!newState.completedQuestsToday["q_tradelog"]) {
+  if (isGenuineTrade && !newState.completedQuestsToday["q_tradelog"]) {
     const questRes = completeQuest(
       newState,
       "q_tradelog",

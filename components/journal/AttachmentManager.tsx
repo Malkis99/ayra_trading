@@ -9,7 +9,6 @@ import { AttachmentKind, AttachmentMetadata, AttachmentRecord } from "@/lib/jour
 import { useJournal } from "@/lib/journal/context";
 import { GAME_CONFIG } from "@/lib/game-config";
 import { LightboxViewer } from "./LightboxViewer";
-import { recordScreenshotAdded } from "@/lib/game";
 import { formatString } from "@/lib/i18n";
 import { noCloudAttachments, notOnDevice, screenshotsElsewhere, type CloudAttachmentStore } from "@/lib/journal/attachments/elsewhere";
 
@@ -35,7 +34,7 @@ export function AttachmentManager({
   readOnly = false,
 }: AttachmentManagerProps) {
   const { dict, showToast } = useApp();
-  const { gameState, setGameState } = useGame();
+  const { recordScreenshot } = useGame();
   const {
     syncMode,
     cloudActive,
@@ -247,15 +246,13 @@ export function AttachmentManager({
         const { originalBlob: _o, previewBlob: _p, ...meta } = saved;
         saveAttachmentRecord(meta);
 
-        // Award XP and check achievement
-        const rewardRes = recordScreenshotAdded(gameState, {
+        // Award XP and check achievement: on the freshest game state, under the lock shared by all tabs
+        const rewardRes = await recordScreenshot({
           hash: saved.hash,
           width: saved.width,
           height: saved.height,
           tradeOpenedAt,
         });
-
-        setGameState(rewardRes.state);
 
         if (rewardRes.xpAwarded > 0) {
           showToast(`+${rewardRes.xpAwarded} XP (${dict.stats.trading})`);
@@ -290,8 +287,7 @@ export function AttachmentManager({
       allIds,
       addAttachment,
       saveAttachmentRecord,
-      gameState,
-      setGameState,
+      recordScreenshot,
       showToast,
       dict,
       dictAtt,

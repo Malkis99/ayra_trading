@@ -13,7 +13,6 @@ import { useGame } from "@/lib/game-context";
 import { useJournal } from "@/lib/journal/context";
 import { calculateKpis } from "@/lib/journal/overview";
 import { getDeterministicDailyQuests } from "@/lib/quests";
-import { getIsoDateString } from "@/lib/game";
 import { recentAchievements } from "@/lib/profile";
 import { formatString } from "@/lib/i18n";
 import { cn } from "@/components/ui/cn";
@@ -119,7 +118,7 @@ function OverviewHeader({ onEditProfile }: { onEditProfile: () => void }) {
 
 export function OverviewTab({ onOpenAchievements, onEditProfile }: { onOpenAchievements: () => void; onEditProfile: () => void }) {
   const { dict, lang } = useApp();
-  const { gameState } = useGame();
+  const { gameState, gameDay } = useGame();
   const { trades, accounts } = useJournal();
   const o = dict.profile.overviewV2;
   const tz = gameState.profile?.timezone || "UTC";
@@ -127,7 +126,7 @@ export function OverviewTab({ onOpenAchievements, onEditProfile }: { onOpenAchie
   // Same numbers as the Journal KPI strip for the period "all"
   const k = useMemo(() => calculateKpis(trades, trades, accounts, tz), [trades, accounts, tz]);
   const recent = recentAchievements(gameState, 3);
-  const quests = getDeterministicDailyQuests(getIsoDateString(new Date())).core;
+  const quests = getDeterministicDailyQuests(gameDay).core;
   const doneCount = quests.filter((q) => gameState.completedQuestsToday[q.id]).length;
   const ach = dict.profile.achievements as Record<string, string>;
 

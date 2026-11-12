@@ -22,6 +22,7 @@ import {
 } from "@/components/home/SharedBlocks";
 import { APP_CLOSED_QUESTS, getDeterministicDailyQuests } from "@/lib/quests";
 import { TITLES, FRAMES, ITEMS } from "@/lib/items";
+import { dayKeyInZone } from "@/lib/day-key";
 
 export default function HomePage() {
   const { setAddTradeModalOpen, showToast, dict, lang } = useApp();
@@ -33,6 +34,7 @@ export default function HomePage() {
     claimDailyReward,
     characterStatus,
     dismissLegacyBanner,
+    gameDay,
   } = useGame();
 
   const [greeting, setGreeting] = useState<string>("");
@@ -49,7 +51,8 @@ export default function HomePage() {
   const nextLevelXp = xpForNextLevel(gameState.level);
   const xpPercent = Math.min(100, Math.round((gameState.xp / nextLevelXp) * 100));
 
-  const todayIso = new Date().toISOString().split("T")[0];
+  // the game day in the account's time zone: the same «today» as on Quests and Profile
+  const todayIso = gameDay;
   const dailyQuests = getDeterministicDailyQuests(todayIso).core;
 
   // A quest the app checks itself closes by itself; a self-reported one gives its XP (no coins)
@@ -451,7 +454,7 @@ export default function HomePage() {
               : 0;
             const checklistTotalCount = todayPlan?.checklist ? todayPlan.checklist.length : 5;
 
-            const todayTradesCount = trades.filter((t) => t.openedAt.startsWith(todayIso)).length;
+            const todayTradesCount = trades.filter((t) => dayKeyInZone(new Date(t.openedAt), gameState.profile?.timezone) === todayIso).length;
             const maxTradesLimit = todayPlan?.limits?.maxTrades;
 
             const isPlanFilled =

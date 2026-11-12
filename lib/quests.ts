@@ -503,3 +503,43 @@ export function getWeightedDailyQuests(
 
   return { core, bonus };
 }
+
+/**
+ * A quest to show instead of `originalId` today: not excluded (already shown, done or swapped), not one the app closes
+ * from the journal, giving no more XP than the original. Stable for the day; null when nothing fits.
+ */
+export function pickReplacement(dayKey: string, originalId: string, excluded: ReadonlySet<string>): QuestTemplate | null {
+  const original = QUEST_POOL.find((q) => q.id === originalId);
+  if (!original) return null;
+  const maxXp = questReward(original).xp;
+  const candidates = QUEST_POOL.filter(
+    (q) => q.id !== originalId && !excluded.has(q.id) && !APP_CLOSED_QUESTS.has(q.id) && q.xpReward <= maxXp
+  );
+  if (candidates.length === 0) return null;
+  // same category first, then a stable order for this day
+  const score = (q: QuestTemplate) => (q.category === original.category ? 0 : 1) + getStableTemplateHash(dayKey, originalId, q.id);
+  return [...candidates].sort((x, y) => score(x) - score(y))[0];
+}
+
+/** Today's quests with the swaps of the day applied (the same set on Quests and Home). */
+export function getTodaysQuests(
+  dayKey: string,
+  replacements: Record<string, string> = {}
+): { core: QuestTemplate[]; bonus: QuestTemplate[]; replacedFrom: Record<string, string> } {
+  const base = getDeterministicDailyQuests(dayKey);
+  const replacedFrom: Record<string, string> = {};
+  // a replacement can be replaced again: follow the chain to the quest shown now
+  const swap = (t: QuestTemplate): QuestTemplate => {
+    let current = t;
+    const seen = new Set<string>([t.id]);
+    for (let toId = replacements[current.id]; toId && !seen.has(toId); toId = replacements[current.id]) {
+      const to = QUEST_POOL.find((x) => x.id === toId);
+      if (!to) break;
+      seen.add(toId);
+      current = to;
+    }
+    if (current !== t) replacedFrom[current.id] = t.id;
+    return current;
+  };
+  return { core: base.core.map(swap), bonus: base.bonus.map(swap), replacedFrom };
+}
