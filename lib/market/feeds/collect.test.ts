@@ -33,13 +33,15 @@ describe("the collector", () => {
     expect(out.results.map((r) => [r.source, r.ok])).toEqual([
       ["schedules-listed", true],
       ["bls-ppi-schedule", false], // the official schedule is not in this test's network
+      ["bls-jolts-schedule", false],
+      ["bls-jolts-history", true],
       ["bea-schedule", true],
       ["eurostat-schedule", false], // not in this test's network
       ["previous-values", false], // the sources are not in this test's network either
     ]);
     expect(events.has("fed:fomc:2026-12-09:decision")).toBe(true);
     expect(events.has("bea:us_pce:2026-11-25")).toBe(true);
-    expect(runs.map((r) => r.source)).toEqual(["schedules-listed", "bls-ppi-schedule", "bea-schedule", "eurostat-schedule", "previous-values"]);
+    expect(runs.map((r) => r.source)).toEqual(["schedules-listed", "bls-ppi-schedule", "bls-jolts-schedule", "bls-jolts-history", "bea-schedule", "eurostat-schedule", "previous-values"]);
   });
 
   it("news: a failing source never stops the others; its error is logged", async () => {
