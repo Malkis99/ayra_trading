@@ -175,8 +175,8 @@ function TodayRow({ item, zone, now, onOpen, eventTitle }: { item: TodayItem; zo
               {item.event.previous && <> · {own.previous} {item.event.previous}</>}
             </span>
           )}
-          {isEvent && !item.event.actual && status === "unavailable" && <FigureMissing url={item.event.url} note={own.unavailableNote} testId="today-item-missing" />}
-          {isEvent && !item.event.actual && status !== "unavailable" && item.event.previous && (
+          {isEvent && !item.event.actual && status === "notPublished" && <FigureMissing url={item.event.release_official_url ?? item.event.url} note={own.missingComparisonBase} testId="today-item-missing" />}
+          {isEvent && !item.event.actual && status !== "notPublished" && item.event.previous && (
             <span className="tabular-nums" data-testid="today-item-figures">
               {own.previous} <span className="text-tx">{item.event.previous}</span>
             </span>

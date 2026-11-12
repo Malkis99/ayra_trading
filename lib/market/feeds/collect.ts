@@ -1,4 +1,4 @@
-import type { EventResult, EventRow, NewsRow } from "./types";
+import type { EventResult, EventRow, NewsRow, ReleaseCompletion } from "./types";
 import { FEEDS, beaReleases, beaSchedule, ecbPress, fedMonetary, fedSpeeches, whiteHouseActions, whiteHouseNews } from "./sources";
 import { listedEvents } from "./schedules";
 import { BLS_API_V1, BLS_API_V2, BLS_FIGURE_CODES, blsLatest, blsRequestBody, blsResults, parseBlsResponse } from "./bls";
@@ -10,7 +10,7 @@ import { CENSUS_RELEASES } from "./schedules-us";
 import { pdfText } from "./pdf-text";
 import { icsCancellations } from "./ics";
 import { previousPeriod } from "./identity";
-import { CPI_METRICS, cpiReleaseUrl, cpiResults, isCpiCode, parseCpiRelease, verifiedCpiMeta } from "./cpi";
+import { CPI_METRICS, cpiAbsences, cpiReleaseUrl, cpiResults, isCpiCode, parseCpiRelease, verifiedCpiMeta } from "./cpi";
 import { nyDay } from "./time";
 import { PPI_METRICS, PPI_SCHEDULE_URL, isPpiCode, parsePpiRelease, ppiReleaseUrl, ppiResults, verifiedPpiMeta } from "./ppi";
 import { JOLTS_CODE, JOLTS_SCHEDULE_URL, joltsReleaseUrl, parseJoltsRelease, joltsResults, verifiedJoltsMeta } from "./jolts";
@@ -24,6 +24,8 @@ import { eurostatCalendarUrl, EUROSTAT_SERIES, type EurostatCode, eurostatLatest
  */
 
 export interface FeedsDb {
+  reserveRelease?(family: "cpi" | "nfp", ids: string[]): Promise<string | null>;
+  finishRelease?(token: string, completion: ReleaseCompletion): Promise<void>;
   cancelEvents(rows: { source: string; source_uid: string; schedule_meta: import("./types").ScheduleMeta }[]): Promise<void>;
   revisionEvents(source: string, from: number, to: number): Promise<WaitingEvent[]>;
   matchResults(rows: EventResult[]): Promise<EventResult[]>;
@@ -125,12 +127,12 @@ function withTimeout<T>(p: Promise<T>): Promise<T> {
 }
 
 /** BLS publication HTML: one deadline covers headers AND body; abandon the request when it expires. */
-async function getBlsText(fetcher: Fetcher, url: string): Promise<string> {
+async function getBlsText(fetcher: Fetcher, url: string, singleRequest = false): Promise<string> {
   const abort = new AbortController();
   try {
     return await withTimeout((async () => {
-      const response = await fetcher(url, {headers:{"User-Agent":USER_AGENT,Accept:"text/html"},signal:abort.signal});
-      if (!response.ok) throw new Error(`HTTP ${response.status} ${url}`);
+      const response = await fetcher(url, {headers:{"User-Agent":USER_AGENT,Accept:"text/html"},signal:abort.signal,...(singleRequest ? {redirect:"manual" as const} : {})});
+      if (!response.ok) throw new ReleaseHttpError(response.status, url, response.headers?.get("retry-after"));
       return response.text();
     })());
   } finally { abort.abort(); }
@@ -259,7 +261,7 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
   }
 
   if (releasesScope) {
-    await run("bea-releases", async () => {
+    const bea = run("bea-releases", async () => {
       const { news, results: figures, issues } = beaReleases(await get(o.fetch, FEEDS.beaRss));
       const rows = dedupe(await linkable(o.db, recent(news, o.now)));
       await o.db.insertNews(rows);
@@ -270,6 +272,7 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
       if (issues.length) throw new Error(Array.from(new Set(issues)).join("; "));
       return rows.length + known.length;
     });
+    await Promise.all([bea, o.db.reserveRelease ? isolated("bls-release-check", () => priorityBls(o, run)) : undefined]);
     await isolated("bls-api", () => blsFigures(o, run));
     await isolated("eia-api", () => eiaFigures(o, run));
     await isolated("census-api", () => censusFigures(o, run));
@@ -344,22 +347,99 @@ async function save(o: CollectOptions, results: EventResult[], waiting: WaitingE
 }
 
 /** BLS: the main releases from the official API (one request asks every series). */
-async function blsData(o: CollectOptions) {
-  const res = await withTimeout(
-    o.fetch(o.blsKey ? BLS_API_V2 : BLS_API_V1, {
+class ReleaseHttpError extends Error {
+  constructor(readonly status: number, source: string, readonly retryAfter?: string | null) {
+    super(`HTTP ${status} ${source}`);
+  }
+}
+export function retryAfterAt(value: string | null | undefined, now: number): string | undefined {
+  const raw = value?.trim();
+  if (!raw) return;
+  const at = /^\d+$/.test(raw) ? now + Number(raw) * 1000 : Date.parse(raw);
+  if (Number.isFinite(at) && at <= 8.64e15) return new Date(Math.max(now, at)).toISOString();
+}
+
+async function blsData(o: CollectOptions, singleRequest = false) {
+  const abort = new AbortController();
+  const body = await withTimeout((async () => {
+    const res = await o.fetch(o.blsKey ? BLS_API_V2 : BLS_API_V1, {
       method: "POST",
       headers: { "Content-Type": "application/json", "User-Agent": USER_AGENT },
       body: blsRequestBody(o.blsKey, new Date(o.now).getUTCFullYear()),
-    })
-  );
-  if (!res.ok) throw new Error(`HTTP ${res.status} BLS API`);
-  const body = JSON.parse(await res.text());
+      signal: abort.signal,
+      ...(singleRequest ? {redirect:"manual" as const} : {}),
+    });
+    if (!res.ok) throw new ReleaseHttpError(res.status, "BLS API", res.headers?.get("retry-after"));
+    return JSON.parse(await res.text());
+  })()).finally(() => abort.abort());
   if (body?.status && body.status !== "REQUEST_SUCCEEDED") throw new Error(`BLS API: ${String(body.status)} ${JSON.stringify(body.message ?? "").slice(0, 300)}`);
   return parseBlsResponse(body);
 }
 
+async function cpiPrevious(o: CollectOptions, figures: EventResult[], group: WaitingEvent[], period: string) {
+  const stored = await o.db.releasedFigures(o.now - 120 * DAY);
+  for (const figure of figures) {
+    const event = group.find(e => e.id === figure.id)!;
+    if (figure.previous !== null) continue;
+    const prior = stored.filter(e => e.code === event.code && isCpiCode(e.code) && e.reference_period === previousPeriod(period) && verifiedCpiMeta(e.code, e.reference_period, e.result_meta));
+    if (prior.length === 1) figure.previous = prior[0].actual;
+  }
+}
+
+async function priorityBls(o: CollectOptions, run: Run): Promise<void> {
+  const {reserveRelease,finishRelease} = o.db;
+  if (!reserveRelease || !finishRelease) return;
+  const waiting = await o.db.waitingEvents("bls", o.now - RETRY_DAYS * DAY, o.now);
+  const groups = new Map<string, WaitingEvent[]>();
+  for (const event of waiting) {
+    if ((!isCpiCode(event.code) && event.code !== "us_nfp") || !event.reference_period || event.release_stage !== "regular") continue;
+    const key = [event.code === "us_nfp" ? "nfp" : "cpi",event.starts_at,event.reference_period].join(":");
+    const group = groups.get(key) ?? [];
+    group.push(event);
+    groups.set(key,group);
+  }
+  for (const group of Array.from(groups.values()).sort((a,b)=>b[0].starts_at.localeCompare(a[0].starts_at))) {
+    const family = group[0].code === "us_nfp" ? "nfp" : "cpi";
+    const token = await reserveRelease(family,group.map(e=>e.id));
+    if (!token) continue;
+    await run(family === "cpi" ? "bls-cpi-check" : "bls-nfp-check", async () =>{
+      const outcome: ReleaseCompletion = {verified:false,results:[],absences:[]};
+      let revisions: EventResult[] = [];
+      try {
+        if (family === "cpi") {
+          const day = nyDay(Date.parse(group[0].starts_at));
+          const release = parseCpiRelease(await getBlsText(o.fetch,cpiReleaseUrl(day),true),day);
+          if (release.period !== group[0].reference_period) throw new Error("CPI: release period mismatch");
+          outcome.results = cpiResults(group,release);
+          outcome.absences = cpiAbsences(group,release);
+          await cpiPrevious(o,outcome.results,group,release.period);
+          outcome.verified = true;
+        } else {
+          const data = await blsData(o,true);
+          outcome.results = blsResults(group.map(e=>e.id),data,group);
+          outcome.verified = outcome.results.length > 0;
+          const older = (await o.db.revisionEvents("bls",o.now-NEWS_DAYS*DAY,o.now)).filter(e=>e.code==="us_nfp");
+          revisions = blsResults(older.map(e=>e.id),data,older);
+        }
+      } catch(error) {
+        const status = error instanceof ReleaseHttpError ? error.status : null;
+        await finishRelease(token,{verified:false,results:[],absences:[],
+          failure:status===403 ? "blocked" : status===429 ? "rate_limited" : status===null || status>=500 ? "transient" : "invalid",
+          retryAt:error instanceof ReleaseHttpError && status===429 ? retryAfterAt(error.retryAfter, Date.now()) : undefined});
+        throw error;
+      }
+      await finishRelease(token,outcome);
+      if (revisions.length) await o.db.saveResults(revisions);
+      await carryForward(o,outcome.results.map(r=>({code:group.find(e=>e.id===r.id)!.code!,actual:r.actual!,at:group[0].starts_at,period:r.result_meta?.period})));
+      if (outcome.results.length+outcome.absences.length!==group.length) throw new Error("BLS: some release results remain unconfirmed");
+      return outcome.results.length+outcome.absences.length;
+    });
+    return;
+  }
+}
+
 async function blsFigures(o: CollectOptions, run: Run) {
-  const waiting = await due(o, "bls", "bls-api", { fastMs: BLS_WINDOW_MS, slowMs: o.blsKey ? 30 * 60_000 : HOUR, codes: [...BLS_FIGURE_CODES, ...Object.keys(CPI_METRICS), ...Object.keys(PPI_METRICS), JOLTS_CODE], otherRunNames: ["bls-cpi-release", "bls-ppi-release", "bls-jolts-release"] });
+  const waiting = await due(o, "bls", "bls-api", { fastMs: BLS_WINDOW_MS, slowMs: o.blsKey ? 30 * 60_000 : HOUR, codes: [...(o.db.reserveRelease ? [] : [...BLS_FIGURE_CODES,...Object.keys(CPI_METRICS)]), ...Object.keys(PPI_METRICS), JOLTS_CODE], otherRunNames: ["bls-cpi-release", "bls-ppi-release", "bls-jolts-release"] });
   if (!waiting.length) return;
   const cpi = waiting.filter(e => isCpiCode(e.code));
   const ppi = waiting.filter(e => isPpiCode(e.code));
@@ -374,13 +454,7 @@ async function blsFigures(o: CollectOptions, run: Run) {
       const group = cpi.filter(e => nyDay(Date.parse(e.starts_at)) === day);
       const release = parseCpiRelease(await get(o.fetch, cpiReleaseUrl(day)), day);
       const figures = cpiResults(group, release);
-      const stored = await o.db.releasedFigures(o.now - 120 * DAY);
-      for (const figure of figures) {
-        const event = group.find(e => e.id === figure.id)!;
-        if (figure.previous !== null) continue;
-        const prior = stored.filter(e => e.code === event.code && isCpiCode(e.code) && e.reference_period === previousPeriod(release.period) && verifiedCpiMeta(e.code, e.reference_period, e.result_meta));
-        if (prior.length === 1) figure.previous = prior[0].actual;
-      }
+      await cpiPrevious(o, figures, group, release.period);
       await save(o, figures, group);
       if (figures.length !== group.length) throw new Error("CPI: confirmed release period or published values unavailable for some events");
       return figures.length;

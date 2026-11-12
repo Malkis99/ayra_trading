@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clockIn, countByDay, eventsOfDay, initialDay, lastUpdate, noOwnCountry, visibleEvents, workWeek, type CalendarEvent } from "./calendar-view";
+import { clockIn, countByDay, eventStatus, eventsOfDay, initialDay, lastUpdate, noOwnCountry, visibleEvents, workWeek, type CalendarEvent } from "./calendar-view";
 
 const ev = (id: string, starts_at: string, o: Partial<CalendarEvent> = {}): CalendarEvent => ({
   id,
@@ -17,6 +17,19 @@ const ev = (id: string, starts_at: string, o: Partial<CalendarEvent> = {}): Cale
   url: null,
   updated_at: "2026-11-03T10:00:00Z",
   ...o,
+});
+
+it("distinguishes release status, source delay, and confirmed absence", () => {
+  const start = Date.parse("2026-11-10T13:30:00Z");
+  const event = ev("cpi", new Date(start).toISOString());
+  expect(eventStatus(event, start - 1)).toBe("scheduled");
+  expect(eventStatus(event, start)).toBe("due");
+  const checking = { ...event, release_phase: "checking", release_check_until: new Date(start + 120_000).toISOString() } as const;
+  expect(eventStatus(checking, start + 60_000)).toBe("checking");
+  expect(eventStatus(checking, start + 120_000)).toBe("delayed");
+  expect(eventStatus(event, start + 86_400_000)).toBe("delayed");
+  expect(eventStatus({ ...event, release_outcome: "not_published" }, start)).toBe("notPublished");
+  expect(eventStatus({ ...event, status: "released", release_outcome: "not_published" }, start)).toBe("released");
 });
 
 describe("own calendar: the week in the user's zone", () => {

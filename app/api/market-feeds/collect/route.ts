@@ -37,7 +37,7 @@ async function handle(req: Request) {
     prune,
     now: Date.now(),
     fetch: (u, init) => fetch(u, { ...init, cache: "no-store" }),
-    db: supabaseFeedsDb(serviceClient(url, serviceKey)),
+    db: supabaseFeedsDb(serviceClient(url, serviceKey), process.env.NEXT_PUBLIC_MARKET_RELEASE_CHECKS === "1"),
     blsKey: cleanApiKey(process.env.BLS_API_KEY || "") || undefined,
     eiaKey: cleanApiKey(process.env.EIA_API_KEY || "") || undefined,
     censusKey: cleanApiKey(process.env.CENSUS_API_KEY || "") || undefined,

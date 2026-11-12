@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
-import { CPI_METRICS, cpiReleaseUrl, cpiResults, parseCpiRelease } from "./cpi";
+import { describe, expect, it, vi } from "vitest";
+import { CPI_METRICS, cpiAbsences, cpiReleaseUrl, cpiResults, parseCpiRelease } from "./cpi";
 import { listedEvents } from "./schedules";
 import { collectFeeds, type Fetcher } from "./collect";
 import { memoryFeedsDb } from "./memory-db";
+import type { ReleaseCompletion } from "./types";
 import { scheduleIdentity } from "./identity";
 import { blsResults } from "./bls";
 import { applyListedCorrections } from "./listed-corrections";
@@ -97,4 +98,65 @@ describe("CPI dated BLS release", () => {
     expect(stored.size).toBe(4);
     for (const event of stored.values()) expect(event).toMatchObject({ status: "released", result_meta: { vintage: "release", period: "2026-09" } });
   });
+});
+it("tracks access failures separately and recovers on a subsequent reservation", async () => {
+  const { db } = memoryFeedsDb({ events });
+  db.reserveRelease = async () => "lease";
+  const completions: ReleaseCompletion[] = [];
+  db.finishRelease = async (_, completion) => { completions.push(completion); };
+  for (const status of [403, 429, 503, 200]) {
+    await collectFeeds({
+      scope: "releases", db, now, fetch: async url => ({
+        ok: status === 200, status, headers: new Headers({ "Retry-After": "180" }),
+        text: async () => url === cpiReleaseUrl(day) ? html : "",
+      }),
+    });
+  }
+  expect(completions.map(c => c.failure)).toEqual(["blocked", "rate_limited", "transient", undefined]);
+  expect(Date.parse(completions[1].retryAt!)).toBeGreaterThan(Date.now() + 170_000);
+  expect(completions.slice(0, 3).every(c => !c.verified && !c.absences.length && !c.results.length)).toBe(true);
+  expect(completions[3]).toMatchObject({ verified: true, results: cpiResults(events, parseCpiRelease(html, day)) });
+});
+
+it("requires a verified missing October base and missing annual cells for both specific rows", () => {
+  // Synthetic regression for the October table layout using the existing September fixture.
+  const noBase = html
+    .replace("Wednesday, October 14, 2026", "Tuesday, November 10, 2026")
+    .replace("CONSUMER PRICE INDEX - SEPTEMBER 2026", "CONSUMER PRICE INDEX - OCTOBER 2026\nBLS did not collect survey data for October 2025. BLS cannot publish 12-month percent changes for October 2026 for indexes where October 2025 data are unavailable.")
+    .replace("category, September 2026", "category, October 2026")
+    .replace(/(id="cpipress1\.h\.2\.3"[^>]*>)[\s\S]*?<\/th>/, "$1Oct. 2025</th>")
+    .replace(/(id="cpipress1\.h\.2\.6"[^>]*>)[\s\S]*?<\/th>/, "$1Oct. 2025–Oct. 2026</th>")
+    .replace(/(id="cpipress1\.h\.2\.9"[^>]*>)[\s\S]*?<\/th>/, "$1Aug. 2026–Sep. 2026</th>")
+    .replace(/(id="cpipress1\.h\.2\.10"[^>]*>)[\s\S]*?<\/th>/, "$1Sep. 2026–Oct. 2026</th>");
+  const blank = noBase.replace(/(<td headers="cpipress1\.r\.[0-9.]+ cpipress1\.h\.1\.[36] cpipress1\.h\.2\.[36]">)[\s\S]*?<\/td>/g, "$1-</td>");
+  const release = parseCpiRelease(blank, "2026-11-10");
+  expect(release.absent).toEqual(["us_cpi_yoy", "us_core_cpi_yoy"]);
+  expect(cpiAbsences(events, release)).toEqual([]);
+  expect(cpiAbsences(events.map(e => ({ ...e, reference_period: "2026-10" })), release)).toHaveLength(2);
+  expect(parseCpiRelease(noBase, "2026-11-10").absent).toBeUndefined();
+  expect(parseCpiRelease(blank.replace("BLS cannot publish", "BLS may publish"), "2026-11-10").absent).toBeUndefined();
+});
+
+it("times out a stalled CPI response body, aborts it and keeps the outcome pending", async () => {
+  const { db } = memoryFeedsDb({ events });
+  const finish = vi.fn();
+  db.reserveRelease = async () => "lease";
+  db.finishRelease = finish;
+  let signal: AbortSignal | undefined;
+  vi.useFakeTimers();
+  try {
+    const collection = collectFeeds({
+      scope: "releases", db, now, fetch: async (url, init) => {
+        if (url !== cpiReleaseUrl(day)) return { ok: true, status: 200, text: async () => "" };
+        signal = init?.signal;
+        return { ok: true, status: 200, text: () => new Promise<string>(() => {}) };
+      },
+    });
+    await vi.advanceTimersByTimeAsync(15_000);
+    await collection;
+    expect(signal?.aborted).toBe(true);
+    expect(finish).toHaveBeenCalledWith("lease", { verified: false, failure: "transient", results: [], absences: [] });
+  } finally {
+    vi.useRealTimers();
+  }
 });

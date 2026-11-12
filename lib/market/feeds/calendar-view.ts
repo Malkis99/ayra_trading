@@ -24,9 +24,17 @@ export interface CalendarEvent {
   previous: string | null;
   url: string | null;
   updated_at: string;
+  release_outcome?: "not_published" | null;
+  release_reason?: "missing_comparison_base" | null;
+  release_phase?: "checking" | "delayed" | null;
+  release_check_until?: string | null;
+  release_checked_at?: string | null;
+  release_official_url?: string | null;
 }
 
 export const EVENT_COLUMNS = "id,source,kind,code,country,title,importance,starts_at,time_tbd,status,actual,previous,url,updated_at";
+
+export const RELEASE_COLUMNS = ",release_outcome,release_reason,release_phase,release_check_until,release_checked_at,release_official_url";
 
 export interface CalendarDay {
   /** `2026-11-02` in the user's zone */
@@ -110,21 +118,39 @@ export function lastUpdate(events: CalendarEvent[]): number | null {
   return times.length ? Math.max(...times) : null;
 }
 
-/** How long after a release a figure is still «on its way» before the row says the source has not given it. */
-export const FIGURE_WAIT_MS = 3 * 60 * 60_000;
+export const RELEASE_REFRESH_WINDOW = 20 * 60_000;
 
-export type EventStatus = "scheduled" | "due" | "released" | "cancelled" | "held" | "unavailable";
+export type EventStatus = "scheduled" | "due" | "released" | "cancelled" | "held" | "checking" | "delayed" | "notPublished";
 
-/**
- * What a row says: «expected» before the time; then for a data release «waiting for data» for three hours and, if no
- * figure came, «no data from the source — see the link» (the collector still asks for a week: a late figure replaces
- * it); a decision, press conference or speech has no figure — it is «held».
- */
-export function eventStatus(e: Pick<CalendarEvent, "status" | "kind" | "starts_at">, now: number): EventStatus {
+export function eventStatus(e: Pick<CalendarEvent, "status" | "kind" | "starts_at" | "time_tbd" | "release_outcome" | "release_phase" | "release_check_until">, now: number): EventStatus {
   if (e.status === "released") return "released";
   if (e.status === "cancelled") return "cancelled";
   const at = Date.parse(e.starts_at);
-  if (at > now) return "scheduled";
+  if (at > now || e.time_tbd) return "scheduled";
   if (e.kind !== "release") return "held";
-  return now - at <= FIGURE_WAIT_MS ? "due" : "unavailable";
+  if (e.release_outcome === "not_published") return "notPublished";
+  if (e.release_phase === "checking" && Date.parse(e.release_check_until ?? "") > now) return "checking";
+  if (e.release_phase || now - at >= RELEASE_REFRESH_WINDOW) return "delayed";
+  return "due";
+}
+
+export function nextReleaseRead(events: CalendarEvent[], now: number): number | null {
+  const times = events.flatMap(event => {
+    const starts = pendingReleaseTime(event);
+    const next = Math.max(starts, now + 60_000);
+    return next < starts + RELEASE_REFRESH_WINDOW ? [next] : [];
+  });
+  return times.length ? Math.min(...times) : null;
+}
+
+export function hasPendingRelease(events: CalendarEvent[], now: number): boolean {
+  return events.some(event => {
+    const starts = pendingReleaseTime(event);
+    return starts <= now && now < starts + RELEASE_REFRESH_WINDOW;
+  });
+}
+
+function pendingReleaseTime(event: CalendarEvent): number {
+  return event.importance === 3 && event.kind === "release" && !event.time_tbd && event.status === "scheduled" && !event.actual && !event.release_outcome
+    ? Date.parse(event.starts_at) : NaN;
 }

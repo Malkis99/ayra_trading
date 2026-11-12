@@ -51,7 +51,7 @@ export function OwnCalendar({ prefs, zone }: { prefs: CalendarNewsPrefs; zone: s
   const days = useMemo(() => (now === null ? [] : workWeek(now, zone, week)), [now, zone, week]);
   const from = days[0]?.from ?? 0;
   const to = days.length ? days[4].to : 0;
-  const [state, retry] = useMarketEvents(from, to);
+  const [state, retry] = useMarketEvents(from, to, true);
 
   // a new week opens on its first day; this week on today
   useEffect(() => setPicked(null), [week, zone]);
@@ -200,8 +200,8 @@ function EventRow({ e, zone, now, names }: { e: CalendarEvent; zone: string; now
         </p>
       </div>
       <div className="col-start-2 flex flex-wrap items-center gap-x-3 gap-y-1 pl-4 text-xs md:col-start-3 md:justify-end md:pl-0" data-testid="own-calendar-event-figures">
-        {status === "unavailable" ? (
-          <FigureMissing url={e.url} note={t.unavailableNote} />
+        {status === "notPublished" ? (
+          <FigureMissing url={e.release_official_url ?? e.url} note={t.missingComparisonBase} />
         ) : (
           e.kind === "release" && (
             <span className="tabular-nums">
@@ -220,6 +220,11 @@ function EventRow({ e, zone, now, names }: { e: CalendarEvent; zone: string; now
             </span>
           </span>
         )}
+        {e.release_checked_at && (
+          <span className="text-mu" title={new Date(e.release_checked_at).toISOString()}>
+            {t.sourceChecked} {clockIn(Date.parse(e.release_checked_at), zone)}
+          </span>
+        )}
         <span className={cn("rounded px-1.5 py-px text-[10px] font-semibold", STATUS_TONE[status])} data-testid="own-calendar-event-status">
           {t.status[status]}
         </span>
@@ -232,7 +237,9 @@ export const STATUS_TONE: Record<EventStatus, string> = {
   released: "bg-long/15 text-long",
   cancelled: "bg-short/15 text-short",
   due: "bg-amber-300/15 text-amber-300",
-  unavailable: "bg-s2 text-tx",
+  delayed: "bg-s2 text-tx",
+  checking: "bg-amber-300/15 text-amber-300",
+  notPublished: "bg-s2 text-tx",
   held: "bg-s2 text-mu",
   scheduled: "bg-s2 text-mu",
 };

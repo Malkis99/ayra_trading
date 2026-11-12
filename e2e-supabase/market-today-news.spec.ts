@@ -63,7 +63,7 @@ test.describe("Market — «Today important» and official news", () => {
       await expect(titles.nth(2)).toContainText("CPI, м/м");
       await expect(block.getByTestId("today-item-time").nth(1)).toHaveText("14:00");
       await expect(block.getByTestId("today-trust").first()).toHaveText("Официальный");
-      await expect(block.getByTestId("today-item-status").nth(2)).toHaveText("Ожидается");
+      await expect(block.getByTestId("today-item-status").nth(2)).toHaveText("Запланировано");
       // «previous» before the release (from the last one of the same indicator)
       await expect(block.getByTestId("today-item").nth(2).getByTestId("today-item-figures")).toHaveText("Пред. +0.6%");
       await expect(block.getByTestId("today-item-source").nth(2)).toHaveAttribute("href", "https://www.bls.gov/schedule/news_release/");
