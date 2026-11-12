@@ -270,14 +270,16 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Before switching space: write this tab's copy only if it is not older than the saved one
+  // Before switching space: write this tab's copy only if it is newer than the saved one
   useEffect(() => {
     const unregister = AppStorage.registerFlushHandler((targetSpaceId) => {
       if (targetSpaceId !== loadedSpaceRef.current || !isLoadedRef.current) return;
       try {
         const raw = AppStorage.getItem(STORAGE_KEY);
         const savedRev = raw ? revOf(JSON.parse(raw)) : -1;
-        if (revOf(gameStateRef.current) >= savedRev && raw !== JSON.stringify(gameStateRef.current)) {
+        // only when this tab's copy is strictly newer (a failed write is retried); an equal rev may be another
+        // writer's newer content (for example the onboarding page) and is never overwritten
+        if (revOf(gameStateRef.current) > savedRev) {
           AppStorage.guardedSetItem(STORAGE_KEY, JSON.stringify(gameStateRef.current), targetSpaceId);
         }
       } catch {

@@ -52,6 +52,25 @@ export interface GameStoreDeps<S extends Revisioned> {
 /** How long a lock holder waits for the saved value to become the latest commit (technical, not a game rule). */
 export const SETTLE_TRIES = 50;
 export const SETTLE_STEP_MS = 10;
+/** The browser database must answer within this time, or it is treated as unavailable (never hang inside the lock). */
+export const LOG_TIMEOUT_MS = 1500;
+
+/** Resolves with the promise's value, or rejects after `ms` (a database that does not answer must not hold the lock). */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("timeout")), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      }
+    );
+  });
+}
 
 export function revOf(s: Revisioned | null | undefined): number {
   return typeof s?.rev === "number" && Number.isFinite(s.rev) ? s.rev : 0;
@@ -146,15 +165,20 @@ export class GameStore<S extends Revisioned> {
   async applyLocked<R>(getMemory: () => S, fn: (fresh: S) => Change<S, R>): Promise<Applied<S, R>> {
     const { lock, commits } = this.deps;
     if (!lock) return this.applySync(getMemory(), fn);
-    return lock(async () => {
-      if (commits && !(await this.settle(commits))) return { saved: false, state: getMemory(), reason: "staleCopy" } as Applied<S, R>;
-      const before = getMemory();
-      const out = this.applyOnce(before, fn, false);
-      if (commits && out.saved && out.state.commitId && out.state !== before) {
-        await commits.record(revOf(out.state), out.state.commitId).catch(() => undefined);
-      }
-      return out;
-    });
+    try {
+      return await lock(async () => {
+        if (commits && !(await this.settle(commits))) return { saved: false, state: getMemory(), reason: "staleCopy" } as Applied<S, R>;
+        const before = getMemory();
+        const out = this.applyOnce(before, fn, false);
+        if (commits && out.saved && out.state.commitId && out.state !== before) {
+          await withTimeout(commits.record(revOf(out.state), out.state.commitId), LOG_TIMEOUT_MS).catch(() => undefined);
+        }
+        return out;
+      });
+    } catch {
+      // the lock itself failed (an unusual browser state): nothing was written, nothing is given; never throw to the UI
+      return { saved: false, state: getMemory(), reason: "writeFailed" };
+    }
   }
 
   private safeRead(): string | null {
@@ -172,15 +196,19 @@ export class GameStore<S extends Revisioned> {
   private async settle(commits: NonNullable<GameStoreDeps<S>["commits"]>): Promise<boolean> {
     let log: CommitLog | null = null;
     try {
-      log = await commits.get();
+      log = await withTimeout(commits.get(), LOG_TIMEOUT_MS);
     } catch {
-      return true; // no log available: the synchronous check-and-write still applies
+      return true; // no log available (or it does not answer): the synchronous check-and-write under the lock still applies
     }
     if (!log) return true;
     const sleep = this.deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     for (let i = 0; i < SETTLE_TRIES; i++) {
       const raw = this.safeRead();
-      if (raw == null) return true; // nothing saved (or another space): nothing older can be written over a newer state
+      if (raw == null) {
+        // a commit exists but this tab sees nothing yet (its copy has not arrived, or another space is active): wait
+        await sleep(SETTLE_STEP_MS);
+        continue;
+      }
       let saved: S;
       try {
         saved = this.deps.parse(raw);

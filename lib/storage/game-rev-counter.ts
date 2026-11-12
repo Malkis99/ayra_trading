@@ -16,8 +16,13 @@ function openDb(): Promise<IDBDatabase> {
       if (db.objectStoreNames.contains("rev")) db.deleteObjectStore("rev"); // the first draft of this store kept a bare number
       if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      // a newer version opened in another tab: let it upgrade instead of blocking it
+      req.result.onversionchange = () => req.result.close();
+      resolve(req.result);
+    };
     req.onerror = () => reject(req.error);
+    req.onblocked = () => reject(new Error("blocked")); // an older tab holds the database: treated as unavailable
   });
 }
 
@@ -34,6 +39,10 @@ export function browserCommitLog(spaceId: string): GameStoreDeps<Revisioned>["co
   let db: Promise<IDBDatabase> | null = null;
   const open = () => {
     db = db ?? openDb();
+    // a failed open is not cached: the next call tries again
+    db.catch(() => {
+      db = null;
+    });
     return db;
   };
   return {

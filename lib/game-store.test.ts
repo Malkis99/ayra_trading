@@ -298,6 +298,56 @@ describe("game store: an older state never overwrites a newer one", () => {
   });
 });
 
+describe("game store: failures of the lock and the browser database", () => {
+  it("the lock itself fails: nothing is written, nothing is given, nothing is thrown", async () => {
+    const b = makeBrowser();
+    const store = new GameStore<S>({
+      read: () => b.spaces.a,
+      write: (raw) => {
+        b.spaces.a = raw;
+        return true;
+      },
+      parse: (raw) => JSON.parse(raw) as S,
+      lock: async () => {
+        throw new DOMException("lock request failed", "InvalidStateError");
+      },
+    });
+    const before = b.spaces.a;
+    const out = await store.applyLocked(() => b.saved()!, (f) => ({ state: { ...f, xp: f.xp + 30 }, result: true }));
+    expect(out.saved).toBe(false);
+    expect(b.spaces.a).toBe(before);
+  });
+
+  it("the browser database does not answer: the change does not hang inside the lock", async () => {
+    const b = makeBrowser();
+    const store = new GameStore<S>({
+      read: () => b.spaces.a,
+      write: (raw) => {
+        b.spaces.a = raw;
+        return true;
+      },
+      parse: (raw) => JSON.parse(raw) as S,
+      lock: b.lock,
+      commits: { get: () => new Promise<CommitLog | null>(() => undefined), record: () => new Promise<void>(() => undefined) },
+    });
+    const started = Date.now();
+    const out = await store.applyLocked(() => b.saved()!, (f) => ({ state: { ...f, xp: f.xp + 30 }, result: true }));
+    expect(out.saved).toBe(true); // the lock still serialises tabs; only the wait for a late copy is skipped
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(b.saved()!.xp).toBe(30);
+  }, 10000);
+
+  it("the first write of a new player has not reached this tab yet: it is not overwritten with an empty state", async () => {
+    const b = makeBrowser(null);
+    const first = makeTab(b);
+    const late = makeTab(b); // opened before anything was saved
+    expect(await first.complete("q_walk")).toBe(true);
+    late.lagFrom(null, SETTLE_TRIES + 5); // still sees «nothing saved»
+    expect(await late.complete("q_read")).toBe(false);
+    expect(b.saved()).toMatchObject({ xp: 30, done: { q_walk: true } });
+  });
+});
+
 describe("commit log", () => {
   it("the last write becomes the latest, whatever its rev", () => {
     let log: CommitLog | null = null;
