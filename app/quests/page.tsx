@@ -1,9 +1,13 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { HardDrive } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
+import { useJournal } from "@/lib/journal/context";
+import { rewardedToday } from "@/lib/game";
+import { lastWeekTradeCount, pickBoss, type DayMode, type JournalSnapshot } from "@/lib/quest-engine";
+import { mondayOfKey } from "@/lib/day-key";
 import { formatString } from "@/lib/i18n";
 import { GAME_CONFIG } from "@/lib/game-config";
 import { QUEST_POOL, type QuestTemplate } from "@/lib/quests";
@@ -22,7 +26,8 @@ const TABS: QuestsTab[] = ["today", "week", "path", "discipline", "history"];
 
 export default function QuestsPage() {
   const { dict, lang, showToast } = useApp();
-  const { gameState, gameDay, completeQuestSafe, passQuest, replaceQuest } = useGame();
+  const { gameState, gameDay, rewards, passQuest, replaceQuest, setDayMode, fixWeekChallenge } = useGame();
+  const { trades, plans, weekPlans, noTrades } = useJournal();
   const [activeTab, setActiveTab] = useState<QuestsTab>("today");
   const [busyId, setBusyId] = useState<string | null>(null);
   const busyRef = useRef(false);
@@ -35,6 +40,22 @@ export default function QuestsPage() {
   const earned = todayEarned(gameState, gameDay);
   const next = nextStep(gameState, core);
   const coreDone = core.filter((q) => gameState.completedQuestsToday[q.id]).length;
+
+  // What the engine reads from the journal (no second journal, no second plan)
+  const snapshot: JournalSnapshot = useMemo(
+    () => ({ trades, plans, weekPlans, noTrades, timezone: gameState.profile?.timezone }),
+    [trades, plans, weekPlans, noTrades, gameState.profile?.timezone]
+  );
+  const mode: DayMode = gameState.isRestDay ? "rest" : gameState.questDay?.day === gameDay ? gameState.questDay.mode : "trading";
+  const modeLocked = rewardedToday(gameState, gameDay);
+
+  // The week challenge is saved once a week, and only when last week's data exists to choose it from
+  const week = mondayOfKey(gameDay);
+  const hasLastWeek = lastWeekTradeCount(snapshot, gameDay) > 0;
+  useEffect(() => {
+    if (gameState.questWeek?.week === week || !hasLastWeek) return;
+    fixWeekChallenge({ week, boss: pickBoss(snapshot, gameDay) });
+  }, [week, hasLastWeek, gameState.questWeek?.week, fixWeekChallenge, snapshot, gameDay]);
 
   // One request at a time per page: a double click does not queue a second one (the store also checks it)
   const runOnce = async (id: string, fn: () => Promise<void>) => {
@@ -52,7 +73,7 @@ export default function QuestsPage() {
   const complete = (q: QuestTemplate) =>
     runOnce(q.id, async () => {
       const title = questTitle(dict, lang, q);
-      const res = await completeQuestSafe(q.id, title, q.category, q.xpReward);
+      const res = await rewards.completeSelfReport({ id: q.id, title, category: q.category, xp: q.xpReward });
       if (res.saveFailed) {
         showToast(t.q1.today.notSaved);
         return;
@@ -80,6 +101,13 @@ export default function QuestsPage() {
       } else {
         showToast(t.q1.today.replaceNone);
       }
+    });
+
+  const changeMode = (m: DayMode) =>
+    runOnce("mode", async () => {
+      const res = await setDayMode(m);
+      if (res.ok) showToast(formatString(t.q2.modes.changed, { mode: t.q2.modes[m] }));
+      else showToast(res.reason === "locked" ? t.q2.modes.locked : t.q1.today.notSaved);
     });
 
   const goToQuest = (questId: string) => {
@@ -112,9 +140,22 @@ export default function QuestsPage() {
 
       <div role="tabpanel" id={`quests-panel-${activeTab}`} aria-labelledby={`quests-tab-${activeTab}`} className="min-w-0">
         {activeTab === "today" && (
-          <TodayTab core={core} bonus={bonus} replacedFrom={replacedFrom} earned={earned} busyId={busyId} onComplete={complete} onPass={pass} onReplace={replace} />
+          <TodayTab
+            core={core}
+            bonus={bonus}
+            replacedFrom={replacedFrom}
+            earned={earned}
+            busyId={busyId}
+            mode={mode}
+            modeLocked={modeLocked}
+            snapshot={snapshot}
+            onMode={changeMode}
+            onComplete={complete}
+            onPass={pass}
+            onReplace={replace}
+          />
         )}
-        {activeTab === "week" && <WeekTab days={days} weekCount={weekCount} />}
+        {activeTab === "week" && <WeekTab days={days} weekCount={weekCount} snapshot={snapshot} />}
         {activeTab === "path" && <PathTab />}
         {activeTab === "discipline" && <DisciplineTab grid={grid} />}
         {activeTab === "history" && <HistoryTab />}

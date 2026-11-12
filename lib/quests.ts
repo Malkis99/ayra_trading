@@ -394,7 +394,8 @@ export const QUEST_POOL: QuestTemplate[] = [
   },
 ];
 
-export function getDeterministicDailyQuests(dateStr: string): {
+/** The day's quests from a pool by the date alone (the pool defaults to every quest, as before Q2). */
+export function getDeterministicDailyQuests(dateStr: string, sourcePool: readonly QuestTemplate[] = QUEST_POOL): {
   core: QuestTemplate[];
   bonus: QuestTemplate[];
 } {
@@ -405,7 +406,7 @@ export function getDeterministicDailyQuests(dateStr: string): {
   }
   const seed = Math.abs(hash);
 
-  const pool = [...QUEST_POOL];
+  const pool = [...sourcePool];
   for (let i = pool.length - 1; i > 0; i--) {
     const j = (seed + i * 17) % (i + 1);
     const temp = pool[i];
@@ -432,24 +433,25 @@ export function getStableTemplateHash(dateStr: string, userSeed: string, templat
 export function getWeightedDailyQuests(
   dateStr: string,
   userSeed: string = "user_default",
-  program?: AwakeningProgram | null
+  program?: AwakeningProgram | null,
+  sourcePool: readonly QuestTemplate[] = QUEST_POOL
 ): {
   core: QuestTemplate[];
   bonus: QuestTemplate[];
 } {
   if (!program) {
-    return getDeterministicDailyQuests(dateStr);
+    return getDeterministicDailyQuests(dateStr, sourcePool);
   }
 
   // If dateStr matches user registration / creation date, use program.firstDayQuestIds for core quests
   if ((dateStr === userSeed || userSeed.startsWith(dateStr)) && program.firstDayQuestIds && program.firstDayQuestIds.length === 3) {
     const firstDayCore = program.firstDayQuestIds
-      .map((id) => QUEST_POOL.find((q) => q.id === id))
+      .map((id) => sourcePool.find((q) => q.id === id))
       .filter((q): q is QuestTemplate => q != null);
 
     if (firstDayCore.length === 3) {
       const firstDayIds = new Set(program.firstDayQuestIds);
-      const bonus = QUEST_POOL.filter((q) => !firstDayIds.has(q.id)).slice(0, 2);
+      const bonus = sourcePool.filter((q) => !firstDayIds.has(q.id)).slice(0, 2);
       return { core: firstDayCore, bonus };
     }
   }
@@ -457,7 +459,7 @@ export function getWeightedDailyQuests(
   const categoryWeights = program.questWeights?.categoryWeights || {};
   const templateWeights = program.questWeights?.templateWeights || {};
 
-  const scored = QUEST_POOL.map((tmpl) => {
+  const scored = sourcePool.map((tmpl) => {
     const catW = categoryWeights[tmpl.category] ?? 1.0;
     const tmplW = templateWeights[tmpl.id] ?? 1.0;
     const totalWeight = catW * tmplW;
@@ -508,11 +510,16 @@ export function getWeightedDailyQuests(
  * A quest to show instead of `originalId` today: not excluded (already shown, done or swapped), not one the app closes
  * from the journal, giving no more XP than the original. Stable for the day; null when nothing fits.
  */
-export function pickReplacement(dayKey: string, originalId: string, excluded: ReadonlySet<string>): QuestTemplate | null {
+export function pickReplacement(
+  dayKey: string,
+  originalId: string,
+  excluded: ReadonlySet<string>,
+  allowed: readonly QuestTemplate[] = QUEST_POOL
+): QuestTemplate | null {
   const original = QUEST_POOL.find((q) => q.id === originalId);
   if (!original) return null;
   const maxXp = questReward(original).xp;
-  const candidates = QUEST_POOL.filter(
+  const candidates = allowed.filter(
     (q) => q.id !== originalId && !excluded.has(q.id) && !APP_CLOSED_QUESTS.has(q.id) && q.xpReward <= maxXp
   );
   if (candidates.length === 0) return null;
@@ -521,12 +528,17 @@ export function pickReplacement(dayKey: string, originalId: string, excluded: Re
   return [...candidates].sort((x, y) => score(x) - score(y))[0];
 }
 
-/** Today's quests with the swaps of the day applied (the same set on Quests and Home). */
+/**
+ * Today's quests with the swaps of the day applied (the same set on Quests, Home and Profile). `stored` is the set saved
+ * for the day (Q2); without it the set is computed from the date, as in Q1.
+ */
 export function getTodaysQuests(
   dayKey: string,
-  replacements: Record<string, string> = {}
+  replacements: Record<string, string> = {},
+  stored?: { core: string[]; bonus: string[] } | null
 ): { core: QuestTemplate[]; bonus: QuestTemplate[]; replacedFrom: Record<string, string> } {
-  const base = getDeterministicDailyQuests(dayKey);
+  const byId = (ids: string[]) => ids.map((id) => QUEST_POOL.find((q) => q.id === id)).filter((q): q is QuestTemplate => !!q);
+  const base = stored ? { core: byId(stored.core), bonus: byId(stored.bonus) } : getDeterministicDailyQuests(dayKey);
   const replacedFrom: Record<string, string> = {};
   // a replacement can be replaced again: follow the chain to the quest shown now
   const swap = (t: QuestTemplate): QuestTemplate => {

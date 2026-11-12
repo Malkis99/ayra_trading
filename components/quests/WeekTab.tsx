@@ -4,6 +4,8 @@ import React from "react";
 import { useApp } from "@/lib/context";
 import { formatString } from "@/lib/i18n";
 import type { DayCell } from "@/lib/quests-view";
+import type { JournalSnapshot } from "@/lib/quest-engine";
+import { TradingDaysPicker, WeekMissions } from "./WeekMissions";
 import { cn } from "@/components/ui/cn";
 
 const WEEKDAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
@@ -14,10 +16,12 @@ export function formatDayKey(key: string, lang: "ru" | "en", opts: Intl.DateTime
 }
 
 /** The 7 real days of this week (account time zone): quests done, rest, shield, no data, ahead. */
-export function WeekTab({ days, weekCount }: { days: DayCell[]; weekCount: number }) {
+export function WeekTab({ days, weekCount, snapshot }: { days: DayCell[]; weekCount: number; snapshot: JournalSnapshot }) {
   const { dict, lang } = useApp();
   const w = dict.questsPage.q1.week;
   const statusText = (d: DayCell) => (d.status === "done" ? formatString(w.status.done, { n: d.quests }) : w.status[d.status]);
+  // a phone column is ~40px wide: a short mark is shown, the full status stays for screen readers
+  const shortText = (d: DayCell) => formatString(dict.questsPage.q2.dayShort[d.status], { n: d.quests });
 
   return (
     <div className="space-y-4">
@@ -48,12 +52,20 @@ export function WeekTab({ days, weekCount }: { days: DayCell[]; weekCount: numbe
                 d.status === "done" ? "text-success" : d.status === "rest" || d.status === "shield" ? "text-vi" : "text-mu"
               )}
             >
-              {statusText(d)}
+              <span className="hidden sm:inline">{statusText(d)}</span>
+              <span className="sm:hidden" aria-hidden="true">
+                {shortText(d)}
+              </span>
+              <span className="sr-only sm:hidden">{statusText(d)}</span>
             </div>
           </li>
         ))}
       </ol>
       <p className="text-xs text-mu">{w.note}</p>
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <WeekMissions snapshot={snapshot} />
+        <TradingDaysPicker />
+      </div>
     </div>
   );
 }

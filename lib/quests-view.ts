@@ -18,7 +18,7 @@ export interface DayCell {
 
 type ViewState = Pick<
   GameState,
-  "history" | "dailyStats" | "createdAt" | "isRestDay" | "completedQuestsToday" | "passedQuestsToday" | "questReplacements" | "lastRewardClaimDate"
+  "history" | "dailyStats" | "createdAt" | "isRestDay" | "completedQuestsToday" | "passedQuestsToday" | "questReplacements" | "lastRewardClaimDate" | "questDay"
 >;
 
 function questsByDay(history: GameState["history"]): Map<string, number> {
@@ -76,8 +76,10 @@ export function todayEarned(state: ViewState, today: string): { xp: number; coin
   return { xp: rec?.xpGained || 0, coins: rec?.coinsGained || 0 };
 }
 
-export function todaysQuests(state: ViewState, today: string) {
-  return getTodaysQuests(today, state.questReplacements || {});
+/** The saved set of the game day (Q2) with the day's swaps; the same set on Quests, Home and Profile. */
+export function todaysQuests(state: Pick<ViewState, "questReplacements" | "questDay">, today: string) {
+  const stored = state.questDay && state.questDay.day === today ? state.questDay : null;
+  return getTodaysQuests(today, state.questReplacements || {}, stored);
 }
 
 export type NextStep =

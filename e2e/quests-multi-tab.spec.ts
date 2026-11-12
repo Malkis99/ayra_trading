@@ -58,8 +58,9 @@ test.describe("Quests in several tabs", () => {
     await completeIn(other, ids[0]);
     await expect.poll(async () => (await readGame(other)).completedQuestsToday[ids[0]]).toBe(true);
     // the early tab changes something else: the first reward stays
-    await early.getByTestId("rest-toggle").click();
-    await early.getByTestId("rest-toggle").click();
+    await early.getByTestId("mode-rest").click();
+    await expect(early.getByTestId("rest-panel")).toBeVisible();
+    await early.getByTestId("mode-trading").click();
     await expandBonus(early);
     await completeIn(early, ids[1]);
     await expect.poll(async () => Object.keys((await readGame(early)).completedQuestsToday).sort()).toEqual([ids[0], ids[1]].sort());

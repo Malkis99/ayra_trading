@@ -27,6 +27,10 @@ import {
   evaluatePlanQuestClosure,
   recordNoteSaved as recordNoteSavedLogic,
   recordScreenshotAdded,
+  setDayMode as setDayModeLogic,
+  setTradingDays as setTradingDaysLogic,
+  setWeekChallenge as setWeekChallengeLogic,
+  type DayModeFailure,
   grantFirstAction as grantFirstActionLogic,
   type FirstActionKind,
   type ReplaceQuestFailure,
@@ -40,6 +44,8 @@ import { AppStorage } from "@/lib/storage";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
 import { dayKeyInZone } from "@/lib/day-key";
 import { GameStore, browserLock, revOf, type Change } from "@/lib/game-store";
+import { deviceRewardService, type RewardService } from "@/lib/reward-service";
+import type { DayMode, WeekChallenge } from "@/lib/quest-engine";
 import { browserCommitLog } from "@/lib/storage/game-rev-counter";
 
 const STORAGE_KEY = "ayra_demo_v1";
@@ -91,6 +97,14 @@ interface GameContextType {
     xp?: number,
     coins?: number
   ) => QuestCompletion;
+  /** The one adapter the Quests UI uses for rewards (lib/reward-service.ts); the server economy (Q4) replaces it. */
+  rewards: RewardService;
+  /** The day mode (Q2): free until the first reward of the day, then only «Rest» and back. */
+  setDayMode: (mode: DayMode) => Promise<{ ok: boolean; reason?: DayModeFailure | "notSaved" }>;
+  /** Trading days, 0 = Monday … 6 = Sunday; applies from the next generated day. */
+  setTradingDays: (days: number[]) => boolean;
+  /** Saves the week challenge once per week. */
+  fixWeekChallenge: (challenge: WeekChallenge) => void;
   /** The same as completeQuest, under the lock shared by all tabs (the Quests page). */
   completeQuestSafe: (questId: string, title: string, category: string, xp?: number) => Promise<QuestCompletion>;
   /** One-time reward for the first action of a kind on this account (coins and XP given; 0 if already given). */
@@ -522,6 +536,31 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     [applyLocked, questChange]
   );
 
+  const rewards = useMemo(() => deviceRewardService(completeQuestSafe), [completeQuestSafe]);
+
+  // A mode change reads the day's rewards on fresh data under the shared lock: another tab's reward cannot slip past it
+  const setDayMode = useCallback(
+    (mode: DayMode) =>
+      applyLocked(
+        (s) => {
+          const res = setDayModeLogic(s, mode, new Date());
+          return { state: res.ok ? res.state : s, result: { ok: res.ok, reason: res.reason as DayModeFailure | "notSaved" | undefined } };
+        },
+        { ok: false, reason: "notSaved" as const }
+      ),
+    [applyLocked]
+  );
+
+  const setTradingDays = useCallback((days: number[]) => update((prev) => setTradingDaysLogic(prev, days)), [update]);
+
+  const fixWeekChallenge = useCallback(
+    (challenge: WeekChallenge) => {
+      if (gameStateRef.current.questWeek?.week === challenge.week) return;
+      update((prev) => setWeekChallengeLogic(prev, challenge));
+    },
+    [update]
+  );
+
   // One-time reward for the first action of a kind on this account (the journal decides it is the first)
   const grantFirstAction = useCallback((kind: FirstActionKind) => {
     return applySync((s) => {
@@ -751,6 +790,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         effectiveEquipment,
         completeQuest,
         completeQuestSafe,
+        rewards,
+        setDayMode,
+        setTradingDays,
+        fixWeekChallenge,
         grantFirstAction,
         passQuest,
         replaceQuest,

@@ -24,10 +24,12 @@ export interface QuestCardProps {
   onPass: () => void;
   onReplace: () => void;
   compact?: boolean;
+  /** Why it is not done yet (from the journal), shown under the quest. */
+  reason?: string;
 }
 
 /** One quest: what it is, why, how it is confirmed, what it gives, and its actions (all with visible labels). */
-export function QuestCard({ quest, done, replacedFromTitle, busy, replaceUsed, replaceMax, onComplete, onPass, onReplace, compact }: QuestCardProps) {
+export function QuestCard({ quest, done, replacedFromTitle, busy, replaceUsed, replaceMax, onComplete, onPass, onReplace, compact, reason }: QuestCardProps) {
   const { dict, lang } = useApp();
   const t = dict.questsPage.q1.card;
   const title = questTitle(dict, lang, quest);
@@ -87,6 +89,11 @@ export function QuestCard({ quest, done, replacedFromTitle, busy, replaceUsed, r
           <p className="mt-0.5 text-xs text-mu">{formatString(t.replacedFrom, { title: replacedFromTitle })}</p>
         )}
         {!compact && <p className="mt-0.5 text-[13px] text-mu">{dict.categories[quest.category]} · {formatString(t.minutes, { n: quest.durationMinutes })}</p>}
+        {!done && reason && (
+          <p className="mt-1 text-xs text-mu" data-testid="quest-reason">
+            <span className="font-semibold text-tx/80">{dict.questsPage.q2.reasonLabel}</span> {reason}
+          </p>
+        )}
         <div className="mt-2 flex flex-wrap gap-1.5">
           <VerificationBadge source={appClosed ? "journal" : "self"} label={appClosed ? t.badgeJournal : t.badgeSelf} />
           <span className="whitespace-nowrap rounded-full bg-s2 px-2.5 py-0.5 text-xs font-semibold text-tx">{rewardText}</span>
