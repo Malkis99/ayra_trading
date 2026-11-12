@@ -72,12 +72,11 @@ test.describe("Market — own calendar of official events", () => {
         url: "https://www.ons.gov.uk/releases/gdpmonthlyestimateukseptember2026",
       })));
       const page = await calendar(browser, width, undefined, "2026-11-12T14:00:00Z", language);
-      await el(page, "market-calendar-importance-medium").click();
       await expect(el(page, "own-calendar-event")).toHaveCount(3);
       for (const [code, ru, en, importance] of metrics) {
         const row = page.locator(`[data-testid="own-calendar-event"][data-id="ons:${code}:2026-11-12"]`);
         await expect(row.getByTestId("own-calendar-event-title")).toHaveText(language === "ru" ? ru : en);
-        await expect(row.getByTestId("own-calendar-event-source")).toHaveText("ONS");
+        await expect(row.getByTestId("own-calendar-event-source")).toHaveText(language === "ru" ? "Статистика Великобритании" : "ONS");
         await expect(row.getByTestId("own-calendar-event-status")).toHaveText(language === "ru" ? "По расписанию" : "On the schedule");
         await expect(row).toHaveAttribute("data-level", importance === 3 ? "high" : "medium");
         await expect(row.getByTestId("own-calendar-event-actual")).toHaveCount(0);

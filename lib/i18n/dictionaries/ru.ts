@@ -2069,11 +2069,11 @@ export const ru = {
         status: { scheduled: "Запланировано", due: "Ожидаем официальный результат", checking: "Проверяем источник", delayed: "Обновление задерживается", released: "Опубликовано", notPublished: "Официально не опубликовано", cancelled: "Отменено", held: "Состоялось", scheduleOnly: "По расписанию" },
         missingComparisonBase: "Нет данных за тот же месяц прошлого года",
         sourceChecked: "Последняя успешная проверка источника",
-        sourcesLine: "Источники: ФРС, ЕЦБ, BLS, BEA, EIA, Census, Минтруд США (DOL), Eurostat — официальные сайты и данные. Данные еврозоны: источник — Eurostat.",
+        sourcesLine: "Источники: ФРС, ЕЦБ, BLS, BEA, EIA, Census, Минтруд США (DOL), Eurostat, Статистика Великобритании — официальные сайты и данные. Данные еврозоны: источник — Eurostat.",
         official: "Официальный",
         trustHint: "Официальный источник: {source}",
         updated: "Данные обновлены: {time}",
-        sources: { fed: "ФРС", ecb: "ЕЦБ", whitehouse: "Белый дом", bls: "BLS", bea: "BEA", eia: "EIA", census: "Census", dol: "Минтруд США", eurostat: "Eurostat", ons: "ONS" },
+        sources: { fed: "ФРС", ecb: "ЕЦБ", whitehouse: "Белый дом", bls: "BLS", bea: "BEA", eia: "EIA", census: "Census", dol: "Минтруд США", eurostat: "Eurostat", ons: "Статистика Великобритании" },
         events: {
           us_nfp: "Занятость вне с/х (NFP) и безработица",
           us_cpi: "CPI, м/м",

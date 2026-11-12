@@ -2071,7 +2071,7 @@ export const en: Dictionary = {
         status: { scheduled: "Scheduled", due: "Awaiting the official result", checking: "Checking the source", delayed: "Update delayed", released: "Published", notPublished: "Officially not published", cancelled: "Cancelled", held: "Held", scheduleOnly: "On the schedule" },
         missingComparisonBase: "Data for the same month last year are unavailable",
         sourceChecked: "Last successful source check",
-        sourcesLine: "Sources: the Fed, the ECB, BLS, BEA, EIA, Census, the Department of Labor (DOL), Eurostat — official sites and data. Euro area data: source — Eurostat.",
+        sourcesLine: "Sources: the Fed, the ECB, BLS, BEA, EIA, Census, the Department of Labor (DOL), Eurostat, ONS — official sites and data. Euro area data: source — Eurostat.",
         official: "Official",
         trustHint: "Official source: {source}",
         updated: "Data updated: {time}",
