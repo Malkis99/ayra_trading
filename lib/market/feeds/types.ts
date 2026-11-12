@@ -75,3 +75,18 @@ export interface NewsRow {
   event_id: string | null;
   hidden: boolean;
 }
+
+export type ReleaseFailure = "blocked" | "rate_limited" | "transient" | "invalid";
+export interface ReleaseAbsence {
+  id: string;
+  period: string;
+  stage: "regular";
+  url: string;
+}
+export interface ReleaseCompletion {
+  verified: boolean;
+  failure?: ReleaseFailure;
+  retryAt?: string;
+  results: EventResult[];
+  absences: ReleaseAbsence[];
+}

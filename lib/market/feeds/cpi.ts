@@ -1,4 +1,4 @@
-import type { EventResult, ResultMeta } from "./types";
+import type { EventResult, ReleaseAbsence, ResultMeta } from "./types";
 import { previousPeriod } from "./identity";
 import { plainText } from "./xml";
 import { NEW_YORK, wallToUtc } from "./time";
@@ -37,6 +37,7 @@ export interface CpiRelease {
     day: string;
     period: string;
     published: string;
+    absent?: CpiCode[];
     values: Record<CpiCode, {
         actual: string | null;
         previous: string | null;
@@ -85,13 +86,14 @@ export function parseCpiRelease(html: string, expectedDay: string): CpiRelease {
             }
         }
     }
-    const read = (row: string, column: string, signed: boolean) => {
+    const cell = (row: string, column: string, parent: string) => {
         const candidates = Array.from((rows.get(row) || "").matchAll(/<td\b([^>]*)>([\s\S]*?)<\/td>/gi)).filter(m => {
             const headers = attr(m[1], "headers").split(/\s+/);
-            return headers.includes(column) && headers.includes(signed ? "cpipress1.h.1.8" : "cpipress1.h.1.6");
+            return headers.includes(column) && headers.includes(parent);
         });
-        return candidates.length === 1 ? percent(candidates[0][2], signed) : null;
+        return candidates.length === 1 ? plainText(candidates[0][2]) : null;
     };
+    const read = (row: string, column: string, signed: boolean) => percent(cell(row,column,signed ? "cpipress1.h.1.8" : "cpipress1.h.1.6") ?? "",signed);
     const values = Object.fromEntries(Object.entries(CPI_METRICS).map(([code, m]) => [code, { actual: read(m.row, m.form === "mom" ? "cpipress1.h.2.10" : "cpipress1.h.2.6", m.form === "mom"), previous: m.form === "mom" ? read(m.row, "cpipress1.h.2.9", true) : null }])) as CpiRelease["values"];
     // Optional, explicit year-over-year comparisons in the release prose. No inference from index levels.
     const currentMonth = MONTHS[Number(reference.slice(5)) - 1];
@@ -110,7 +112,20 @@ export function parseCpiRelease(html: string, expectedDay: string): CpiRelease {
     const coreMatches = Array.from(header.matchAll(core));
     if (coreMatches.length === 1 && percent(coreMatches[0][1], false) === values.us_core_cpi_yoy.actual)
         values.us_core_cpi_yoy.previous = percent(coreMatches[0][2], false);
-    return { day, period: reference, published: new Date(wallToUtc(day, "08:30", NEW_YORK)).toISOString(), values };
+    // Require the source's explicit statement and both missing cells in the verified row.
+    const absent: CpiCode[] = [];
+    const confirmsOctoberBase = reference === "2026-10"
+        && /BLS did not collect survey data for October 2025/i.test(header)
+        && /BLS cannot publish 12-month percent changes for October 2026 for indexes where October 2025 data are unavailable/i.test(header)
+        && JSON.stringify(ranges("cpipress1.h.2.3")) === JSON.stringify([annualStart]);
+    if (confirmsOctoberBase) {
+        for (const code of ["us_cpi_yoy","us_core_cpi_yoy"] as const) {
+            const row = CPI_METRICS[code].row;
+            const dash = (value: string | null) => /^[-–—−]$/.test(value ?? "");
+            if (dash(cell(row,"cpipress1.h.2.3","cpipress1.h.1.3")) && dash(cell(row,"cpipress1.h.2.6","cpipress1.h.1.6"))) absent.push(code);
+        }
+    }
+    return { day, period: reference, ...(absent.length ? {absent} : {}), published: new Date(wallToUtc(day, "08:30", NEW_YORK)).toISOString(), values };
 }
 export function cpiResults(events: {
     id: string;
@@ -127,4 +142,10 @@ export function cpiResults(events: {
         return [{ id: e.id, status: "released" as const, release_stage: "regular", actual: value.actual, previous: value.previous, summary: null,
                 result_meta: { period: release.period, series: metric.series, unit: `percent-${metric.form}`, adjustment: metric.adjustment, source_updated: release.published, release_url: cpiReleaseUrl(release.day), vintage: "release" as const } }];
     });
+}
+
+export function cpiAbsences(events: {id:string; code:string|null; reference_period?:string|null; release_stage?:string|null}[], release:CpiRelease): ReleaseAbsence[] {
+    return events.flatMap(e => isCpiCode(e.code) && release.absent?.includes(e.code)
+        && e.reference_period === release.period && e.release_stage === "regular"
+        ? [{id:e.id, period:release.period, stage:"regular", url:cpiReleaseUrl(release.day)}] : []);
 }

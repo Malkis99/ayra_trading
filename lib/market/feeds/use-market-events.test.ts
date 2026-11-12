@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, test, vi } from "vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { useMarketEvents } from "./use-market-events";
 
@@ -35,4 +35,51 @@ describe("calendar return refresh without polling or upstream APIs", () => {
     const second=renderHook(()=>useMarketEvents(5000,6000));await waitFor(()=>expect(second.result.current[0].status).toBe("ready"));
     expect(query.limit).toHaveBeenCalledTimes(2);
   });
+});
+test("refreshes an open calendar once a minute until the result arrives", async () => {
+  vi.useFakeTimers();
+  const focused = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  const start = Date.parse("2026-11-10T13:30:00Z");
+  vi.setSystemTime(start);
+  const waiting = { id: "cpi", starts_at: new Date(start).toISOString(), kind: "release", importance: 3, status: "scheduled", actual: null };
+  const published = { ...waiting, status: "released", actual: "+0.4%" };
+  query.limit.mockResolvedValueOnce({ data: [waiting], error: null }).mockResolvedValue({ data: [published], error: null });
+  try {
+    const { result } = renderHook(() => useMarketEvents(start - 1000, start + 1000, true));
+    await act(async () => {});
+    await act(async () => vi.advanceTimersByTimeAsync(59_999));
+    expect(query.limit).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(result.current[0]).toMatchObject({ status: "ready", events: [published] });
+    await act(async () => vi.advanceTimersByTimeAsync(120_000));
+    expect(query.limit).toHaveBeenCalledTimes(2);
+  } finally {
+    cleanup();
+    focused.mockRestore();
+    vi.useRealTimers();
+  }
+});
+
+test("pauses on blur and stops at the end of the release window", async () => {
+  vi.useFakeTimers();
+  const focused = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  const start = Date.parse("2026-11-11T13:30:00Z");
+  vi.setSystemTime(start + 18 * 60_000);
+  const pending = { id: "nfp", starts_at: new Date(start).toISOString(), kind: "release", importance: 3, status: "scheduled" };
+  query.limit.mockResolvedValue({ data: [pending], error: null });
+  try {
+    renderHook(() => useMarketEvents(start - 1000, start + 1000, true));
+    await act(async () => {});
+    act(() => window.dispatchEvent(new Event("blur")));
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(query.limit).toHaveBeenCalledTimes(1);
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(query.limit).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(120_000));
+    expect(query.limit).toHaveBeenCalledTimes(2);
+  } finally {
+    cleanup();
+    focused.mockRestore();
+    vi.useRealTimers();
+  }
 });

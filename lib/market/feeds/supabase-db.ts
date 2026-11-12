@@ -17,7 +17,7 @@ const check = (error: { message: string } | null, what: string) => {
 const CHUNK = 200;
 const chunks = <T>(rows: T[]) => Array.from({ length: Math.ceil(rows.length / CHUNK) }, (_, i) => rows.slice(i * CHUNK, (i + 1) * CHUNK));
 
-export function supabaseFeedsDb(db: SupabaseClient): FeedsDb {
+export function supabaseFeedsDb(db: SupabaseClient, releaseChecks = false): FeedsDb {
   async function apply(rows: unknown[], mode: string) {
     const conflicts: string[] = [];
     for (const part of chunks(rows)) {
@@ -28,6 +28,22 @@ export function supabaseFeedsDb(db: SupabaseClient): FeedsDb {
     if (conflicts.length) throw new Error(`calendar conflict: ${Array.from(new Set(conflicts)).join("; ")}`);
   }
   return {
+    ...(releaseChecks ? {
+      async reserveRelease(family, ids) {
+        const { data, error } = await db.rpc("market_release_reserve", { p_family: family, p_ids: ids });
+        check(error, "calendar release reservation");
+        return typeof data === "string" ? data : null;
+      },
+      async finishRelease(token, outcome) {
+        const { data, error } = await db.rpc("market_release_finish", {
+          p_token: token, p_verified: outcome.verified, p_failure: outcome.failure ?? null,
+          p_retry_at: outcome.retryAt ?? null, p_results: outcome.results, p_absences: outcome.absences,
+        });
+        check(error, "calendar release completion");
+        const conflicts = (data ?? []).flatMap((item: { conflict?: string }) => item.conflict ? [item.conflict] : []);
+        if (conflicts.length) throw new Error("calendar release conflict: " + conflicts.join("; "));
+      },
+    } satisfies Pick<FeedsDb, "reserveRelease" | "finishRelease"> : {}),
     async matchResults(rows) {
       const matched: EventResult[] = [];
       for (const r of rows) {
@@ -72,7 +88,7 @@ export function supabaseFeedsDb(db: SupabaseClient): FeedsDb {
       return new Set((data ?? []).map((r: { id: string }) => r.id));
     },
     async waitingEvents(source: string, from: number, to: number) {
-      const { data, error } = await db
+      const query = db
         .from("market_events")
         .select("id,code,starts_at,reference_period,release_stage")
         .eq("source", source)
@@ -80,6 +96,8 @@ export function supabaseFeedsDb(db: SupabaseClient): FeedsDb {
         .eq("status", "scheduled")
         .gte("starts_at", new Date(from).toISOString())
         .lte("starts_at", new Date(to).toISOString());
+      if (releaseChecks) query.is("release_outcome", null);
+      const { data, error } = await query;
       check(error, "market_events read");
       return (data ?? []) as WaitingEvent[];
     },

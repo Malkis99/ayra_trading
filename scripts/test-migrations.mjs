@@ -305,3 +305,67 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   link.event_id === 'bea:legacy:2026-11-01' ? ok('L: news FK unchanged') : fail('L: news FK changed');
   await db.close();
 }
+{
+  const db = await fresh();
+  for (const file of ["0001_init", "0002_profile_defaults", "0009_market_feeds", "0010_market_feeds_sources", "0012_market_event_integrity"]) {
+    await db.exec(read(`supabase/migrations/${file}.sql`));
+  }
+  const snapshot = async () => JSON.stringify((await db.query("SELECT id,actual,previous,result_meta FROM public.market_events ORDER BY id")).rows);
+  await db.exec(`INSERT INTO public.market_events(id,source,country,kind,code,title,importance,starts_at,status,actual,previous,result_meta,reference_period,release_stage) VALUES
+    ('bls:us_cpi:2026-11-10','bls','us','release','us_cpi','CPI',3,now()-interval '10 seconds','scheduled',NULL,NULL,NULL,'2026-10','regular'),
+    ('bls:us_cpi_yoy:2026-11-10','bls','us','release','us_cpi_yoy','Annual CPI',3,now()-interval '10 seconds','scheduled',NULL,NULL,NULL,'2026-10','regular'),
+    ('bls:us_cpi:2026-10-14','bls','us','release','us_cpi','Prior CPI',3,now()-interval '1 month','released','0.3%','0.2%','{"period":"2026-09"}','2026-09','regular');`);
+  const before = await snapshot();
+  const originalWriter = (await db.query("SELECT pg_get_functiondef('public.market_events_apply(jsonb,text)'::regprocedure) AS definition")).rows[0].definition;
+  for (let i = 0; i < 2; i++) await db.exec(read("supabase/migrations/0013_market_release_checks.sql"));
+  const afterWriter = (await db.query("SELECT pg_get_functiondef('public.market_events_apply(jsonb,text)'::regprocedure) AS definition")).rows[0].definition;
+  before === await snapshot() && originalWriter === afterWriter ? ok("M: 0013 applied twice, old facts and writer preserved") : fail("M: changed old data or 0012 writer");
+  const roles = (await db.query(`SELECT has_table_privilege('anon','public.market_release_checks','SELECT') AS anon_read,
+    has_table_privilege('authenticated','public.market_release_checks','SELECT') AS user_read,
+    has_function_privilege('anon','public.market_release_reserve(text,text[])','EXECUTE') AS anon_exec,
+    has_function_privilege('authenticated','public.market_release_finish(uuid,boolean,text,timestamptz,jsonb,jsonb)','EXECUTE') AS user_exec,
+    has_column_privilege('anon','public.market_events','release_outcome','SELECT') AS public_read`)).rows[0];
+  !roles.anon_read && !roles.user_read && !roles.anon_exec && !roles.user_exec && roles.public_read ? ok("M: private attempts, public outcome") : fail("M: unexpected grants");
+  const reserve = async () => (await db.query("SELECT public.market_release_reserve('cpi',ARRAY['bls:us_cpi:2026-11-10','bls:us_cpi_yoy:2026-11-10']) AS token")).rows[0].token;
+  const finish = async (token, verified, failure, retryAt, results = [], absences = []) =>
+    (await db.query("SELECT public.market_release_finish($1,$2,$3,$4,$5::jsonb,$6::jsonb) AS result",
+      [token, verified, failure, retryAt, JSON.stringify(results), JSON.stringify(absences)])).rows[0].result;
+  await db.exec("SET ROLE service_role");
+  const claims = await Promise.all([reserve(), reserve()]);
+  claims.filter(Boolean).length === 1 ? ok("M: one reservation wins") : fail("M: parallel acquisition");
+  await finish(claims.find(Boolean), false, "rate_limited", new Date(Date.now() + 900_000).toISOString());
+  const retry = (await db.query("SELECT retry_at > now()+interval '14 minutes' AS honors FROM public.market_release_checks")).rows[0];
+  retry.honors && !await reserve() && before === await snapshot() ? ok("M: Retry-After and failure preserve facts") : fail("M: Retry-After or data loss");
+  await db.exec("UPDATE public.market_release_checks SET retry_at=NULL; UPDATE public.market_events SET starts_at=now()-interval '3 minutes' WHERE id IN ('bls:us_cpi:2026-11-10','bls:us_cpi_yoy:2026-11-10')");
+  const second = await reserve();
+  if (!second) fail("M: no second release slot");
+  await finish(second, false, "blocked", null);
+  const blocked = (await db.query("SELECT retry_at > now()+interval '23 hours' AS paused FROM public.market_release_checks")).rows[0];
+  blocked.paused && !await reserve() ? ok("M: 403 pauses frequent checks") : fail("M: missing 403 backoff");
+  await db.exec("UPDATE public.market_release_checks SET retry_at=NULL,attempted_at=now()-interval '25 hours'; UPDATE public.market_events SET starts_at=now()-interval '2 days' WHERE id IN ('bls:us_cpi:2026-11-10','bls:us_cpi_yoy:2026-11-10')");
+  const recovered = await reserve();
+  if (!recovered) fail("M: no late recovery");
+  const url = (await db.query(`SELECT 'https://www.bls.gov/news.release/archives/cpi_' || to_char(starts_at AT TIME ZONE 'America/New_York','MMDDYYYY') || '.htm' AS url FROM public.market_events WHERE id='bls:us_cpi:2026-11-10'`)).rows[0].url;
+  const result = await finish(recovered, true, null, null, [
+    {id:"bls:us_cpi:2026-11-10",actual:"+0.4%",release_stage:"regular",result_meta:{period:"2026-10",series:"CUSR0000SA0",unit:"percent-mom",adjustment:"SA",release_url:url,vintage:"release"}},
+  ], [{id:"bls:us_cpi_yoy:2026-11-10",period:"2026-10",stage:"regular",url}]);
+  const outcomes = (await db.query("SELECT id,actual,release_outcome,release_official_url,release_checked_at,release_saved_at FROM public.market_events ORDER BY id")).rows;
+  !result.some(x => x.conflict) && outcomes[2].release_outcome === "not_published" && outcomes[2].actual === null &&
+    outcomes[2].release_official_url === url && outcomes[1].actual === "+0.4%" && outcomes[1].release_saved_at && outcomes[1].release_checked_at &&
+    outcomes[0].actual === "0.3%" && !await reserve() ? ok("M: late recovery, confirmed absence, old value and no more attempts") : fail("M: unexpected final outcomes");
+  try { await finish(recovered, false, "transient", null); fail("M: consumed lease accepted twice"); }
+  catch (error) { error.message.includes("release reservation expired") ? ok("M: consumed lease rejected") : fail(`M: ${error.message}`); }
+  await db.exec(`INSERT INTO public.market_events(id,source,country,kind,code,title,importance,starts_at,reference_period,release_stage)
+    VALUES ('bls:us_nfp:2026-11-06','bls','us','release','us_nfp','NFP',3,now(),'2026-10','regular');`);
+  const reserveNfp = async () => (await db.query("SELECT public.market_release_reserve('nfp',ARRAY['bls:us_nfp:2026-11-06']) AS token")).rows[0].token;
+  for (const minutes of [0, 2, 4, 8, 14]) {
+    await db.query("UPDATE public.market_events SET starts_at=now() - $1::int * interval '1 minute' WHERE code='us_nfp'", [minutes]);
+    const token = await reserveNfp();
+    if (!token) fail(`M: no slot at T+${minutes}`);
+    await finish(token, false, "transient", null);
+    if (await reserveNfp()) fail(`M: same slot accepted twice at T+${minutes}`);
+  }
+  await db.exec("UPDATE public.market_events SET starts_at=now()-interval '19 minutes' WHERE code='us_nfp'");
+  !await reserveNfp() ? ok("M: five initial slots with no extra reservation") : fail("M: more than five initial slots");
+  await db.close();
+}

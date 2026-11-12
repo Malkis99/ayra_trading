@@ -14,6 +14,7 @@ const env = {
   AYRA_NEXT_DIST_DIR: ".next-e2e-supabase",
   // registration and «Forgot password» are tested here even while production waits for SMTP (lib/auth/email-sending.ts)
   NEXT_PUBLIC_AYRA_E2E_EMAIL_OPEN: "1",
+  NEXT_PUBLIC_MARKET_RELEASE_CHECKS: "1",
 };
 delete env.AYRA_E2E_AUTH_MOCK;
 delete env.NEXT_PUBLIC_AYRA_E2E_AUTH_MOCK;

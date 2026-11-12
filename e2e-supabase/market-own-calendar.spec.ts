@@ -117,7 +117,7 @@ test.describe("Market — own calendar of official events", () => {
       await expect(row.getByTestId("own-calendar-event-title")).toHaveText("Вакансии JOLTS");
       await expect(row.getByTestId("own-calendar-event-actual")).toHaveText("7.52M");
       await expect(row.getByTestId("own-calendar-event-previous")).toHaveText("7.19M");
-      await expect(row.getByTestId("own-calendar-event-status")).toHaveText("Вышло");
+      await expect(row.getByTestId("own-calendar-event-status")).toHaveText("Опубликовано");
       await expect(row.getByTestId("own-calendar-event-trust")).toHaveText("Официальный");
       await expect(row.getByTestId("own-calendar-event-source")).toHaveAttribute("href", "https://www.bls.gov/schedule/news_release/");
       await expect(el(page, "market-calendar-disclaimer")).toHaveText("Не является финансовой рекомендацией.");
@@ -129,7 +129,7 @@ test.describe("Market — own calendar of official events", () => {
       await expect(el(page, "own-calendar-event")).toHaveCount(1);
       await expect(el(page, "own-calendar-event").getByTestId("own-calendar-event-title")).toHaveText("Занятость вне с/х (NFP) и безработица");
       await expect(el(page, "own-calendar-event").getByTestId("own-calendar-event-time")).toHaveText("17:30");
-      await expect(el(page, "own-calendar-event").getByTestId("own-calendar-event-status")).toHaveText("Ожидается");
+      await expect(el(page, "own-calendar-event").getByTestId("own-calendar-event-status")).toHaveText("Запланировано");
       // the hidden row never shows
       await el(page, "own-calendar-day-4").click();
       await expect(el(page, "own-calendar-empty")).toBeVisible();
@@ -251,11 +251,11 @@ test.describe("Market — own calendar of official events", () => {
       await expect(flash.getByTestId("own-calendar-event-trust")).toHaveText("Официальный");
       await expect(flash.getByTestId("own-calendar-event-source")).toHaveText(/Eurostat/);
       await expect(flash.getByTestId("own-calendar-event-source")).toHaveAttribute("href", "https://ec.europa.eu/eurostat/news/euro-indicators");
-      await expect(flash.getByTestId("own-calendar-event-status")).toHaveText("Ожидается");
+      await expect(flash.getByTestId("own-calendar-event-status")).toHaveText("Запланировано");
       await el(page, "own-calendar-day-1").click();
       const jobless = el(page, "own-calendar-event").filter({ hasText: "Безработица в еврозоне" });
       await expect(jobless.getByTestId("own-calendar-event-actual")).toHaveText("6.5%");
-      await expect(jobless.getByTestId("own-calendar-event-status")).toHaveText("Вышло");
+      await expect(jobless.getByTestId("own-calendar-event-status")).toHaveText("Опубликовано");
       await expect(el(page, "market-calendar-sources")).toContainText("Данные еврозоны: источник — Eurostat.");
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     });
@@ -275,13 +275,12 @@ test.describe("Market — own calendar of official events", () => {
       const nfp = el(page, "own-calendar-event").filter({ hasText: "NFP" });
       await expect(nfp.getByTestId("own-calendar-event-actual")).toHaveText("—");
       await expect(nfp.getByTestId("own-calendar-event-previous")).toHaveText("+29K · 4.2%");
-      await expect(nfp.getByTestId("own-calendar-event-status")).toHaveText("Ожидается");
-      // Monday: a release without a figure for a day — said plainly, with the link; the ECB decision is «held»
+      await expect(nfp.getByTestId("own-calendar-event-status")).toHaveText("Запланировано");
+      // Monday: a release still without a figure is delayed; the ECB decision is «held»
       await el(page, "own-calendar-day-1").click();
       const missing = el(page, "own-calendar-event").filter({ hasText: "Construction Spending" });
-      await expect(missing.getByTestId("own-calendar-event-status")).toHaveText("Нет данных");
-      await expect(missing.getByTestId("own-calendar-event-missing")).toHaveText("Данные недоступны от источника, смотрите по ссылке");
-      await expect(missing.getByTestId("own-calendar-event-missing")).toHaveAttribute("href", "https://www.bea.gov/news/schedule");
+      await expect(missing.getByTestId("own-calendar-event-status")).toHaveText("Обновление задерживается");
+      await expect(missing.getByTestId("own-calendar-event-missing")).toHaveCount(0);
       const decision = el(page, "own-calendar-event").filter({ hasText: "Решение ЕЦБ" });
       await expect(decision.getByTestId("own-calendar-event-status")).toHaveText("Состоялось");
       await expect(decision.getByTestId("own-calendar-event-actual")).toHaveCount(0);
@@ -312,4 +311,28 @@ test.describe("Market — own calendar of official events", () => {
     await expect(el(page, "own-calendar-list")).toBeVisible();
     expect(page.url()).toContain("view=own");
   });
+});
+test("visible calendar updates actual and confirmed absence from Supabase without reloading", async ({ browser, request }) => {
+  const now = "2026-11-10T13:31:00Z";
+  const url = "https://www.bls.gov/news.release/archives/cpi_11102026.htm";
+  const common = { source: "bls", starts_at: "2026-11-10T13:30:00Z", title: "Consumer Price Index", url };
+  const monthly = ev({ ...common, id: "bls:us_cpi:2026-11-10", code: "us_cpi", release_phase: "checking", release_check_until: "2026-11-10T13:32:00Z" });
+  const annual = ev({ ...common, id: "bls:us_cpi_yoy:2026-11-10", code: "us_cpi_yoy", release_phase: "delayed" });
+  await seed(request, [monthly, annual]);
+  const page = await calendar(browser, 360, undefined, now);
+  const row = (code: string) => page.locator(`[data-testid="own-calendar-event"][data-id="bls:${code}:2026-11-10"]`);
+  await expect(row("us_cpi").getByTestId("own-calendar-event-status")).toHaveText("Проверяем источник");
+  await expect(row("us_cpi_yoy").getByTestId("own-calendar-event-status")).toHaveText("Обновление задерживается");
+  await page.bringToFront();
+  await seed(request, [
+    { ...monthly, release_phase: null, release_checked_at: now, status: "released", actual: "+0.4%" },
+    { ...annual, release_phase: null, release_checked_at: now, release_outcome: "not_published", release_reason: "missing_comparison_base", release_official_url: url },
+  ]);
+  await page.clock.runFor(60_000);
+  await expect(row("us_cpi").getByTestId("own-calendar-event-actual")).toHaveText("+0.4%");
+  await expect(row("us_cpi")).toContainText("Последняя успешная проверка источника");
+  await expect(row("us_cpi_yoy").getByTestId("own-calendar-event-status")).toHaveText("Официально не опубликовано");
+  await expect(row("us_cpi_yoy").getByTestId("own-calendar-event-missing")).toHaveAttribute("href", url);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.close();
 });
