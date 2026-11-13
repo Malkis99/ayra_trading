@@ -71,6 +71,51 @@ describe("ONS GDP official calendar", () => {
     expect([...events.values()].filter(e => e.id === id)).toHaveLength(1);
     expect([...events.values()].filter(e => e.source !== "ons" && e.actual)).toEqual([]);
   });
+
+  it.each([404, 503, 200])("separates schedule success from an unusable bulletin (HTTP %d)", async status => {
+    const existing = onsSchedules(upcoming, "upcoming", now);
+    const { db, events } = memoryFeedsDb({ events: existing });
+    const network = source({ published });
+    const fetch: Fetcher = async (url, init) => {
+      if (!url.includes("/bulletins/")) return network.fetch(url, init);
+      const monthly = url.includes("monthly");
+      return { ok: !monthly || status === 200, status: monthly ? status : 200, headers: new Headers({ "Content-Type": "text/html" }),
+        text: async () => monthly ? "<html>Unexpected format</html>" : facts("first") };
+    };
+    const { results } = await collectFeeds({ db, fetch, now, scope: "schedules" });
+    expect(results.find(r => r.source === "ons-gdp-schedule")).toMatchObject({ ok: true, items: 2, error: null });
+    expect(results.find(r => r.source === "ons-gdp-facts")).toMatchObject({ ok: false, items: 1,
+      error: expect.stringContaining(status === 200 ? "period, stage or date mismatch" : `HTTP ${status}`) });
+    expect(events.get(monthlyId)).toMatchObject({ status: "scheduled" });
+    expect(events.get("ons:gb_gdp_monthly:2026-09")).toMatchObject({ status: "scheduled" });
+    expect(events.get("ons:gb_gdp_first:2026-q3")).toMatchObject({ status: "released", actual: "+0.7%" });
+    expect(results.map(r => r.source)).toEqual(expect.arrayContaining(["schedules-listed", "bea-schedule", "eurostat-schedule"]));
+  });
+
+  it("gives moves priority over facts and processes a deferred fact on the next day", async () => {
+    const existing = onsSchedules(upcoming, "upcoming", now);
+    const { db, events } = memoryFeedsDb({ events: existing });
+    const moveDay = source({ upcoming: moved, published, detail: notice });
+    const nextDay = source({ upcoming: moved, published });
+    const calls: string[] = [];
+    const fetchWithFacts = (network: ReturnType<typeof source>): Fetcher => async (url, init) => {
+      if (!url.includes("/bulletins/")) return network.fetch(url, init);
+      calls.push(url);
+      return { ok: true, status: 200, headers: new Headers({ "Content-Type": "text/html" }),
+        text: async () => facts(url.includes("monthly") ? "monthly" : "first") };
+    };
+    await collectFeeds({ db, fetch: fetchWithFacts(moveDay), now, scope: "schedules" });
+    expect(moveDay.calls).toHaveLength(4);
+    expect(moveDay.calls[3]).toBe(monthlyUrl);
+    expect(calls).toHaveLength(1);
+    expect(events.get(monthlyId)?.starts_at).toBe("2026-12-14T07:00:00.000Z");
+    expect(events.get("ons:gb_gdp_first:2026-q3")?.status).toBe("scheduled");
+    await collectFeeds({ db, fetch: fetchWithFacts(nextDay), now: now + 86_400_000, scope: "schedules" });
+    expect(nextDay.calls).toHaveLength(3);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toContain("gdpfirstquarterlyestimateuk/julytoseptember2026");
+    expect(events.get("ons:gb_gdp_first:2026-q3")).toMatchObject({ status: "released", actual: "+0.7%" });
+  });
   it("reads confirmed dates, deduplicates time-series entries, separates stages and applies London DST", () => {
     const future = onsSchedules(upcoming, "upcoming", now);
     expect(future).toHaveLength(4);
