@@ -111,14 +111,14 @@ test.describe("Rewards: only new actions, once per account", () => {
     await seed(page);
     await page.goto("/quests");
     const before = await game(page);
-    const buttons = page.getByRole("button", { name: "Выполнить" });
+    const buttons = page.getByTestId("quest-complete");
     await expect(buttons.first()).toBeVisible();
     await buttons.first().click();
     await expect.poll(async () => (await game(page)).xp).toBeGreaterThan(before.xp);
     expect((await game(page)).coins).toBe(before.coins);
     // a quest the journal checks has no «Complete» button: it leads to the journal instead
     for (const card of await page.locator('[data-testid^="quest-card-"]').filter({ has: page.getByTestId("quest-badge-journal") }).all()) {
-      await expect(card.getByRole("button", { name: "Выполнить" })).toHaveCount(0);
+      await expect(card.getByTestId("quest-complete")).toHaveCount(0);
       await expect(card.getByTestId("quest-journal-link")).toBeVisible();
     }
   });

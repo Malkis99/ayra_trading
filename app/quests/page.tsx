@@ -13,7 +13,6 @@ import { GAME_CONFIG } from "@/lib/game-config";
 import { QUEST_POOL, type QuestTemplate } from "@/lib/quests";
 import { activityGrid, nextStep, todayEarned, todaysQuests, weekDays, weekQuestCount } from "@/lib/quests-view";
 import { QuestsHeader } from "@/components/quests/QuestsHeader";
-import { NextStepBar } from "@/components/quests/NextStepBar";
 import { TodayView } from "@/components/quests/TodayView";
 import { WeekCard, WeekTab } from "@/components/quests/WeekTab";
 import { TradingDaysPicker, WeeklyBoss } from "@/components/quests/WeekMissions";
@@ -127,24 +126,6 @@ export default function QuestsPage() {
       showToast(res.ok ? formatString(t.q2.modes.changed, { mode: t.q2.modes[m] }) : t.q1.today.notSaved);
     });
 
-  const goToQuest = (questId: string) => {
-    requestAnimationFrame(() => {
-      const el = document.querySelector<HTMLElement>(`[data-testid="quest-card-${questId}"] [data-action="main"]`);
-      el?.scrollIntoView({ block: "center", behavior: "smooth" });
-      el?.focus({ preventScroll: true });
-    });
-  };
-
-  // the button text of a journal next step (for example «Set the limits»)
-  const nextCta =
-    next.kind === "journal"
-      ? next.quest.id === "q_riskcheck"
-        ? reasonFor("q_riskcheck", false, snapshot, gameDay) === "riskNotChecked"
-          ? t.q2.journalCta.q_riskcheckChecked
-          : t.q2.journalCta.q_riskcheck
-        : (t.q2.journalCta as Record<string, string>)[next.quest.id]
-      : undefined;
-
   const badge = "rounded-full px-1.5 text-[11px] font-bold";
   const tabItems = HUB_TABS.map((id) => ({
     id,
@@ -163,22 +144,19 @@ export default function QuestsPage() {
   const panels: Record<HubTab, { main: React.ReactNode; rail: React.ReactNode }> = {
     today: {
       main: (
-        <div className="space-y-4">
-          <NextStepBar next={next} journalCta={nextCta} onNextQuest={goToQuest} />
-          <TodayView
-            core={core}
-            bonus={bonus}
-            replacedFrom={replacedFrom}
-            busyId={busyId}
-            mode={mode}
-            nextQuestId={next.kind === "quest" || next.kind === "journal" ? next.quest.id : undefined}
-            snapshot={snapshot}
-            onActivate={changeMode}
-            onComplete={complete}
-            onPass={pass}
-            onReplace={replace}
-          />
-        </div>
+        <TodayView
+          core={core}
+          bonus={bonus}
+          replacedFrom={replacedFrom}
+          busyId={busyId}
+          mode={mode}
+          nextQuestId={next.kind === "quest" || next.kind === "journal" ? next.quest.id : undefined}
+          snapshot={snapshot}
+          onActivate={changeMode}
+          onComplete={complete}
+          onPass={pass}
+          onReplace={replace}
+        />
       ),
       rail: (
         <>

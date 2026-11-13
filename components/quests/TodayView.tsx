@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Check, ChevronDown, Moon } from "lucide-react";
+import { BookCheck, Check, Moon, Sprout, Swords } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { formatString } from "@/lib/i18n";
@@ -12,10 +12,12 @@ import { APP_CLOSED_QUESTS, QUEST_POOL, type QuestTemplate } from "@/lib/quests"
 import { journalHref, planHref } from "@/lib/quests-view";
 import { endOfDayRitual, morningProtocol, noTradesOn, reasonFor, type DayMode, type JournalSnapshot, type MissionStep } from "@/lib/quest-engine";
 import { Button, buttonClasses } from "@/components/ui/Button";
+import { cn } from "@/components/ui/cn";
 import { QuestItem } from "./QuestItem";
 import { PlanSteps } from "./PlanSteps";
 import { ModeSwitch } from "./ModeSwitch";
-import { questTitle } from "./quest-text";
+import { HABIT_QUESTS, questShortTitle, questTitle } from "./quest-text";
+import { VerificationBadge } from "./VerificationBadge";
 
 interface Props {
   core: QuestTemplate[];
@@ -24,7 +26,7 @@ interface Props {
   busyId: string | null;
   /** The active mode of the game day. */
   mode: DayMode;
-  /** The quest of the «next step» (its button is the primary one). */
+  /** The quest of the «next step»: it is marked in its own row (a mission, a day plan step or an extra). */
   nextQuestId?: string;
   snapshot: JournalSnapshot;
   onActivate: (m: DayMode) => void;
@@ -36,18 +38,19 @@ interface Props {
 const byIds = (ids: string[]) => ids.map((id) => QUEST_POOL.find((q) => q.id === id)).filter((q): q is QuestTemplate => !!q);
 
 /**
- * Today (docs/quests-ux-3.0-plan.md): the three missions of the day are the one focus; modes are a compact row that can
- * show any mode (only the active one can be done); the day plan, extra quests and the rest come after, quieter.
+ * Today (docs/quest-hub-plan.md, 4.1): the three missions of the day are rows and the one focus; the next step is marked
+ * inside its row. Below them, quieter: the day plan, extra challenges and everyday habits (self-reports) apart.
  */
 export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId, snapshot, onActivate, onComplete, onPass, onReplace }: Props) {
   const { dict, lang } = useApp();
   const { gameState, gameDay } = useGame();
   const p = dict.questsPage.q2.page;
+  const m = dict.questsPage.q2.mission;
   const q2 = dict.questsPage.q2;
-  const [bonusOpen, setBonusOpen] = useState(false);
   const [viewed, setViewed] = useState<DayMode>(mode);
   const done = gameState.completedQuestsToday;
   const passed = gameState.passedQuestsToday;
+  const tz = gameState.profile?.timezone;
 
   // a change of the active mode (here or in another tab) shows that mode
   useEffect(() => setViewed(mode), [mode]);
@@ -59,6 +62,18 @@ export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId
   const carried = (preview ? preview.carried : gameState.questDay?.day === gameDay ? gameState.questDay.carried : undefined) || {};
   const coreDone = shownCore.filter((q) => done[q.id]).length;
 
+  // when a quest was done today: the last entry of the day's history (shown on the row, in the account time zone)
+  const doneAt = useMemo(() => {
+    const out: Record<string, string> = {};
+    const fmt = new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "en-US", { hour: "2-digit", minute: "2-digit", timeZone: tz || undefined });
+    for (const h of gameState.history || []) {
+      if (h.completedAt !== gameDay || !h.at) continue;
+      const d = new Date(h.at);
+      if (!isNaN(d.getTime())) out[h.questId] = fmt.format(d);
+    }
+    return out;
+  }, [gameState.history, gameDay, lang, tz]);
+
   const reasonKey = (id: string) => reasonFor(id, !!done[id], snapshot, gameDay);
   const journalCta = (id: string, key: ReturnType<typeof reasonKey>) => {
     const c = q2.journalCta;
@@ -69,10 +84,10 @@ export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId
     if (preview) return undefined;
     const from = replacedFrom[id];
     const tpl = from ? QUEST_POOL.find((x) => x.id === from) : undefined;
-    return tpl ? questTitle(dict, lang, tpl) : undefined;
+    return tpl ? questShortTitle(dict, lang, tpl) : undefined;
   };
 
-  const item = (q: QuestTemplate, variant: "tile" | "row", slot?: number) => {
+  const item = (q: QuestTemplate, variant: "mission" | "extra", slot?: number) => {
     const key = reasonKey(q.id);
     const from = carried[q.id];
     return (
@@ -82,9 +97,10 @@ export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId
         variant={variant}
         slot={slot}
         done={!!done[q.id]}
+        doneAt={doneAt[q.id]}
         passed={!!passed[q.id] && !done[q.id]}
         readOnly={!isActiveView}
-        emphasize={isActiveView && q.id === nextQuestId}
+        next={isActiveView && q.id === nextQuestId}
         carriedLabel={from ? formatString(p.from, { mode: q2.modes[from] }) : undefined}
         replacedFromTitle={fromTitle(q.id)}
         journalHref={APP_CLOSED_QUESTS.has(q.id) ? journalHref(q.id, key) : undefined}
@@ -103,16 +119,19 @@ export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId
   const protocol = viewed === "trading" ? morningProtocol(snapshot, gameDay, done).steps : [];
   const ritual = viewed === "trading" || viewed === "study" ? endOfDayRitual(snapshot, gameDay, done).steps : [];
   const noTrades = noTradesOn(snapshot, gameDay);
+  const challenges = shownBonus.filter((q) => !HABIT_QUESTS.has(q.id));
+  const habits = shownBonus.filter((q) => HABIT_QUESTS.has(q.id));
 
   // done today in another mode and not part of this view (journal quests are shown by the day plan)
   const shownIds = new Set([...shownCore, ...shownBonus].map((q) => q.id));
   const elsewhere = isActiveView ? byIds(Object.keys(done).filter((id) => done[id] && !shownIds.has(id) && !APP_CLOSED_QUESTS.has(id))) : [];
+  const hasPlan = protocol.length > 0 || ritual.length > 0;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 sm:space-y-7">
       {/* the one focus: three missions of the day */}
       <section aria-labelledby="missions-title" className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <div className="flex items-baseline gap-3">
             <h2 id="missions-title" className="font-serif text-xl font-bold text-tx">{p.missions}</h2>
             {viewed !== "rest" && (
@@ -143,39 +162,58 @@ export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId
               </div>
             </div>
           ) : (
-            <div className="grid gap-3 lg:grid-cols-3">{shownCore.map((q, i) => item(q, "tile", i + 1))}</div>
+            <div className="missions space-y-2.5" data-testid="missions">
+              {shownCore.map((q, i) => item(q, "mission", i + 1))}
+            </div>
           )}
         </div>
       </section>
 
       {/* everything else: quieter and further down */}
-      {viewed !== "rest" && (protocol.length > 0 || ritual.length > 0 || shownBonus.length > 0 || elsewhere.length > 0) && (
+      {viewed !== "rest" && (
         <section aria-labelledby="more-title" className="space-y-3">
-          <h2 id="more-title" className="text-xs font-semibold uppercase tracking-[0.12em] text-mu">{p.more}</h2>
-          <div className="grid gap-3 lg:grid-cols-2">
-            {(protocol.length > 0 || ritual.length > 0) && <PlanSteps protocol={protocol} ritual={ritual} hrefFor={stepHref} />}
-
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <h2 id="more-title" className="text-base font-bold text-tx">{m.extras}</h2>
+            <span className="text-xs text-mu" data-testid="self-cap">
+              {formatString(m.selfCap, { xp: selfReportXpOn(gameState, gameDay), cap: GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP })}
+            </span>
+          </div>
+          <div className="grid items-start gap-3 lg:grid-cols-2">
+            {hasPlan && (
+              <div className="min-w-0">
+                <PlanSteps protocol={protocol} ritual={ritual} hrefFor={stepHref} nextQuestId={isActiveView && !shownCore.some((q) => q.id === nextQuestId) ? nextQuestId : undefined} />
+              </div>
+            )}
             <div className="min-w-0 space-y-3">
-              {shownBonus.length > 0 && (
-                <section className="rounded-2xl border border-line bg-s1/60 px-4 py-1">
-                  <button
-                    type="button"
-                    aria-expanded={bonusOpen}
-                    onClick={() => setBonusOpen((v) => !v)}
-                    className="flex min-h-[44px] w-full items-center justify-between gap-3 text-left text-sm font-semibold text-tx hover:text-vi focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
-                  >
-                    {formatString(p.bonus, { n: shownBonus.length })}
-                    <span className="flex items-center gap-2 text-xs font-normal text-mu">
-                      <span data-testid="self-cap">{formatString(p.selfCap, { xp: selfReportXpOn(gameState, gameDay), cap: GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP })}</span>
-                      <ChevronDown size={16} aria-hidden="true" className={`transition-transform motion-reduce:transition-none ${bonusOpen ? "rotate-180" : ""}`} />
-                    </span>
-                  </button>
-                  {bonusOpen && <div className="divide-y divide-line/60 border-t border-line/60">{shownBonus.map((q) => item(q, "row"))}</div>}
-                </section>
+              <ExtrasGroup testId="extras-challenges" icon={<Swords size={15} aria-hidden="true" />} title={m.challenges} note={m.challengesNote}>
+                {challenges.map((q) => item(q, "extra"))}
+                <div className="flex items-center gap-3 py-2.5" data-testid="no-trade-card">
+                  <span aria-hidden="true" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-success/[0.08] text-success">
+                    <BookCheck size={15} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <h4 className="text-sm font-semibold leading-snug text-tx">{m.noTrade}</h4>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-mu">
+                      <VerificationBadge source="journal" label={p.journal} />
+                      {noTrades > 0 && (
+                        <span className="font-semibold text-tx" data-testid="no-trade-count">
+                          {formatString(p.noTradeToday, { n: noTrades })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <Link href="/journal?tab=trades" className={buttonClasses("secondary", "sm", "shrink-0")} aria-label={`${m.noTradeGo}: ${m.noTrade}`}>
+                    {m.noTradeGo}
+                  </Link>
+                </div>
+              </ExtrasGroup>
+              {habits.length > 0 && (
+                <ExtrasGroup testId="extras-habits" icon={<Sprout size={15} aria-hidden="true" />} title={m.habits} note={m.habitsNote} quiet>
+                  {habits.map((q) => item(q, "extra"))}
+                </ExtrasGroup>
               )}
-
               {elsewhere.length > 0 && (
-                <section className="rounded-2xl border border-line bg-s1/60 p-4" data-testid="done-elsewhere">
+                <section className="rounded-2xl border border-line bg-s1/50 p-4" data-testid="done-elsewhere">
                   <h3 className="text-sm font-semibold text-tx">{p.elsewhere}</h3>
                   <ul className="mt-2 space-y-1">
                     {elsewhere.map((q) => (
@@ -187,24 +225,26 @@ export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId
                   </ul>
                 </section>
               )}
-
-              <div className="flex items-center justify-between gap-3 rounded-2xl border border-line bg-s1/60 px-4 py-2" data-testid="no-trade-card">
-                <span className="min-w-0 text-sm text-mu">
-                  {p.noTrade}
-                  {noTrades > 0 && (
-                    <span className="block text-xs font-semibold text-tx" data-testid="no-trade-count">
-                      {formatString(p.noTradeToday, { n: noTrades })}
-                    </span>
-                  )}
-                </span>
-                <Link href="/journal?tab=trades" className={buttonClasses("ghost", "sm", "shrink-0")}>
-                  {p.go}
-                </Link>
-              </div>
             </div>
           </div>
         </section>
       )}
     </div>
+  );
+}
+
+/** A group of the extras: challenges (trading practice, by choice) or habits (self-reports, quieter). */
+function ExtrasGroup({ testId, icon, title, note, quiet, children }: { testId: string; icon: React.ReactNode; title: string; note: string; quiet?: boolean; children: React.ReactNode }) {
+  return (
+    <section className={cn("min-w-0 rounded-2xl border px-4 pb-1 pt-3", quiet ? "border-dashed border-line" : "border-line bg-s1/60")} data-testid={testId}>
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="flex items-center gap-2 text-sm font-bold text-tx">
+          <span className={quiet ? "text-mu" : "text-vi"}>{icon}</span>
+          {title}
+        </h3>
+        <span className="text-xs text-mu">{note}</span>
+      </div>
+      <div className="mt-1 divide-y divide-line/60">{children}</div>
+    </section>
   );
 }

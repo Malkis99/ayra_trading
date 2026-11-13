@@ -13,7 +13,7 @@ import { buttonClasses } from "@/components/ui/Button";
  * The day plan in the journal as one short checklist (the morning protocol and the end-of-day review). It has no reward
  * of its own; a step that closes an existing journal quest shows that reward, the others are preparation only.
  */
-export function PlanSteps({ protocol, ritual, hrefFor }: { protocol: MissionStep[]; ritual: MissionStep[]; hrefFor: (step: MissionStep) => string }) {
+export function PlanSteps({ protocol, ritual, hrefFor, nextQuestId }: { protocol: MissionStep[]; ritual: MissionStep[]; hrefFor: (step: MissionStep) => string; nextQuestId?: string }) {
   const { dict } = useApp();
   const p = dict.questsPage.q2.page;
   const t = dict.questsPage.q2.protocol;
@@ -26,20 +26,25 @@ export function PlanSteps({ protocol, ritual, hrefFor }: { protocol: MissionStep
     return r.coins > 0 ? formatString(dict.questsPage.todayTab.rewardXpCoins, { xp: r.xp, coins: r.coins }) : formatString(dict.questsPage.todayTab.rewardXp, { xp: r.xp });
   };
 
-  const row = (s: MissionStep) => (
-    <li key={s.key} data-testid={`mission-step-${s.key}`} data-state={s.state} className="flex min-h-[44px] items-center gap-3 py-1.5">
-      {s.state === "done" ? <Check size={16} aria-hidden="true" className="shrink-0 text-success" /> : <Circle size={16} aria-hidden="true" className="shrink-0 text-mu/70" />}
-      <span className={s.state === "done" ? "min-w-0 flex-1 text-sm text-mu" : "min-w-0 flex-1 text-sm text-tx"}>
-        {t.steps[s.key]}
-        {s.rewardQuest && <span className="block text-xs font-semibold text-tx/70">{formatString(t.rewardStep, { reward: rewardText(s.rewardQuest) })}</span>}
-      </span>
-      {s.state !== "done" && (
-        <Link href={hrefFor(s)} className={buttonClasses("ghost", "sm", "shrink-0")} data-testid={`mission-step-go-${s.key}`} aria-label={`${p.go}: ${t.steps[s.key]}`}>
-          {p.go}
-        </Link>
-      )}
-    </li>
-  );
+  const row = (s: MissionStep) => {
+    // the next step of the day lives here when it is a day plan quest that is not one of the three missions
+    const next = s.state !== "done" && !!s.rewardQuest && s.rewardQuest === nextQuestId;
+    return (
+      <li key={s.key} data-testid={`mission-step-${s.key}`} data-state={s.state} data-next={next ? "true" : undefined} aria-current={next ? "step" : undefined} className={next ? "-mx-2 my-1 flex min-h-[44px] items-center gap-3 rounded-xl border border-vi/60 bg-pri/[0.12] px-2 py-1.5" : "flex min-h-[44px] items-center gap-3 py-1.5"}>
+        {s.state === "done" ? <Check size={16} aria-hidden="true" className="shrink-0 text-success" /> : <Circle size={16} aria-hidden="true" className="shrink-0 text-mu/70" />}
+        <span className={s.state === "done" ? "min-w-0 flex-1 text-sm text-mu" : "min-w-0 flex-1 text-sm text-tx"}>
+          {next && <span className="block text-[11px] font-bold uppercase tracking-[0.12em] text-vi">{dict.questsPage.q2.mission.next}</span>}
+          {t.steps[s.key]}
+          {s.rewardQuest && <span className="block text-xs font-semibold text-tx/70">{formatString(t.rewardStep, { reward: rewardText(s.rewardQuest) })}</span>}
+        </span>
+        {s.state !== "done" && (
+          <Link href={hrefFor(s)} className={buttonClasses(next ? "primary" : "ghost", "sm", "shrink-0")} data-testid={`mission-step-go-${s.key}`} aria-label={`${p.go}: ${t.steps[s.key]}`}>
+            {p.go}
+          </Link>
+        )}
+      </li>
+    );
+  };
 
   return (
     <section className="min-w-0 rounded-2xl border border-line bg-s1/60 p-4" aria-labelledby="plan-steps-title">

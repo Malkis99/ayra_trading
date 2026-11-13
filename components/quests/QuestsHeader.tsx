@@ -48,7 +48,7 @@ export function QuestsHeader({ earned }: { earned: { xp: number; coins: number }
     >
       <div className="relative shrink-0">
         {/* a portrait crop of the whole figure: the character is only scaled, never stretched */}
-        <div className="relative h-[60px] w-12 overflow-hidden rounded-xl bg-ink bg-[radial-gradient(70%_60%_at_50%_35%,rgb(var(--c-vi)/0.18),transparent_70%)] ring-1 ring-vi/30 sm:h-[92px] sm:w-[72px]">
+        <div className="relative h-[60px] w-12 overflow-hidden rounded-xl bg-ink bg-[radial-gradient(75%_55%_at_50%_30%,rgb(var(--c-vi)/0.28),transparent_72%)] shadow-[inset_0_-14px_18px_-12px_rgb(var(--c-pri)/0.55)] ring-1 ring-vi/40 sm:h-[92px] sm:w-[72px]">
           <div className="absolute left-1/2 top-0 h-[150px] w-[66px] -translate-x-1/2 sm:h-[228px] sm:w-[99px]">
             <Character appearance={gameState.profile.appearance} equipment={effectiveEquipment} size="fill" />
           </div>
@@ -66,8 +66,9 @@ export function QuestsHeader({ earned }: { earned: { xp: number; coins: number }
         <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/[0.08]" role="progressbar" aria-valuemin={0} aria-valuemax={need} aria-valuenow={gameState.xp} aria-label={formatString(p.levelAria, { level: gameState.level })}>
           <span className="block h-full rounded-full bg-gradient-to-r from-pri to-vi" style={{ width: `${pct}%` }} />
         </div>
-        <div className="mt-1 text-xs text-mu" data-testid="hero-xp">
-          {formatString(p.xp, { xp: formatNumber(lang, gameState.xp), need: formatNumber(lang, need) })}
+        <div className="mt-1 flex items-baseline justify-between gap-3 text-xs text-mu">
+          <span data-testid="hero-xp">{formatString(p.xp, { xp: formatNumber(lang, gameState.xp), need: formatNumber(lang, need) })}</span>
+          <span className="hidden sm:inline">{formatString(h.toLevel, { level: gameState.level + 1 })}</span>
         </div>
       </div>
 

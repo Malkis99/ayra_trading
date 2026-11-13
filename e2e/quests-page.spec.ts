@@ -107,7 +107,7 @@ test.describe("Quests page (Q1)", () => {
     await seedGame(context, baseGame({ lastQuestDate: today }));
     await page.goto("/quests");
     const q = await firstSelfQuest(page);
-    await q.card.getByRole("button", { name: "Выполнить" }).click();
+    await q.card.getByTestId("quest-complete").click();
     await expect(page.getByTestId(`quest-card-${q.id}`).getByTestId("quest-done")).toBeVisible();
     await page.getByRole("tab", { name: "История" }).click();
     const item = page.getByTestId("history-item").first();
@@ -163,15 +163,15 @@ test.describe("Quests page (Q1)", () => {
         return w.__origSetItem!.call(this, key, value);
       };
     });
-    await q.card.getByRole("button", { name: "Выполнить" }).click();
+    await q.card.getByTestId("quest-complete").click();
     await expect(page.getByText("Не удалось сохранить — ничего не начислено. Попробуйте ещё раз.")).toBeVisible();
-    await expect(page.getByTestId(`quest-card-${q.id}`).getByRole("button", { name: "Выполнить" })).toBeVisible();
+    await expect(page.getByTestId(`quest-card-${q.id}`).getByTestId("quest-complete")).toBeVisible();
     expect(totalXp(await readGame(page))).toBe(before);
     await page.evaluate(() => {
       const w = window as unknown as { __origSetItem?: typeof Storage.prototype.setItem };
       Storage.prototype.setItem = w.__origSetItem!;
     });
-    await page.getByTestId(`quest-card-${q.id}`).getByRole("button", { name: "Выполнить" }).click();
+    await page.getByTestId(`quest-card-${q.id}`).getByTestId("quest-complete").click();
     await expect(page.getByTestId(`quest-card-${q.id}`).getByTestId("quest-done")).toBeVisible();
     const g = await readGame(page);
     expect(g.history.filter((h) => h.questId === q.id)).toHaveLength(1);

@@ -32,3 +32,28 @@ export const CATEGORY_LOOK: Record<QuestCategory, { color: string; icon: LucideI
   Social: { color: "#e0a6c8", icon: Users },
   Lifestyle: { color: "#b9a3e0", icon: Sun },
 };
+
+/** Short title of a quest on the Quest Hub rows (owner decision В5: the task, reward and check stay the same). */
+export function questShortTitle(dict: Dictionary, lang: Lang, q: Pick<QuestTemplate, "id" | "fallbackTitleRu" | "fallbackTitleEn">): string {
+  return (dict.questsPage.q2.short as Record<string, string | undefined>)[q.id] || questTitle(dict, lang, q);
+}
+
+/** What exactly makes a quest done: the journal's rule, or what the person marks for a self-report. */
+export function questCriterion(dict: Dictionary, q: Pick<QuestTemplate, "id">): string | undefined {
+  return (dict.questsPage.q2.criteria as Record<string, string | undefined>)[q.id];
+}
+
+/** Everyday habits among the extra quests (shown apart from the trading challenges; the game rules are the same). */
+export const HABIT_QUESTS: ReadonlySet<string> = new Set([
+  "q_walk",
+  "q_meditate",
+  "q_sleep_prep",
+  "q_lang_study",
+  "q_lang_10m",
+  "q_workout",
+  "q_stretching",
+  "q_read_pages",
+  "q_running",
+  "q_swimming",
+  "q_gym",
+]);
