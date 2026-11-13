@@ -2,6 +2,16 @@ import type { ProfileDetails } from "./profile";
 import { GAME_CONFIG } from "./game-config";
 import { dayKeyInZone, mondayOfKey } from "./day-key";
 import { APP_CLOSED_QUESTS, pickReplacement } from "./quests";
+import {
+  defaultModeFor,
+  generateDaySet,
+  legacyDaySet,
+  poolForMode,
+  QUEST_CATALOG,
+  type DayMode,
+  type DaySet,
+  type WeekChallenge,
+} from "./quest-engine";
 import { ITEMS } from "./items";
 import { TITLES_CATALOG } from "./titles";
 import {
@@ -126,6 +136,12 @@ export interface GameState {
   coinLog?: CoinLogEntry[];
   /** When this device started keeping the coin history (ISO). */
   coinLogSince?: string;
+  /** The day's quest set, generated once per game day (Q2, lib/quest-engine.ts). */
+  questDay?: DaySet;
+  /** The week challenge, chosen once per week (Q2; no rewards yet). */
+  questWeek?: WeekChallenge;
+  /** Trading days, 0 = Monday … 6 = Sunday (empty or missing: every day). A change applies to the next generated day. */
+  tradingDays?: number[];
   /** Grows with every saved change: the freshest copy wins between tabs (lib/game-store.ts). */
   rev?: number;
 }
@@ -430,6 +446,9 @@ export function checkAndApplyDateResets(
   const todayStr = gameDayKey(updated, currentDate);
   const mondayStr = mondayOfKey(todayStr);
 
+  // the day had begun on this device before this call (Q1 or earlier): its quest set is kept as it was
+  const dayAlreadyStarted = !!updated.lastQuestDate && updated.lastQuestDate === todayStr;
+
   if (updated.lastQuestDate && updated.lastQuestDate !== todayStr) {
     const yesterdayDoneCount = Object.keys(updated.completedQuestsToday).length;
     const wasActive = yesterdayDoneCount >= 1;
@@ -467,6 +486,14 @@ export function checkAndApplyDateResets(
     updated.lastQuestDate = todayStr;
   } else if (!updated.lastQuestDate) {
     updated.lastQuestDate = todayStr;
+  }
+
+  // The day's quest set: generated once for the game day and saved, so a reload, another tab or a time zone change
+  // shows the same set. A day that had begun before Q2 keeps the set Q1 showed for it.
+  if (!updated.questDay || updated.questDay.day !== todayStr) {
+    const mode: DayMode = defaultModeFor(todayStr, updated.tradingDays);
+    const set = dayAlreadyStarted && !updated.questDay ? legacyDaySet(todayStr, mode) : generateDaySet(updated, todayStr, mode);
+    updated.questDay = updated.isRestDay ? { ...set, mode: "rest", modeBeforeRest: mode } : set;
   }
 
   if (updated.lastWeeklyResetDate !== mondayStr) {
@@ -1263,6 +1290,37 @@ export function completeQuest(
   };
 }
 
+/** XP given today for self-reported quests (from the quest history of the game day). */
+export function selfReportXpOn(state: Pick<GameState, "history">, dayKey: string): number {
+  return (state.history || []).reduce((n, h) => (h.completedAt === dayKey && !APP_CLOSED_QUESTS.has(h.questId) ? n + (h.xp || 0) : n), 0);
+}
+
+/**
+ * A quest the person ticks (self-report): done as before, but its XP counts only up to the daily cap for self-reports
+ * (GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP, owner decision 2026-11-13). Over the cap the quest is still done (the day and
+ * the streak count), with the XP that is left (possibly 0). Never coins. Journal-checked quests are not affected.
+ * Only catalog quests confirmed by a self-report go this way, never above their catalog XP: journal quests and
+ * composite missions (which have no reward of their own) cannot be ticked.
+ */
+export function completeSelfReportQuest(
+  state: GameState,
+  questId: string,
+  questTitle: string,
+  category: string,
+  xpAmount: number,
+  currentDate: Date = new Date()
+): ReturnType<typeof completeQuest> & { xpGiven: number; capped: boolean } {
+  const fresh = checkAndApplyDateResets(state, currentDate);
+  const def = QUEST_CATALOG.find((d) => d.id === questId && d.kind === "daily" && d.confirmation === "self");
+  if (!def || APP_CLOSED_QUESTS.has(questId)) return { state: fresh, leveledUp: false, newlyUnlocked: [], xpGiven: 0, capped: false };
+  const asked = Math.max(0, Math.min(xpAmount, def.template?.xpReward ?? 0));
+  const today = gameDayKey(fresh, currentDate);
+  const left = Math.max(0, GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP - selfReportXpOn(fresh, today));
+  const xp = Math.min(asked, left);
+  const res = completeQuest(fresh, questId, questTitle, category, xp, 0, currentDate);
+  return { ...res, xpGiven: res.state.completedQuestsToday[questId] && !fresh.completedQuestsToday[questId] ? xp : 0, capped: xp < asked };
+}
+
 export function passQuest(
   state: GameState,
   questId: string,
@@ -1318,7 +1376,8 @@ export function replaceQuest(
     ...Object.values(replacements),
     ...Object.keys(newState.completedQuestsToday),
   ]);
-  const replacement = pickReplacement(todayStr, questId, excluded);
+  const mode = newState.isRestDay ? "rest" : newState.questDay?.mode ?? "trading";
+  const replacement = pickReplacement(todayStr, questId, excluded, poolForMode(mode));
   if (!replacement) return { state: newState, success: false, reason: "noAlternative" };
 
   const updatedDailyStats = recordDailyStatEvent(newState.dailyStats, todayStr, {
@@ -1339,24 +1398,86 @@ export function replaceQuest(
   return { state: newState, success: true, replacementId: replacement.id };
 }
 
+/** Rest on, or back to the mode the day had before the rest (Q1 behaviour, now through the day modes). */
 export function toggleRestDay(
   state: GameState,
   currentDate: Date = new Date()
 ): GameState {
-  let newState = checkAndApplyDateResets(state, currentDate);
-  const todayStr = gameDayKey(newState, currentDate);
-  const nextRestDayState = !newState.isRestDay;
+  const s = checkAndApplyDateResets(state, currentDate);
+  const target: DayMode = s.isRestDay ? s.questDay?.modeBeforeRest ?? "trading" : "rest";
+  return setDayMode(s, target, currentDate).state;
+}
 
-  // the day keeps its final state; switching gives no reward and does not touch earlier days
-  const updatedDailyStats = recordDailyStatEvent(newState.dailyStats, todayStr, {
-    type: nextRestDayState ? "restDay" : "restDayOff",
-  });
+/** Something was given today (a quest, XP or coins): after that the day's quests cannot be swapped by a mode change. */
+export function rewardedToday(state: Pick<GameState, "completedQuestsToday" | "dailyStats">, dayKey: string): boolean {
+  const rec = state.dailyStats?.[dayKey];
+  return Object.keys(state.completedQuestsToday || {}).length > 0 || (rec?.xpGained || 0) > 0 || (rec?.coinsGained || 0) > 0;
+}
 
+export type DayModeFailure = "locked";
+
+/**
+ * Changes the mode of the game day (docs/quests-2.0-plan.md, 2.2): free until the first reward of the day; after it only
+ * «Rest» (and back to the mode before it). A new mode gives that mode's set (the same set every time for the same
+ * mode and day). Rest keeps the streak without growing it. A change never gives a reward.
+ */
+export function setDayMode(
+  state: GameState,
+  mode: DayMode,
+  currentDate: Date = new Date()
+): { state: GameState; ok: boolean; reason?: DayModeFailure } {
+  const s = checkAndApplyDateResets(state, currentDate);
+  const today = gameDayKey(s, currentDate);
+  const day = s.questDay && s.questDay.day === today ? s.questDay : generateDaySet(s, today, defaultModeFor(today, s.tradingDays));
+  const current: DayMode = s.isRestDay ? "rest" : day.mode;
+  if (mode === current) return { state: s, ok: true };
+
+  if (mode === "rest") {
+    return {
+      ok: true,
+      state: {
+        ...s,
+        isRestDay: true,
+        questDay: { ...day, mode: "rest", modeBeforeRest: current },
+        dailyStats: recordDailyStatEvent(s.dailyStats, today, { type: "restDay" }),
+      },
+    };
+  }
+
+  const back = day.modeBeforeRest ?? defaultModeFor(today, s.tradingDays);
+  const leavingRest = current === "rest";
+  if (leavingRest && mode === back) {
+    const { modeBeforeRest: _drop, ...rest } = day;
+    return {
+      ok: true,
+      state: { ...s, isRestDay: false, questDay: { ...rest, mode: back }, dailyStats: recordDailyStatEvent(s.dailyStats, today, { type: "restDayOff" }) },
+    };
+  }
+  if (rewardedToday(s, today)) return { state: s, ok: false, reason: "locked" };
+
+  const next = generateDaySet(s, today, mode);
   return {
-    ...newState,
-    isRestDay: nextRestDayState,
-    dailyStats: updatedDailyStats,
+    ok: true,
+    state: {
+      ...s,
+      isRestDay: false,
+      questDay: day.legacy ? { ...next } : next,
+      questReplacements: {},
+      dailyStats: leavingRest ? recordDailyStatEvent(s.dailyStats, today, { type: "restDayOff" }) : s.dailyStats,
+    },
   };
+}
+
+/** Trading days (0 = Monday … 6 = Sunday). Today's set stays; the choice applies from the next generated day. */
+export function setTradingDays(state: GameState, days: number[]): GameState {
+  const clean = Array.from(new Set(days.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))).sort();
+  return { ...state, tradingDays: clean };
+}
+
+/** Saves the week challenge once per week (it does not change in the middle of a week). */
+export function setWeekChallenge(state: GameState, challenge: WeekChallenge): GameState {
+  if (state.questWeek && state.questWeek.week === challenge.week) return state;
+  return { ...state, questWeek: challenge };
 }
 
 export function claimDailyReward(
