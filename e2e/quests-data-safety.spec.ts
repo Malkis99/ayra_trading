@@ -78,8 +78,9 @@ test.describe("Q1 data safety", () => {
   test("English: the page and its tabs are in English", async ({ context, page }) => {
     await seedGame(context, { ...old, xp: 10 }, { ayra_lang: "en" });
     await page.goto("/quests");
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quests & Discipline");
-    for (const name of ["Today", "Week", "Path", "Discipline", "History"]) await expect(page.getByRole("tab", { name })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quests");
+    await expect(page.getByRole("heading", { name: "Missions of the day" })).toBeVisible();
+    for (const name of ["Week", "Path", "Discipline", "History"]) await expect(page.getByRole("tab", { name })).toBeVisible();
     await expect(page.getByTestId("device-note")).toContainText("Progress is kept on this device");
     await page.getByRole("tab", { name: "Discipline" }).click();
     await expect(page.getByText("Activity over 4 weeks")).toBeVisible();

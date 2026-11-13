@@ -94,7 +94,7 @@ export function WeekMissions({ snapshot }: { snapshot: JournalSnapshot }) {
   return (
     <div className="space-y-4">
       <section className="rounded-[20px] border border-vi/35 bg-gradient-to-b from-[#1d1b2a] to-s1 p-4 sm:p-5" data-testid="weekly-boss" data-boss={boss} data-state={overall}>
-        <div className="flex items-start gap-4">
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
           <span aria-hidden="true" className="grid h-14 w-14 shrink-0 place-items-center bg-gradient-to-br from-[#6d55a8] to-[#2c2148] font-serif text-2xl font-bold text-[#efe9ff] [clip-path:polygon(50%_0,100%_25%,100%_75%,50%_100%,0_75%,0_25%)]">
             {b.names[boss].slice(0, 1)}
           </span>
@@ -103,7 +103,7 @@ export function WeekMissions({ snapshot }: { snapshot: JournalSnapshot }) {
             <h3 className="font-serif text-xl font-bold text-tx">{b.names[boss]}</h3>
             <p className="text-xs text-mu">{basedOnData ? b.chosenFrom : b.chosenDefault}</p>
           </div>
-          <span className="ml-auto whitespace-nowrap text-sm font-semibold text-tx" data-testid="boss-overall">
+          <span className="ml-auto text-sm font-semibold text-tx sm:whitespace-nowrap" data-testid="boss-overall">
             {b.overall[overall]}
           </span>
         </div>

@@ -12,22 +12,23 @@ import { GAME_CONFIG } from "@/lib/game-config";
 import { QUEST_POOL, type QuestTemplate } from "@/lib/quests";
 import { activityGrid, nextStep, todayEarned, todaysQuests, weekDays, weekQuestCount } from "@/lib/quests-view";
 import { Tabs } from "@/components/ui/Tabs";
-import { QuestsHero } from "@/components/quests/QuestsHero";
-import { TodayTab } from "@/components/quests/TodayTab";
+import { QuestsHeader } from "@/components/quests/QuestsHeader";
+import { TodayView } from "@/components/quests/TodayView";
 import { WeekTab } from "@/components/quests/WeekTab";
 import { PathTab } from "@/components/quests/PathTab";
 import { DisciplineTab } from "@/components/quests/DisciplineTab";
 import { HistoryTab } from "@/components/quests/HistoryTab";
 import { questTitle } from "@/components/quests/quest-text";
 
-type QuestsTab = "today" | "week" | "path" | "discipline" | "history";
-const TABS: QuestsTab[] = ["today", "week", "path", "discipline", "history"];
+// Today is the page itself; the week, the path, discipline and history are a quieter section below it
+type QuestsTab = "week" | "path" | "discipline" | "history";
+const TABS: QuestsTab[] = ["week", "path", "discipline", "history"];
 
 export default function QuestsPage() {
   const { dict, lang, showToast } = useApp();
   const { gameState, gameDay, rewards, passQuest, replaceQuest, setDayMode, fixWeekChallenge } = useGame();
   const { trades, plans, weekPlans, noTrades } = useJournal();
-  const [activeTab, setActiveTab] = useState<QuestsTab>("today");
+  const [activeTab, setActiveTab] = useState<QuestsTab>("week");
   const [busyId, setBusyId] = useState<string | null>(null);
   const busyRef = useRef(false);
   const t = dict.questsPage;
@@ -112,58 +113,63 @@ export default function QuestsPage() {
     });
 
   const goToQuest = (questId: string) => {
-    setActiveTab("today");
     requestAnimationFrame(() => {
-      const el = document.querySelector<HTMLElement>(`[data-testid="quest-card-${questId}"] button`);
+      const el = document.querySelector<HTMLElement>(`[data-testid="quest-card-${questId}"] [data-action="main"]`);
       el?.scrollIntoView({ block: "center", behavior: "smooth" });
       el?.focus({ preventScroll: true });
     });
   };
 
+  // the button text of a journal next step (for example «Set the limits»)
+  const nextCta =
+    next.kind === "journal"
+      ? next.quest.id === "q_riskcheck"
+        ? reasonFor("q_riskcheck", false, snapshot, gameDay) === "riskNotChecked"
+          ? t.q2.journalCta.q_riskcheckChecked
+          : t.q2.journalCta.q_riskcheck
+        : (t.q2.journalCta as Record<string, string>)[next.quest.id]
+      : undefined;
+
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="font-serif text-2xl font-bold text-tx md:text-3xl">{t.title}</h1>
-          <p className="mt-1 text-sm text-mu">{t.subtitle}</p>
-        </div>
-      </header>
+    <div className="mx-auto w-full max-w-[880px] space-y-6">
+      <h1 className="sr-only">{t.q2.page.title}</h1>
 
-      <QuestsHero coreDone={coreDone} coreTotal={core.length} weekCount={weekCount} next={next} onNextQuest={goToQuest} />
+      <QuestsHeader coreDone={coreDone} coreTotal={core.length} earned={earned} next={next} nextJournalCta={nextCta} onNextQuest={goToQuest} />
 
-      <Tabs<QuestsTab>
-        items={TABS.map((id) => ({ id, label: t.tabs[id] }))}
-        value={activeTab}
-        onChange={setActiveTab}
-        label={t.q1.tabsLabel}
-        idPrefix="quests"
+      <TodayView
+        core={core}
+        bonus={bonus}
+        replacedFrom={replacedFrom}
+        busyId={busyId}
+        mode={mode}
+        nextQuestId={next.kind === "quest" || next.kind === "journal" ? next.quest.id : undefined}
+        snapshot={snapshot}
+        onActivate={changeMode}
+        onComplete={complete}
+        onPass={pass}
+        onReplace={replace}
       />
 
-      <div role="tabpanel" id={`quests-panel-${activeTab}`} aria-labelledby={`quests-tab-${activeTab}`} className="min-w-0">
-        {activeTab === "today" && (
-          <TodayTab
-            core={core}
-            bonus={bonus}
-            replacedFrom={replacedFrom}
-            earned={earned}
-            busyId={busyId}
-            mode={mode}
-            snapshot={snapshot}
-            onActivate={changeMode}
-            onComplete={complete}
-            onPass={pass}
-            onReplace={replace}
-          />
-        )}
-        {activeTab === "week" && <WeekTab days={days} weekCount={weekCount} snapshot={snapshot} />}
-        {activeTab === "path" && <PathTab />}
-        {activeTab === "discipline" && <DisciplineTab grid={grid} />}
-        {activeTab === "history" && <HistoryTab />}
-      </div>
+      <section aria-labelledby="progress-title" className="space-y-3 border-t border-line/70 pt-6">
+        <h2 id="progress-title" className="text-xs font-semibold uppercase tracking-[0.12em] text-mu">{t.q2.page.progress}</h2>
+        <Tabs<QuestsTab>
+          items={TABS.map((id) => ({ id, label: t.tabs[id] }))}
+          value={activeTab}
+          onChange={setActiveTab}
+          label={t.q1.tabsLabel}
+          idPrefix="quests"
+        />
+        <div role="tabpanel" id={`quests-panel-${activeTab}`} aria-labelledby={`quests-tab-${activeTab}`} className="min-w-0">
+          {activeTab === "week" && <WeekTab days={days} weekCount={weekCount} snapshot={snapshot} />}
+          {activeTab === "path" && <PathTab />}
+          {activeTab === "discipline" && <DisciplineTab grid={grid} />}
+          {activeTab === "history" && <HistoryTab />}
+        </div>
+      </section>
 
-      <p className="flex items-start gap-2 text-xs text-mu" data-testid="device-note">
-        <HardDrive size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
-        {t.q1.deviceNote}
+      <p className="flex items-center justify-center gap-2 text-xs text-mu" data-testid="device-note">
+        <HardDrive size={13} aria-hidden="true" className="shrink-0" />
+        {t.q2.page.device}
       </p>
     </div>
   );
