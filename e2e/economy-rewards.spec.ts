@@ -116,8 +116,11 @@ test.describe("Rewards: only new actions, once per account", () => {
     await buttons.first().click();
     await expect.poll(async () => (await game(page)).xp).toBeGreaterThan(before.xp);
     expect((await game(page)).coins).toBe(before.coins);
-    // a quest the app closes by itself shows that instead of a button
-    for (const hint of await page.getByTestId("quest-auto-closes").all()) await expect(hint).toHaveText("Закроется само по журналу");
+    // a quest the journal checks has no «Complete» button: it leads to the journal instead
+    for (const card of await page.locator('[data-testid^="quest-card-"]').filter({ has: page.getByTestId("quest-badge-journal") }).all()) {
+      await expect(card.getByRole("button", { name: "Выполнить" })).toHaveCount(0);
+      await expect(card.getByTestId("quest-journal-link")).toBeVisible();
+    }
   });
 
   test("clock put back: the daily reward gives nothing until real time catches up", async ({ page }) => {

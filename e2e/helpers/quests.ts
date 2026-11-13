@@ -62,7 +62,7 @@ export function baseGame(over: Record<string, unknown> = {}) {
 
 /** Opens the bonus quests on «Today» (closed by default), so every quest of the day is on screen. */
 export async function expandBonus(page: Page) {
-  const toggle = page.getByRole("button", { name: /^Бонусные задания/ });
+  const toggle = page.getByRole("button", { name: /^Дополнительно/ });
   await expect(toggle).toBeVisible();
   if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
 }

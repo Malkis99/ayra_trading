@@ -41,9 +41,9 @@ test.describe("Quests page (Q1)", () => {
       })
     );
     await page.goto("/quests");
-    await expect(page.getByTestId("today-earned")).toHaveText("Задания и журнал сегодня: +70 XP · +20 Coins");
+    await expect(page.getByTestId("today-earned")).toHaveText("Сегодня +70 XP · +20 Coins");
 
-    for (const name of ["Неделя", "Путь", "Дисциплина", "История", "Сегодня"]) {
+    for (const name of ["Путь", "Дисциплина", "История", "Неделя"]) {
       await page.getByRole("tab", { name }).click();
       await expect(page.getByRole("tab", { name })).toHaveAttribute("aria-selected", "true");
     }

@@ -77,7 +77,7 @@ test.describe("Quest Engine (Q2)", () => {
     await expect(page.getByText("Активный режим: Учёба. Выполненное сегодня сохранено.")).toBeVisible();
     const xp0 = totalXp(await game(page));
 
-    const core = page.locator('section[aria-labelledby="core-title"] [data-testid^="quest-card-"]');
+    const core = page.locator('[data-testid="mode-panel"] [data-testid^="quest-card-"]');
     const card = core.filter({ has: page.getByTestId("quest-badge-self") }).first();
     const doneId = ((await card.getAttribute("data-testid")) || "").replace("quest-card-", "");
     await card.getByRole("button", { name: "Выполнить" }).click();
@@ -100,7 +100,7 @@ test.describe("Quest Engine (Q2)", () => {
       expect(g.questDay!.core[slot]).toBe(doneId);
       await expect(page.getByTestId(`quest-card-${doneId}`).getByTestId("quest-done")).toBeVisible();
       await expect(page.getByTestId("core-count")).toContainText(/^[1-3] \/ 3$/);
-      if (m !== "study") await expect(page.getByTestId(`quest-card-${doneId}`).getByTestId("quest-carried")).toHaveText("Выполнено в режиме «Учёба»");
+      if (m !== "study") await expect(page.getByTestId(`quest-card-${doneId}`).getByTestId("quest-carried")).toHaveText("Из режима «Учёба»");
     }
     // a double click and a reload do not add anything either
     await page.reload();
@@ -113,7 +113,7 @@ test.describe("Quest Engine (Q2)", () => {
     const plan = { date: today, bias: [{ instrument: "EURUSD", direction: "bullish" }], levels: [], events: [], checklist: [], createdAt: `${today}T07:00:00.000Z`, updatedAt: `${today}T07:00:00.000Z` };
     await seedGame(context, baseGame({ lastQuestDate: today, questDay }), { ayra_journal_v1: journal({ plans: [plan] }) });
     await page.goto("/quests");
-    const core = page.locator('section[aria-labelledby="core-title"] [data-testid^="quest-card-"]');
+    const core = page.locator('[data-testid="mode-panel"] [data-testid^="quest-card-"]');
     await expect(core).toHaveCount(3);
     await expect(page.getByTestId("core-count")).toHaveText("0 / 3");
     const risk = page.getByTestId("quest-card-q_riskcheck");
@@ -122,7 +122,7 @@ test.describe("Quest Engine (Q2)", () => {
     await expect(risk.getByTestId("quest-journal-link")).toHaveAttribute("href", "/journal?tab=plan&focus=limits");
     // the morning protocol: «levels» has no reward of its own and says so; open steps lead to their block
     const levels = page.getByTestId("mission-step-levels");
-    await expect(levels).toContainText("Без отдельной награды — часть подготовки");
+    await expect(levels).not.toContainText("Награда");
     await expect(page.getByTestId("mission-step-bias")).toContainText("Награда: +40 XP");
     await expect(page.getByTestId("mission-step-go-calendar")).toHaveAttribute("href", "/journal?tab=plan&focus=events");
 
@@ -158,10 +158,9 @@ test.describe("Quest Engine (Q2)", () => {
     await expect(protocol.getByTestId("mission-step-levels")).toHaveAttribute("data-state", "done");
     await expect(protocol.getByTestId("mission-step-calendar")).toHaveAttribute("data-state", "open");
     await expect(protocol.getByTestId("mission-step-risk")).toHaveAttribute("data-state", "open");
-    await expect(protocol.getByTestId("mission-morning_protocol-progress")).toHaveText("2 из 4");
-    // self-reported quests say how they are confirmed
-    await expandBonus(page);
-    await expect(page.getByTestId("quest-reason").first()).toContainText("самоотчёт");
+    await expect(page.getByTestId("plan-steps-count")).toHaveText("2 из 5"); // four morning steps and the review
+    // self-reported quests say how they are confirmed (quieter than the journal's mark)
+    await expect(page.getByTestId("quest-badge-self").first()).toHaveText("Самоотчёт");
   });
 
   test("week: without trades the challenge is «not applicable»; trading days are saved for the next days", async ({ context, page }) => {
@@ -210,7 +209,7 @@ test.describe("Quest Engine (Q2)", () => {
     const earlier = { questId: "q_earlier", questTitle: "Earlier", category: "Mental", xp: 80, coins: 0, completedAt: today, at: `${today}T06:00:00.000Z` };
     await seedGame(context, baseGame({ lastQuestDate: today, history: [earlier], completedQuestsToday: { q_earlier: true } }), { ayra_journal_v1: journal() });
     await page.goto("/quests");
-    await expect(page.getByTestId("self-cap")).toHaveText("XP за самоотчёты сегодня: 80 из 90");
+    await expect(page.getByTestId("self-cap")).toHaveText("Самоотчёты: 80 из 90 XP");
     await expandBonus(page);
     const card = page.locator('[data-testid^="quest-card-"]').filter({ has: page.getByTestId("quest-badge-self") }).filter({ hasNot: page.getByTestId("quest-done") }).first();
     const id = ((await card.getAttribute("data-testid")) || "").replace("quest-card-", "");
@@ -219,7 +218,7 @@ test.describe("Quest Engine (Q2)", () => {
     await expect(page.getByText("Задание отмечено: +10 XP — дневной лимит XP за самоотчёты (90) достигнут")).toBeVisible();
     await expect(page.getByTestId(`quest-card-${id}`).getByTestId("quest-done")).toBeVisible();
     expect(totalXp(await game(page)) - xp0).toBe(10);
-    await expect(page.getByTestId("self-cap")).toHaveText("XP за самоотчёты сегодня: 90 из 90");
+    await expect(page.getByTestId("self-cap")).toHaveText("Самоотчёты: 90 из 90 XP");
   });
 
   test("two tabs: a reward in one tab and a mode change in the other — the reward is kept once, the slot stays (fresh data)", async ({ context }) => {
@@ -230,7 +229,7 @@ test.describe("Quest Engine (Q2)", () => {
     await b.goto("/quests");
     await expect(a.getByTestId("quests-hero")).toBeVisible();
     await expect(b.getByTestId("quests-hero")).toBeVisible();
-    const card = a.locator('section[aria-labelledby="core-title"] [data-testid^="quest-card-"]').filter({ has: a.getByTestId("quest-badge-self") }).first();
+    const card = a.locator('[data-testid="mode-panel"] [data-testid^="quest-card-"]').filter({ has: a.getByTestId("quest-badge-self") }).first();
     const doneId = ((await card.getAttribute("data-testid")) || "").replace("quest-card-", "");
     await card.getByRole("button", { name: "Выполнить" }).click();
     await expect(card.getByTestId("quest-done")).toBeVisible();
