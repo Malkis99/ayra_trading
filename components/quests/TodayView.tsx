@@ -143,7 +143,7 @@ export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId
               </div>
             </div>
           ) : (
-            <div className="grid gap-3 md:grid-cols-3">{shownCore.map((q, i) => item(q, "tile", i + 1))}</div>
+            <div className="grid gap-3 lg:grid-cols-3">{shownCore.map((q, i) => item(q, "tile", i + 1))}</div>
           )}
         </div>
       </section>
@@ -152,7 +152,7 @@ export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId
       {viewed !== "rest" && (protocol.length > 0 || ritual.length > 0 || shownBonus.length > 0 || elsewhere.length > 0) && (
         <section aria-labelledby="more-title" className="space-y-3">
           <h2 id="more-title" className="text-xs font-semibold uppercase tracking-[0.12em] text-mu">{p.more}</h2>
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3 lg:grid-cols-2">
             {(protocol.length > 0 || ritual.length > 0) && <PlanSteps protocol={protocol} ritual={ritual} hrefFor={stepHref} />}
 
             <div className="min-w-0 space-y-3">

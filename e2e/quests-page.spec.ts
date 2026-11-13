@@ -43,7 +43,7 @@ test.describe("Quests page (Q1)", () => {
     await page.goto("/quests");
     await expect(page.getByTestId("today-earned")).toHaveText("Сегодня +70 XP · +20 Coins");
 
-    for (const name of ["Путь", "Дисциплина", "История", "Неделя"]) {
+    for (const name of ["Неделя", "История", "Авторы", "Сегодня"]) {
       await page.getByRole("tab", { name }).click();
       await expect(page.getByRole("tab", { name })).toHaveAttribute("aria-selected", "true");
     }
@@ -53,7 +53,7 @@ test.describe("Quests page (Q1)", () => {
     const yesterday = page.locator(`[data-testid="week-day-${daysAgo(1)}"]`);
     if (await yesterday.count()) await expect(yesterday).toHaveAttribute("data-status", "done");
 
-    await page.getByRole("tab", { name: "Дисциплина" }).click();
+    await page.getByRole("tab", { name: "История" }).click(); // discipline is the top of History
     const cells = page.getByTestId("activity-cell");
     await expect(cells).toHaveCount(28);
     await expect(page.locator(`[data-testid="activity-cell"][data-status="rest"]`)).toHaveCount(1);
@@ -119,8 +119,7 @@ test.describe("Quests page (Q1)", () => {
   test("goals: 80 characters are fine, 81 and spaces only are not; a long title fits a phone", async ({ context, page }) => {
     await page.setViewportSize({ width: 360, height: 780 });
     await seedGame(context, baseGame({ lastQuestDate: today }));
-    await page.goto("/quests");
-    await page.getByRole("tab", { name: "Путь" }).click();
+    await page.goto("/quests"); // «My goals» sits in the progress rail of Today
     await page.getByTestId("goal-add").click();
     const input = page.getByTestId("goal-title");
 
@@ -144,8 +143,7 @@ test.describe("Quests page (Q1)", () => {
 
   test("a goal can be deleted after confirming", async ({ context, page }) => {
     await seedGame(context, baseGame({ lastQuestDate: today, customGoals: [{ id: "g1", title: "Удалить меня", category: "Trading", createdAt: today }] }));
-    await page.goto("/quests");
-    await page.getByRole("tab", { name: "Путь" }).click();
+    await page.goto("/quests?tab=history"); // and in the rail of History
     await page.getByRole("button", { name: "Удалить: Удалить меня" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Удалить" }).click();
     await expect(page.getByTestId("goal-list")).toHaveCount(0);

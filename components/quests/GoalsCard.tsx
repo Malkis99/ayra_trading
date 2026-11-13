@@ -13,9 +13,13 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 const CATEGORIES: QuestCategory[] = ["Trading", "Discipline", "Psychology", "Physical", "Mental", "Social", "Lifestyle"];
 
-/** «Path»: for now the personal goals only; growth branches come later with real progress (docs/quests-2.0-plan.md). */
-export function PathTab() {
+/**
+ * «My goals» (the former «Path» tab, docs/quest-hub-plan.md 1): personal goals in the progress rail — add, list,
+ * delete with a confirmation. No rewards. Growth branches come later with real progress.
+ */
+export function GoalsCard() {
   const { dict, showToast } = useApp();
+  const h = dict.questsPage.q2.hub;
   const { gameState, addCustomGoal, removeCustomGoal } = useGame();
   const p = dict.questsPage.q1.path;
   const g = dict.questsPage.goalsTab;
@@ -48,23 +52,20 @@ export function PathTab() {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="font-serif text-lg font-bold text-tx">{p.title}</h2>
-          <p className="mt-0.5 text-sm text-mu">{formatString(p.desc, { max, len: maxLen })}</p>
-        </div>
+    <section className="space-y-3 rounded-2xl border border-line bg-s1 p-4" data-testid="goals-card" aria-labelledby="goals-title">
+      <div className="flex items-center justify-between gap-3">
+        <h3 id="goals-title" className="text-sm font-bold text-tx">{h.goalsTitle}</h3>
         {!adding && (
-          <Button onClick={() => setAdding(true)} disabled={full} data-testid="goal-add">
-            <Plus size={16} aria-hidden="true" />
-            {g.addGoalBtn}
+          <Button variant="ghost" className="-mr-3 gap-1 text-vi" onClick={() => setAdding(true)} disabled={full} data-testid="goal-add" aria-label={g.addGoalBtn}>
+            <Plus size={15} aria-hidden="true" />
+            {h.goalsAdd}
           </Button>
         )}
       </div>
-      {full && <p className="text-sm text-mu">{formatString(p.errorLimit, { max })}</p>}
+      {full && <p className="text-xs text-mu">{formatString(p.errorLimit, { max })}</p>}
 
       {adding && (
-        <form onSubmit={save} className="space-y-3 rounded-lg border border-line bg-s1 p-4" noValidate>
+        <form onSubmit={save} className="space-y-3 rounded-xl bg-s2/60 p-3" noValidate>
           <div>
             <label htmlFor="goal-title" className="sr-only">
               {g.goalTitlePlaceholder}
@@ -118,11 +119,11 @@ export function PathTab() {
       )}
 
       {gameState.customGoals.length === 0 ? (
-        !adding && <p className="rounded-lg bg-s2/60 p-4 text-sm text-mu">{p.empty}</p>
+        !adding && <p className="text-sm text-mu">{p.empty}</p>
       ) : (
-        <ul className="space-y-2" data-testid="goal-list">
+        <ul className="divide-y divide-line/60" data-testid="goal-list">
           {gameState.customGoals.map((goal) => (
-            <li key={goal.id} className="flex items-start justify-between gap-3 rounded-lg border border-line bg-s1 p-3.5">
+            <li key={goal.id} className="flex items-center justify-between gap-2 py-1.5">
               <div className="min-w-0">
                 <div className="break-words text-sm font-semibold text-tx [overflow-wrap:anywhere]">{goal.title}</div>
                 <div className="mt-0.5 text-xs text-mu">{dict.categories[goal.category as QuestCategory] || goal.category}</div>
@@ -131,7 +132,7 @@ export function PathTab() {
                 type="button"
                 onClick={() => setDeleting({ id: goal.id, title: goal.title })}
                 aria-label={`${g.deleteBtn}: ${goal.title}`}
-                className="grid h-11 w-11 shrink-0 place-items-center rounded-md text-mu hover:bg-s2 hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
+                className="-mr-2 grid h-10 w-10 shrink-0 place-items-center rounded-md text-mu hover:bg-s2 hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
               >
                 <Trash2 size={16} aria-hidden="true" />
               </button>
@@ -139,6 +140,7 @@ export function PathTab() {
           ))}
         </ul>
       )}
+      {gameState.customGoals.length > 0 && <p className="text-xs text-mu">{formatString(h.goalsCount, { n: gameState.customGoals.length, max })}</p>}
 
       {deleting && (
         <ConfirmDialog
@@ -155,6 +157,6 @@ export function PathTab() {
           onCancel={() => setDeleting(null)}
         />
       )}
-    </div>
+    </section>
   );
 }

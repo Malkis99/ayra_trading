@@ -80,9 +80,9 @@ test.describe("Q1 data safety", () => {
     await page.goto("/quests");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Quests");
     await expect(page.getByRole("heading", { name: "Missions of the day" })).toBeVisible();
-    for (const name of ["Week", "Path", "Discipline", "History"]) await expect(page.getByRole("tab", { name })).toBeVisible();
+    for (const name of ["Today", "Week", "History", "Creators"]) await expect(page.getByTestId("hub-tabs").getByRole("tab", { name })).toBeVisible();
     await expect(page.getByTestId("device-note")).toContainText("Progress is kept on this device");
-    await page.getByRole("tab", { name: "Discipline" }).click();
+    await page.getByRole("tab", { name: "History" }).click();
     await expect(page.getByText("Activity over 4 weeks")).toBeVisible();
   });
 });
