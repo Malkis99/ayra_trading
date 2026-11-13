@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { HardDrive } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
@@ -11,27 +12,41 @@ import { formatString } from "@/lib/i18n";
 import { GAME_CONFIG } from "@/lib/game-config";
 import { QUEST_POOL, type QuestTemplate } from "@/lib/quests";
 import { activityGrid, nextStep, todayEarned, todaysQuests, weekDays, weekQuestCount } from "@/lib/quests-view";
-import { Tabs } from "@/components/ui/Tabs";
 import { QuestsHeader } from "@/components/quests/QuestsHeader";
+import { NextStepBar } from "@/components/quests/NextStepBar";
 import { TodayView } from "@/components/quests/TodayView";
-import { WeekTab } from "@/components/quests/WeekTab";
-import { PathTab } from "@/components/quests/PathTab";
-import { DisciplineTab } from "@/components/quests/DisciplineTab";
+import { WeekCard, WeekTab } from "@/components/quests/WeekTab";
+import { TradingDaysPicker, WeeklyBoss } from "@/components/quests/WeekMissions";
+import { GoalsCard } from "@/components/quests/GoalsCard";
+import { DisciplineSummary, StreakRuleCard } from "@/components/quests/DisciplineTab";
 import { HistoryTab } from "@/components/quests/HistoryTab";
+import { CreatorsRules, CreatorsSoon } from "@/components/quests/CreatorsTab";
+import { HUB_TABS, HubColumns, HubTabs, parseHubTab, type HubTab } from "@/components/quests/HubLayout";
 import { questTitle } from "@/components/quests/quest-text";
 
-// Today is the page itself; the week, the path, discipline and history are a quieter section below it
-type QuestsTab = "week" | "path" | "discipline" | "history";
-const TABS: QuestsTab[] = ["week", "path", "discipline", "history"];
-
+/** Quest Hub (docs/quest-hub-plan.md): the profile strip, four top-level tabs that switch the page, two columns. */
 export default function QuestsPage() {
   const { dict, lang, showToast } = useApp();
   const { gameState, gameDay, rewards, passQuest, replaceQuest, setDayMode, fixWeekChallenge } = useGame();
   const { trades, plans, weekPlans, noTrades } = useJournal();
-  const [activeTab, setActiveTab] = useState<QuestsTab>("week");
+  const searchParams = useSearchParams();
+  const activeTab = parseHubTab(searchParams.get("tab"));
   const [busyId, setBusyId] = useState<string | null>(null);
   const busyRef = useRef(false);
+  const tabsRef = useRef<HTMLDivElement>(null);
   const t = dict.questsPage;
+  const h = t.q2.hub;
+
+  // A tab is a history entry (?tab=week): «Back» and «Forward» switch tabs; the Next router keeps useSearchParams in step
+  const setTab = useCallback((tab: HubTab) => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("tab") === tab) return;
+    url.searchParams.set("tab", tab);
+    window.history.pushState(null, "", url.toString());
+    // a tab switched from far below starts at its top
+    const top = tabsRef.current?.getBoundingClientRect().top;
+    if (top !== undefined && top < 0) tabsRef.current?.scrollIntoView({ block: "start" });
+  }, []);
 
   const { core, bonus, replacedFrom } = useMemo(() => todaysQuests(gameState, gameDay), [gameState, gameDay]);
   const days = useMemo(() => weekDays(gameState, gameDay), [gameState, gameDay]);
@@ -130,44 +145,90 @@ export default function QuestsPage() {
         : (t.q2.journalCta as Record<string, string>)[next.quest.id]
       : undefined;
 
+  const badge = "rounded-full px-1.5 text-[11px] font-bold";
+  const tabItems = HUB_TABS.map((id) => ({
+    id,
+    label: t.tabs[id],
+    badge:
+      id === "today" && mode !== "rest" && core.length > 0 ? (
+        <span className={`${badge} text-vi`} aria-label={formatString(h.todayCountAria, { done: coreDone, total: core.length })}>
+          {formatString(h.todayCount, { done: coreDone, total: core.length })}
+        </span>
+      ) : id === "creators" ? (
+        <span className={`${badge} border border-line text-mu`}>{h.soon}</span>
+      ) : undefined,
+  }));
+
+  const openWeek = () => setTab("week");
+  const panels: Record<HubTab, { main: React.ReactNode; rail: React.ReactNode }> = {
+    today: {
+      main: (
+        <div className="space-y-4">
+          <NextStepBar next={next} journalCta={nextCta} onNextQuest={goToQuest} />
+          <TodayView
+            core={core}
+            bonus={bonus}
+            replacedFrom={replacedFrom}
+            busyId={busyId}
+            mode={mode}
+            nextQuestId={next.kind === "quest" || next.kind === "journal" ? next.quest.id : undefined}
+            snapshot={snapshot}
+            onActivate={changeMode}
+            onComplete={complete}
+            onPass={pass}
+            onReplace={replace}
+          />
+        </div>
+      ),
+      rail: (
+        <>
+          <WeekCard days={days} weekCount={weekCount} onOpen={openWeek} />
+          <WeeklyBoss snapshot={snapshot} compact onOpenWeek={openWeek} />
+          <GoalsCard />
+        </>
+      ),
+    },
+    week: {
+      main: <WeekTab days={days} weekCount={weekCount} snapshot={snapshot} />,
+      rail: (
+        <>
+          <WeeklyBoss snapshot={snapshot} />
+          <TradingDaysPicker />
+        </>
+      ),
+    },
+    history: {
+      main: (
+        <div className="space-y-5">
+          <DisciplineSummary grid={grid} />
+          <HistoryTab />
+        </div>
+      ),
+      rail: (
+        <>
+          <GoalsCard />
+          <StreakRuleCard />
+        </>
+      ),
+    },
+    creators: { main: <CreatorsSoon />, rail: <CreatorsRules /> },
+  };
+
   return (
-    <div className="mx-auto w-full max-w-[880px] space-y-6">
+    <div className="mx-auto w-full max-w-[1480px] space-y-4">
       <h1 className="sr-only">{t.q2.page.title}</h1>
 
-      <QuestsHeader coreDone={coreDone} coreTotal={core.length} earned={earned} next={next} nextJournalCta={nextCta} onNextQuest={goToQuest} />
+      <QuestsHeader earned={earned} />
 
-      <TodayView
-        core={core}
-        bonus={bonus}
-        replacedFrom={replacedFrom}
-        busyId={busyId}
-        mode={mode}
-        nextQuestId={next.kind === "quest" || next.kind === "journal" ? next.quest.id : undefined}
-        snapshot={snapshot}
-        onActivate={changeMode}
-        onComplete={complete}
-        onPass={pass}
-        onReplace={replace}
-      />
+      <div ref={tabsRef} className="scroll-mt-4">
+        <HubTabs value={activeTab} onChange={setTab} label={h.tabsLabel} items={tabItems} />
+      </div>
 
-      <section aria-labelledby="progress-title" className="space-y-3 border-t border-line/70 pt-6">
-        <h2 id="progress-title" className="text-xs font-semibold uppercase tracking-[0.12em] text-mu">{t.q2.page.progress}</h2>
-        <Tabs<QuestsTab>
-          items={TABS.map((id) => ({ id, label: t.tabs[id] }))}
-          value={activeTab}
-          onChange={setActiveTab}
-          label={t.q1.tabsLabel}
-          idPrefix="quests"
-        />
-        <div role="tabpanel" id={`quests-panel-${activeTab}`} aria-labelledby={`quests-tab-${activeTab}`} className="min-w-0">
-          {activeTab === "week" && <WeekTab days={days} weekCount={weekCount} snapshot={snapshot} />}
-          {activeTab === "path" && <PathTab />}
-          {activeTab === "discipline" && <DisciplineTab grid={grid} />}
-          {activeTab === "history" && <HistoryTab />}
-        </div>
-      </section>
+      <div role="tabpanel" id={`quests-panel-${activeTab}`} aria-labelledby={`quests-tab-${activeTab}`} className="min-w-0 pt-1" data-testid="hub-panel" data-tab={activeTab}>
+        <HubColumns main={panels[activeTab].main} rail={panels[activeTab].rail} railLabel={h.rail} />
+      </div>
 
-      <p className="flex items-center justify-center gap-2 text-xs text-mu" data-testid="device-note">
+      <p className="flex items-center justify-center gap-2 pt-2 text-xs text-mu" data-testid="device-note">
         <HardDrive size={13} aria-hidden="true" className="shrink-0" />
         {t.q2.page.device}
       </p>
