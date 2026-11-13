@@ -7,6 +7,7 @@ import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { formatNumber, formatString } from "@/lib/i18n";
 import { GAME_CONFIG } from "@/lib/game-config";
+import { selfReportXpOn } from "@/lib/game";
 import { QUEST_POOL, type QuestTemplate } from "@/lib/quests";
 import { endOfDayRitual, morningProtocol, noTradesOn, reasonFor, type DayMode, type JournalSnapshot } from "@/lib/quest-engine";
 import { buttonClasses } from "@/components/ui/Button";
@@ -84,9 +85,14 @@ export function TodayTab({ core, bonus, replacedFrom, earned, busyId, mode, mode
     <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
       <div className="min-w-0 space-y-4">
         <ModeSwitch mode={mode} locked={modeLocked} busy={busyId === "mode"} backMode={gameState.questDay?.modeBeforeRest ?? "trading"} onChange={onMode} />
-        <p className="text-sm text-mu" data-testid="today-earned">
-          {formatString(t.earned, { xp: formatNumber(lang, earned.xp), coins: formatNumber(lang, earned.coins) })}
-        </p>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <p className="text-sm text-mu" data-testid="today-earned">
+            {formatString(t.earned, { xp: formatNumber(lang, earned.xp), coins: formatNumber(lang, earned.coins) })}
+          </p>
+          <p className="text-sm text-mu" data-testid="self-cap" title={formatString(q2.selfCap.note, { cap: GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP })}>
+            {formatString(q2.selfCap.progress, { xp: selfReportXpOn(gameState, gameDay), cap: GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP })}
+          </p>
+        </div>
 
         {mode === "rest" ? (
           <div className="rounded-lg border border-line bg-s1 px-5 py-10 text-center" data-testid="rest-panel">
@@ -150,6 +156,7 @@ export function TodayTab({ core, bonus, replacedFrom, earned, busyId, mode, mode
           </Link>
         </div>
         <p className="rounded-lg bg-s2/60 p-3 text-xs text-mu">{t.restHint}</p>
+        <p className="rounded-lg bg-s2/60 p-3 text-xs text-mu">{formatString(q2.selfCap.note, { cap: GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP })}</p>
       </aside>
     </div>
   );

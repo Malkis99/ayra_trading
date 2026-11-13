@@ -135,6 +135,22 @@ test.describe("Quest Engine (Q2)", () => {
     await expect(page.getByTestId("objective-tradeLimit")).toHaveAttribute("data-state", "insufficientData");
   });
 
+  test("the daily cap on self-report XP (90): the rest of it is given, then the quest still counts with 0 XP", async ({ context, page }) => {
+    const earlier = { questId: "q_earlier", questTitle: "Earlier", category: "Mental", xp: 80, coins: 0, completedAt: today, at: `${today}T06:00:00.000Z` };
+    await seedGame(context, baseGame({ lastQuestDate: today, history: [earlier], completedQuestsToday: { q_earlier: true } }), { ayra_journal_v1: journal() });
+    await page.goto("/quests");
+    await expect(page.getByTestId("self-cap")).toHaveText("XP за самоотчёты сегодня: 80 из 90");
+    await expandBonus(page);
+    const card = page.locator('[data-testid^="quest-card-"]').filter({ has: page.getByTestId("quest-badge-self") }).filter({ hasNot: page.getByTestId("quest-done") }).first();
+    const id = ((await card.getAttribute("data-testid")) || "").replace("quest-card-", "");
+    const xp0 = totalXp(await game(page));
+    await card.getByRole("button", { name: "Выполнить" }).click();
+    await expect(page.getByText("Задание отмечено: +10 XP — дневной лимит XP за самоотчёты (90) достигнут")).toBeVisible();
+    await expect(page.getByTestId(`quest-card-${id}`).getByTestId("quest-done")).toBeVisible();
+    expect(totalXp(await game(page)) - xp0).toBe(10);
+    await expect(page.getByTestId("self-cap")).toHaveText("XP за самоотчёты сегодня: 90 из 90");
+  });
+
   test("two tabs: a reward in one tab locks the mode change in the other (checked on fresh data)", async ({ context }) => {
     await seedGame(context, baseGame({ lastQuestDate: yesterday }), { ayra_journal_v1: journal() });
     const a = await context.newPage();

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { simulate, withSelfCap } from "./econ-sim";
 import { GAME_CONFIG } from "./game-config";
 
-// Properties of the CURRENT rules (no new cap is applied — docs/quests-2.0-plan.md, 5.3). If a future change breaks one
+// Properties of the CURRENT rules, including the approved self-report XP cap (docs/quests-2.0-plan.md). If a future change breaks one
 // of them, the economy changed and needs the owner's decision.
 describe("economy simulation on the real game rules", () => {
   const days = 28;
@@ -15,6 +15,10 @@ describe("economy simulation on the real game rules", () => {
     for (const r of [honest, active, farmer]) {
       for (const d of r.log) expect(d.coins).toBeLessThanOrEqual(GAME_CONFIG.DAILY_COIN_CAP + firstActions);
     }
+  });
+
+  it("self-report XP never goes over the approved daily cap", () => {
+    for (const r of [honest, active, farmer]) for (const d of r.log) expect(d.selfXp).toBeLessThanOrEqual(GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP);
   });
 
   it("the farmer gets no more coins than a very active honest player", () => {

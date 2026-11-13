@@ -1289,6 +1289,33 @@ export function completeQuest(
   };
 }
 
+/** XP given today for self-reported quests (from the quest history of the game day). */
+export function selfReportXpOn(state: Pick<GameState, "history">, dayKey: string): number {
+  return (state.history || []).reduce((n, h) => (h.completedAt === dayKey && !APP_CLOSED_QUESTS.has(h.questId) ? n + (h.xp || 0) : n), 0);
+}
+
+/**
+ * A quest the person ticks (self-report): done as before, but its XP counts only up to the daily cap for self-reports
+ * (GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP, owner decision 2026-11-13). Over the cap the quest is still done (the day and
+ * the streak count), with the XP that is left (possibly 0). Never coins. Journal-checked quests are not affected.
+ */
+export function completeSelfReportQuest(
+  state: GameState,
+  questId: string,
+  questTitle: string,
+  category: string,
+  xpAmount: number,
+  currentDate: Date = new Date()
+): ReturnType<typeof completeQuest> & { xpGiven: number; capped: boolean } {
+  const fresh = checkAndApplyDateResets(state, currentDate);
+  if (APP_CLOSED_QUESTS.has(questId)) return { state: fresh, leveledUp: false, newlyUnlocked: [], xpGiven: 0, capped: false };
+  const today = gameDayKey(fresh, currentDate);
+  const left = Math.max(0, GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP - selfReportXpOn(fresh, today));
+  const xp = Math.max(0, Math.min(xpAmount, left));
+  const res = completeQuest(fresh, questId, questTitle, category, xp, 0, currentDate);
+  return { ...res, xpGiven: res.state.completedQuestsToday[questId] && !fresh.completedQuestsToday[questId] ? xp : 0, capped: xp < xpAmount };
+}
+
 export function passQuest(
   state: GameState,
   questId: string,

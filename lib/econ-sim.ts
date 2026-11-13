@@ -1,7 +1,7 @@
 /**
  * Economy simulation (docs/quests-2.0-plan.md, 5.3; Q2). Runs the real game rules of lib/game.ts — no separate model —
- * for three kinds of players over N days and reports XP, coins and where the XP came from. Self-report XP caps are only
- * evaluated here as options for the owner; nothing in the game applies them (no cap is approved yet).
+ * for three kinds of players over N days and reports XP, coins and where the XP came from. The approved daily cap on
+ * self-report XP (GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP, 2026-11-13) is part of those rules.
  *
  * Run: npx vite-node scripts/econ-sim.ts
  */
@@ -9,7 +9,7 @@ import {
   INITIAL_GAME_STATE,
   checkAndApplyDateResets,
   claimDailyReward,
-  completeQuest,
+  completeSelfReportQuest,
   evaluatePlanQuestClosure,
   grantFirstAction,
   recordLoggedTrade,
@@ -74,9 +74,9 @@ function tickSelf(s: GameState, day: string, n: number | "all", time: string): {
   const quests = shownSelf(s, day);
   for (const q of n === "all" ? quests : quests.slice(0, n)) {
     const before = totalXpOf(s);
-    s = completeQuest(s, q.id, q.id, q.category, q.xpReward, 0, at(day, time)).state;
+    s = completeSelfReportQuest(s, q.id, q.id, q.category, q.xpReward, at(day, time)).state;
     // a second tab / double click: the same quest again (blocked by the rules)
-    s = completeQuest(s, q.id, q.id, q.category, q.xpReward, 0, at(day, time)).state;
+    s = completeSelfReportQuest(s, q.id, q.id, q.category, q.xpReward, at(day, time)).state;
     xp += totalXpOf(s) - before;
   }
   return { s, xp };

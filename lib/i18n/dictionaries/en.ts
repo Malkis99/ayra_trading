@@ -2472,6 +2472,11 @@ export const en: Dictionary = {
         studyNote: "Study: research, backtesting and review. No trades needed today.",
       },
       dayShort: { done: "{n}", rest: "rest", shield: "shd", none: "0", noData: "—", today: "now", future: "·", beforeStart: "·" },
+      selfCap: {
+        progress: "Self-report XP today: {xp} of {cap}",
+        capped: "Quest ticked: +{xp} XP — the daily self-report XP limit ({cap}) is reached",
+        note: "Quests you tick yourself give at most {cap} XP a day. Quests checked by the journal are not counted.",
+      },
       reasonLabel: "Why it is not done yet:",
       reasons: {
         selfReport: "tick it when you have done it — it is a self-report",

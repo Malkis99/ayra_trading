@@ -8,6 +8,8 @@ export const GAME_CONFIG = {
   QUEST_XP: 40,
   QUEST_COINS: 10,
   MAX_CUSTOM_GOALS: 5,
+  /** Most XP a day from quests the person ticks (self-reports); journal-checked quests are not counted (owner decision 2026-11-13). */
+  SELF_REPORT_DAILY_XP_CAP: 90,
   /** Longest personal goal title (owner decision 2026-11-12). */
   CUSTOM_GOAL_TITLE_MAX: 80,
 

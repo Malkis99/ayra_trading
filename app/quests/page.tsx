@@ -79,6 +79,10 @@ export default function QuestsPage() {
         return;
       }
       if (!res.completed) return;
+      if (res.capped) {
+        showToast(formatString(t.q2.selfCap.capped, { xp: res.xp, cap: GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP }));
+        return;
+      }
       showToast(res.leveledUp ? formatString(dict.chronicleEvents.levelUp, { level: res.newLevel ?? gameState.level }) : formatString(t.todayTab.rewardXp, { xp: res.xp }));
     });
 

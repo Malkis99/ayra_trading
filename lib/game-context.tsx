@@ -5,7 +5,7 @@ import {
   GameState,
   INITIAL_GAME_STATE,
   checkAndApplyDateResets,
-  completeQuest as completeQuestLogic,
+  completeSelfReportQuest,
   claimDailyReward as claimDailyRewardLogic,
   changePlan as changePlanLogic,
   getCharacterStatus,
@@ -177,6 +177,8 @@ export interface QuestCompletion {
   completed: boolean;
   /** The change could not be saved: nothing was given (try again). */
   saveFailed?: boolean;
+  /** Less XP than the quest's own value: the daily cap on self-report XP was reached. */
+  capped?: boolean;
   xp: number;
   leveledUp: boolean;
   newLevel?: number;
@@ -509,12 +511,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const questChange = useCallback(
     (questId: string, title: string, category: string, xp?: number) =>
       (fresh: GameState): Change<GameState, QuestCompletion> => {
-        const res = completeQuestLogic(fresh, questId, title, category, xp, 0, new Date());
+        // the daily cap on self-report XP is applied here, in the game rules (lib/game.ts), on fresh data
+        const res = completeSelfReportQuest(fresh, questId, title, category, xp ?? 0, new Date());
         const completed = res.state.completedQuestsToday[questId] === true && !fresh.completedQuestsToday[questId];
         if (!completed) return { state: fresh, result: NOT_COMPLETED };
         return {
           state: res.state,
-          result: { completed, xp: res.state.history[0]?.xp ?? 0, leveledUp: res.leveledUp, newLevel: res.newLevel, newlyUnlocked: res.newlyUnlocked },
+          result: { completed, xp: res.xpGiven, capped: res.capped, leveledUp: res.leveledUp, newLevel: res.newLevel, newlyUnlocked: res.newlyUnlocked },
         };
       },
     []

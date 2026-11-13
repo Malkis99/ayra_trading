@@ -15,6 +15,8 @@ export interface RewardOutcome {
   newlyUnlocked: string[];
   /** Could not be saved: nothing was given (try again). */
   saveFailed?: boolean;
+  /** Less XP than the quest's value: the daily cap on self-report XP was reached. */
+  capped?: boolean;
 }
 
 export interface RewardService {

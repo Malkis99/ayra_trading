@@ -4,6 +4,8 @@ import {
   INITIAL_GAME_STATE,
   checkAndApplyDateResets,
   completeQuest,
+  completeSelfReportQuest,
+  selfReportXpOn,
   replaceQuest,
   setDayMode,
   setTradingDays,
@@ -157,6 +159,43 @@ describe("day modes", () => {
     if (r.success) expect(poolForMode("recovery").map((q) => q.id)).toContain(r.replacementId);
     const set = getTodaysQuests("2026-11-12", r.state.questReplacements, r.state.questDay);
     expect(set.core.length + set.bonus.length).toBe(shown.length);
+  });
+});
+
+describe("daily cap on self-report XP (owner decision 2026-11-13: 90)", () => {
+  const now = at("2026-11-12T09:00:00Z");
+  it("gives XP up to the cap; over it the quest is done with the XP left (possibly 0); never coins", () => {
+    let s = fresh({ lastQuestDate: "2026-11-11" });
+    const coins = s.coins;
+    const a = completeSelfReportQuest(s, "q_backtest", "a", "Discipline", 50, now);
+    expect(a).toMatchObject({ xpGiven: 50, capped: false });
+    s = a.state;
+    const b = completeSelfReportQuest(s, "q_gym", "b", "Physical", 45, now);
+    expect(b).toMatchObject({ xpGiven: 40, capped: true });
+    s = b.state;
+    const c = completeSelfReportQuest(s, "q_walk", "c", "Physical", 30, now);
+    expect(c).toMatchObject({ xpGiven: 0, capped: true });
+    expect(c.state.completedQuestsToday.q_walk).toBe(true); // the day still counts
+    expect(selfReportXpOn(c.state, "2026-11-12")).toBe(90);
+    expect(c.state.coins).toBe(coins);
+  });
+
+  it("a double click adds nothing; journal-checked quests are not counted; the next day starts again", () => {
+    let s = fresh({ lastQuestDate: "2026-11-11" });
+    s = completeQuest(s, "q_bias", "Bias", "Trading", 40, 10, now).state; // journal-checked: outside the cap
+    s = completeSelfReportQuest(s, "q_backtest", "a", "Discipline", 50, now).state;
+    const again = completeSelfReportQuest(s, "q_backtest", "a", "Discipline", 50, now);
+    expect(again.xpGiven).toBe(0);
+    expect(selfReportXpOn(again.state, "2026-11-12")).toBe(50);
+    const next = completeSelfReportQuest(again.state, "q_gym", "b", "Physical", 45, at("2026-11-13T09:00:00Z"));
+    expect(next.xpGiven).toBe(45);
+  });
+
+  it("journal-checked quests cannot be ticked through the self-report path", () => {
+    const s = fresh({ lastQuestDate: "2026-11-11" });
+    const r = completeSelfReportQuest(s, "q_bias", "Bias", "Trading", 40, now);
+    expect(r.xpGiven).toBe(0);
+    expect(r.state.completedQuestsToday.q_bias).toBeUndefined();
   });
 });
 
