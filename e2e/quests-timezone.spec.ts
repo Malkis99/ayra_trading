@@ -37,7 +37,7 @@ test.describe("Game day and time zones", () => {
     await page.goto("/quests");
     await expect.poll(async () => (await readGame(page)).lastQuestDate).toBe("2026-11-13");
     const card = page.locator('[data-testid^="quest-card-"]').filter({ has: page.getByTestId("quest-badge-self") }).first();
-    await card.getByRole("button", { name: "Выполнить" }).click();
+    await card.getByTestId("quest-complete").click();
     await expect(card.getByTestId("quest-done")).toBeVisible();
     const xp1 = totalXp(await readGame(page));
 
@@ -56,7 +56,7 @@ test.describe("Game day and time zones", () => {
     }
     // the quest done earlier stays done, the others stay open
     await expect(page.getByTestId("quest-done").first()).toBeVisible();
-    await expect(page.locator('[data-testid^="quest-card-"]').filter({ has: page.getByTestId("quest-badge-self") }).getByRole("button", { name: "Выполнить" }).first()).toBeVisible();
+    await expect(page.locator('[data-testid^="quest-card-"]').filter({ has: page.getByTestId("quest-badge-self") }).getByTestId("quest-complete").first()).toBeVisible();
   });
 
   test("midnight while the tab is open: a new day once, yesterday's rewards are not given again", async ({ context, page }) => {
@@ -65,7 +65,7 @@ test.describe("Game day and time zones", () => {
     await page.goto("/quests");
     const card = page.locator('[data-testid^="quest-card-"]').filter({ has: page.getByTestId("quest-badge-self") }).first();
     const id = ((await card.getAttribute("data-testid")) || "").replace("quest-card-", "");
-    await card.getByRole("button", { name: "Выполнить" }).click();
+    await card.getByTestId("quest-complete").click();
     await expect(card.getByTestId("quest-done")).toBeVisible();
     const xpBefore = totalXp(await readGame(page));
 

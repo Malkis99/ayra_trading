@@ -166,3 +166,37 @@ html[data-market-fullscreen] main { z-index: 95; }
     font-size: 9px;
   }
 }
+
+/* Quest Hub mission rows (docs/quest-hub-plan.md, 2–3): the layout follows the width of the missions column, not the
+   window. Narrow (a phone): the reward sits with the source; one wide button and the «…» menu go under the text. Middle: the
+   reward and the button under the text. Wide: one line — number, text, reward, button, menu. */
+.missions { container-type: inline-size; }
+.mission-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "num body body" "foot foot menu"; column-gap: 0.75rem; align-items: start; padding: 0.875rem; }
+.mission-row .m-num { grid-area: num; }
+.mission-row .m-body { grid-area: body; }
+.mission-row .m-menu { grid-area: menu; align-self: center; margin: 0.75rem -0.25rem 0 0; }
+.mission-row .m-foot { grid-area: foot; display: flex; align-items: center; margin-top: 0.75rem; }
+.mission-row .m-foot > .m-reward { display: none; }
+.mission-row .m-foot > .m-action { flex: 1 1 auto; }
+.mission-row .m-foot > .m-action > * { width: 100%; }
+.mission-row[data-done="true"] .m-foot,
+.mission-row[data-done="true"] .m-meta { display: none; }
+@container (min-width: 480px) {
+  .mission-row { grid-template-areas: "num body menu" ". foot foot"; column-gap: 1rem; padding: 1rem 1.25rem; }
+  .mission-row .m-menu { align-self: start; margin: -0.25rem -0.375rem 0 0; }
+  .mission-row .m-foot { justify-content: space-between; gap: 1rem; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid rgb(var(--c-line) / 0.6); }
+  .mission-row .m-foot > .m-reward { display: inline; }
+  .mission-row .m-foot > .m-action { flex: 0 0 auto; }
+  .mission-row .m-foot > .m-action > * { width: 212px; }
+  .mission-row .m-reward-inline { display: none; }
+  .mission-row[data-done="true"] .m-meta { display: flex; }
+}
+@container (min-width: 760px) {
+  .mission-row { grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "num body foot menu"; align-items: center; }
+  .mission-row .m-menu { align-self: center; margin: 0; }
+  .mission-row .m-foot { margin: 0; padding: 0; border: 0; gap: 1.25rem; }
+  /* a done row keeps its reward in the same column as the others (no button, no menu) */
+  .mission-row[data-done="true"] .m-foot { display: flex; padding-right: calc(40px + 1rem); }
+  .mission-row[data-done="true"] .m-foot::after { content: ""; width: 212px; }
+  .mission-row[data-done="true"] .m-done-reward { display: none; }
+}

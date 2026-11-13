@@ -60,11 +60,9 @@ export function baseGame(over: Record<string, unknown> = {}) {
   };
 }
 
-/** Opens the bonus quests on «Today» (closed by default), so every quest of the day is on screen. */
+/** Waits for the extras of «Today» (QH-2: always open, challenges and habits apart), so every quest of the day is on screen. */
 export async function expandBonus(page: Page) {
-  const toggle = page.getByRole("button", { name: /^Дополнительно/ });
-  await expect(toggle).toBeVisible();
-  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(page.getByTestId("extras-challenges")).toBeVisible();
 }
 
 /** The first self-reported (ticked by hand) quest card on «Today» that is not done yet (bonus quests opened). */

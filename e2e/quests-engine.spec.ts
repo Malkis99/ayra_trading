@@ -62,7 +62,7 @@ test.describe("Quest Engine (Q2)", () => {
     await expect(page.getByTestId("mission-morning_protocol")).toHaveCount(0);
     await expect(page.getByTestId("mission-eod_ritual")).toBeVisible();
     await expect(page.getByTestId("mode-panel").getByTestId("quest-preview-only").first()).toBeVisible();
-    await expect(page.getByTestId("mode-panel").getByRole("button", { name: "Выполнить" })).toHaveCount(0);
+    await expect(page.getByTestId("mode-panel").getByTestId("quest-complete")).toHaveCount(0);
     const after = await game(page);
     expect(after.questDay).toEqual(before.questDay);
     expect(totalXp(after)).toBe(totalXp(before));
@@ -80,7 +80,7 @@ test.describe("Quest Engine (Q2)", () => {
     const core = page.locator('[data-testid="mode-panel"] [data-testid^="quest-card-"]');
     const card = core.filter({ has: page.getByTestId("quest-badge-self") }).first();
     const doneId = ((await card.getAttribute("data-testid")) || "").replace("quest-card-", "");
-    await card.getByRole("button", { name: "Выполнить" }).click();
+    await card.getByTestId("quest-complete").click();
     await expect(card.getByTestId("quest-done")).toBeVisible();
     await expect.poll(async () => totalXp(await game(page))).toBeGreaterThan(xp0);
     const paid = await game(page);
@@ -132,13 +132,35 @@ test.describe("Quest Engine (Q2)", () => {
     await expect.poll(() => new URL(page.url()).searchParams.get("focus")).toBeNull();
   });
 
-  test("the next step of a trading morning is the day plan, not an evening habit (E2)", async ({ context, page }) => {
+  test("the next step of a trading morning is the day plan, not an evening habit (E2), marked in its own row", async ({ context, page }) => {
     const questDay = { day: today, mode: "trading", catalogVersion: 2, core: ["q_sleep_prep", "q_logic_puzzle", "q_stretching"], bonus: ["q_gym"] };
     await seedGame(context, baseGame({ lastQuestDate: today, questDay }), { ayra_journal_v1: journal() });
     await page.goto("/quests");
-    const next = page.getByTestId("hero-next");
-    await expect(next).toHaveAttribute("href", "/journal?tab=plan&focus=bias");
-    await expect(next).not.toContainText("сну");
+    // QH-2: no separate next-step bar; the day plan step is marked and has the primary button
+    await expect(page.getByTestId("next-step")).toHaveCount(0);
+    const bias = page.getByTestId("mission-step-bias");
+    await expect(bias).toHaveAttribute("data-next", "true");
+    await expect(bias).toContainText("Следующий шаг");
+    await expect(page.getByTestId("mission-step-go-bias")).toHaveAttribute("href", "/journal?tab=plan&focus=bias");
+    await expect(page.locator('[data-testid^="quest-card-"][data-state="next"]')).toHaveCount(0);
+    await expect(page.locator('[aria-current="step"]')).toHaveCount(1);
+  });
+
+  test("a mission that is the next step is marked in its row, only once (QH-2)", async ({ context, page }) => {
+    const questDay = { day: today, mode: "trading", catalogVersion: 2, core: ["q_riskcheck", "q_logic_puzzle", "q_stretching"], bonus: ["q_gym"] };
+    await seedGame(context, baseGame({ lastQuestDate: today, questDay, completedQuestsToday: { q_bias: true } }), { ayra_journal_v1: journal() });
+    await page.goto("/quests");
+    const risk = page.getByTestId("quest-card-q_riskcheck");
+    await expect(risk).toHaveAttribute("data-state", "next");
+    await expect(risk).toContainText("Следующий шаг");
+    await expect(risk.getByTestId("quest-criterion")).toHaveText("Готово, когда: в плане дня заданы лимиты риска и в чек-листе отмечена их проверка");
+    await expect(page.locator('[aria-current="step"]')).toHaveCount(1);
+    await expect(page.getByTestId("mission-step-risk")).not.toHaveAttribute("data-next", "true");
+    // a self-report says so and never looks like a journal check
+    const puzzle = page.getByTestId("quest-card-q_logic_puzzle");
+    await expect(puzzle.getByTestId("quest-badge-self")).toHaveText("Самоотчёт");
+    await expect(puzzle.getByTestId("quest-badge-journal")).toHaveCount(0);
+    await expect(puzzle.getByTestId("quest-complete")).toHaveAccessibleName("Отметить выполнение: Разбор торговой модели");
   });
 
   test("the morning protocol follows the journal's day plan and explains what is missing", async ({ context, page }) => {
@@ -209,16 +231,16 @@ test.describe("Quest Engine (Q2)", () => {
     const earlier = { questId: "q_earlier", questTitle: "Earlier", category: "Mental", xp: 80, coins: 0, completedAt: today, at: `${today}T06:00:00.000Z` };
     await seedGame(context, baseGame({ lastQuestDate: today, history: [earlier], completedQuestsToday: { q_earlier: true } }), { ayra_journal_v1: journal() });
     await page.goto("/quests");
-    await expect(page.getByTestId("self-cap")).toHaveText("Самоотчёты: 80 из 90 XP");
+    await expect(page.getByTestId("self-cap")).toHaveText("Самоотчёты сегодня: 80 из 90 XP");
     await expandBonus(page);
     const card = page.locator('[data-testid^="quest-card-"]').filter({ has: page.getByTestId("quest-badge-self") }).filter({ hasNot: page.getByTestId("quest-done") }).first();
     const id = ((await card.getAttribute("data-testid")) || "").replace("quest-card-", "");
     const xp0 = totalXp(await game(page));
-    await card.getByRole("button", { name: "Выполнить" }).click();
+    await card.getByTestId("quest-complete").click();
     await expect(page.getByText("Задание отмечено: +10 XP — дневной лимит XP за самоотчёты (90) достигнут")).toBeVisible();
     await expect(page.getByTestId(`quest-card-${id}`).getByTestId("quest-done")).toBeVisible();
     expect(totalXp(await game(page)) - xp0).toBe(10);
-    await expect(page.getByTestId("self-cap")).toHaveText("Самоотчёты: 90 из 90 XP");
+    await expect(page.getByTestId("self-cap")).toHaveText("Самоотчёты сегодня: 90 из 90 XP");
   });
 
   test("two tabs: a reward in one tab and a mode change in the other — the reward is kept once, the slot stays (fresh data)", async ({ context }) => {
@@ -231,7 +253,7 @@ test.describe("Quest Engine (Q2)", () => {
     await expect(b.getByTestId("quests-hero")).toBeVisible();
     const card = a.locator('[data-testid="mode-panel"] [data-testid^="quest-card-"]').filter({ has: a.getByTestId("quest-badge-self") }).first();
     const doneId = ((await card.getAttribute("data-testid")) || "").replace("quest-card-", "");
-    await card.getByRole("button", { name: "Выполнить" }).click();
+    await card.getByTestId("quest-complete").click();
     await expect(card.getByTestId("quest-done")).toBeVisible();
     await expect.poll(async () => (await game(a)).completedQuestsToday[doneId]).toBe(true);
     const paid = await game(a);

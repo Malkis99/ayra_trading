@@ -18,7 +18,7 @@ async function selfQuestId(page: Page) {
 }
 
 const completeIn = (page: Page, id: string, tolerant = false) => {
-  const click = page.getByTestId(`quest-card-${id}`).getByRole("button", { name: "Выполнить" }).click({ timeout: tolerant ? 3000 : undefined });
+  const click = page.getByTestId(`quest-card-${id}`).getByTestId("quest-complete").click({ timeout: tolerant ? 3000 : undefined });
   // at the same moment the other tab may already show it done (its button is gone): that is fine
   return tolerant ? click.catch(() => undefined) : click;
 };
