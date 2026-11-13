@@ -7,6 +7,7 @@ import {
   generateDaySet,
   legacyDaySet,
   poolForMode,
+  QUEST_CATALOG,
   type DayMode,
   type DaySet,
   type WeekChallenge,
@@ -1298,6 +1299,8 @@ export function selfReportXpOn(state: Pick<GameState, "history">, dayKey: string
  * A quest the person ticks (self-report): done as before, but its XP counts only up to the daily cap for self-reports
  * (GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP, owner decision 2026-11-13). Over the cap the quest is still done (the day and
  * the streak count), with the XP that is left (possibly 0). Never coins. Journal-checked quests are not affected.
+ * Only catalog quests confirmed by a self-report go this way, never above their catalog XP: journal quests and
+ * composite missions (which have no reward of their own) cannot be ticked.
  */
 export function completeSelfReportQuest(
   state: GameState,
@@ -1308,12 +1311,14 @@ export function completeSelfReportQuest(
   currentDate: Date = new Date()
 ): ReturnType<typeof completeQuest> & { xpGiven: number; capped: boolean } {
   const fresh = checkAndApplyDateResets(state, currentDate);
-  if (APP_CLOSED_QUESTS.has(questId)) return { state: fresh, leveledUp: false, newlyUnlocked: [], xpGiven: 0, capped: false };
+  const def = QUEST_CATALOG.find((d) => d.id === questId && d.kind === "daily" && d.confirmation === "self");
+  if (!def || APP_CLOSED_QUESTS.has(questId)) return { state: fresh, leveledUp: false, newlyUnlocked: [], xpGiven: 0, capped: false };
+  const asked = Math.max(0, Math.min(xpAmount, def.template?.xpReward ?? 0));
   const today = gameDayKey(fresh, currentDate);
   const left = Math.max(0, GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP - selfReportXpOn(fresh, today));
-  const xp = Math.max(0, Math.min(xpAmount, left));
+  const xp = Math.min(asked, left);
   const res = completeQuest(fresh, questId, questTitle, category, xp, 0, currentDate);
-  return { ...res, xpGiven: res.state.completedQuestsToday[questId] && !fresh.completedQuestsToday[questId] ? xp : 0, capped: xp < xpAmount };
+  return { ...res, xpGiven: res.state.completedQuestsToday[questId] && !fresh.completedQuestsToday[questId] ? xp : 0, capped: xp < asked };
 }
 
 export function passQuest(

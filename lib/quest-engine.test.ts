@@ -101,6 +101,28 @@ describe("the day set is generated once and saved", () => {
     s = checkAndApplyDateResets(s, at("2026-11-14T09:00:00Z")); // Saturday
     expect(s.questDay?.mode).toBe("study");
   });
+
+  it("changing trading days many times (owner decision 2026-11-13: no frequency limit) opens no quests or rewards and keeps the past", () => {
+    // account in New York: 2026-11-14 03:00 UTC is still Friday 13 there
+    let s = checkAndApplyDateResets(
+      { ...INITIAL_GAME_STATE, createdAt: "2026-10-01", lastQuestDate: "2026-11-12", profile: { ...INITIAL_GAME_STATE.profile, timezone: "America/New_York" } } as GameState,
+      at("2026-11-13T15:00:00Z")
+    );
+    s = completeQuest(s, "q_bias", "Bias", "Trading", 40, 10, at("2026-11-13T15:01:00Z")).state;
+    const before = { day: s.questDay, done: s.completedQuestsToday, xp: s.xp, coins: s.coins, level: s.level, history: s.history };
+    for (const days of [[0], [0, 1, 2, 3, 4], [5, 6], [0, 1, 2, 3, 4, 5, 6], [4]]) s = setTradingDays(s, days);
+    s = checkAndApplyDateResets(s, at("2026-11-14T03:00:00Z")); // the same game day in the account time zone
+    expect(s.questDay).toEqual(before.day);
+    expect(s.completedQuestsToday).toEqual(before.done);
+    expect([s.xp, s.coins, s.level]).toEqual([before.xp, before.coins, before.level]);
+    expect(s.history).toEqual(before.history);
+    expect(s.tradingDays).toEqual([4]);
+    // the next game day (Saturday in New York) follows the last schedule: study, not trading; nothing is paid for it
+    s = checkAndApplyDateResets(s, at("2026-11-14T15:00:00Z"));
+    expect(s.questDay?.day).toBe("2026-11-14");
+    expect(s.questDay?.mode).toBe("study");
+    expect([s.xp, s.coins, s.level]).toEqual([before.xp, before.coins, before.level]);
+  });
 });
 
 describe("day modes", () => {
@@ -196,6 +218,19 @@ describe("daily cap on self-report XP (owner decision 2026-11-13: 90)", () => {
     const r = completeSelfReportQuest(s, "q_bias", "Bias", "Trading", 40, now);
     expect(r.xpGiven).toBe(0);
     expect(r.state.completedQuestsToday.q_bias).toBeUndefined();
+  });
+
+  it("composite missions have no reward of their own and cannot be ticked; XP never goes above the catalog rate", () => {
+    const s = fresh({ lastQuestDate: "2026-11-11" });
+    for (const id of ["morning_protocol", "eod_ritual", "not_a_quest"]) {
+      const r = completeSelfReportQuest(s, id, id, "Trading", 40, now);
+      expect(r.xpGiven).toBe(0);
+      expect(r.state.completedQuestsToday[id]).toBeUndefined();
+      expect([r.state.xp, r.state.coins]).toEqual([s.xp, s.coins]);
+    }
+    const gym = QUEST_CATALOG.find((d) => d.id === "q_gym")!.template!;
+    const r = completeSelfReportQuest(s, "q_gym", "Gym", "Physical", 9999, now);
+    expect(r.xpGiven).toBe(gym.xpReward);
   });
 });
 
