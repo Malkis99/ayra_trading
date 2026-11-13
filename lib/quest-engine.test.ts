@@ -7,6 +7,7 @@ import {
   completeSelfReportQuest,
   selfReportXpOn,
   replaceQuest,
+  modeSetPreview,
   setDayMode,
   setTradingDays,
   toggleRestDay,
@@ -36,6 +37,17 @@ function fresh(over: Partial<GameState> = {}, nowIso = "2026-11-12T09:00:00Z"): 
   const base = { ...INITIAL_GAME_STATE, createdAt: "2026-10-01", profile: { ...INITIAL_GAME_STATE.profile, timezone: "UTC" }, ...over } as GameState;
   return checkAndApplyDateResets(base, at(nowIso));
 }
+
+/** The day set of the active mode, chosen by the test (the quests a person sees and can tick). */
+function withSet(s: GameState, core: string[], bonus: string[] = [], mode: "trading" | "study" | "recovery" = "trading"): GameState {
+  return { ...s, questDay: { day: s.lastQuestDate!, mode, catalogVersion: 2, core, bonus } };
+}
+
+/** Everything the player owns that a quest change must never touch (after the usual day check, which only adds titles). */
+const kept = (raw: GameState, when = at("2026-11-12T09:00:00Z")) => {
+  const s = checkAndApplyDateResets(raw, when);
+  return JSON.stringify([s.xp, s.coins, s.level, s.history, s.achievements, s.equipment, s.loadouts, s.unlockedTitles, s.chronicle, s.currentStreak, s.bestStreak, s.streakShieldsAvailable]);
+};
 
 describe("catalog and modes", () => {
   it("never offers a quest that needs a trade; rest offers nothing; study and recovery are subsets", () => {
@@ -142,22 +154,124 @@ describe("day modes", () => {
     for (const id of study.core) expect(allowed.has(id)).toBe(true);
   });
 
-  it("after a reward only rest (and back); a mode change never gives a reward", () => {
+  it("after a reward any mode can be made active: the done quest keeps its slot and nothing is paid again (UX3-1)", () => {
     let s = fresh({ lastQuestDate: "2026-11-11" });
     const selfQuest = s.questDay!.core.find((id) => !APP_CLOSED_QUESTS.has(id))!;
-    s = completeQuest(s, selfQuest, "x", "Mental", 30, 0, now).state;
-    const xp = s.xp;
-    const locked = setDayMode(s, "study", now);
-    expect(locked).toMatchObject({ ok: false, reason: "locked" });
-    const rest = setDayMode(s, "rest", now);
-    expect(rest.ok).toBe(true);
-    expect(rest.state.isRestDay).toBe(true);
-    const back = setDayMode(rest.state, "trading", now);
-    expect(back.ok).toBe(true);
-    expect(back.state.isRestDay).toBe(false);
-    expect(back.state.questDay?.core).toEqual(s.questDay?.core);
-    expect(setDayMode(rest.state, "recovery", now)).toMatchObject({ ok: false, reason: "locked" });
-    expect(back.state.xp).toBe(xp);
+    const slot = s.questDay!.core.indexOf(selfQuest);
+    const r0 = completeSelfReportQuest(s, selfQuest, "x", "Mental", 999, now);
+    expect(r0.xpGiven).toBeGreaterThan(0);
+    s = r0.state;
+    const paid = kept(s);
+    for (const m of ["study", "recovery", "rest", "trading", "study", "rest", "study", "trading"] as const) {
+      const r = setDayMode(s, m, now);
+      expect(r.ok).toBe(true);
+      s = r.state;
+      expect(kept(s)).toBe(paid);
+      expect(s.completedQuestsToday[selfQuest]).toBe(true);
+      if (m === "rest") continue;
+      expect(s.questDay!.mode).toBe(m);
+      expect(s.questDay!.core[slot]).toBe(selfQuest);
+      expect(s.questDay!.core).toHaveLength(3);
+      expect(new Set(s.questDay!.core).size).toBe(3); // never one quest in two slots
+      if (m !== "trading") expect(s.questDay!.carried?.[selfQuest]).toBe("trading");
+    }
+    // the slot is paid: ticking it again (in any mode, any number of times) gives nothing
+    for (let i = 0; i < 3; i++) {
+      const again = completeSelfReportQuest(s, selfQuest, "x", "Mental", 999, now);
+      expect(again.xpGiven).toBe(0);
+      expect(kept(again.state)).toBe(paid);
+    }
+  });
+
+  it("viewing a mode changes nothing; its quests can be ticked only after it is made active", () => {
+    const s = withSet(fresh({ lastQuestDate: "2026-11-11" }), ["q_walk", "q_meditate", "q_nosocial"], ["q_gym"]);
+    const before = JSON.stringify(s);
+    const study = modeSetPreview(s, "study", now);
+    expect(JSON.stringify(s)).toBe(before);
+    const onlyThere = study.core.find((id) => !s.questDay!.core.includes(id) && !s.questDay!.bonus.includes(id) && !APP_CLOSED_QUESTS.has(id))!;
+    expect(onlyThere).toBeDefined();
+    const early = completeSelfReportQuest(s, onlyThere, "x", "Mental", 999, now);
+    expect(early.xpGiven).toBe(0);
+    expect(early.state.completedQuestsToday[onlyThere]).toBeUndefined();
+    const active = setDayMode(s, "study", now).state;
+    expect(active.questDay!.core).toEqual(study.core); // the preview is what activation saves
+    expect(completeSelfReportQuest(active, onlyThere, "x", "Mental", 999, now).xpGiven).toBeGreaterThan(0);
+  });
+
+  it("a rest day accepts no self-report; journal rewards keep working in every mode and are paid once", () => {
+    let s = fresh({ lastQuestDate: "2026-11-11" });
+    const selfQuest = s.questDay!.core.find((id) => !APP_CLOSED_QUESTS.has(id))!;
+    s = setDayMode(s, "rest", now).state;
+    expect(completeSelfReportQuest(s, selfQuest, "x", "Mental", 999, now).xpGiven).toBe(0);
+    s = setDayMode(s, "study", now).state;
+    const coins = s.coins;
+    s = completeQuest(s, "q_bias", "Bias", "Trading", 40, 10, now).state; // the journal closes it in study mode (Q1 rule)
+    expect(s.coins).toBe(coins + 10);
+    for (const m of ["trading", "recovery", "trading"] as const) {
+      s = setDayMode(s, m, now).state;
+      s = completeQuest(s, "q_bias", "Bias", "Trading", 40, 10, now).state; // the journal saves the plan again
+    }
+    expect(s.coins).toBe(coins + 10);
+  });
+
+  it("a slot closed by the journal stays closed in another mode; the other mode's quest for it is not offered", () => {
+    let s = withSet(fresh({ lastQuestDate: "2026-11-11" }), ["q_read_pages", "q_lang_study", "q_reflect"], ["q_backtest"], "study");
+    s = completeQuest(s, "q_reflect", "Review", "Psychology", 40, 10, now).state;
+    const paid = kept(s);
+    s = setDayMode(s, "trading", now).state;
+    expect(s.questDay!.core[2]).toBe("q_reflect");
+    expect(s.questDay!.carried).toEqual({ q_reflect: "study" });
+    expect(kept(s)).toBe(paid);
+    // whatever trading would have put in slot 3 is not part of the set, so it cannot be ticked for that slot
+    const freshTrading = modeSetPreview({ ...s, completedQuestsToday: {} }, "trading", now);
+    const other = freshTrading.core[2];
+    if (other && !s.questDay!.core.includes(other) && !s.questDay!.bonus.includes(other)) {
+      expect(completeSelfReportQuest(s, other, "x", "Mental", 999, now).xpGiven).toBe(0);
+    }
+  });
+
+  it("the game day follows the account time zone: switching late in the evening, then the next day starts clean", () => {
+    let s = checkAndApplyDateResets(
+      { ...INITIAL_GAME_STATE, createdAt: "2026-10-01", lastQuestDate: "2026-11-11", profile: { ...INITIAL_GAME_STATE.profile, timezone: "America/New_York" } } as GameState,
+      at("2026-11-13T03:30:00Z") // 22:30 on the 12th in New York
+    );
+    expect(s.questDay!.day).toBe("2026-11-12");
+    const selfQuest = s.questDay!.core.find((id) => !APP_CLOSED_QUESTS.has(id))!;
+    s = completeSelfReportQuest(s, selfQuest, "x", "Mental", 999, at("2026-11-13T03:31:00Z")).state;
+    s = setDayMode(s, "study", at("2026-11-13T03:40:00Z")).state;
+    expect(s.questDay!.day).toBe("2026-11-12");
+    const paid = s.xp;
+    s = checkAndApplyDateResets(s, at("2026-11-13T05:30:00Z")); // 00:30 on the 13th in New York
+    expect(s.questDay!.day).toBe("2026-11-13");
+    expect(s.questDay!.mode).toBe("trading");
+    expect(s.questDay!.carried).toBeUndefined();
+    expect(s.completedQuestsToday).toEqual({});
+    expect(s.xp).toBe(paid);
+  });
+
+  it("old saves (Q1 day in progress, Q2 day without slot data) switch safely: progress, items and history stay", () => {
+    // Q1: the legacy save with a day already begun
+    const old = JSON.parse(JSON.stringify(legacy)) as GameState;
+    old.lastQuestDate = "2026-11-12";
+    let s = checkAndApplyDateResets(old, at("2026-11-12T09:00:00Z"));
+    expect(s.questDay?.legacy).toBe(true);
+    const before = kept(s);
+    const doneId = Object.keys(s.completedQuestsToday)[0];
+    for (const m of ["study", "recovery", "trading"] as const) {
+      s = setDayMode(s, m, at("2026-11-12T10:00:00Z")).state;
+      expect(kept(s)).toBe(before);
+      expect(s.completedQuestsToday[doneId]).toBe(true);
+      expect(s.questDay!.legacy).toBeUndefined();
+    }
+    // Q2: a saved day with a reward and no `carried` field
+    let q2 = fresh({ lastQuestDate: "2026-11-11" });
+    const selfQuest = q2.questDay!.core.find((id) => !APP_CLOSED_QUESTS.has(id))!;
+    q2 = completeSelfReportQuest(q2, selfQuest, "x", "Mental", 999, now).state;
+    expect(q2.questDay!.carried).toBeUndefined();
+    const q2Before = kept(q2);
+    q2 = setDayMode(JSON.parse(JSON.stringify(q2)), "recovery", now).state;
+    expect(kept(q2)).toBe(q2Before);
+    expect(q2.questDay!.core).toContain(selfQuest);
   });
 
   it("rest keeps the streak but does not grow it (through the mode and through the Q1 toggle)", () => {
@@ -187,7 +301,7 @@ describe("day modes", () => {
 describe("daily cap on self-report XP (owner decision 2026-11-13: 90)", () => {
   const now = at("2026-11-12T09:00:00Z");
   it("gives XP up to the cap; over it the quest is done with the XP left (possibly 0); never coins", () => {
-    let s = fresh({ lastQuestDate: "2026-11-11" });
+    let s = withSet(fresh({ lastQuestDate: "2026-11-11" }), ["q_backtest", "q_gym", "q_walk"]);
     const coins = s.coins;
     const a = completeSelfReportQuest(s, "q_backtest", "a", "Discipline", 50, now);
     expect(a).toMatchObject({ xpGiven: 50, capped: false });
@@ -203,13 +317,14 @@ describe("daily cap on self-report XP (owner decision 2026-11-13: 90)", () => {
   });
 
   it("a double click adds nothing; journal-checked quests are not counted; the next day starts again", () => {
-    let s = fresh({ lastQuestDate: "2026-11-11" });
+    let s = withSet(fresh({ lastQuestDate: "2026-11-11" }), ["q_backtest", "q_gym", "q_walk"]);
     s = completeQuest(s, "q_bias", "Bias", "Trading", 40, 10, now).state; // journal-checked: outside the cap
     s = completeSelfReportQuest(s, "q_backtest", "a", "Discipline", 50, now).state;
     const again = completeSelfReportQuest(s, "q_backtest", "a", "Discipline", 50, now);
     expect(again.xpGiven).toBe(0);
     expect(selfReportXpOn(again.state, "2026-11-12")).toBe(50);
-    const next = completeSelfReportQuest(again.state, "q_gym", "b", "Physical", 45, at("2026-11-13T09:00:00Z"));
+    const tomorrow = withSet(checkAndApplyDateResets(again.state, at("2026-11-13T08:00:00Z")), ["q_gym", "q_walk", "q_read_pages"]);
+    const next = completeSelfReportQuest(tomorrow, "q_gym", "b", "Physical", 45, at("2026-11-13T09:00:00Z"));
     expect(next.xpGiven).toBe(45);
   });
 
@@ -229,7 +344,7 @@ describe("daily cap on self-report XP (owner decision 2026-11-13: 90)", () => {
       expect([r.state.xp, r.state.coins]).toEqual([s.xp, s.coins]);
     }
     const gym = QUEST_CATALOG.find((d) => d.id === "q_gym")!.template!;
-    const r = completeSelfReportQuest(s, "q_gym", "Gym", "Physical", 9999, now);
+    const r = completeSelfReportQuest(withSet(s, ["q_gym", "q_walk", "q_read_pages"]), "q_gym", "Gym", "Physical", 9999, now);
     expect(r.xpGiven).toBe(gym.xpReward);
   });
 });

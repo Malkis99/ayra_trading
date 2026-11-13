@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { INITIAL_GAME_STATE, type GameState } from "./game";
 import { activityGrid, nextStep, todayEarned, weekDays, weekQuestCount } from "./quests-view";
-import { getTodaysQuests } from "./quests";
+import { QUEST_POOL } from "./quests";
 
 const rec = (over: Partial<GameState["dailyStats"][string]> = {}) => ({
   questsCompleted: {},
@@ -64,14 +64,29 @@ describe("quests view: only saved data", () => {
     expect(todayEarned(s, "2026-11-13")).toEqual({ xp: 0, coins: 0 });
   });
 
-  it("the next step: first open core quest, the journal for app-checked ones, rest, done", () => {
-    const { core } = getTodaysQuests(today);
-    const open = nextStep(state({}), core);
-    expect(["quest", "journal"]).toContain(open.kind);
-    const allDone = state({ completedQuestsToday: Object.fromEntries(core.map((q) => [q.id, true])) });
-    expect(nextStep(allDone, core).kind).toBe("done");
-    expect(nextStep(state({ isRestDay: true }), core).kind).toBe("rest");
-    const journalFirst = [{ ...core[0], id: "q_bias" }, ...core.slice(1)];
-    expect(nextStep(state({}), journalFirst)).toMatchObject({ kind: "journal", href: "/journal?tab=plan" });
+  it("the next step: the day's preparation in the journal first, then core quests, the review, evening habits last", () => {
+    const pool = (id: string) => QUEST_POOL.find((q) => q.id === id)!;
+    const core = [pool("q_sleep_prep"), pool("q_logic_puzzle"), pool("q_stretching")];
+    const prep = ["q_bias", "q_riskcheck", "q_reflect"];
+    const doneAll = (ids: string[]) => Object.fromEntries(ids.map((id) => [id, true]));
+
+    // trading morning: the day plan first (E2: never «sleep prep» as the first step), straight to the right block
+    expect(nextStep(state({}), core, "trading")).toMatchObject({ kind: "journal", href: "/journal?tab=plan&focus=bias" });
+    const biasDone = state({ completedQuestsToday: doneAll(["q_bias"]) });
+    expect(nextStep(biasDone, core, "trading")).toMatchObject({ kind: "journal", href: "/journal?tab=plan&focus=limits" });
+    expect(nextStep(biasDone, core, "trading", () => "riskNotChecked")).toMatchObject({ href: "/journal?tab=plan&focus=checklist" });
+    // then core quests, evening habits after the review
+    const prepDone = state({ completedQuestsToday: doneAll(["q_bias", "q_riskcheck"]) });
+    expect(nextStep(prepDone, core, "trading")).toMatchObject({ kind: "quest", quest: { id: "q_logic_puzzle" } });
+    const dayDone = state({ completedQuestsToday: doneAll(["q_bias", "q_riskcheck", "q_logic_puzzle", "q_stretching"]) });
+    expect(nextStep(dayDone, core, "trading")).toMatchObject({ kind: "journal", href: "/journal?tab=plan&focus=review" });
+    const reviewed = state({ completedQuestsToday: doneAll([...prep, "q_logic_puzzle", "q_stretching"]) });
+    expect(nextStep(reviewed, core, "trading")).toMatchObject({ kind: "quest", quest: { id: "q_sleep_prep" } });
+    expect(nextStep(state({ completedQuestsToday: doneAll([...prep, ...core.map((q) => q.id)]) }), core, "trading").kind).toBe("done");
+    // a quest put off for today is never suggested; recovery has no journal preparation; rest
+    expect(nextStep(state({ passedQuestsToday: doneAll(["q_logic_puzzle"]), completedQuestsToday: doneAll(["q_bias", "q_riskcheck"]) }), core, "trading")).toMatchObject({ quest: { id: "q_stretching" } });
+    expect(nextStep(state({}), core, "recovery")).toMatchObject({ kind: "quest", quest: { id: "q_logic_puzzle" } });
+    expect(nextStep(state({ isRestDay: true }), core, "trading").kind).toBe("rest");
+    expect(nextStep(state({}), core, "rest").kind).toBe("rest");
   });
 });

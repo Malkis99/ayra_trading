@@ -8,7 +8,7 @@ import { simulate, type Profile } from "../lib/econ-sim";
 import { GAME_CONFIG } from "../lib/game-config";
 
 const days = Number(process.argv[2]) || 90;
-const profiles: Profile[] = ["honest", "active", "farmer"];
+const profiles: Profile[] = ["honest", "active", "farmer", "hopper"];
 const results = profiles.map((p) => simulate(p, days));
 
 const pad = (s: string | number, n: number) => String(s).padStart(n);

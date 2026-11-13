@@ -5,7 +5,8 @@
  */
 import type { GameState } from "./game";
 import { addDaysToKey, mondayOfKey } from "./day-key";
-import { APP_CLOSED_QUESTS, getTodaysQuests, type QuestTemplate } from "./quests";
+import { APP_CLOSED_QUESTS, QUEST_POOL, getTodaysQuests, type QuestTemplate } from "./quests";
+import type { DayMode, ReasonKey } from "./quest-engine";
 
 export type DayStatus = "done" | "rest" | "shield" | "none" | "noData" | "today" | "future" | "beforeStart";
 
@@ -88,21 +89,50 @@ export type NextStep =
   | { kind: "journal"; quest: QuestTemplate; href: string }
   | { kind: "done" };
 
-/** Where the journal closes each quest the app checks. */
+/** A block of the journal's day plan that a link opens and scrolls to (`/journal?tab=plan&focus=…`). */
+export type PlanFocus = "bias" | "levels" | "events" | "limits" | "checklist" | "review";
+
+export const planHref = (focus: PlanFocus) => `/journal?tab=plan&focus=${focus}`;
+
+/** Where the journal closes each quest the app checks: straight to the field that closes it. */
 export const JOURNAL_LINK: Record<string, string> = {
   q_tradelog: "/journal?tab=trades",
-  q_bias: "/journal?tab=plan",
-  q_riskcheck: "/journal?tab=plan",
-  q_reflect: "/journal?tab=plan",
+  q_bias: planHref("bias"),
+  q_riskcheck: planHref("limits"),
+  q_reflect: planHref("review"),
 };
 
-/** The one useful next action: the first open core quest (a self-reported one, or the journal for app-checked ones). */
-export function nextStep(state: ViewState, core: QuestTemplate[]): NextStep {
-  if (state.isRestDay) return { kind: "rest" };
-  const open = core.find((q) => !state.completedQuestsToday[q.id] && !state.passedQuestsToday[q.id]);
-  if (!open) return { kind: "done" };
-  if (APP_CLOSED_QUESTS.has(open.id)) return { kind: "journal", quest: open, href: JOURNAL_LINK[open.id] || "/journal" };
-  return { kind: "quest", quest: open };
+/** The exact place for a journal quest, from why it is still open (risk: limits first, then the «limits checked» item). */
+export function journalHref(questId: string, reason?: ReasonKey | null): string {
+  if (questId === "q_riskcheck" && reason === "riskNotChecked") return planHref("checklist");
+  return JOURNAL_LINK[questId] || "/journal";
+}
+
+/** Self-reported quests that belong to the evening: never the first suggestion of a day. */
+const EVENING_QUESTS: ReadonlySet<string> = new Set(["q_sleep_prep"]);
+/** Journal steps of the morning protocol (trading days). */
+const PREPARATION: readonly string[] = ["q_bias", "q_riskcheck"];
+
+/**
+ * The one useful next action of the active mode: the day's preparation in the journal first (trading), then the core
+ * quests, then the day review, and evening habits last. Never a quest put off for today.
+ */
+export function nextStep(state: ViewState, core: QuestTemplate[], mode: DayMode = "trading", reasonOf?: (questId: string) => ReasonKey | null): NextStep {
+  if (state.isRestDay || mode === "rest") return { kind: "rest" };
+  const open = (id: string) => !state.completedQuestsToday[id] && !state.passedQuestsToday[id];
+  const tpl = (id: string) => core.find((q) => q.id === id) || QUEST_POOL.find((q) => q.id === id);
+  const reviewOpen = open("q_reflect") && (mode === "trading" || mode === "study" || core.some((q) => q.id === "q_reflect"));
+  const order: string[] = [
+    ...(mode === "trading" ? PREPARATION.filter(open) : []),
+    ...core.filter((q) => open(q.id) && q.id !== "q_reflect" && !EVENING_QUESTS.has(q.id)).map((q) => q.id),
+    ...(reviewOpen ? ["q_reflect"] : []),
+    ...core.filter((q) => open(q.id) && EVENING_QUESTS.has(q.id)).map((q) => q.id),
+  ];
+  const id = order.find((x) => !!tpl(x));
+  const quest = id ? tpl(id) : undefined;
+  if (!quest) return { kind: "done" };
+  if (APP_CLOSED_QUESTS.has(quest.id)) return { kind: "journal", quest, href: journalHref(quest.id, reasonOf?.(quest.id)) };
+  return { kind: "quest", quest };
 }
 
 /** A quest of the history: checked by the journal or ticked by the person. */

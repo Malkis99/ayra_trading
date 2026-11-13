@@ -5,8 +5,7 @@ import { HardDrive } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useJournal } from "@/lib/journal/context";
-import { rewardedToday } from "@/lib/game";
-import { lastWeekTradeCount, pickBoss, type DayMode, type JournalSnapshot } from "@/lib/quest-engine";
+import { lastWeekTradeCount, pickBoss, reasonFor, type DayMode, type JournalSnapshot } from "@/lib/quest-engine";
 import { mondayOfKey } from "@/lib/day-key";
 import { formatString } from "@/lib/i18n";
 import { GAME_CONFIG } from "@/lib/game-config";
@@ -38,7 +37,6 @@ export default function QuestsPage() {
   const grid = useMemo(() => activityGrid(gameState, gameDay, 4), [gameState, gameDay]);
   const weekCount = useMemo(() => weekQuestCount(gameState, gameDay), [gameState, gameDay]);
   const earned = todayEarned(gameState, gameDay);
-  const next = nextStep(gameState, core);
   const coreDone = core.filter((q) => gameState.completedQuestsToday[q.id]).length;
 
   // What the engine reads from the journal (no second journal, no second plan)
@@ -47,7 +45,7 @@ export default function QuestsPage() {
     [trades, plans, weekPlans, noTrades, gameState.profile?.timezone]
   );
   const mode: DayMode = gameState.isRestDay ? "rest" : gameState.questDay?.day === gameDay ? gameState.questDay.mode : "trading";
-  const modeLocked = rewardedToday(gameState, gameDay);
+  const next = nextStep(gameState, core, mode, (id) => reasonFor(id, !!gameState.completedQuestsToday[id], snapshot, gameDay));
 
   // The week challenge is saved once a week, and only when last week's data exists to choose it from
   const week = mondayOfKey(gameDay);
@@ -110,8 +108,7 @@ export default function QuestsPage() {
   const changeMode = (m: DayMode) =>
     runOnce("mode", async () => {
       const res = await setDayMode(m);
-      if (res.ok) showToast(formatString(t.q2.modes.changed, { mode: t.q2.modes[m] }));
-      else showToast(res.reason === "locked" ? t.q2.modes.locked : t.q1.today.notSaved);
+      showToast(res.ok ? formatString(t.q2.modes.changed, { mode: t.q2.modes[m] }) : t.q1.today.notSaved);
     });
 
   const goToQuest = (questId: string) => {
@@ -151,9 +148,8 @@ export default function QuestsPage() {
             earned={earned}
             busyId={busyId}
             mode={mode}
-            modeLocked={modeLocked}
             snapshot={snapshot}
-            onMode={changeMode}
+            onActivate={changeMode}
             onComplete={complete}
             onPass={pass}
             onReplace={replace}

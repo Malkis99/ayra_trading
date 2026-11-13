@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { baseGame, expandBonus, readGame, seedGame, totalXp, utcDay } from "./helpers/quests";
+import { baseGame, expandBonus, readGame, seedGame, totalXp, utcDay, activateMode } from "./helpers/quests";
 
 // One reward per quest across tabs (docs/quests-2.0-plan.md, 4.1): one mutation point, Web Locks, check inside the lock.
 
@@ -58,9 +58,9 @@ test.describe("Quests in several tabs", () => {
     await completeIn(other, ids[0]);
     await expect.poll(async () => (await readGame(other)).completedQuestsToday[ids[0]]).toBe(true);
     // the early tab changes something else: the first reward stays
-    await early.getByTestId("mode-rest").click();
+    await activateMode(early, "rest");
     await expect(early.getByTestId("rest-panel")).toBeVisible();
-    await early.getByTestId("mode-trading").click();
+    await activateMode(early, "trading");
     await expandBonus(early);
     await completeIn(early, ids[1]);
     await expect.poll(async () => Object.keys((await readGame(early)).completedQuestsToday).sort()).toEqual([ids[0], ids[1]].sort());

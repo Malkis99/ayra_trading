@@ -66,6 +66,32 @@ export function TradingPlanTab() {
   // Mode: 'day' | 'week'
   const [mode, setMode] = useState<"day" | "week">("day");
 
+  // A link from Quests (`?focus=limits`) opens the block that closes the quest: scroll to it and focus its first field.
+  // The blocks can appear a moment later (journal data loading), so a few short tries; the parameter is then removed.
+  useEffect(() => {
+    const focus = new URLSearchParams(window.location.search).get("focus");
+    if (!focus || !/^(bias|levels|events|limits|checklist|review)$/.test(focus)) return;
+    let tries = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const go = () => {
+      const el = document.getElementById(`plan-${focus}`);
+      if (!el) {
+        if (++tries < 20) timer = setTimeout(go, 100);
+        return;
+      }
+      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      el.scrollIntoView({ block: "start", behavior: reduce ? "auto" : "smooth" });
+      el.querySelector<HTMLElement>("input, textarea, select, button")?.focus({ preventScroll: true });
+      el.setAttribute("data-focused", "true");
+      timer = setTimeout(() => el.removeAttribute("data-focused"), 2500);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("focus");
+      window.history.replaceState(window.history.state, "", url.toString());
+    };
+    go();
+    return () => clearTimeout(timer);
+  }, []);
+
   // Selected Day (Date object & YYYY-MM-DD string)
   const [selectedDayDate, setSelectedDayDate] = useState<Date>(new Date());
   const dayStr = useMemo(() => {
@@ -739,7 +765,7 @@ export function TradingPlanTab() {
           {/* Card Blocks Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* BLOCK 1: BIAS */}
-            <div className="card p-4 space-y-3 border border-line">
+            <div id="plan-bias" className="scroll-mt-24 data-[focused=true]:ring-2 data-[focused=true]:ring-vi card p-4 space-y-3 border border-line">
               <div className="flex justify-between items-center border-b border-line pb-2">
                 <div className="flex items-center gap-2">
                   <Sparkles size={16} className="text-vi" />
@@ -847,7 +873,7 @@ export function TradingPlanTab() {
             </div>
 
             {/* BLOCK 2: LEVELS */}
-            <div className="card p-4 space-y-3 border border-line">
+            <div id="plan-levels" className="scroll-mt-24 data-[focused=true]:ring-2 data-[focused=true]:ring-vi card p-4 space-y-3 border border-line">
               <div className="flex justify-between items-center border-b border-line pb-2">
                 <div className="flex items-center gap-2">
                   <h4 className="font-bold text-sm text-tx">
@@ -917,7 +943,7 @@ export function TradingPlanTab() {
             </div>
 
             {/* BLOCK 3: EVENTS */}
-            <div className="card p-4 space-y-3 border border-line">
+            <div id="plan-events" className="scroll-mt-24 data-[focused=true]:ring-2 data-[focused=true]:ring-vi card p-4 space-y-3 border border-line">
               <div className="flex justify-between items-center border-b border-line pb-2">
                 <div className="flex items-center gap-2">
                   <h4 className="font-bold text-sm text-tx">
@@ -973,7 +999,7 @@ export function TradingPlanTab() {
             </div>
 
             {/* BLOCK 4: LIMITS */}
-            <div className="card p-4 space-y-3 border border-line">
+            <div id="plan-limits" className="scroll-mt-24 data-[focused=true]:ring-2 data-[focused=true]:ring-vi card p-4 space-y-3 border border-line">
               <div className="flex justify-between items-center border-b border-line pb-2">
                 <h4 className="font-bold text-sm text-tx">
                   {dict.journal.tradingPlan.limitsTitle}
@@ -1115,7 +1141,7 @@ export function TradingPlanTab() {
             </div>
 
             {/* BLOCK 5: CHECKLIST */}
-            <div className="card p-4 space-y-3 border border-line lg:col-span-2">
+            <div id="plan-checklist" className="scroll-mt-24 data-[focused=true]:ring-2 data-[focused=true]:ring-vi card p-4 space-y-3 border border-line lg:col-span-2">
               <div className="flex justify-between items-center border-b border-line pb-2">
                 <div className="flex items-center gap-2">
                   <CheckSquare size={16} className="text-vi" />
@@ -1199,7 +1225,7 @@ export function TradingPlanTab() {
             </div>
 
             {/* BLOCK 7: DAY REVIEW (SECTION 4) */}
-            <div className="card p-5 space-y-4 border border-line lg:col-span-2 bg-s2/40">
+            <div id="plan-review" className="scroll-mt-24 data-[focused=true]:ring-2 data-[focused=true]:ring-vi card p-5 space-y-4 border border-line lg:col-span-2 bg-s2/40">
               <div className="flex justify-between items-center border-b border-line pb-3">
                 <div className="flex items-center gap-2">
                   <h4 className="font-serif font-bold text-base text-tx">
