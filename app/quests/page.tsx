@@ -6,7 +6,7 @@ import { HardDrive } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useJournal } from "@/lib/journal/context";
-import { lastWeekTradeCount, pickBoss, reasonFor, type DayMode, type JournalSnapshot } from "@/lib/quest-engine";
+import { bossConditions, bossState, lastWeekTradeCount, pickBoss, reasonFor, type DayMode, type JournalSnapshot } from "@/lib/quest-engine";
 import { mondayOfKey } from "@/lib/day-key";
 import { formatString } from "@/lib/i18n";
 import { GAME_CONFIG } from "@/lib/game-config";
@@ -26,8 +26,8 @@ import { questTitle } from "@/components/quests/quest-text";
 /** Quest Hub (docs/quest-hub-plan.md): the profile strip, four top-level tabs that switch the page, two columns. */
 export default function QuestsPage() {
   const { dict, lang, showToast } = useApp();
-  const { gameState, gameDay, rewards, passQuest, replaceQuest, setDayMode, fixWeekChallenge } = useGame();
-  const { trades, plans, weekPlans, noTrades } = useJournal();
+  const { gameState, gameDay, rewards, passQuest, replaceQuest, setDayMode, fixWeekChallenge, recordWeekBossResult } = useGame();
+  const { trades, plans, weekPlans, noTrades, ready: journalReady } = useJournal();
   const searchParams = useSearchParams();
   const activeTab = parseHubTab(searchParams.get("tab"));
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -69,6 +69,14 @@ export default function QuestsPage() {
     if (gameState.questWeek?.week === week || !hasLastWeek) return;
     fixWeekChallenge({ week, boss: pickBoss(snapshot, gameDay) });
   }, [week, hasLastWeek, gameState.questWeek?.week, fixWeekChallenge, snapshot, gameDay]);
+
+  // A closed week keeps its challenge result, written once by the journal of this device (QH-3; nothing is given)
+  const closedWeek = gameState.questWeeks?.find((w) => w.week < week && w.boss && !w.bossResult);
+  useEffect(() => {
+    if (!journalReady || !closedWeek?.boss) return;
+    const conditions = bossConditions(closedWeek.boss, snapshot, closedWeek.week);
+    recordWeekBossResult(closedWeek.week, { state: bossState(conditions), conditions, at: new Date().toISOString() });
+  }, [journalReady, closedWeek, snapshot, recordWeekBossResult]);
 
   // One request at a time per page: a double click does not queue a second one (the store also checks it)
   const runOnce = async (id: string, fn: () => Promise<void>) => {

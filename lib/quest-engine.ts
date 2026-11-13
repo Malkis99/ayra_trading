@@ -108,6 +108,13 @@ export interface DaySet {
   legacy?: boolean;
   /** Core quests done in another mode earlier today and kept in their slot after a mode change (quest id → that mode). */
   carried?: Record<string, DayMode>;
+  /** QH-3 tracking for the day snapshot (lib/day-snapshots.ts): every quest the active set showed today. Absent on a set
+   * saved by an older version (that day is then marked incomplete, nothing is guessed). */
+  offered?: string[];
+  /** Mode changes of the day (QH-3 tracking). */
+  modeChanges?: Array<{ to: DayMode; at: string }>;
+  /** Replacements of the day, kept across mode changes (QH-3 tracking). */
+  replaced?: Array<{ from: string; to: string }>;
 }
 
 /** The program of the onboarding answers (the same rules as the Awakening finale), or null without a finished onboarding. */

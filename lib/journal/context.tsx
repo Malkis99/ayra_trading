@@ -147,6 +147,8 @@ interface JournalContextType {
   initialSyncAutoStart: boolean;
   /** The server already said whether cloud sync is on (guests: true). */
   cloudFlagKnown: boolean;
+  /** The journal of this device has been read at least once (before that the lists are empty, not «no data»). */
+  ready: boolean;
   /** After the guest journal was copied into the account: reload it and queue it for the cloud. */
   adoptCopiedJournal: () => void;
   closeInitialSync: () => void;
@@ -190,6 +192,7 @@ export function JournalProvider({
   const [lastSelectedAccountId, setLastSelectedAccountIdState] = useState<string | null>(null);
   const [lastSelectedInstrument, setLastSelectedInstrumentState] = useState<string | null>(null);
   const pendingDeletionsRef = React.useRef<Map<string, { timer: NodeJS.Timeout; account: Account }>>(new Map());
+  const [ready, setReady] = useState(false);
 
   const refresh = useCallback(() => {
     setPrimaryPropAccountIdState(repository.getPrimaryPropAccountId());
@@ -208,6 +211,7 @@ export function JournalProvider({
     setAttachments(shots.filter((a) => !a.deletedAt));
     setDeletedAttachmentIds(new Set(shots.filter((a) => a.deletedAt).map((a) => a.id)));
     setStorageUsage(repository.getStorageUsage());
+    setReady(true);
   }, [repository]);
 
   // Files of deleted screenshots leave this browser after the «Undo» pause (guests and the local journal too)
@@ -781,6 +785,7 @@ export function JournalProvider({
         openInitialSync,
         initialSyncAutoStart,
         cloudFlagKnown,
+        ready,
         adoptCopiedJournal,
         closeInitialSync,
         conflictDialogRequest,

@@ -30,6 +30,7 @@ import {
   setDayMode as setDayModeLogic,
   setTradingDays as setTradingDaysLogic,
   setWeekChallenge as setWeekChallengeLogic,
+  recordWeekBossResult as recordWeekBossResultLogic,
   type DayModeFailure,
   grantFirstAction as grantFirstActionLogic,
   type FirstActionKind,
@@ -46,6 +47,7 @@ import { dayKeyInZone } from "@/lib/day-key";
 import { GameStore, browserLock, revOf, type Change } from "@/lib/game-store";
 import { deviceRewardService, type RewardService } from "@/lib/reward-service";
 import type { DayMode, WeekChallenge } from "@/lib/quest-engine";
+import type { WeekSnapshot } from "@/lib/day-snapshots";
 import { browserCommitLog } from "@/lib/storage/game-rev-counter";
 
 const STORAGE_KEY = "ayra_demo_v1";
@@ -105,6 +107,8 @@ interface GameContextType {
   setTradingDays: (days: number[]) => boolean;
   /** Saves the week challenge once per week. */
   fixWeekChallenge: (challenge: WeekChallenge) => void;
+  /** Writes a closed week challenge result once into its week snapshot (QH-3; no reward). */
+  recordWeekBossResult: (week: string, result: NonNullable<WeekSnapshot["bossResult"]>) => void;
   /** The same as completeQuest, under the lock shared by all tabs (the Quests page). */
   completeQuestSafe: (questId: string, title: string, category: string, xp?: number) => Promise<QuestCompletion>;
   /** One-time reward for the first action of a kind on this account (coins and XP given; 0 if already given). */
@@ -564,6 +568,15 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     [update]
   );
 
+  const recordWeekBossResult = useCallback(
+    (week: string, result: NonNullable<WeekSnapshot["bossResult"]>) => {
+      const w = gameStateRef.current.questWeeks?.find((x) => x.week === week);
+      if (!w || w.bossResult || !w.boss) return;
+      update((prev) => recordWeekBossResultLogic(prev, week, result));
+    },
+    [update]
+  );
+
   // One-time reward for the first action of a kind on this account (the journal decides it is the first)
   const grantFirstAction = useCallback((kind: FirstActionKind) => {
     return applySync((s) => {
@@ -797,6 +810,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         setDayMode,
         setTradingDays,
         fixWeekChallenge,
+        recordWeekBossResult,
         grantFirstAction,
         passQuest,
         replaceQuest,
