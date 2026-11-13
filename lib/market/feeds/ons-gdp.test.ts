@@ -4,11 +4,12 @@ import { PGlite } from "@electric-sql/pglite";
 import { describe, expect, it } from "vitest";
 import { collectFeeds, type Fetcher } from "./collect";
 import { memoryFeedsDb } from "./memory-db";
-import { onsCalendarUrl, onsMoveSequence, onsSchedules } from "./ons-gdp";
+import { onsCalendarUrl, onsGdpResult, onsMoveSequence, onsSchedules } from "./ons-gdp";
 
 const now = Date.parse("2026-11-12T14:00:00Z");
 const upcoming = readFileSync("lib/market/feeds/fixtures/ons-gdp-upcoming.html", "utf8");
 const published = readFileSync("lib/market/feeds/fixtures/ons-gdp-published.html", "utf8");
+const facts = (kind: string) => readFileSync(`lib/market/feeds/fixtures/ons-gdp-facts-${kind}.html`, "utf8");
 const monthlyId = "ons:gb_gdp_monthly:2026-10";
 const monthlyUrl = "https://www.ons.gov.uk/releases/gdpmonthlyestimateukoctober2026";
 const empty = '<h1>Release calendar</h1><div class="ons-pagination__position">Page 1 of 1</div>';
@@ -26,13 +27,50 @@ function source(overrides: Partial<Record<"upcoming" | "published" | "cancelled"
     if (parsed.hostname !== "www.ons.gov.uk") return { ok: false, status: 503, text: async () => "" };
     calls.push(url);
     if (outage && list === "upcoming") return { ok: false, status: outage, text: async () => "" };
-    const body = list ? overrides[list] ?? { upcoming, published, cancelled: empty }[list] : overrides.detail ?? "";
+    const body = list ? overrides[list] ?? { upcoming, published: empty, cancelled: empty }[list] : overrides.detail ?? "";
     return { ok: true, status: 200, text: async () => body };
   };
   return { calls, fetch };
 }
 
 describe("ONS GDP official calendar", () => {
+  it("reads the dated monthly, first estimate and national accounts vintages", () => {
+    const [monthly, first] = ["gb_gdp_monthly", "gb_gdp_first"].map(code => onsSchedules(published, "published", now).find(e => e.code === code)!);
+    const qna = {
+      ...onsSchedules(upcoming, "upcoming", now).find(e => e.code === "gb_gdp_qna")!,
+      id: "ons:gb_gdp_qna:2026-q2", reference_period: "2026-Q2", starts_at: "2026-09-30T06:00:00.000Z",
+      source_uid: "/releases/gdpquarterlynationalaccountsukapriltojune2026",
+    };
+    expect(onsGdpResult(facts("monthly"), monthly)).toMatchObject({ id: monthly.id, actual: "+0.2%", previous: "0.0%", result_meta: { series: "ECYX", unit: "percent-mom" } });
+    expect(onsGdpResult(facts("first"), first)).toMatchObject({ id: first.id, actual: "+0.7%", previous: "+0.5%", result_meta: { series: "IHYQ", unit: "percent-qoq" } });
+    expect(onsGdpResult(facts("qna"), qna)).toMatchObject({ id: qna.id, actual: "+0.5%", previous: "+0.6%", release_stage: "revision", result_meta: { source_updated: qna.starts_at } });
+    expect(() => onsGdpResult(facts("first"), qna)).toThrow("period, stage or date mismatch");
+    expect(() => onsGdpResult(facts("monthly"), { ...monthly, starts_at: "2026-11-13T07:00:00Z" })).toThrow("period, stage or date mismatch");
+    expect(() => onsGdpResult(facts("monthly") + '<h2>Correction</h2>', monthly)).toThrow("correction requires provenance review");
+    expect(onsGdpResult(facts("monthly").replaceAll("0.2% in September", "unavailable in September"), monthly)).toBeNull();
+    expect(onsGdpResult(facts("monthly").replaceAll("in August 2026", "in July 2026"), monthly)?.previous).toBeNull();
+  });
+
+  it("uses only two daily detail slots, keeps IDs, and stops fetching after confirmed results", async () => {
+    const { db, events } = memoryFeedsDb();
+    const network = source({ published });
+    const calls: string[] = [];
+    const fetch: Fetcher = async (url, init) => {
+      if (!url.includes("/bulletins/")) return network.fetch(url, init);
+      calls.push(url);
+      return { ok: true, status: 200, headers: new Headers({ "Content-Type": "text/html;charset=utf-8" }), text: async () => facts(url.includes("monthly") ? "monthly" : "first") };
+    };
+    await collectFeeds({ db, fetch, now, scope: "news" });
+    expect(calls).toHaveLength(0);
+    await collectFeeds({ db, fetch, now, scope: "schedules" });
+    expect(network.calls.length + calls.length).toBe(5);
+    const id = "ons:gb_gdp_monthly:2026-09";
+    expect(events.get(id)).toMatchObject({ id, status: "released", actual: "+0.2%", previous: "0.0%" });
+    await collectFeeds({ db, fetch, now: now + 86_400_000, scope: "schedules" });
+    expect(calls).toHaveLength(2);
+    expect([...events.values()].filter(e => e.id === id)).toHaveLength(1);
+    expect([...events.values()].filter(e => e.source !== "ons" && e.actual)).toEqual([]);
+  });
   it("reads confirmed dates, deduplicates time-series entries, separates stages and applies London DST", () => {
     const future = onsSchedules(upcoming, "upcoming", now);
     expect(future).toHaveLength(4);
@@ -128,6 +166,11 @@ describe("ONS GDP official calendar", () => {
         result_meta: { period: scheduled.reference_period, series: "ECYX", unit: "percent-mom", adjustment: "SA", release_url: scheduled.url },
       };
       await db.query("SELECT public.market_events_apply($1::jsonb,'result')", [JSON.stringify([result])]);
+      const verified = onsGdpResult(facts("monthly"), scheduled)!;
+      const attempt = async (candidate: unknown) => (await db.query<{ result: { conflict?: string }[] }>(
+        "SELECT public.market_events_apply($1::jsonb,'result') AS result", [JSON.stringify([candidate])],
+      )).rows[0].result;
+      expect((await attempt(verified))[0].conflict).toBe("series units or period changed");
       expect(await apply(scheduled)).toEqual([{ id: scheduled.id }]);
       expect((await db.query("SELECT id,status,actual,previous FROM public.market_events WHERE reference_period='2026-09'")).rows)
         .toEqual([{ id: scheduled.id, status: "released", actual: "+0.2%", previous: "0.0%" }]);

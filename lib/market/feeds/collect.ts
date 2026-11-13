@@ -15,7 +15,7 @@ import { nyDay } from "./time";
 import { PPI_METRICS, PPI_SCHEDULE_URL, isPpiCode, parsePpiRelease, ppiReleaseUrl, ppiResults, verifiedPpiMeta } from "./ppi";
 import { JOLTS_CODE, JOLTS_SCHEDULE_URL, joltsReleaseUrl, parseJoltsRelease, joltsResults, verifiedJoltsMeta } from "./jolts";
 import { joltsSchedule, ppiSchedule } from "./bls-schedule";
-import { ONS_LISTS, onsCalendarUrl, onsMoveSequence, onsSchedules, type StoredOnsSchedule } from "./ons-gdp";
+import { ONS_LISTS, onsBulletinUrl, onsCalendarUrl, onsGdpResult, onsMoveSequence, onsSchedules, type StoredOnsSchedule } from "./ons-gdp";
 import { eurostatCalendarUrl, EUROSTAT_SERIES, type EurostatCode, eurostatLatest, eurostatResult, eurostatSchedule, eurostatUrl, parseEurostat } from "./eurostat";
 
 /**
@@ -347,16 +347,39 @@ async function collectOnsSchedules(o: CollectOptions): Promise<number> {
     }
   }
   await o.db.upsertEvents(rows);
+  // Only the daily schedule run owns these two slots. Moves take precedence.
+  for (const row of lists[1].slice().sort((a, b) => a.starts_at.localeCompare(b.starts_at))) {
+    if (detailRequests >= 2) break;
+    const old = stored.get(row.id);
+    const saved = rows.find(candidate => candidate.id === row.id);
+    if (ambiguous.has(row.id) || old?.status === "released" || old?.status === "cancelled"
+      || (old && old.source_uid !== row.source_uid) || Date.parse(row.starts_at) > o.now
+      || (!saved && (!old || Date.parse(old.starts_at) !== Date.parse(row.starts_at)))) continue;
+    const url = onsBulletinUrl(row);
+    if (!url) { issues.push("ONS GDP: unsupported dated bulletin path"); continue; }
+    detailRequests++;
+    try {
+      const result = onsGdpResult(await getOns(o.fetch, url, true), row);
+      if (result) await o.db.saveResults([result]);
+      else issues.push("ONS GDP: published bulletin lacks a verified figure");
+    } catch (error) {
+      issues.push(error instanceof Error ? error.message : String(error));
+      if (error instanceof ReleaseHttpError && (error.status === 403 || error.status === 429 || error.status === 503)) break;
+    }
+  }
   if (issues.length) throw new Error(Array.from(new Set(issues)).join("; "));
   return rows.length;
 }
 
-async function getOns(fetcher: Fetcher, url: string): Promise<string> {
+async function getOns(fetcher: Fetcher, url: string, bulletin = false): Promise<string> {
   const abort = new AbortController();
   try {
     return await withTimeout((async () => {
       const response = await fetcher(url, { headers: { Accept: "text/html", "User-Agent": USER_AGENT }, redirect: "manual", signal: abort.signal });
-      if (!response.ok) throw new Error(`ONS GDP: HTTP ${response.status}`);
+      if (!response.ok) throw new ReleaseHttpError(response.status, "ONS GDP", response.headers?.get("retry-after"));
+      if (bulletin && !/^text\/html(?:\s*;|$)/i.test(response.headers?.get("content-type") ?? "")) {
+        throw new Error("ONS GDP: unexpected bulletin content type");
+      }
       return response.text();
     })(), 8_000);
   } finally {
