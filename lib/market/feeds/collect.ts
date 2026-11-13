@@ -15,7 +15,7 @@ import { nyDay } from "./time";
 import { PPI_METRICS, PPI_SCHEDULE_URL, isPpiCode, parsePpiRelease, ppiReleaseUrl, ppiResults, verifiedPpiMeta } from "./ppi";
 import { JOLTS_CODE, JOLTS_SCHEDULE_URL, joltsReleaseUrl, parseJoltsRelease, joltsResults, verifiedJoltsMeta } from "./jolts";
 import { joltsSchedule, ppiSchedule } from "./bls-schedule";
-import { ONS_LISTS, onsCalendarUrl, onsMoveSequence, onsSchedules, type StoredOnsSchedule } from "./ons-gdp";
+import { ONS_LISTS, onsBulletinUrl, onsCalendarUrl, onsGdpResult, onsMoveSequence, onsSchedules, type StoredOnsSchedule } from "./ons-gdp";
 import { eurostatCalendarUrl, EUROSTAT_SERIES, type EurostatCode, eurostatLatest, eurostatResult, eurostatSchedule, eurostatUrl, parseEurostat } from "./eurostat";
 
 /**
@@ -170,11 +170,13 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
   // the log's times follow the collector's own clock («now»), so the pace of retries works the same in tests
   const t0 = Date.now();
   const clock = () => o.now + (Date.now() - t0);
-  const run = async (source: string, job: () => Promise<number>) => {
+  const run: Run = async (source, job) => {
     const started = clock();
     let r: SourceResult;
     try {
-      r = { source, ok: true, items: await job(), error: null };
+      const outcome = await job();
+      const { items, issues } = typeof outcome === "number" ? { items: outcome, issues: [] } : outcome;
+      r = { source, ok: issues.length === 0, items, error: issues.length ? [...new Set(issues)].join("; ").slice(0, 2000) : null };
     } catch (e) {
       r = { source, ok: false, items: 0, error: (e instanceof Error ? e.message : String(e)).slice(0, 2000) };
     }
@@ -197,7 +199,13 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
     const ons = isolated("ons-gdp-schedule", async () => {
       const last = await o.db.lastRun("ons-gdp-schedule");
       if (last !== null && new Date(last).toISOString().slice(0, 10) === new Date(o.now).toISOString().slice(0, 10)) return;
-      await run("ons-gdp-schedule", () => collectOnsSchedules(o));
+      let facts: (() => Promise<SourceOutcome>) | undefined;
+      await run("ons-gdp-schedule", async () => {
+        const schedule = await collectOnsSchedules(o);
+        facts = schedule.facts;
+        return schedule;
+      });
+      if (facts) await run("ons-gdp-facts", facts);
     });
     await run("schedules-listed", async () => {
       const rows = listedEvents().filter(e => !isPpiCode(e.code) && e.code !== JOLTS_CODE);
@@ -292,9 +300,11 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
   return { results, pruned };
 }
 
-type Run = (source: string, job: () => Promise<number>) => Promise<void>;
+type SourceOutcome = { items: number; issues: string[] };
+type Run = (source: string, job: () => Promise<number | SourceOutcome>) => Promise<void>;
+const ONS_DETAIL_LIMIT = 2;
 
-async function collectOnsSchedules(o: CollectOptions): Promise<number> {
+async function collectOnsSchedules(o: CollectOptions): Promise<SourceOutcome & { facts?: () => Promise<SourceOutcome> }> {
   const lists = await Promise.all(ONS_LISTS.map(async list => onsSchedules(
     await getOns(o.fetch, onsCalendarUrl(list, o.now)), list, o.now,
   )));
@@ -310,6 +320,7 @@ async function collectOnsSchedules(o: CollectOptions): Promise<number> {
     else found.set(row.id, row);
   }
   let detailRequests = 0;
+  let pauseDetails = false;
   for (const [id, row] of found) {
     if (ambiguous.has(id)) {
       issues.push("ONS GDP: conflicting official listings");
@@ -333,7 +344,7 @@ async function collectOnsSchedules(o: CollectOptions): Promise<number> {
       continue;
     }
     if (sameTime || old.status !== "scheduled") continue;
-    if (detailRequests >= 2) {
+    if (pauseDetails || detailRequests >= ONS_DETAIL_LIMIT) {
       issues.push("ONS GDP: remaining changes deferred to the next daily run");
       continue;
     }
@@ -344,19 +355,55 @@ async function collectOnsSchedules(o: CollectOptions): Promise<number> {
       else rows.push({ ...row, schedule_meta: { sequence, cancelled: false } });
     } catch (error) {
       issues.push(error instanceof Error ? error.message : String(error));
+      pauseDetails = onsBackoff(error);
     }
   }
   await o.db.upsertEvents(rows);
-  if (issues.length) throw new Error(Array.from(new Set(issues)).join("; "));
-  return rows.length;
+  const budget = pauseDetails ? 0 : ONS_DETAIL_LIMIT - detailRequests;
+  const pending = lists[1].filter(row => {
+    const old = stored.get(row.id);
+    const saved = rows.find(candidate => candidate.id === row.id);
+    return !(ambiguous.has(row.id) || old?.status === "released" || old?.status === "cancelled"
+      || (old && old.source_uid !== row.source_uid) || Date.parse(row.starts_at) > o.now
+      || (!saved && (!old || Date.parse(old.starts_at) !== Date.parse(row.starts_at))));
+  }).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+  return { items: rows.length, issues, facts: pending.length && budget ? () => collectOnsFacts(o, pending, budget) : undefined };
 }
 
-async function getOns(fetcher: Fetcher, url: string): Promise<string> {
+function onsBackoff(error: unknown): boolean {
+  return error instanceof ReleaseHttpError && (error.status === 403 || error.status === 429 || (error.status === 503 && !!error.retryAfter));
+}
+
+async function collectOnsFacts(o: CollectOptions, pending: EventRow[], budget: number): Promise<SourceOutcome> {
+  const issues: string[] = [];
+  let items = 0;
+  for (const row of pending) {
+    if (budget === 0) break;
+    const url = onsBulletinUrl(row);
+    if (!url) { issues.push(`${row.id}: unsupported dated bulletin path`); continue; }
+    budget--;
+    try {
+      const result = onsGdpResult(await getOns(o.fetch, url, true), row);
+      if (!result) throw new Error("published bulletin lacks a verified figure");
+      await o.db.saveResults([result]);
+      items++;
+    } catch (error) {
+      issues.push(`${row.id}: ${error instanceof Error ? error.message : String(error)}`);
+      if (onsBackoff(error)) break;
+    }
+  }
+  return { items, issues };
+}
+
+async function getOns(fetcher: Fetcher, url: string, bulletin = false): Promise<string> {
   const abort = new AbortController();
   try {
     return await withTimeout((async () => {
       const response = await fetcher(url, { headers: { Accept: "text/html", "User-Agent": USER_AGENT }, redirect: "manual", signal: abort.signal });
-      if (!response.ok) throw new Error(`ONS GDP: HTTP ${response.status}`);
+      if (!response.ok) throw new ReleaseHttpError(response.status, "ONS GDP", response.headers?.get("retry-after"));
+      if (bulletin && !/^text\/html(?:\s*;|$)/i.test(response.headers?.get("content-type") ?? "")) {
+        throw new Error("ONS GDP: unexpected bulletin content type");
+      }
       return response.text();
     })(), 8_000);
   } finally {
