@@ -375,6 +375,22 @@ export class CloudJournalRepository implements JournalRepository {
     return !userId || !this.remote || this.flagCache.has(userId);
   }
 
+  /**
+   * The journal on this device is known to include the cloud copy as of `sinceMs` or later (QH-3: a result that is
+   * written once, like the closed week challenge, waits for this). Guests, no remote and flag off: true (nothing to
+   * wait for). Flag not known yet, the first sync not done (waits for the button), offline, an error or manual mode
+   * without an exchange: false — a successful exchange (pull and push) after `sinceMs` is required, in any tab.
+   */
+  isCloudSettledSince(sinceMs: number): boolean {
+    const userId = AppStorage.getUserId();
+    if (!userId || !this.remote) return true;
+    if (!this.isCloudFlagKnown()) return false;
+    if (!this.isCloudActive()) return true;
+    if (!isInitialSyncDone(userId)) return false;
+    const last = Date.parse(readSyncState(userId).lastSyncAt || "");
+    return Number.isFinite(last) && last >= sinceMs;
+  }
+
   isCloudActive(): boolean {
     const userId = AppStorage.getUserId();
     return Boolean(userId && this.remote && this.flagCache.get(userId)?.enabled);

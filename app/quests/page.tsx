@@ -27,7 +27,7 @@ import { questTitle } from "@/components/quests/quest-text";
 export default function QuestsPage() {
   const { dict, lang, showToast } = useApp();
   const { gameState, gameDay, rewards, passQuest, replaceQuest, setDayMode, fixWeekChallenge, recordWeekBossResult } = useGame();
-  const { trades, plans, weekPlans, noTrades, ready: journalReady } = useJournal();
+  const { trades, plans, weekPlans, noTrades, ready: journalReady, cloudSettled } = useJournal();
   const searchParams = useSearchParams();
   const activeTab = parseHubTab(searchParams.get("tab"));
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -70,13 +70,15 @@ export default function QuestsPage() {
     fixWeekChallenge({ week, boss: pickBoss(snapshot, gameDay) });
   }, [week, hasLastWeek, gameState.questWeek?.week, fixWeekChallenge, snapshot, gameDay]);
 
-  // A closed week keeps its challenge result, written once by the journal of this device (QH-3; nothing is given)
+  // A closed week keeps its challenge result, written once by the journal of this device (QH-3; nothing is given).
+  // It waits until the journal is read AND, for a cloud journal, the cloud copy fetched after opening is in: while the
+  // cloud is loading, offline or in error the result stays pending (never a «not met» from incomplete data).
   const closedWeek = gameState.questWeeks?.find((w) => w.week < week && w.boss && !w.bossResult);
   useEffect(() => {
-    if (!journalReady || !closedWeek?.boss) return;
+    if (!journalReady || !cloudSettled || !closedWeek?.boss) return;
     const conditions = bossConditions(closedWeek.boss, snapshot, closedWeek.week);
     recordWeekBossResult(closedWeek.week, { state: bossState(conditions), conditions, at: new Date().toISOString() });
-  }, [journalReady, closedWeek, snapshot, recordWeekBossResult]);
+  }, [journalReady, cloudSettled, closedWeek, snapshot, recordWeekBossResult]);
 
   // One request at a time per page: a double click does not queue a second one (the store also checks it)
   const runOnce = async (id: string, fn: () => Promise<void>) => {

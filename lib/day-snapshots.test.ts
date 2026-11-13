@@ -353,3 +353,48 @@ describe("QH-3 day snapshots: 120 days kept, the rest of the progress untouched"
     expect(s.questDays!.every((d: DaySnapshot) => d.day >= addDaysToKey(today, -DAY_SNAPSHOT_RETENTION_DAYS))).toBe(true);
   });
 });
+
+describe("QH-3 review: coming back after weeks, no invented weeks", () => {
+  it("active in one week, back three weeks later: one week snapshot (that week), one day snapshot, real totals only", () => {
+    let s = started("2026-11-03"); // Tuesday
+    s = setWeekChallenge(s, { week: "2026-11-02", boss: "noFomo" });
+    s = tickSelf(s, at("2026-11-03T09:00:00Z")).state;
+    const dayXp = s.dailyStats["2026-11-03"].xpGained;
+    s = checkAndApplyDateResets(s, noon("2026-11-26")); // Thursday, three weeks later
+    expect(s.questDays!.map((d) => d.day)).toEqual(["2026-11-03"]);
+    expect(s.questWeeks!.map((w) => w.week)).toEqual(["2026-11-02"]);
+    expect(s.questWeeks![0]).toMatchObject({ boss: "noFomo", daysRecorded: ["2026-11-03"], totals: { xp: dayXp, coins: 0, quests: 1 } });
+    expect(s.questWeeks![0].bossResult).toBeUndefined();
+    // the weeks in between have no snapshot and no challenge was made up for them
+    expect(s.questWeek?.week).toBe("2026-11-02");
+  });
+
+  it("a week without a chosen challenge gets no boss and can never get a result", () => {
+    let s = started("2026-11-03");
+    s = checkAndApplyDateResets(s, noon("2026-11-10"));
+    expect(s.questWeeks![0].boss).toBeUndefined();
+    const r = { state: "met" as const, conditions: [], at: "2026-11-10T12:00:00.000Z" };
+    expect(recordWeekBossResult(s, "2026-11-02", r, noon("2026-11-10")).questWeeks![0].bossResult).toBeUndefined();
+  });
+
+  it("back after more than 120 days: the old day is outside the window, so no snapshot is kept; history stays", () => {
+    let s = started("2026-03-02");
+    s = tickSelf(s, at("2026-03-02T09:00:00Z")).state;
+    const history = s.history;
+    s = checkAndApplyDateResets(s, noon("2026-08-01"));
+    expect(s.questDays).toEqual([]);
+    expect(s.questWeeks).toEqual([]);
+    expect(s.history).toEqual(history);
+  });
+
+  it("pruning runs on each day change: snapshots older than 120 closed days go, the newest stay in order", () => {
+    let s = started("2026-06-01");
+    for (let i = 1; i <= 125; i++) s = checkAndApplyDateResets(s, noon(addDaysToKey("2026-06-01", i)));
+    const today = addDaysToKey("2026-06-01", 125);
+    const days = s.questDays!.map((d) => d.day);
+    expect(days).toHaveLength(DAY_SNAPSHOT_RETENTION_DAYS);
+    expect(days[0]).toBe(addDaysToKey(today, -1));
+    expect(days[days.length - 1]).toBe(addDaysToKey(today, -DAY_SNAPSHOT_RETENTION_DAYS));
+    expect([...days].sort().reverse()).toEqual(days);
+  });
+});
