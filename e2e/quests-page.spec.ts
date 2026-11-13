@@ -91,14 +91,14 @@ test.describe("Quests page (Q1)", () => {
     await page.goto("/quests");
     const g0 = await readGame(page);
     for (let i = 0; i < 4; i++) {
-      await page.getByTestId("rest-toggle").click();
-      await page.waitForTimeout(100);
+      await page.getByTestId(i % 2 === 0 ? "mode-rest" : "mode-trading").click();
+      await page.waitForTimeout(150);
     }
     const g1 = await readGame(page);
     expect(totalXp(g1)).toBe(totalXp(g0));
     expect(g1.coins).toBe(g0.coins);
     expect(g1.isRestDay).toBe(false);
-    await page.getByTestId("rest-toggle").click();
+    await page.getByTestId("mode-rest").click();
     await expect(page.getByTestId("rest-panel")).toBeVisible();
     expect((await readGame(page)).dailyStats[today].isRestDay).toBe(true);
   });

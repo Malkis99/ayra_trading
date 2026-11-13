@@ -20,7 +20,8 @@ import {
   MarketMiniCard,
   TopicOfDayCard,
 } from "@/components/home/SharedBlocks";
-import { APP_CLOSED_QUESTS, getDeterministicDailyQuests } from "@/lib/quests";
+import { APP_CLOSED_QUESTS } from "@/lib/quests";
+import { todaysQuests } from "@/lib/quests-view";
 import { TITLES, FRAMES, ITEMS } from "@/lib/items";
 import { dayKeyInZone } from "@/lib/day-key";
 
@@ -53,7 +54,7 @@ export default function HomePage() {
 
   // the game day in the account's time zone: the same «today» as on Quests and Profile
   const todayIso = gameDay;
-  const dailyQuests = getDeterministicDailyQuests(todayIso).core;
+  const dailyQuests = todaysQuests(gameState, todayIso).core;
 
   // A quest the app checks itself closes by itself; a self-reported one gives its XP (no coins)
   const handleQuestClick = (questId: string, fallbackTitle: string, category: string, xp: number) => {

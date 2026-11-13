@@ -12,7 +12,7 @@ import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useJournal } from "@/lib/journal/context";
 import { calculateKpis } from "@/lib/journal/overview";
-import { getDeterministicDailyQuests } from "@/lib/quests";
+import { todaysQuests } from "@/lib/quests-view";
 import { recentAchievements } from "@/lib/profile";
 import { formatString } from "@/lib/i18n";
 import { cn } from "@/components/ui/cn";
@@ -126,7 +126,7 @@ export function OverviewTab({ onOpenAchievements, onEditProfile }: { onOpenAchie
   // Same numbers as the Journal KPI strip for the period "all"
   const k = useMemo(() => calculateKpis(trades, trades, accounts, tz), [trades, accounts, tz]);
   const recent = recentAchievements(gameState, 3);
-  const quests = getDeterministicDailyQuests(gameDay).core;
+  const quests = todaysQuests(gameState, gameDay).core;
   const doneCount = quests.filter((q) => gameState.completedQuestsToday[q.id]).length;
   const ach = dict.profile.achievements as Record<string, string>;
 
