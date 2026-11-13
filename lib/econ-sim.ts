@@ -24,7 +24,8 @@ import { addDaysToKey, weekdayOfKey } from "./day-key";
 import { APP_CLOSED_QUESTS, getTodaysQuests } from "./quests";
 import type { DayMode } from "./quest-engine";
 
-export type Profile = "honest" | "active" | "farmer";
+/** hopper: the farmer who, after every reward, makes each mode active in turn and ticks all it sees (UX3-1). */
+export type Profile = "honest" | "active" | "farmer" | "hopper";
 
 export interface DayLog {
   day: string;
@@ -139,7 +140,8 @@ export function simulate(profile: Profile, days = 90, start = "2026-11-16"): Sim
       }
     } else {
       // active and farmer play every day; the farmer first looks for the mode whose set gives the most self-report XP
-      if (profile === "farmer") {
+      const farming = profile === "farmer" || profile === "hopper";
+      if (farming) {
         let best: { mode: DayMode; xp: number } = { mode: "trading", xp: selfXpOfSet(s, day) };
         for (const m of ["study", "recovery"] as DayMode[]) {
           const tryS = setDayMode(s, m, at(day, "06:01")).state;
@@ -157,7 +159,7 @@ export function simulate(profile: Profile, days = 90, start = "2026-11-16"): Sim
         trades.push(t);
         s = recordLoggedTrade(s, t, trades, at(day, "13:00")).state;
       }
-      if (profile === "farmer") {
+      if (farming) {
         // duplicates, a future date and extra trades: blocked or capped by the existing rules
         const dup = { ...dayTrades[0], id: `d${i}`, openedAt: `${day}T10:00:20Z` };
         trades.push(dup);
@@ -184,6 +186,16 @@ export function simulate(profile: Profile, days = 90, start = "2026-11-16"): Sim
       selfXp += r.xp;
       const pr = plan(day, "07:30", true);
       s = evaluatePlanQuestClosure(s, pr, dayTrades, [pr], notes, at(day, "20:05")).state;
+      if (profile === "hopper") {
+        // every mode, again and again, after the rewards: tick everything shown and save the plan again each time
+        for (const m of ["study", "recovery", "trading", "rest", "study", "recovery", "trading"] as DayMode[]) {
+          s = setDayMode(s, m, at(day, "20:10")).state;
+          const h = tickSelf(s, day, "all", "20:11");
+          s = h.s;
+          selfXp += h.xp;
+          s = evaluatePlanQuestClosure(s, pr, dayTrades, [pr], notes, at(day, "20:12")).state;
+        }
+      }
     }
 
     selfTotal += selfXp;

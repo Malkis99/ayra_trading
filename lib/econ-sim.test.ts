@@ -35,6 +35,13 @@ describe("economy simulation on the real game rules", () => {
     expect(farmer.selfXp).toBeGreaterThanOrEqual(active.selfXp);
   });
 
+  it("switching modes after rewards gives nothing extra: the mode hopper ends with the farmer's XP and coins (UX3-1)", () => {
+    const hopper = simulate("hopper", days);
+    expect(hopper.coins).toBe(farmer.coins);
+    expect(hopper.totalXp).toBe(farmer.totalXp);
+    for (const d of hopper.log) expect(d.selfXp).toBeLessThanOrEqual(GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP);
+  });
+
   it("cap options are only computed here: with no cap the totals are the real ones", () => {
     expect(withSelfCap(farmer, null).totalXp).toBe(farmer.totalXp);
     expect(withSelfCap(farmer, 0).totalXp).toBe(farmer.totalXp - farmer.selfXp);

@@ -26,10 +26,19 @@ export interface QuestCardProps {
   compact?: boolean;
   /** Why it is not done yet (from the journal), shown under the quest. */
   reason?: string;
+  /** A quest of a mode that is only being viewed: shown, but it cannot be ticked here. */
+  readOnly?: boolean;
+  /** Put off for today («not today» or replaced): kept in its place, without actions. */
+  passed?: boolean;
+  /** Done in another mode earlier today and kept in its slot. */
+  carriedLabel?: string;
+  /** Journal quests: the exact place in the journal and the button text for it. */
+  journalHref?: string;
+  journalCta?: string;
 }
 
 /** One quest: what it is, why, how it is confirmed, what it gives, and its actions (all with visible labels). */
-export function QuestCard({ quest, done, replacedFromTitle, busy, replaceUsed, replaceMax, onComplete, onPass, onReplace, compact, reason }: QuestCardProps) {
+export function QuestCard({ quest, done, replacedFromTitle, busy, replaceUsed, replaceMax, onComplete, onPass, onReplace, compact, reason, readOnly, passed, carriedLabel, journalHref, journalCta }: QuestCardProps) {
   const { dict, lang } = useApp();
   const t = dict.questsPage.q1.card;
   const title = questTitle(dict, lang, quest);
@@ -70,9 +79,10 @@ export function QuestCard({ quest, done, replacedFromTitle, busy, replaceUsed, r
     <article
       data-testid={`quest-card-${quest.id}`}
       data-done={done ? "true" : "false"}
+      data-passed={passed && !done ? "true" : undefined}
       className={cn(
         "relative grid grid-cols-[44px_minmax(0,1fr)] gap-x-3.5 gap-y-3 rounded-lg border p-4 transition-colors sm:grid-cols-[44px_minmax(0,1fr)_auto]",
-        done ? "border-success/25 bg-gradient-to-r from-success/[0.07] to-s1 to-40%" : "border-line bg-s1 hover:border-vi/50"
+        done ? "border-success/25 bg-gradient-to-r from-success/[0.07] to-s1 to-40%" : passed ? "border-line bg-s1/60 opacity-75" : "border-line bg-s1 hover:border-vi/50"
       )}
     >
       <span
@@ -89,7 +99,12 @@ export function QuestCard({ quest, done, replacedFromTitle, busy, replaceUsed, r
           <p className="mt-0.5 text-xs text-mu">{formatString(t.replacedFrom, { title: replacedFromTitle })}</p>
         )}
         {!compact && <p className="mt-0.5 text-[13px] text-mu">{dict.categories[quest.category]} · {formatString(t.minutes, { n: quest.durationMinutes })}</p>}
-        {!done && reason && (
+        {carriedLabel && (
+          <p className="mt-0.5 text-xs font-semibold text-vi" data-testid="quest-carried">
+            {carriedLabel}
+          </p>
+        )}
+        {!done && !passed && reason && (
           <p className="mt-1 text-xs text-mu" data-testid="quest-reason">
             <span className="font-semibold text-tx/80">{dict.questsPage.q2.reasonLabel}</span> {reason}
           </p>
@@ -124,22 +139,30 @@ export function QuestCard({ quest, done, replacedFromTitle, busy, replaceUsed, r
             <Check size={16} aria-hidden="true" />
             {t.done}
           </span>
+        ) : passed ? (
+          <span className="text-sm font-semibold text-mu" data-testid="quest-passed">
+            {dict.questsPage.q2.passed}
+          </span>
         ) : appClosed ? (
           <>
             <span className="text-xs text-mu" data-testid="quest-auto-closes">
               {dict.questsPage.todayTab.autoCloses}
             </span>
-            <Link href={JOURNAL_LINK[quest.id] || "/journal"} className={buttonClasses("secondary", "sm")}>
-              {dict.questsPage.q1.today.noTradeCta}
+            <Link href={journalHref || JOURNAL_LINK[quest.id] || "/journal"} className={buttonClasses("secondary", "sm")} data-testid="quest-journal-link">
+              {journalCta || dict.questsPage.q1.today.noTradeCta}
             </Link>
           </>
+        ) : readOnly ? (
+          <span className="text-xs text-mu" data-testid="quest-preview-only">
+            {dict.questsPage.q2.modes.previewOnly}
+          </span>
         ) : (
           <Button variant="secondary" disabled={busy} onClick={onComplete} aria-busy={busy || undefined}>
             {busy ? t.saving : dict.questsPage.todayTab.completeBtn}
           </Button>
         )}
 
-        {!done && (
+        {!done && !passed && !readOnly && (
           <div ref={menuRef} className="relative">
             <button
               type="button"

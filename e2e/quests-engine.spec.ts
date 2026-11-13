@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { baseGame, expandBonus, readGame, seedGame, totalXp, utcDay } from "./helpers/quests";
+import { activateMode, baseGame, expandBonus, readGame, seedGame, totalXp, utcDay } from "./helpers/quests";
 
 // Q2 Quest Engine (docs/quests-2.0-plan.md, section 2): a saved day set, day modes, composite missions from the
 // journal's day plan, «why not done», week missions and the Weekly Boss without rewards.
@@ -11,7 +11,10 @@ const yesterday = (() => {
   return utcDay(d);
 })();
 
-type Saved = Awaited<ReturnType<typeof readGame>> & { questDay?: { day: string; mode: string; core: string[]; bonus: string[] }; tradingDays?: number[] };
+type Saved = Awaited<ReturnType<typeof readGame>> & {
+  questDay?: { day: string; mode: string; core: string[]; bonus: string[]; carried?: Record<string, string> };
+  tradingDays?: number[];
+};
 const game = (page: Page) => readGame(page) as Promise<Saved>;
 
 const journal = (over: Record<string, unknown> = {}) =>
@@ -43,31 +46,99 @@ test.describe("Quest Engine (Q2)", () => {
     }
   });
 
-  test("modes: free before a reward; after it only rest and back; no XP from switching", async ({ context, page }) => {
+  test("modes: any mode can be viewed at any time without changing anything", async ({ context, page }) => {
     await seedGame(context, baseGame({ lastQuestDate: yesterday }), { ayra_journal_v1: journal() });
     await page.goto("/quests");
     await expect(page.getByTestId("mission-morning_protocol")).toBeVisible();
-    await page.getByTestId("mode-study").click();
-    await expect(page.getByText("Режим дня: Учёба")).toBeVisible();
+    await expect.poll(async () => (await game(page)).questDay?.mode).toBe("trading");
+    const before = await game(page);
+    for (const m of ["study", "recovery", "rest", "trading", "study"] as const) {
+      await page.getByTestId(`mode-${m}`).click();
+      await expect(page.getByTestId("mode-panel")).toHaveAttribute("data-mode", m);
+      await expect(page.getByTestId("mode-trading")).toHaveAttribute("data-active", "true");
+      if (m !== "trading") await expect(page.getByTestId("mode-viewing")).toBeVisible();
+    }
+    // a viewed mode shows its quests read-only: no «Done» button anywhere in it
     await expect(page.getByTestId("mission-morning_protocol")).toHaveCount(0);
     await expect(page.getByTestId("mission-eod_ritual")).toBeVisible();
+    await expect(page.getByTestId("mode-panel").getByTestId("quest-preview-only").first()).toBeVisible();
+    await expect(page.getByTestId("mode-panel").getByRole("button", { name: "Выполнить" })).toHaveCount(0);
+    const after = await game(page);
+    expect(after.questDay).toEqual(before.questDay);
+    expect(totalXp(after)).toBe(totalXp(before));
+    expect(after.coins).toBe(before.coins);
+  });
+
+  test("modes: after a reward any mode can be made active; the done quest stays in its place; nothing is paid twice", async ({ context, page }) => {
+    await seedGame(context, baseGame({ lastQuestDate: yesterday }), { ayra_journal_v1: journal() });
+    await page.goto("/quests");
+    await expect(page.getByTestId("mission-morning_protocol")).toBeVisible();
+    await activateMode(page, "study");
+    await expect(page.getByText("Активный режим: Учёба. Выполненное сегодня сохранено.")).toBeVisible();
     const xp0 = totalXp(await game(page));
 
-    await expandBonus(page);
-    const card = page.locator('[data-testid^="quest-card-"]').filter({ has: page.getByTestId("quest-badge-self") }).first();
+    const core = page.locator('section[aria-labelledby="core-title"] [data-testid^="quest-card-"]');
+    const card = core.filter({ has: page.getByTestId("quest-badge-self") }).first();
+    const doneId = ((await card.getAttribute("data-testid")) || "").replace("quest-card-", "");
     await card.getByRole("button", { name: "Выполнить" }).click();
     await expect(card.getByTestId("quest-done")).toBeVisible();
-    const xp1 = totalXp(await game(page));
-    expect(xp1).toBeGreaterThan(xp0);
+    await expect.poll(async () => totalXp(await game(page))).toBeGreaterThan(xp0);
+    const paid = await game(page);
+    const slot = paid.questDay!.core.indexOf(doneId);
 
-    await page.getByTestId("mode-recovery").click();
-    await expect(page.getByText("Сегодня уже есть награда: режим можно сменить только на «Отдых»").first()).toBeVisible();
-    expect((await game(page)).questDay?.mode).toBe("study");
-    await page.getByTestId("mode-rest").click();
-    await expect(page.getByTestId("rest-panel")).toBeVisible();
-    await page.getByTestId("mode-study").click();
-    await expect(page.getByTestId("mode-study")).toHaveAttribute("aria-checked", "true");
-    expect(totalXp(await game(page))).toBe(xp1);
+    for (const m of ["recovery", "trading", "rest", "trading", "study"] as const) {
+      await activateMode(page, m);
+      await expect.poll(async () => (await game(page)).questDay?.mode).toBe(m === "rest" ? "rest" : m);
+      const g = await game(page);
+      expect(totalXp(g)).toBe(totalXp(paid));
+      expect(g.coins).toBe(paid.coins);
+      expect(g.completedQuestsToday[doneId]).toBe(true);
+      if (m === "rest") {
+        await expect(page.getByTestId("rest-panel")).toBeVisible();
+        continue;
+      }
+      expect(g.questDay!.core[slot]).toBe(doneId);
+      await expect(page.getByTestId(`quest-card-${doneId}`).getByTestId("quest-done")).toBeVisible();
+      await expect(page.getByTestId("core-count")).toContainText(/^[1-3] \/ 3$/);
+      if (m !== "study") await expect(page.getByTestId(`quest-card-${doneId}`).getByTestId("quest-carried")).toHaveText("Выполнено в режиме «Учёба»");
+    }
+    // a double click and a reload do not add anything either
+    await page.reload();
+    await expect(page.getByTestId(`quest-card-${doneId}`).getByTestId("quest-done")).toBeVisible();
+    expect(totalXp(await game(page))).toBe(totalXp(paid));
+  });
+
+  test("every core quest is shown (E1); journal quests have a button to the exact place in the day plan", async ({ context, page }) => {
+    const questDay = { day: today, mode: "trading", catalogVersion: 2, core: ["q_riskcheck", "q_walk", "q_read_pages"], bonus: ["q_gym"] };
+    const plan = { date: today, bias: [{ instrument: "EURUSD", direction: "bullish" }], levels: [], events: [], checklist: [], createdAt: `${today}T07:00:00.000Z`, updatedAt: `${today}T07:00:00.000Z` };
+    await seedGame(context, baseGame({ lastQuestDate: today, questDay }), { ayra_journal_v1: journal({ plans: [plan] }) });
+    await page.goto("/quests");
+    const core = page.locator('section[aria-labelledby="core-title"] [data-testid^="quest-card-"]');
+    await expect(core).toHaveCount(3);
+    await expect(page.getByTestId("core-count")).toHaveText("0 / 3");
+    const risk = page.getByTestId("quest-card-q_riskcheck");
+    await expect(risk.getByTestId("quest-badge-journal")).toBeVisible();
+    await expect(risk.getByTestId("quest-journal-link")).toHaveText("Задать лимиты");
+    await expect(risk.getByTestId("quest-journal-link")).toHaveAttribute("href", "/journal?tab=plan&focus=limits");
+    // the morning protocol: «levels» has no reward of its own and says so; open steps lead to their block
+    const levels = page.getByTestId("mission-step-levels");
+    await expect(levels).toContainText("Без отдельной награды — часть подготовки");
+    await expect(page.getByTestId("mission-step-bias")).toContainText("Награда: +40 XP");
+    await expect(page.getByTestId("mission-step-go-calendar")).toHaveAttribute("href", "/journal?tab=plan&focus=events");
+
+    await risk.getByTestId("quest-journal-link").click();
+    await expect(page).toHaveURL(/\/journal\?tab=plan/);
+    await expect(page.locator("#plan-limits")).toBeInViewport();
+    await expect.poll(() => new URL(page.url()).searchParams.get("focus")).toBeNull();
+  });
+
+  test("the next step of a trading morning is the day plan, not an evening habit (E2)", async ({ context, page }) => {
+    const questDay = { day: today, mode: "trading", catalogVersion: 2, core: ["q_sleep_prep", "q_logic_puzzle", "q_stretching"], bonus: ["q_gym"] };
+    await seedGame(context, baseGame({ lastQuestDate: today, questDay }), { ayra_journal_v1: journal() });
+    await page.goto("/quests");
+    const next = page.getByTestId("hero-next");
+    await expect(next).toHaveAttribute("href", "/journal?tab=plan&focus=bias");
+    await expect(next).not.toContainText("сну");
   });
 
   test("the morning protocol follows the journal's day plan and explains what is missing", async ({ context, page }) => {
@@ -151,7 +222,7 @@ test.describe("Quest Engine (Q2)", () => {
     await expect(page.getByTestId("self-cap")).toHaveText("XP за самоотчёты сегодня: 90 из 90");
   });
 
-  test("two tabs: a reward in one tab locks the mode change in the other (checked on fresh data)", async ({ context }) => {
+  test("two tabs: a reward in one tab and a mode change in the other — the reward is kept once, the slot stays (fresh data)", async ({ context }) => {
     await seedGame(context, baseGame({ lastQuestDate: yesterday }), { ayra_journal_v1: journal() });
     const a = await context.newPage();
     const b = await context.newPage();
@@ -159,12 +230,23 @@ test.describe("Quest Engine (Q2)", () => {
     await b.goto("/quests");
     await expect(a.getByTestId("quests-hero")).toBeVisible();
     await expect(b.getByTestId("quests-hero")).toBeVisible();
-    await expandBonus(a);
-    const card = a.locator('[data-testid^="quest-card-"]').filter({ has: a.getByTestId("quest-badge-self") }).first();
+    const card = a.locator('section[aria-labelledby="core-title"] [data-testid^="quest-card-"]').filter({ has: a.getByTestId("quest-badge-self") }).first();
+    const doneId = ((await card.getAttribute("data-testid")) || "").replace("quest-card-", "");
     await card.getByRole("button", { name: "Выполнить" }).click();
     await expect(card.getByTestId("quest-done")).toBeVisible();
+    await expect.poll(async () => (await game(a)).completedQuestsToday[doneId]).toBe(true);
+    const paid = await game(a);
+    // tab B changes the mode (its screen may be a moment behind): the change is made on fresh data
     await b.getByTestId("mode-study").click();
-    await expect.poll(async () => (await game(b)).questDay?.mode).toBe("trading");
-    await expect(b.getByText("Сегодня уже есть награда: режим можно сменить только на «Отдых»").first()).toBeVisible();
+    await b.getByTestId("mode-activate").click();
+    await expect.poll(async () => (await game(b)).questDay?.mode).toBe("study");
+    const g = await game(b);
+    expect(g.questDay!.core).toContain(doneId);
+    expect(totalXp(g)).toBe(totalXp(paid));
+    expect(g.coins).toBe(paid.coins);
+    // tab A follows; the done quest is still done, and clicking around adds nothing
+    await expect(a.getByTestId("mode-study")).toHaveAttribute("data-active", "true");
+    await expect(a.getByTestId(`quest-card-${doneId}`).getByTestId("quest-done")).toBeVisible();
+    expect(totalXp(await game(a))).toBe(totalXp(paid));
   });
 });

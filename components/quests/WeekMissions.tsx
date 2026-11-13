@@ -121,7 +121,9 @@ export function WeekMissions({ snapshot }: { snapshot: JournalSnapshot }) {
             </li>
           ))}
         </ul>
-        <p className="mt-3 text-xs text-mu">{b.noReward}</p>
+        <p className="mt-3 text-xs text-mu" data-testid="boss-until-end">
+          {b.untilEnd} {b.noReward}
+        </p>
       </section>
 
       <section className="rounded-lg border border-line bg-s1 p-4" data-testid="week-objectives">

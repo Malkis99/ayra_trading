@@ -14,7 +14,24 @@ import { VerificationBadge } from "./VerificationBadge";
  * A composite mission (morning protocol, end-of-day ritual): its steps from the day plan. It has no reward of its own;
  * a step that closes an existing quest shows that quest's existing reward.
  */
-export function MissionCard({ id, kicker, title, desc, steps, hasPlan }: { id: string; kicker: string; title: string; desc: string; steps: MissionStep[]; hasPlan: boolean }) {
+export function MissionCard({
+  id,
+  kicker,
+  title,
+  desc,
+  steps,
+  hasPlan,
+  hrefFor,
+}: {
+  id: string;
+  kicker: string;
+  title: string;
+  desc: string;
+  steps: MissionStep[];
+  hasPlan: boolean;
+  /** The exact block of the day plan for an open step. */
+  hrefFor: (step: MissionStep) => string;
+}) {
   const { dict } = useApp();
   const t = dict.questsPage.q2.protocol;
   const done = steps.filter((s) => s.state === "done").length;
@@ -48,10 +65,22 @@ export function MissionCard({ id, kicker, title, desc, steps, hasPlan }: { id: s
             )}
             <div className="min-w-0">
               <div className="text-sm text-tx">{t.steps[s.key]}</div>
-              <div className="text-xs text-mu">{s.rewardQuest ? formatString(t.rewardStep, { reward: rewardText(s.rewardQuest) }) : t.progressOnly}</div>
+              <div className={s.rewardQuest ? "text-xs font-semibold text-tx/80" : "text-xs text-mu"}>
+                {s.rewardQuest ? formatString(t.rewardStep, { reward: rewardText(s.rewardQuest) }) : t.progressOnly}
+              </div>
             </div>
-            <div className="col-start-2 sm:col-start-3">
+            <div className="col-start-2 flex flex-wrap items-center gap-2 sm:col-start-3">
               <VerificationBadge source="journal" label={dict.questsPage.q1.card.badgeJournal} />
+              {s.state !== "done" && (
+                <Link
+                  href={hrefFor(s)}
+                  className={buttonClasses("ghost", "sm")}
+                  data-testid={`mission-step-go-${s.key}`}
+                  aria-label={`${t.go}: ${t.steps[s.key]}`}
+                >
+                  {t.go}
+                </Link>
+              )}
             </div>
           </li>
         ))}

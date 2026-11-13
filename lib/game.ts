@@ -1,8 +1,9 @@
 import type { ProfileDetails } from "./profile";
 import { GAME_CONFIG } from "./game-config";
 import { dayKeyInZone, mondayOfKey } from "./day-key";
-import { APP_CLOSED_QUESTS, pickReplacement } from "./quests";
+import { APP_CLOSED_QUESTS, getTodaysQuests, pickReplacement } from "./quests";
 import {
+  composeSwitchedSet,
   defaultModeFor,
   generateDaySet,
   legacyDaySet,
@@ -1300,7 +1301,7 @@ export function selfReportXpOn(state: Pick<GameState, "history">, dayKey: string
  * (GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP, owner decision 2026-11-13). Over the cap the quest is still done (the day and
  * the streak count), with the XP that is left (possibly 0). Never coins. Journal-checked quests are not affected.
  * Only catalog quests confirmed by a self-report go this way, never above their catalog XP: journal quests and
- * composite missions (which have no reward of their own) cannot be ticked.
+ * composite missions (which have no reward of their own) cannot be ticked, nor a quest outside the active mode set.
  */
 export function completeSelfReportQuest(
   state: GameState,
@@ -1313,8 +1314,13 @@ export function completeSelfReportQuest(
   const fresh = checkAndApplyDateResets(state, currentDate);
   const def = QUEST_CATALOG.find((d) => d.id === questId && d.kind === "daily" && d.confirmation === "self");
   if (!def || APP_CLOSED_QUESTS.has(questId)) return { state: fresh, leveledUp: false, newlyUnlocked: [], xpGiven: 0, capped: false };
-  const asked = Math.max(0, Math.min(xpAmount, def.template?.xpReward ?? 0));
   const today = gameDayKey(fresh, currentDate);
+  // only a quest of the active mode set can be ticked (a viewed mode, a rest day or a stale tab cannot add one)
+  const shown = shownSet(fresh, today);
+  if (fresh.isRestDay || (!shown.core.includes(questId) && !shown.bonus.includes(questId))) {
+    return { state: fresh, leveledUp: false, newlyUnlocked: [], xpGiven: 0, capped: false };
+  }
+  const asked = Math.max(0, Math.min(xpAmount, def.template?.xpReward ?? 0));
   const left = Math.max(0, GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP - selfReportXpOn(fresh, today));
   const xp = Math.min(asked, left);
   const res = completeQuest(fresh, questId, questTitle, category, xp, 0, currentDate);
@@ -1408,18 +1414,49 @@ export function toggleRestDay(
   return setDayMode(s, target, currentDate).state;
 }
 
-/** Something was given today (a quest, XP or coins): after that the day's quests cannot be swapped by a mode change. */
+/** Something was given today (a quest, XP or coins). */
 export function rewardedToday(state: Pick<GameState, "completedQuestsToday" | "dailyStats">, dayKey: string): boolean {
   const rec = state.dailyStats?.[dayKey];
   return Object.keys(state.completedQuestsToday || {}).length > 0 || (rec?.xpGained || 0) > 0 || (rec?.coinsGained || 0) > 0;
 }
 
-export type DayModeFailure = "locked";
+/** Kept for callers of the Q2 API: a mode change no longer fails (docs/quests-ux-3.0-plan.md, 6). */
+export type DayModeFailure = never;
+
+/** The day set as shown now: stored ids with today's replacements followed (what the person sees and can tick). */
+function shownSet(s: GameState, today: string): { core: string[]; bonus: string[] } {
+  const set = getTodaysQuests(today, s.questReplacements || {}, s.questDay?.day === today ? s.questDay : null);
+  return { core: set.core.map((q) => q.id), bonus: set.bonus.map((q) => q.id) };
+}
 
 /**
- * Changes the mode of the game day (docs/quests-2.0-plan.md, 2.2): free until the first reward of the day; after it only
- * «Rest» (and back to the mode before it). A new mode gives that mode's set (the same set every time for the same
- * mode and day). Rest keeps the streak without growing it. A change never gives a reward.
+ * The set a mode would have now (the same function a mode change saves). Pure: viewing a mode changes nothing.
+ * Rest has no quests; going back from a rest to the mode before it gives that day set back.
+ */
+export function modeSetPreview(state: GameState, mode: DayMode, currentDate: Date = new Date()): DaySet {
+  const s = checkAndApplyDateResets(state, currentDate);
+  const today = gameDayKey(s, currentDate);
+  const day = s.questDay && s.questDay.day === today ? s.questDay : generateDaySet(s, today, defaultModeFor(today, s.tradingDays));
+  const current: DayMode = s.isRestDay ? "rest" : day.mode;
+  const before = day.modeBeforeRest ?? (current === "rest" ? defaultModeFor(today, s.tradingDays) : current);
+  const shown = shownSet(s, today);
+  if (mode === "rest") return { ...day, mode: "rest", core: [], bonus: [] };
+  if (mode === current || (current === "rest" && mode === before)) {
+    const { modeBeforeRest: _drop, ...rest } = day;
+    return { ...rest, mode, core: shown.core, bonus: shown.bonus };
+  }
+  return composeSwitchedSet(
+    { core: shown.core, mode: current === "rest" ? before : current, carried: day.carried },
+    generateDaySet(s, today, mode),
+    s.completedQuestsToday,
+    s.passedQuestsToday
+  );
+}
+
+/**
+ * Changes the active mode of the game day (docs/quests-ux-3.0-plan.md, 6): allowed at any time. Done core quests keep
+ * their slot and their reward (paid once); open slots take the new mode's quests (composeSwitchedSet). The same mode
+ * gives the same set while nothing new is done. Rest keeps the streak without growing it. A change never gives a reward.
  */
 export function setDayMode(
   state: GameState,
@@ -1453,15 +1490,14 @@ export function setDayMode(
       state: { ...s, isRestDay: false, questDay: { ...rest, mode: back }, dailyStats: recordDailyStatEvent(s.dailyStats, today, { type: "restDayOff" }) },
     };
   }
-  if (rewardedToday(s, today)) return { state: s, ok: false, reason: "locked" };
-
-  const next = generateDaySet(s, today, mode);
+  const next = modeSetPreview(s, mode, currentDate);
   return {
     ok: true,
     state: {
       ...s,
       isRestDay: false,
-      questDay: day.legacy ? { ...next } : next,
+      questDay: next,
+      // the shown ids are saved in the new set, so today's replacements are already applied
       questReplacements: {},
       dailyStats: leavingRest ? recordDailyStatEvent(s.dailyStats, today, { type: "restDayOff" }) : s.dailyStats,
     },

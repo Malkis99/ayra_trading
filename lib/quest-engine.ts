@@ -106,6 +106,8 @@ export interface DaySet {
   bonus: string[];
   /** The set of a day that had begun before Q2: kept as Q1 computed it, so nothing changes in the middle of a day. */
   legacy?: boolean;
+  /** Core quests done in another mode earlier today and kept in their slot after a mode change (quest id → that mode). */
+  carried?: Record<string, DayMode>;
 }
 
 /** The program of the onboarding answers (the same rules as the Awakening finale), or null without a finished onboarding. */
@@ -128,6 +130,43 @@ export function generateDaySet(
   const seed = (state.createdAt || "user_default").slice(0, 10);
   const picked = pool.length ? (program ? getWeightedDailyQuests(dayKey, seed, program, pool) : getDeterministicDailyQuests(dayKey, pool)) : { core: [], bonus: [] };
   return { day: dayKey, mode, catalogVersion: QUEST_CATALOG_VERSION, core: picked.core.map((q) => q.id), bonus: picked.bonus.map((q) => q.id) };
+}
+
+/**
+ * The set of a new active mode in the middle of a day (docs/quests-ux-3.0-plan.md, 6). The core list is three slots:
+ * a slot already done keeps its quest (and its reward, paid once), so a mode change never erases work and never opens
+ * a second reward for the same slot. Open slots take the new mode's quests; a quest is never in two slots, and quests put
+ * off for today («not today», replaced) are not offered again.
+ */
+export function composeSwitchedSet(
+  current: { core: string[]; mode: DayMode; carried?: Record<string, DayMode> },
+  fresh: DaySet,
+  done: Record<string, boolean>,
+  passed: Record<string, boolean>
+): DaySet {
+  const slots = Math.max(current.core.length, fresh.core.length);
+  const core: Array<string | undefined> = new Array(slots).fill(undefined);
+  const used = new Set<string>();
+  const carried: Record<string, DayMode> = {};
+  current.core.forEach((id, i) => {
+    if (!done[id]) return;
+    core[i] = id;
+    used.add(id);
+    const from = current.carried?.[id] ?? current.mode;
+    if (from !== fresh.mode) carried[id] = from;
+  });
+  const free = (id: string) => !used.has(id) && (!passed[id] || !!done[id]);
+  const candidates = [...fresh.core, ...fresh.bonus, ...poolForMode(fresh.mode).map((q) => q.id)];
+  for (let i = 0; i < slots; i++) {
+    if (core[i]) continue;
+    const pick = [fresh.core[i], ...candidates].find((id) => !!id && free(id));
+    if (!pick) continue;
+    core[i] = pick;
+    used.add(pick);
+  }
+  const set: DaySet = { ...fresh, core: core.filter((id): id is string => !!id), bonus: fresh.bonus.filter((id) => !used.has(id)) };
+  if (Object.keys(carried).length > 0) set.carried = carried;
+  return set;
 }
 
 /** The Q1 set of a day that had already begun (kept unchanged for that day). */

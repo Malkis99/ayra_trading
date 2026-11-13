@@ -75,3 +75,11 @@ export async function firstSelfQuest(page: Page) {
   const testId = (await card.getAttribute("data-testid")) || "";
   return { card, id: testId.replace("quest-card-", "") };
 }
+
+/** Makes a day mode active (UX3-1: a mode tab only shows that mode; «Make active» changes the active one). */
+export async function activateMode(page: Page, mode: "trading" | "study" | "rest" | "recovery") {
+  await page.getByTestId(`mode-${mode}`).click();
+  const activate = page.getByTestId("mode-activate");
+  if (await activate.isVisible()) await activate.click();
+  await expect(page.getByTestId(`mode-${mode}`)).toHaveAttribute("data-active", "true");
+}

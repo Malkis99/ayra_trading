@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { readGame, seedGame, utcDay } from "./helpers/quests";
+import { readGame, seedGame, utcDay, activateMode } from "./helpers/quests";
 
 // Data safety of Q1 (docs/quests-2.0-plan.md, 6.1): an old save loads with everything kept, one backup copy of it is
 // written once and never overwritten, the journal is not touched; the page works in English too.
@@ -60,7 +60,7 @@ test.describe("Q1 data safety", () => {
     const backup = await page.evaluate(() => localStorage.getItem("ayra_demo_v1_backup_q1"));
     expect(JSON.parse(backup!)).toEqual(old);
     // a change and a reload do not overwrite the backup
-    await page.getByTestId("mode-rest").click();
+    await activateMode(page, "rest");
     await page.reload();
     await expect(page.getByTestId("quests-hero")).toBeVisible();
     expect(await page.evaluate(() => localStorage.getItem("ayra_demo_v1_backup_q1"))).toBe(backup);
