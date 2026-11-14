@@ -88,11 +88,19 @@ export const isCompleteBacktest = (note: Pick<Note, "templateKey" | "backtest" |
 };
 
 /**
- * What makes two results «the same result»: instrument, timeframe, period and the numbers. A copy saved again under a
- * new id has the same fingerprint, so a mission can count one result once (QH-6.4, owner condition 5).
+ * When two saved results are «the same result» (a mission counts it once — QH-6.4, owner condition 5; an import does
+ * not add it twice). All of these must match:
+ * - the instrument (case ignored), the timeframe and the period (from and to);
+ * - what was tested: the same journal strategy (by its id, whatever its name now) when the result is linked to one;
+ *   otherwise the same setup text (case and repeated spaces ignored). A result linked to a strategy and one described
+ *   only by text are different results;
+ * - the four numbers: setups, wins, losses, breakeven.
+ * The conclusion and the optional average R are not part of it: rewording the conclusion or rounding R again does not
+ * make a new result. Different strategies or setups with equal numbers are never the same result.
  */
 export function backtestFingerprint(r: BacktestResult): string {
-  return [r.instrument.trim().toUpperCase(), r.timeframe, r.periodFrom, r.periodTo, r.setups, r.wins, r.losses, r.breakeven].join("|");
+  const tested = r.strategyId ? `strategy:${r.strategyId}` : `setup:${r.setup.replace(/\s+/g, " ").trim().toLowerCase()}`;
+  return [r.instrument.trim().toUpperCase(), r.timeframe, r.periodFrom, r.periodTo, tested, r.setups, r.wins, r.losses, r.breakeven].join("|");
 }
 
 /** Share of winning setups, 0–100, rounded (null without setups). */

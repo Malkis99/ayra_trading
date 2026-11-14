@@ -9,6 +9,8 @@ export interface ImportBatch {
   fileName: string;
   accountId: string;
   tradeCount: number;
+  /** Notes (and backtest results) brought by the same run (AYRA JSON). */
+  noteCount?: number;
   undoneAt?: string;
   /** Last change (sync, T7b). */
   updatedAt?: string;

@@ -312,6 +312,36 @@ export class LocalStorageJournalRepository implements JournalRepository {
     return saved;
   }
 
+  /**
+   * Notes from an import file. A note whose id is already here — live or deleted — is never replaced: the local copy
+   * (or the deletion) is newer than a file. The file version keeps its own updatedAt (not «now»), so a newer copy in
+   * the cloud wins over it in sync instead of being overwritten.
+   */
+  importNotes(notes: Note[]): number {
+    const data = this.loadData();
+    const list = data.notes || (data.notes = []);
+    const ids = new Set(list.map((n) => n.id));
+    let added = 0;
+    for (const n of notes) {
+      if (ids.has(n.id)) continue;
+      list.push({ ...n, deletedAt: null } as Note);
+      ids.add(n.id);
+      added++;
+    }
+    if (added) this.saveData(data);
+    return added;
+  }
+
+  deleteNotesByBatch(batchId: string): number {
+    const data = this.loadData();
+    let removed = 0;
+    for (const n of data.notes || []) {
+      if (n.importBatchId === batchId && isLive(n) && this.softDelete(data.notes, (x) => x.id === n.id)) removed++;
+    }
+    if (removed) this.saveData(data);
+    return removed;
+  }
+
   archiveNote(id: string): Note {
     const data = this.loadData();
     const note = data.notes.find((n) => n.id === id && isLive(n));

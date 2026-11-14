@@ -1175,6 +1175,7 @@ export const ru = {
         ayraHint: "Экспорт из AYRA (версия 1.2 и ниже)",
         history: "Последние импорты",
         historyItem: "{date} · {platform} · сделок: {count}",
+        historyNotes: " · заметок: {count}",
         undone: "отменён",
       },
       file: {
@@ -1254,6 +1255,10 @@ export const ru = {
         fixedRisk: "Риск на сделку",
       },
       preview: {
+        notesTitle: "Заметки из файла",
+        notesSummary: "В файле заметок: {total}, из них результатов бэктеста: {backtests}. Будет добавлено: {add}; уже есть в Журнале: {existing}; повторы: {duplicates}; без текста: {invalid}.",
+        notesInclude: "Импортировать заметки",
+        notesNoReward: "Заметки из файла не дают XP и Coins и не засчитываются в миссии.",
         title: "Проверка перед импортом",
         new: "Новые",
         duplicates: "Дубликаты",
@@ -1284,6 +1289,7 @@ export const ru = {
         },
         nothing: "Нечего импортировать: все сделки уже есть в журнале или строки с ошибками.",
         importBtn: "Импортировать: {count}",
+        importNotesBtn: "Импортировать заметки: {count}",
         tooMany: "В файле больше {max} сделок — импортируй частями.",
       },
       done: {
@@ -1294,7 +1300,11 @@ export const ru = {
         undoTitle: "Отменить импорт?",
         undoDesc: "Будут удалены только сделки этого импорта ({count}). Остальные сделки не изменятся.",
         undoConfirm: "Удалить сделки импорта",
+        undoDescNotes: "Будут удалены только записи этого импорта: сделки ({count}) и заметки ({notes}). Остальное не изменится.",
+        undoConfirmNotes: "Удалить записи импорта",
         undoneToast: "Импорт отменён: удалено сделок — {count}",
+        undoneNotesToast: "Импорт отменён: удалено сделок — {count}, заметок — {notes}",
+        notesToast: "Импортировано заметок: {count}",
         importedToast: "Импортировано сделок: {count}",
         finish: "Готово",
       },
