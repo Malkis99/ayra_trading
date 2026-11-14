@@ -16,6 +16,7 @@ import { PPI_METRICS, PPI_SCHEDULE_URL, isPpiCode, parsePpiRelease, ppiReleaseUr
 import { JOLTS_CODE, JOLTS_SCHEDULE_URL, joltsReleaseUrl, parseJoltsRelease, joltsResults, verifiedJoltsMeta } from "./jolts";
 import { joltsSchedule, ppiSchedule } from "./bls-schedule";
 import { ONS_LISTS, onsBulletinUrl, onsCalendarUrl, onsGdpResult, onsMoveSequence, onsSchedules, type StoredOnsSchedule } from "./ons-gdp";
+import { type OnsBudget, type OnsRequestKind, withOnsSlot } from "./ons-budget";
 import { eurostatCalendarUrl, EUROSTAT_SERIES, type EurostatCode, eurostatLatest, eurostatResult, eurostatSchedule, eurostatUrl, parseEurostat } from "./eurostat";
 
 /**
@@ -84,6 +85,8 @@ export type Fetcher = (url: string, init?: { method?: string; headers?: Record<s
 export type Scope = "news" | "releases" | "schedules" | "all";
 
 export interface CollectOptions {
+  onsBudget?: OnsBudget;
+  onsFetch?: Fetcher;
   scope: Scope;
   prune?: boolean;
   now: number;
@@ -199,13 +202,21 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
     const ons = isolated("ons-gdp-schedule", async () => {
       const last = await o.db.lastRun("ons-gdp-schedule");
       if (last !== null && new Date(last).toISOString().slice(0, 10) === new Date(o.now).toISOString().slice(0, 10)) return;
+      const daily = await o.onsBudget?.daily();
+      if (o.onsBudget && !daily) return;
       let facts: (() => Promise<SourceOutcome>) | undefined;
-      await run("ons-gdp-schedule", async () => {
-        const schedule = await collectOnsSchedules(o);
-        facts = schedule.facts;
-        return schedule;
-      });
-      if (facts) await run("ons-gdp-facts", facts);
+      let ready = false;
+      try {
+        await run("ons-gdp-schedule", async () => {
+          const schedule = await collectOnsSchedules(o, daily);
+          facts = schedule.facts;
+          ready = schedule.issues.length === 0;
+          return schedule;
+        });
+        if (facts) await run("ons-gdp-facts", facts);
+      } finally {
+        if (daily) await o.onsBudget?.daily(daily, ready);
+      }
     });
     await run("schedules-listed", async () => {
       const rows = listedEvents().filter(e => !isPpiCode(e.code) && e.code !== JOLTS_CODE);
@@ -262,6 +273,13 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
     await previousValues(o, run);
   }
 
+  const onsBudget = o.onsBudget;
+  const fastOns = o.scope === "news" && onsBudget
+    ? isolated("ons-gdp-fast", async () => {
+      const candidates = await onsBudget.due(o.now);
+      if (candidates.length) await run("ons-gdp-fast", () => collectOnsFacts(o, candidates, ONS_DETAIL_LIMIT));
+    }) : undefined;
+
   if (newsScope) {
     const newsJob = (parse: (xml: string) => NewsRow[], url: string) => async () => {
       const rows = dedupe(await linkable(o.db, recent(parse(await get(o.fetch, url)), o.now)));
@@ -296,6 +314,7 @@ export async function collectFeeds(o: CollectOptions): Promise<{ results: Source
     await isolated("eurostat-api", () => eurostatFigures(o, run));
   }
 
+  await fastOns;
   const pruned = o.prune ? await o.db.prune() : null;
   return { results, pruned };
 }
@@ -304,10 +323,18 @@ type SourceOutcome = { items: number; issues: string[] };
 type Run = (source: string, job: () => Promise<number | SourceOutcome>) => Promise<void>;
 const ONS_DETAIL_LIMIT = 2;
 
-async function collectOnsSchedules(o: CollectOptions): Promise<SourceOutcome & { facts?: () => Promise<SourceOutcome> }> {
-  const lists = await Promise.all(ONS_LISTS.map(async list => onsSchedules(
-    await getOns(o.fetch, onsCalendarUrl(list, o.now)), list, o.now,
-  )));
+async function collectOnsSchedules(o: CollectOptions, daily?: string | null): Promise<SourceOutcome & { facts?: () => Promise<SourceOutcome> }> {
+  const read = async (list: (typeof ONS_LISTS)[number]) => {
+    const html = await onsRequest(o, "schedule", list, onsCalendarUrl(list, o.now), daily);
+    if (html === null) throw new Error("ONS GDP: schedule request deferred by budget or source pause");
+    return onsSchedules(html, list, o.now);
+  };
+  const lists: EventRow[][] = [];
+  if (o.onsBudget) {
+    for (const list of ONS_LISTS) lists.push(await read(list));
+  } else {
+    lists.push(...await Promise.all(ONS_LISTS.map(read)));
+  }
   if (!lists[0].some(row => Date.parse(row.starts_at) > o.now)) throw new Error("ONS GDP: confirmed future horizon unavailable");
   const stored = new Map((await o.db.onsSchedules()).map(row => [row.id, row]));
   const rows: EventRow[] = [];
@@ -350,7 +377,9 @@ async function collectOnsSchedules(o: CollectOptions): Promise<SourceOutcome & {
     }
     detailRequests++;
     try {
-      const sequence = onsMoveSequence(await getOns(o.fetch, row.url!), row, old);
+      const html = await onsRequest(o, "move", id, row.url!, daily);
+      if (html === null) { issues.push("ONS GDP: move deferred by budget or source pause"); continue; }
+      const sequence = onsMoveSequence(html, row, old);
       if (sequence === null) issues.push("ONS GDP: date change not verified");
       else rows.push({ ...row, schedule_meta: { sequence, cancelled: false } });
     } catch (error) {
@@ -367,25 +396,49 @@ async function collectOnsSchedules(o: CollectOptions): Promise<SourceOutcome & {
       || (old && old.source_uid !== row.source_uid) || Date.parse(row.starts_at) > o.now
       || (!saved && (!old || Date.parse(old.starts_at) !== Date.parse(row.starts_at))));
   }).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
-  return { items: rows.length, issues, facts: pending.length && budget ? () => collectOnsFacts(o, pending, budget) : undefined };
+  return { items: rows.length, issues, facts: pending.length && budget ? () => collectOnsFacts(o, pending, budget, daily) : undefined };
+}
+
+function onsPause(error: unknown, now: number): string | undefined {
+  if (!(error instanceof ReleaseHttpError)) return;
+  if (error.status === 403) {
+    const nextDaily = Math.floor((now - 5 * HOUR) / DAY + 1) * DAY + 5 * HOUR;
+    return new Date(nextDaily).toISOString();
+  }
+  if (error.status === 429 || error.status === 503) {
+    return retryAfterAt(error.retryAfter, now) ?? (error.status === 429 ? new Date(now + HOUR).toISOString() : undefined);
+  }
+}
+
+async function onsRequest(o: CollectOptions, kind: OnsRequestKind, target: string, url: string, daily?: string | null) {
+  const get = () => getOns(o.onsFetch ?? o.fetch, url);
+  if (!o.onsBudget) return get();
+  return withOnsSlot(o.onsBudget, kind, target, daily, get, onsPause);
 }
 
 function onsBackoff(error: unknown): boolean {
   return error instanceof ReleaseHttpError && (error.status === 403 || error.status === 429 || (error.status === 503 && !!error.retryAfter));
 }
 
-async function collectOnsFacts(o: CollectOptions, pending: EventRow[], budget: number): Promise<SourceOutcome> {
+async function collectOnsFacts(o: CollectOptions, pending: EventRow[], budget: number, daily?: string | null): Promise<SourceOutcome> {
   const issues: string[] = [];
   let items = 0;
   for (const row of pending) {
     if (budget === 0) break;
     const url = onsBulletinUrl(row);
     if (!url) { issues.push(`${row.id}: unsupported dated bulletin path`); continue; }
-    budget--;
     try {
-      const result = onsGdpResult(await getOns(o.fetch, url, true), row);
-      if (!result) throw new Error("published bulletin lacks a verified figure");
-      await o.db.saveResults([result]);
+      const read = async () => {
+        budget--;
+        const result = onsGdpResult(await getOns(o.onsFetch ?? o.fetch, url, true), row);
+        if (!result) throw new Error("published bulletin lacks a verified figure");
+        return result;
+      };
+      if (o.onsBudget) {
+        if (!await withOnsSlot(o.onsBudget, "fact", row.id, daily, read, onsPause, row.starts_at)) continue;
+      } else {
+        await o.db.saveResults([await read()]);
+      }
       items++;
     } catch (error) {
       issues.push(`${row.id}: ${error instanceof Error ? error.message : String(error)}`);
