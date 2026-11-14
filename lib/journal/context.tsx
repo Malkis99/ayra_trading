@@ -751,10 +751,12 @@ export function JournalProvider({
 
   const saveNote = useCallback(
     (note: Note) => {
-      const first = noRecordsYet("note");
+      // a backtest result is not a note for rewards (QH-6.1 gives nothing; the mission comes with QH-6.4)
+      const isBacktest = note.templateKey === "backtest";
+      const first = !isBacktest && noRecordsYet("note");
       const saved = repository.saveNote(note);
       refresh();
-      rewardFirstAction("note", first);
+      if (!isBacktest) rewardFirstAction("note", first);
       return saved;
     },
     [repository, refresh, noRecordsYet, rewardFirstAction]

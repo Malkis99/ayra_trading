@@ -5,6 +5,9 @@ import { useApp } from "@/lib/context";
 import { useJournal } from "@/lib/journal/context";
 import { Note } from "@/lib/journal/types";
 import { NoteModal } from "./NoteModal";
+import { BacktestModal } from "./BacktestModal";
+import { backtestWinRate, readBacktest } from "@/lib/journal/backtest";
+import { formatString } from "@/lib/i18n";
 import {
   Search,
   Plus,
@@ -14,6 +17,7 @@ import {
   Archive,
   Edit2,
   FileText,
+  FlaskConical,
 } from "lucide-react";
 import { FilterChip } from "@/components/ui";
 
@@ -31,6 +35,11 @@ export function NotesTab() {
   // Modal state
   const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
   const [editingNote, setEditingNote] = useState<Note | null>(null);
+  // backtest results (QH-6.1) open their own form
+  const [isBacktestOpen, setIsBacktestOpen] = useState(false);
+  const [editingBacktest, setEditingBacktest] = useState<Note | null>(null);
+  const bt = dict.journal.backtest;
+  const dayLabel = (key: string) => new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "en-US", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${key}T00:00:00Z`));
 
   // Collect all unique user tags across active notes
   const allUserTags = useMemo(() => {
@@ -104,8 +113,18 @@ export function NotesTab() {
   };
 
   const handleOpenEditModal = (note: Note) => {
+    if (note.templateKey === "backtest") {
+      setEditingBacktest(note);
+      setIsBacktestOpen(true);
+      return;
+    }
     setEditingNote(note);
     setIsNoteModalOpen(true);
+  };
+
+  const handleOpenBacktest = () => {
+    setEditingBacktest(null);
+    setIsBacktestOpen(true);
   };
 
   return (
@@ -119,13 +138,24 @@ export function NotesTab() {
           </p>
         </div>
 
-        <button
-          onClick={handleOpenCreateModal}
-          className="btn text-xs py-2 px-4 flex items-center gap-1.5 font-semibold self-start sm:self-auto"
-        >
-          <Plus size={16} />
-          <span>{dict.journal.notes.addNoteBtn}</span>
-        </button>
+        <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={handleOpenBacktest}
+            className="btn-ghost flex min-h-[40px] items-center gap-1.5 rounded-xl border border-line px-4 text-xs font-semibold text-tx hover:border-vi"
+            data-testid="backtest-add"
+          >
+            <FlaskConical size={15} aria-hidden="true" className="text-vi" />
+            <span>{bt.addBtn}</span>
+          </button>
+          <button
+            onClick={handleOpenCreateModal}
+            className="btn text-xs py-2 px-4 flex items-center gap-1.5 font-semibold"
+          >
+            <Plus size={16} />
+            <span>{dict.journal.notes.addNoteBtn}</span>
+          </button>
+        </div>
       </div>
 
       {/* Filter & Search Bar */}
@@ -215,70 +245,95 @@ export function NotesTab() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {filteredNotes.map((note) => (
-            <div
-              key={note.id}
-              onClick={() => handleOpenEditModal(note)}
-              className={`card p-4 space-y-3 cursor-pointer hover:border-vi transition-all relative ${
-                note.pinned ? "border-amber-500/40 bg-s2/80 shadow-md" : "border-line"
-              }`}
-            >
-              <div className="flex justify-between items-start gap-2">
-                <h4 className="font-bold text-sm text-tx line-clamp-1">
-                  {note.title || (note.body.split("\n")[0] || dict.journal.notes.untitled)}
-                </h4>
-                {note.pinned && (
-                  <Pin size={14} className="text-amber-400 flex-none fill-amber-400/20" />
-                )}
-              </div>
-
-              {/* Rendered safely as plain text */}
-              <p className="text-xs text-tx/80 line-clamp-4 whitespace-pre-wrap font-sans">
-                {note.body}
-              </p>
-
-              {/* Tags & Links */}
-              <div className="space-y-2 pt-2 border-t border-line/40 text-[11px] text-mu">
-                {note.tags && note.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {note.tags.map((t) => (
-                      <span
-                        key={t}
-                        className="px-1.5 py-0.2 rounded bg-s1 border border-line/60 text-acc text-[10px] font-semibold"
-                      >
-                        #{t}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                <div className="flex justify-between items-center text-[10px] pt-1">
-                  <span className="text-mu">
-                    {new Date(note.createdAt).toLocaleDateString(
-                      lang === "ru" ? "ru-RU" : "en-US",
-                      {
-                        day: "2-digit",
-                        month: "short",
-                        year: "numeric",
-                      }
-                    )}
-                  </span>
-
-                  {note.links && Object.keys(note.links).length > 0 && (
-                    <div className="flex items-center gap-1 text-acc font-semibold">
-                      <LinkIcon size={11} />
-                      <span>
-                        {note.links.instrument ||
-                          (note.links.tradeId ? `#${note.links.tradeId.slice(-4)}` : dict.journal.notes.linkFallback)}
-                      </span>
-                    </div>
+          {filteredNotes.map((note) => {
+            const result = note.templateKey === "backtest" ? readBacktest(note) : null;
+            return (
+              <div
+                key={note.id}
+                data-testid={note.templateKey === "backtest" ? "backtest-card" : "note-card"}
+                data-note-id={note.id}
+                onClick={() => handleOpenEditModal(note)}
+                className={`card p-4 space-y-3 cursor-pointer hover:border-vi transition-all relative ${
+                  note.pinned ? "border-amber-500/40 bg-s2/80 shadow-md" : "border-line"
+                }`}
+              >
+                <div className="flex justify-between items-start gap-2">
+                  <h4 className="font-bold text-sm text-tx line-clamp-1">
+                    {note.title || (note.body.split("\n")[0] || dict.journal.notes.untitled)}
+                  </h4>
+                  {note.pinned && (
+                    <Pin size={14} className="text-amber-400 flex-none fill-amber-400/20" />
                   )}
                 </div>
+  
+                {note.templateKey === "backtest" && (
+                  <div className="space-y-1" data-testid="backtest-summary">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-vi/40 px-2 py-0.5 text-[10px] font-semibold text-vi">
+                      <FlaskConical size={11} aria-hidden="true" />
+                      {bt.badge}
+                    </span>
+                    {result ? (
+                      <p className="text-xs text-tx">
+                        {formatString(bt.period, { from: dayLabel(result.periodFrom), to: dayLabel(result.periodTo) })} · {formatString(bt.setupsCount, { n: result.setups })} ·{" "}
+                        <span className="font-semibold">{formatString(bt.winRate, { n: backtestWinRate(result) ?? 0 })}</span>
+                        {result.avgWinR != null && result.avgLossR != null ? ` · +${result.avgWinR}R / ${result.avgLossR}R` : ""}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-amber-300" data-testid="backtest-broken">{bt.broken}</p>
+                    )}
+                  </div>
+                )}
+  
+                {/* Rendered safely as plain text */}
+                <p className="text-xs text-tx/80 line-clamp-4 whitespace-pre-wrap font-sans">
+                  {note.body}
+                </p>
+  
+                {/* Tags & Links */}
+                <div className="space-y-2 pt-2 border-t border-line/40 text-[11px] text-mu">
+                  {note.tags && note.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {note.tags.map((t) => (
+                        <span
+                          key={t}
+                          className="px-1.5 py-0.2 rounded bg-s1 border border-line/60 text-acc text-[10px] font-semibold"
+                        >
+                          #{t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+  
+                  <div className="flex justify-between items-center text-[10px] pt-1">
+                    <span className="text-mu">
+                      {new Date(note.createdAt).toLocaleDateString(
+                        lang === "ru" ? "ru-RU" : "en-US",
+                        {
+                          day: "2-digit",
+                          month: "short",
+                          year: "numeric",
+                        }
+                      )}
+                    </span>
+  
+                    {note.links && Object.keys(note.links).length > 0 && (
+                      <div className="flex items-center gap-1 text-acc font-semibold">
+                        <LinkIcon size={11} />
+                        <span>
+                          {note.links.instrument ||
+                            (note.links.tradeId ? `#${note.links.tradeId.slice(-4)}` : dict.journal.notes.linkFallback)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
+
+      <BacktestModal isOpen={isBacktestOpen} onClose={() => setIsBacktestOpen(false)} initialNote={editingBacktest} />
 
       {/* Note Edit Modal */}
       <NoteModal
