@@ -32,23 +32,11 @@ test("late acknowledgment consumes the slot without dispatch", async () => {
 
 test("failed HTTP response persists a pause and never replays the GET", async () => {
   const rpc = budget();
-  let requests = 0;
-  const server = createServer((_req, res) => { requests++; res.writeHead(429).end(); });
-  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-  try {
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("missing test server");
-    const pause = "2026-11-15T00:05:00Z";
-    const read = async () => {
-      const response = await fetch("http://127.0.0.1:" + address.port, { redirect: "manual" });
-      throw new Error("HTTP " + response.status);
-    };
-    await expect(withOnsSlot(rpc, "schedule", "upcoming", "daily", read, () => pause)).rejects.toThrow("HTTP 429");
-    expect(requests).toBe(1);
-    expect(rpc.finish).toHaveBeenCalledWith("token", undefined, pause);
-  } finally {
-    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-  }
+  const pause = "2026-11-15T00:05:00Z";
+  const read = vi.fn(async () => { throw new Error("HTTP 429"); });
+  await expect(withOnsSlot(rpc, "schedule", "upcoming", "daily", read, () => pause)).rejects.toThrow("HTTP 429");
+  expect(read).toHaveBeenCalledTimes(1);
+  expect(rpc.finish).toHaveBeenCalledWith("token", undefined, pause);
 });
 
 test.skipIf(!process.env.ONS_TEST_PG_MODULE)("real PostgreSQL connections share five HTTP GETs", async () => {
