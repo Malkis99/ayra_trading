@@ -500,6 +500,8 @@ export interface JournalRepository {
   isCloudActive?(): boolean;
   /** The server already answered whether cloud sync is on for the signed-in account (guests: true). */
   isCloudFlagKnown?(): boolean;
+  /** Optional (cloud journal): a successful cloud exchange finished at `sinceMs` or later (guests, flag off: true). */
+  isCloudSettledSince?(sinceMs: number): boolean;
   /** Queue for the cloud the records written outside the repository (guest journal copied in). */
   adoptLocalRecords?(): number;
   /** Optional (cloud journal): records changed both here and in the cloud, waiting for the user's choice. */

@@ -13,6 +13,21 @@ import {
   type DaySet,
   type WeekChallenge,
 } from "./quest-engine";
+import {
+  addDaySnapshot,
+  addWeekSnapshot,
+  buildDaySnapshot,
+  buildWeekSnapshot,
+  readDaySnapshots,
+  readWeekSnapshots,
+  pruneWeekSnapshots,
+  startTracking,
+  trackModeChange,
+  trackReplacement,
+  withBossResult,
+  type DaySnapshot,
+  type WeekSnapshot,
+} from "./day-snapshots";
 import { ITEMS } from "./items";
 import { TITLES_CATALOG } from "./titles";
 import {
@@ -141,6 +156,10 @@ export interface GameState {
   questDay?: DaySet;
   /** The week challenge, chosen once per week (Q2; no rewards yet). */
   questWeek?: WeekChallenge;
+  /** Closed game days as they were (QH-3, lib/day-snapshots.ts): written once at the day change, read-only, newest first. */
+  questDays?: DaySnapshot[];
+  /** Closed weeks (QH-3): written once at the week change, the challenge result once in the next week; no rewards. */
+  questWeeks?: WeekSnapshot[];
   /** Trading days, 0 = Monday … 6 = Sunday (empty or missing: every day). A change applies to the next generated day. */
   tradingDays?: number[];
   /** Grows with every saved change: the freshest copy wins between tabs (lib/game-store.ts). */
@@ -418,6 +437,9 @@ export function migrateState(rawState: any): GameState {
     profile,
     aiConsent,
     coinLog: Array.isArray(rawState.coinLog) ? rawState.coinLog : [],
+    // snapshots of closed days and weeks (QH-3): an old save has none; damaged entries are dropped, never guessed
+    questDays: readDaySnapshots(rawState.questDays),
+    questWeeks: readWeekSnapshots(rawState.questWeeks),
     // the history starts when this version first runs on the device (earlier coins are in the balance only)
     coinLogSince: typeof rawState.coinLogSince === "string" ? rawState.coinLogSince : new Date().toISOString(),
   };
@@ -458,6 +480,7 @@ export function checkAndApplyDateResets(
 
     let newStreak = updated.currentStreak;
     let newShields = updated.streakShieldsAvailable;
+    let shieldSpent = false;
 
     if (wasActive) {
       newStreak += 1;
@@ -466,6 +489,7 @@ export function checkAndApplyDateResets(
     } else {
       if (newShields > 0) {
         newShields -= 1;
+        shieldSpent = true;
         updated.dailyStats = recordDailyStatEvent(updated.dailyStats, updated.lastQuestDate, {
           type: "shieldUsed",
         });
@@ -479,6 +503,10 @@ export function checkAndApplyDateResets(
     updated.currentStreak = newStreak;
     updated.bestStreak = newBest;
     updated.streakShieldsAvailable = newShields;
+    // the closing day as it was, written once before it is cleared (an existing snapshot of that day is kept).
+    // Days that were not opened get no snapshot; the streak rule for them is unchanged here (owner decision В4).
+    updated.questDays = addDaySnapshot(updated.questDays, buildDaySnapshot(updated, shieldSpent, currentDate), todayStr);
+    if (updated.questWeeks?.length) updated.questWeeks = pruneWeekSnapshots(updated.questWeeks, todayStr);
     updated.completedQuestsToday = {};
     updated.passedQuestsToday = {};
     updated.questReplacements = {};
@@ -493,11 +521,18 @@ export function checkAndApplyDateResets(
   // shows the same set. A day that had begun before Q2 keeps the set Q1 showed for it.
   if (!updated.questDay || updated.questDay.day !== todayStr) {
     const mode: DayMode = defaultModeFor(todayStr, updated.tradingDays);
-    const set = dayAlreadyStarted && !updated.questDay ? legacyDaySet(todayStr, mode) : generateDaySet(updated, todayStr, mode);
+    // a new set starts tracking what the day offers; a day that began before Q2 keeps the Q1 set, untracked
+    const set = dayAlreadyStarted && !updated.questDay ? legacyDaySet(todayStr, mode) : startTracking(generateDaySet(updated, todayStr, mode));
     updated.questDay = updated.isRestDay ? { ...set, mode: "rest", modeBeforeRest: mode } : set;
   }
 
   if (updated.lastWeeklyResetDate !== mondayStr) {
+    // the closing week as it was (once; a first run has no closing week)
+    const closing = updated.lastWeeklyResetDate;
+    if (closing && closing < mondayStr) {
+      const week = buildWeekSnapshot({ week: closing, questWeek: updated.questWeek, dailyStats: updated.dailyStats, questDays: updated.questDays || [] }, currentDate);
+      updated.questWeeks = addWeekSnapshot(updated.questWeeks, week, todayStr);
+    }
     updated.weeklyQuestCount = 0;
     updated.lastWeeklyResetDate = mondayStr;
     updated.streakShieldsAvailable = GAME_CONFIG.STREAK_SHIELDS_PER_WEEK;
@@ -1394,6 +1429,8 @@ export function replaceQuest(
     ...newState,
     replacementsUsedToday: newState.replacementsUsedToday + 1,
     questReplacements: { ...replacements, [questId]: replacement.id },
+    // the day snapshot keeps the replacement and the new quest as offered (QH-3)
+    questDay: newState.questDay?.day === todayStr ? trackReplacement(newState.questDay, questId, replacement.id) : newState.questDay,
     passedQuestsToday: {
       ...newState.passedQuestsToday,
       [questId]: true,
@@ -1475,7 +1512,7 @@ export function setDayMode(
       state: {
         ...s,
         isRestDay: true,
-        questDay: { ...day, mode: "rest", modeBeforeRest: current },
+        questDay: trackModeChange(day, { ...day, mode: "rest", modeBeforeRest: current }, "rest", currentDate),
         dailyStats: recordDailyStatEvent(s.dailyStats, today, { type: "restDay" }),
       },
     };
@@ -1487,7 +1524,7 @@ export function setDayMode(
     const { modeBeforeRest: _drop, ...rest } = day;
     return {
       ok: true,
-      state: { ...s, isRestDay: false, questDay: { ...rest, mode: back }, dailyStats: recordDailyStatEvent(s.dailyStats, today, { type: "restDayOff" }) },
+      state: { ...s, isRestDay: false, questDay: trackModeChange(day, { ...rest, mode: back }, back, currentDate), dailyStats: recordDailyStatEvent(s.dailyStats, today, { type: "restDayOff" }) },
     };
   }
   const next = modeSetPreview(s, mode, currentDate);
@@ -1496,7 +1533,7 @@ export function setDayMode(
     state: {
       ...s,
       isRestDay: false,
-      questDay: next,
+      questDay: trackModeChange(day, next, mode, currentDate),
       // the shown ids are saved in the new set, so today's replacements are already applied
       questReplacements: {},
       dailyStats: leavingRest ? recordDailyStatEvent(s.dailyStats, today, { type: "restDayOff" }) : s.dailyStats,
@@ -1508,6 +1545,16 @@ export function setDayMode(
 export function setTradingDays(state: GameState, days: number[]): GameState {
   const clean = Array.from(new Set(days.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))).sort();
   return { ...state, tradingDays: clean };
+}
+
+/**
+ * The result of a closed week challenge, written once into that week snapshot (QH-3). The journal is read by the page in
+ * the next week; nothing is given for it (owner decision 5) and an existing result is never changed.
+ */
+export function recordWeekBossResult(state: GameState, week: string, result: NonNullable<WeekSnapshot["bossResult"]>, currentDate: Date = new Date()): GameState {
+  const s = checkAndApplyDateResets(state, currentDate);
+  const next = withBossResult(s.questWeeks, week, mondayOfKey(gameDayKey(s, currentDate)), result);
+  return next ? { ...s, questWeeks: next } : s;
 }
 
 /** Saves the week challenge once per week (it does not change in the middle of a week). */

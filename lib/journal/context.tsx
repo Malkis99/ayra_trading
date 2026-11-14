@@ -147,6 +147,14 @@ interface JournalContextType {
   initialSyncAutoStart: boolean;
   /** The server already said whether cloud sync is on (guests: true). */
   cloudFlagKnown: boolean;
+  /** The journal of this device has been read at least once (before that the lists are empty, not «no data»). */
+  ready: boolean;
+  /**
+   * The journal here includes the cloud copy fetched after this page was opened (QH-3). Guests and the local journal:
+   * always true. A signed-in account with the cloud on: true only after a successful exchange since opening — while
+   * the cloud is loading, offline or in error it stays false (data may be incomplete, nothing final is decided on it).
+   */
+  cloudSettled: boolean;
   /** After the guest journal was copied into the account: reload it and queue it for the cloud. */
   adoptCopiedJournal: () => void;
   closeInitialSync: () => void;
@@ -190,6 +198,10 @@ export function JournalProvider({
   const [lastSelectedAccountId, setLastSelectedAccountIdState] = useState<string | null>(null);
   const [lastSelectedInstrument, setLastSelectedInstrumentState] = useState<string | null>(null);
   const pendingDeletionsRef = React.useRef<Map<string, { timer: NodeJS.Timeout; account: Account }>>(new Map());
+  const [ready, setReady] = useState(false);
+  // the moment this journal was opened: only an exchange after it counts as «the cloud copy is in»
+  const openedAtRef = React.useRef(Date.now());
+  const [cloudSettled, setCloudSettled] = useState(() => (typeof window === "undefined" ? false : repository.isCloudSettledSince?.(openedAtRef.current) ?? true));
 
   const refresh = useCallback(() => {
     setPrimaryPropAccountIdState(repository.getPrimaryPropAccountId());
@@ -208,6 +220,9 @@ export function JournalProvider({
     setAttachments(shots.filter((a) => !a.deletedAt));
     setDeletedAttachmentIds(new Set(shots.filter((a) => a.deletedAt).map((a) => a.id)));
     setStorageUsage(repository.getStorageUsage());
+    // records from the cloud may arrive through another tab that exchanges for this account
+    setCloudSettled(repository.isCloudSettledSince?.(openedAtRef.current) ?? true);
+    setReady(true);
   }, [repository]);
 
   // Files of deleted screenshots leave this browser after the «Undo» pause (guests and the local journal too)
@@ -354,6 +369,7 @@ export function JournalProvider({
     setSyncModeState(repository.getSyncMode?.() ?? "auto");
     setSyncConflicts(active ? repository.listConflicts?.() ?? [] : []);
     setInitialSync(repository.getInitialSyncInfo?.() ?? { needed: false, started: false });
+    setCloudSettled(repository.isCloudSettledSince?.(openedAtRef.current) ?? true);
     const downloaded = repository.takeCloudDownloadNotice?.() ?? null;
     if (downloaded) setCloudDownloadNotice(downloaded);
   }, [repository]);
@@ -781,6 +797,8 @@ export function JournalProvider({
         openInitialSync,
         initialSyncAutoStart,
         cloudFlagKnown,
+        ready,
+        cloudSettled,
         adoptCopiedJournal,
         closeInitialSync,
         conflictDialogRequest,

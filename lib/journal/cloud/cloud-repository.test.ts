@@ -419,3 +419,47 @@ describe("T7b-3 cloud journal repository", () => {
     });
   });
 });
+
+describe("QH-3: is the cloud copy in (a result written once waits for it)", () => {
+  it("signed in, cloud on: false until an exchange after the given moment succeeds; true after it", async () => {
+    const opened = Date.now();
+    expect(repo.isCloudSettledSince(opened)).toBe(false);
+    await settle();
+    expect(repo.getCloudStatus().state).toBe("synced");
+    expect(repo.isCloudSettledSince(opened)).toBe(true);
+    // an exchange before the page was opened does not count for a page opened later
+    expect(repo.isCloudSettledSince(Date.now() + 60_000)).toBe(false);
+  });
+
+  it("offline or the cloud unreachable: stays false (a network error is never taken as complete data)", async () => {
+    const opened = Date.now();
+    remote.down = true;
+    await settle();
+    expect(repo.isCloudSettledSince(opened)).toBe(false);
+    remote.down = false;
+    await settle();
+    expect(repo.isCloudSettledSince(opened)).toBe(true);
+  });
+
+  it("the first sync not done yet (waits for the button): false", async () => {
+    localStorage.removeItem(`ayra:${USER}:ayra_sync_state`);
+    repo.dispose();
+    repo = new CloudJournalRepository(local, remote, undefined, "tab_a");
+    repo.saveTrade(trade("tr_local")); // local data: the first upload waits for the user
+    await settle();
+    expect(repo.isCloudSettledSince(0)).toBe(false);
+  });
+
+  it("guests, no remote and the flag off: true at once (nothing to wait for)", async () => {
+    AppStorage.setUserId(null);
+    expect(repo.isCloudSettledSince(Date.now())).toBe(true);
+    AppStorage.setUserId(USER);
+    const noRemote = new CloudJournalRepository(local, null as unknown as FakeRemote, undefined, "tab_b");
+    expect(noRemote.isCloudSettledSince(Date.now())).toBe(true);
+    noRemote.dispose();
+    remote.enabled = false;
+    await settle();
+    expect(repo.isCloudActive()).toBe(false);
+    expect(repo.isCloudSettledSince(Date.now() + 60_000)).toBe(true);
+  });
+});
