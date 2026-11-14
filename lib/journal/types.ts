@@ -443,6 +443,10 @@ export interface Note extends SyncMeta {
   templateKey?: NoteTemplateKey;
   /** Only on a backtest result (templateKey "backtest"). */
   backtest?: BacktestResult;
+  /** The import run that brought this note from a file (undo removes exactly these). Imported notes never close a mission. */
+  importBatchId?: string;
+  /** When it was imported (ISO). */
+  importedAt?: string;
   createdAt: string; // ISO String
   updatedAt: string; // ISO String
   archivedAt?: string | null;
@@ -491,6 +495,10 @@ export interface JournalRepository {
   getNotes(): Note[];
   getNote(id: string): Note | null;
   saveNote(note: Note): Note;
+  /** Adds notes from an import file: an id already here (also a deleted one) is never replaced. Returns the number added. */
+  importNotes(notes: Note[]): number;
+  /** Deletes the notes of one import run (undo import). Returns the number deleted. */
+  deleteNotesByBatch(batchId: string): number;
   archiveNote(id: string): Note;
   deleteNote(id: string): boolean;
 

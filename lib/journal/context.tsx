@@ -98,6 +98,9 @@ interface JournalContextType {
   deleteTrade: (id: string) => boolean;
   importTrades: (trades: Trade[]) => number;
   deleteTradesByBatch: (batchId: string) => number;
+  /** Notes from an AYRA JSON file (already checked by lib/journal/import/notes.ts). Gives nothing: no XP, no Coins, no one-time reward. */
+  importNotes: (notes: Note[]) => number;
+  deleteNotesByBatch: (batchId: string) => number;
   /** fromImport: created by an import file (no «first strategy» reward). */
   saveStrategy: (strategy: Strategy, opts?: { fromImport?: boolean }) => Strategy;
   archiveStrategy: (id: string) => Strategy;
@@ -639,6 +642,25 @@ export function JournalProvider({
     [repository, refresh]
   );
 
+  // Imported notes give nothing (no XP, no Coins, no one-time reward) and never close a mission (QH-6)
+  const importNotes = useCallback(
+    (list: Note[]) => {
+      const added = repository.importNotes(list);
+      refresh();
+      return added;
+    },
+    [repository, refresh]
+  );
+
+  const deleteNotesByBatch = useCallback(
+    (batchId: string) => {
+      const removed = repository.deleteNotesByBatch(batchId);
+      refresh();
+      return removed;
+    },
+    [repository, refresh]
+  );
+
   const saveStrategy = useCallback(
     (strategy: Strategy, opts?: { fromImport?: boolean }) => {
       const first = !opts?.fromImport && noRecordsYet("strategy");
@@ -843,6 +865,8 @@ export function JournalProvider({
         deleteTrade,
         importTrades,
         deleteTradesByBatch,
+        importNotes,
+        deleteNotesByBatch,
         saveStrategy,
         archiveStrategy,
         deleteStrategy,

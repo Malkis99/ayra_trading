@@ -20,6 +20,7 @@ import { Button, Checkbox, Input, Modal, NumberInput, Segmented, Select } from "
 import { cn } from "@/components/ui/cn";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { defaultAccountId } from "@/lib/journal/preferences";
+import { ayraNotesFrom, planNoteImport } from "@/lib/journal/import/notes";
 
 type Step = "source" | "file" | "mapping" | "settings" | "preview" | "done";
 const STEPS: Step[] = ["source", "file", "mapping", "settings", "preview", "done"];
@@ -62,7 +63,7 @@ function timeZoneOptions(user: string): string[] {
 export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }: Props) {
   const { dict, lang, showToast } = useApp();
   const t = dict.journal.importExport;
-  const { importTrades, deleteTradesByBatch, saveAccount, saveStrategy, strategies, preferences } = useJournal();
+  const { importTrades, deleteTradesByBatch, importNotes, deleteNotesByBatch, getAllRecords, saveAccount, saveStrategy, strategies, preferences } = useJournal();
 
   const [step, setStep] = useState<Step>("source");
   const [format, setFormat] = useState<ImportFormatId | "auto">("auto");
@@ -85,8 +86,10 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
   const [rMode, setRMode] = useState<RMode>("stopLoss");
   const [fixedRisk, setFixedRisk] = useState("");
   const [excluded, setExcluded] = useState<Set<number>>(new Set());
-  const [result, setResult] = useState<{ batchId: string; imported: number; skipped: number } | null>(null);
-  const [undoBatch, setUndoBatch] = useState<ImportBatch | { id: string; tradeCount: number } | null>(null);
+  const [result, setResult] = useState<{ batchId: string; imported: number; skipped: number; notes: number } | null>(null);
+  // notes and backtest results of an AYRA JSON file (imported with the trades unless switched off)
+  const [includeNotes, setIncludeNotes] = useState(true);
+  const [undoBatch, setUndoBatch] = useState<ImportBatch | { id: string; tradeCount: number; noteCount?: number } | null>(null);
   const [history, setHistory] = useState<ImportBatch[]>([]);
   /** Strategy names from the file the user does NOT want created (by name key); everything else is created. */
   const [skipStrategies, setSkipStrategies] = useState<Set<string>>(new Set());
@@ -213,6 +216,15 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
     });
   }, [parsed, trades, parserId, accountChoice, rMode, fixedRisk, strategyIds]);
 
+  // what the file's notes would add: an id already in the journal (also a deleted one) is never replaced, a copy is skipped
+  const notesPlan = useMemo(() => {
+    if (parserId !== "ayra" || !table?.json) return null;
+    const raw = ayraNotesFrom(table.json);
+    if (!raw.length) return null;
+    return { total: raw.length, ...planNoteImport(raw, getAllRecords().notes || [], batchId.current, new Date().toISOString()) };
+  }, [parserId, table, getAllRecords]);
+  const notesToAdd = includeNotes && notesPlan ? notesPlan.add.length : 0;
+
   const newRows = preview.filter((r) => r.status === "new");
   const selected = newRows.filter((r) => !excluded.has(r.index));
   // A platform picked by hand that does not fit the file: explain why instead of silently finding 0 trades
@@ -232,7 +244,8 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
 
   const doImport = () => {
     let accountId = accountChoice;
-    if (accountChoice === NEW_ACCOUNT) {
+    // a file with notes only: no account is created for it
+    if (accountChoice === NEW_ACCOUNT && selected.length > 0) {
       const acc: Account = {
         id: `acc_${Date.now()}`,
         name: newAccName.trim() || null,
@@ -265,7 +278,9 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
         };
         saveStrategy(strategy, { fromImport: true });
       });
-    const added = importTrades(list);
+    const added = list.length ? importTrades(list) : 0;
+    // notes give nothing and never close a mission (no XP, no Coins, no one-time reward)
+    const notesAdded = notesToAdd && notesPlan ? importNotes(notesPlan.add) : 0;
     addImportBatch({
       id: batchId.current,
       createdAt: new Date().toISOString(),
@@ -273,6 +288,7 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
       fileName,
       accountId,
       tradeCount: added,
+      ...(notesAdded ? { noteCount: notesAdded } : {}),
     });
     if (isUniversal && table) {
       const all = loadMappings();
@@ -281,16 +297,17 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
         AppStorage.setItem(MAPPINGS_KEY, JSON.stringify(all));
       } catch {}
     }
-    setResult({ batchId: batchId.current, imported: added, skipped: preview.length - added });
-    showToast(formatString(t.done.importedToast, { count: added }));
+    setResult({ batchId: batchId.current, imported: added, skipped: preview.length - added, notes: notesAdded });
+    showToast(added > 0 || !notesAdded ? formatString(t.done.importedToast, { count: added }) : formatString(t.done.notesToast, { count: notesAdded }));
     setStep("done");
   };
 
   const confirmUndo = () => {
     if (!undoBatch) return;
     const removed = deleteTradesByBatch(undoBatch.id);
+    const notesRemoved = deleteNotesByBatch(undoBatch.id);
     markImportBatchUndone(undoBatch.id, new Date().toISOString());
-    showToast(formatString(t.done.undoneToast, { count: removed }));
+    showToast(notesRemoved ? formatString(t.done.undoneNotesToast, { count: removed, notes: notesRemoved }) : formatString(t.done.undoneToast, { count: removed }));
     setUndoBatch(null);
     setHistory(listImportBatches().slice(-5).reverse());
     if (result && result.batchId === undoBatch.id) onClose();
@@ -306,8 +323,8 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
   const footer =
     step === "done" ? (
       <div className="flex w-full flex-wrap justify-between gap-2">
-        {result && result.imported > 0 ? (
-          <Button variant="danger" onClick={() => setUndoBatch({ id: result.batchId, tradeCount: result.imported })}>
+        {result && (result.imported > 0 || result.notes > 0) ? (
+          <Button variant="danger" onClick={() => setUndoBatch({ id: result.batchId, tradeCount: result.imported, noteCount: result.notes })}>
             <Undo2 size={16} aria-hidden="true" />
             {t.done.undo}
           </Button>
@@ -322,8 +339,10 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
           {t.back}
         </Button>
         {step === "preview" ? (
-          <Button onClick={doImport} disabled={selected.length === 0} data-testid="import-confirm">
-            {formatString(t.preview.importBtn, { count: Math.min(selected.length, IMPORT_MAX_TRADES) })}
+          <Button onClick={doImport} disabled={selected.length === 0 && notesToAdd === 0} data-testid="import-confirm">
+            {selected.length === 0 && notesToAdd > 0
+              ? formatString(t.preview.importNotesBtn, { count: notesToAdd })
+              : formatString(t.preview.importBtn, { count: Math.min(selected.length, IMPORT_MAX_TRADES) })}
           </Button>
         ) : (
           <Button onClick={goNext} disabled={!canNext} data-testid="import-next">
@@ -420,9 +439,10 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
                     <li key={b.id} className="flex items-center justify-between gap-2 rounded-md bg-s2/60 px-3 py-2 text-sm">
                       <span className="min-w-0 truncate text-tx">
                         {formatString(t.source.historyItem, { date: fmtDate(b.createdAt), platform: PLATFORM_NAMES[b.formatId], count: b.tradeCount })}
+                        {b.noteCount ? formatString(t.source.historyNotes, { count: b.noteCount }) : ""}
                         {b.undoneAt && <span className="ml-1 text-mu">· {t.source.undone}</span>}
                       </span>
-                      {!b.undoneAt && b.tradeCount > 0 && (
+                      {!b.undoneAt && (b.tradeCount > 0 || (b.noteCount ?? 0) > 0) && (
                         <Button variant="ghost" size="sm" onClick={() => setUndoBatch(b)}>
                           <Undo2 size={14} aria-hidden="true" />
                           {t.done.undo}
@@ -733,7 +753,17 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
                 {formatString(t.preview.openCount, { count: newRows.filter((r) => r.open).length })}
               </p>
             )}
-            {newRows.length === 0 && <p className="rounded-md border border-dashed border-line p-4 text-center text-sm text-mu">{t.preview.nothing}</p>}
+            {notesPlan && (
+              <section className="space-y-2 rounded-md border border-line bg-s2/40 p-3" data-testid="import-notes">
+                <h4 className="text-sm font-semibold text-tx">{t.preview.notesTitle}</h4>
+                <p className="text-xs text-mu" data-testid="import-notes-summary">
+                  {formatString(t.preview.notesSummary, { total: notesPlan.total, backtests: notesPlan.backtests, add: notesPlan.add.length, existing: notesPlan.existing, duplicates: notesPlan.duplicates, invalid: notesPlan.invalid })}
+                </p>
+                {notesPlan.add.length > 0 && <Checkbox label={t.preview.notesInclude} checked={includeNotes} onChange={(v) => setIncludeNotes(v)} data-testid="import-notes-include" />}
+                <p className="text-xs text-mu">{t.preview.notesNoReward}</p>
+              </section>
+            )}
+            {newRows.length === 0 && notesToAdd === 0 && <p className="rounded-md border border-dashed border-line p-4 text-center text-sm text-mu">{t.preview.nothing}</p>}
             {preview.length > 0 && (
               <div className="overflow-x-auto rounded-md border border-line">
                 <table className="w-full min-w-[640px] text-left text-sm">
@@ -858,8 +888,12 @@ export function ImportWizard({ isOpen, onClose, accounts, trades, userTimeZone }
       <ConfirmDialog
         isOpen={undoBatch !== null}
         title={t.done.undoTitle}
-        description={formatString(t.done.undoDesc, { count: undoBatch?.tradeCount ?? 0 })}
-        confirmLabel={t.done.undoConfirm}
+        description={
+          undoBatch?.noteCount
+            ? formatString(t.done.undoDescNotes, { count: undoBatch.tradeCount, notes: undoBatch.noteCount })
+            : formatString(t.done.undoDesc, { count: undoBatch?.tradeCount ?? 0 })
+        }
+        confirmLabel={undoBatch?.noteCount ? t.done.undoConfirmNotes : t.done.undoConfirm}
         cancelLabel={dict.journal.cancel}
         isDanger
         onConfirm={confirmUndo}

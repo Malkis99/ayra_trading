@@ -90,10 +90,20 @@ describe("QH-6.1 backtest result: validation", () => {
     expect(isCompleteBacktest(note("n3", result(), { body: "short" }), TODAY)).toBe(false);
   });
 
-  it("a copy of the same result has the same fingerprint (counted once later); a different result does not", () => {
-    expect(backtestFingerprint(result())).toBe(backtestFingerprint(result({ setup: "renamed", avgWinR: 3 })));
-    expect(backtestFingerprint(result({ instrument: "eurusd" }))).toBe(backtestFingerprint(result()));
-    expect(backtestFingerprint(result({ wins: 10, breakeven: 3 }))).not.toBe(backtestFingerprint(result()));
+  it("equivalence: the same result only with the same instrument, timeframe, period, numbers AND the same strategy or setup", () => {
+    const fp = (o: Partial<BacktestResult> = {}) => backtestFingerprint(result(o));
+    // a copy: the same result (case, spaces, the conclusion and average R do not matter)
+    expect(fp({ instrument: "eurusd", setup: "  retest   AFTER a breakout ", avgWinR: 3, avgLossR: null })).toBe(fp());
+    // different numbers, period or timeframe: different results
+    expect(fp({ wins: 10, breakeven: 3 })).not.toBe(fp());
+    expect(fp({ periodTo: "2026-06-29" })).not.toBe(fp());
+    expect(fp({ timeframe: "H4" })).not.toBe(fp());
+    // equal instrument, period and numbers but a different setup or strategy: never the same result
+    expect(fp({ setup: "Range fade" })).not.toBe(fp());
+    expect(fp({ strategyId: "str_a" })).not.toBe(fp({ strategyId: "str_b" }));
+    expect(fp({ strategyId: "str_a" })).not.toBe(fp());
+    // a journal strategy is identified by its id: renaming it (the setup text) keeps the same result
+    expect(fp({ strategyId: "str_a", setup: "Old name" })).toBe(fp({ strategyId: "str_a", setup: "New name" }));
     expect(backtestWinRate(result())).toBe(55);
   });
 });

@@ -1177,6 +1177,7 @@ export const en: Dictionary = {
         ayraHint: "AYRA export (version 1.2 or lower)",
         history: "Recent imports",
         historyItem: "{date} · {platform} · trades: {count}",
+        historyNotes: " · notes: {count}",
         undone: "undone",
       },
       file: {
@@ -1256,6 +1257,10 @@ export const en: Dictionary = {
         fixedRisk: "Risk per trade",
       },
       preview: {
+        notesTitle: "Notes from the file",
+        notesSummary: "Notes in the file: {total}, backtest results among them: {backtests}. To add: {add}; already in the journal: {existing}; repeats: {duplicates}; without text: {invalid}.",
+        notesInclude: "Import the notes",
+        notesNoReward: "Notes from a file give no XP or Coins and never count for missions.",
         title: "Review before import",
         new: "New",
         duplicates: "Duplicates",
@@ -1286,6 +1291,7 @@ export const en: Dictionary = {
         },
         nothing: "Nothing to import: all trades are already in the journal or the rows have errors.",
         importBtn: "Import: {count}",
+        importNotesBtn: "Import notes: {count}",
         tooMany: "The file has more than {max} trades — import it in parts.",
       },
       done: {
@@ -1296,7 +1302,11 @@ export const en: Dictionary = {
         undoTitle: "Undo this import?",
         undoDesc: "Only the trades of this import ({count}) will be deleted. Other trades stay unchanged.",
         undoConfirm: "Delete imported trades",
+        undoDescNotes: "Only the records of this import will be deleted: trades ({count}) and notes ({notes}). The rest stays unchanged.",
+        undoConfirmNotes: "Delete imported records",
         undoneToast: "Import undone: trades deleted — {count}",
+        undoneNotesToast: "Import undone: trades deleted — {count}, notes — {notes}",
+        notesToast: "Notes imported: {count}",
         importedToast: "Trades imported: {count}",
         finish: "Done",
       },

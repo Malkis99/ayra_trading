@@ -614,6 +614,12 @@ export class CloudJournalRepository implements JournalRepository {
   archiveNote(id: string): Note {
     return this.write(() => this.local.archiveNote(id));
   }
+  importNotes(notes: Note[]): number {
+    return this.write(() => this.local.importNotes(notes));
+  }
+  deleteNotesByBatch(batchId: string): number {
+    return this.write(() => this.local.deleteNotesByBatch(batchId));
+  }
   deleteNote(id: string): boolean {
     return this.write(() => this.local.deleteNote(id));
   }
