@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { cleanApiKey, cleanSupabaseUrl } from "@/lib/supabase/config";
 import { collectFeeds, type Scope } from "@/lib/market/feeds/collect";
-import { serviceClient, supabaseFeedsDb } from "@/lib/market/feeds/supabase-db";
+import { serviceClient, supabaseFeedsDb, supabaseOnsBudget } from "@/lib/market/feeds/supabase-db";
 import { sameSecret } from "@/lib/market/feeds/secret";
+import { fetchOnsOnce } from "@/lib/market/feeds/ons-http";
 
 /**
  * The Market feeds collector (docs/market-feeds-plan.md, section 4). Called on a schedule by Supabase (pg_cron +
@@ -32,12 +33,16 @@ async function handle(req: Request) {
   const scope: Scope = isScope(scopeParam) ? scopeParam : "news";
   const prune = params.get("prune") === "1";
 
+  const client = serviceClient(url, serviceKey);
+  const onsFast = process.env.MARKET_ONS_FAST_RELEASE === "1";
   const { results, pruned } = await collectFeeds({
     scope,
     prune,
     now: Date.now(),
     fetch: (u, init) => fetch(u, { ...init, cache: "no-store" }),
-    db: supabaseFeedsDb(serviceClient(url, serviceKey), process.env.NEXT_PUBLIC_MARKET_RELEASE_CHECKS === "1"),
+    db: supabaseFeedsDb(client, process.env.NEXT_PUBLIC_MARKET_RELEASE_CHECKS === "1"),
+    onsBudget: onsFast ? supabaseOnsBudget(client) : undefined,
+    onsFetch: onsFast ? fetchOnsOnce : undefined,
     blsKey: cleanApiKey(process.env.BLS_API_KEY || "") || undefined,
     eiaKey: cleanApiKey(process.env.EIA_API_KEY || "") || undefined,
     censusKey: cleanApiKey(process.env.CENSUS_API_KEY || "") || undefined,

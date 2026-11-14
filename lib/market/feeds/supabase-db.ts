@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { FeedsDb, RunLog, ScheduledEvent, WaitingEvent } from "./collect";
 import type { EventResult, EventRow, NewsRow } from "./types";
 import type { StoredOnsSchedule } from "./ons-gdp";
+import type { OnsBudget } from "./ons-budget";
 
 /**
  * The collector's database access with the service role (server only: the key never reaches a browser).
@@ -14,6 +15,41 @@ export function serviceClient(url: string, serviceKey: string): SupabaseClient {
 const check = (error: { message: string } | null, what: string) => {
   if (error) throw new Error(`${what}: ${error.message}`);
 };
+
+export function supabaseOnsBudget(db: SupabaseClient): OnsBudget {
+  async function rpc(name: string, args: Record<string, unknown>) {
+    const { data, error } = await db.rpc(name, args);
+    check(error, "ONS budget " + name);
+    return data;
+  }
+  return {
+    async daily(token, ready) {
+      return await rpc("ons_daily", { p_token: token ?? null, p_ready: ready ?? false }) as string | null;
+    },
+    async due(now) {
+      const { data, error } = await db.from("market_events")
+        .select("id,source,kind,code,country,title,importance,starts_at,time_tbd,url,source_uid,reference_period,release_stage")
+        .eq("source", "ons").eq("country", "gb").eq("kind", "release").eq("status", "scheduled")
+        .is("actual", null).eq("time_tbd", false)
+        .gte("starts_at", new Date(now - 30 * 60_000).toISOString()).lte("starts_at", new Date(now).toISOString())
+        .order("starts_at").order("importance", { ascending: false }).order("id");
+      check(error, "ONS due releases");
+      return (data ?? []) as EventRow[];
+    },
+    async reserve(kind, target, daily, expectedStart) {
+      return await rpc("ons_reserve_slot", { p_kind: kind, p_target: target, p_daily: daily ?? null,
+        p_expected_start: expectedStart ?? null }) as string | null;
+    },
+    async charge(token) {
+      return await rpc("ons_charge_slot", { p_token: token }) === true;
+    },
+    async finish(token, result, pause) {
+      const args = { p_token: token, p_result: result ?? null, p_pause: pause ?? null };
+      const outcome = await rpc("ons_finish_slot", args).catch(() => rpc("ons_finish_slot", args));
+      if (outcome !== (result ? "saved" : "complete")) throw new Error("ONS verification: " + outcome);
+    },
+  };
+}
 
 const CHUNK = 200;
 const chunks = <T>(rows: T[]) => Array.from({ length: Math.ceil(rows.length / CHUNK) }, (_, i) => rows.slice(i * CHUNK, (i + 1) * CHUNK));
