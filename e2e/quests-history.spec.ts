@@ -127,6 +127,9 @@ test.describe("Quest Hub History (QH-5)", () => {
     await expect(page.getByTestId("stat-coins")).toContainText("+10");
     await expect(page.getByTestId("stat-shields")).toContainText(/^\s*1\s*Щитов использовано/);
     await expect(page.getByTestId("history-reliability")).toContainText("Точные данные — с");
+    // the totals say what they include: one-time rewards for first actions are not part of them
+    await expect(page.getByTestId("stat-xp")).toContainText("без разовых наград");
+    await expect(page.getByTestId("history-totals-note")).toContainText("Разовые награды за первые действия сюда не входят");
 
     // an old save without any snapshot: full days and missions are «—», with the reason
     const old = seed(today, { questDays: [] });
