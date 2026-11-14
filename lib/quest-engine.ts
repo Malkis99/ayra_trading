@@ -302,6 +302,38 @@ export function noTradesOn(snap: JournalSnapshot, dayKey: string): number {
   return alive(snap.noTrades).filter((n) => (n.date || "").slice(0, 10) === dayKey).length;
 }
 
+/** The journal on a day, as it is now (QH-4 day panel; the journal can be edited later, so it is shown «as of now»). */
+export interface JournalDay {
+  plan: { exists: boolean; bias: boolean; levels: boolean; limits: boolean; riskChecked: boolean; review: boolean; beforeFirstTrade: boolean | null; at?: string };
+  trades: number;
+  withRisk: number;
+  maxTrades: number | null;
+  noTrades: number;
+}
+
+export function journalOnDay(snap: JournalSnapshot, dayKey: string): JournalDay {
+  const plan = planFor(snap, dayKey);
+  const trades = alive(snap.trades).filter((t) => tradeDay(t, snap.timezone) === dayKey);
+  const first = trades.length ? Math.min(...trades.map((t) => new Date(t.openedAt).getTime())) : null;
+  const planAt = plan?.createdAt ? new Date(plan.createdAt).getTime() : null;
+  return {
+    plan: {
+      exists: !!plan,
+      bias: planChecks.bias(plan),
+      levels: planChecks.levels(plan),
+      limits: planChecks.limits(plan),
+      riskChecked: planChecks.riskChecked(plan),
+      review: planChecks.reviewDone(plan),
+      beforeFirstTrade: plan && first !== null && planAt !== null ? planAt <= first : null,
+      at: plan?.createdAt,
+    },
+    trades: trades.length,
+    withRisk: trades.filter((t) => t.stopLoss != null || t.riskAmount != null || t.riskPercent != null).length,
+    maxTrades: typeof plan?.limits?.maxTrades === "number" ? plan.limits.maxTrades : null,
+    noTrades: noTradesOn(snap, dayKey),
+  };
+}
+
 /* ------------------------------------------------------------------ week missions */
 
 export type CheckState = "met" | "notMet" | "notApplicable" | "insufficientData" | "pending";
