@@ -15,7 +15,8 @@ import { activityGrid, nextStep, todayEarned, todaysQuests, weekDays, weekQuestC
 import { QuestsHeader } from "@/components/quests/QuestsHeader";
 import { TodayView } from "@/components/quests/TodayView";
 import { WeekCard, WeekTab } from "@/components/quests/WeekTab";
-import { TradingDaysPicker, WeeklyBoss } from "@/components/quests/WeekMissions";
+import { PastWeekBoss, TradingDaysPicker, WeekGoals, WeekObjectives, WeeklyBoss } from "@/components/quests/WeekMissions";
+import { clampWeek, dayDetail, defaultDay, earliestWeek, weekView } from "@/lib/week-view";
 import { GoalsCard } from "@/components/quests/GoalsCard";
 import { DisciplineSummary, StreakRuleCard } from "@/components/quests/DisciplineTab";
 import { HistoryTab } from "@/components/quests/HistoryTab";
@@ -41,6 +42,9 @@ export default function QuestsPage() {
     const url = new URL(window.location.href);
     if (url.searchParams.get("tab") === tab) return;
     url.searchParams.set("tab", tab);
+    // a tab opens at its start: the week and day chosen on «Week» are not carried over
+    url.searchParams.delete("week");
+    url.searchParams.delete("day");
     window.history.pushState(null, "", url.toString());
     // a tab switched from far below starts at its top
     const top = tabsRef.current?.getBoundingClientRect().top;
@@ -49,6 +53,24 @@ export default function QuestsPage() {
 
   const { core, bonus, replacedFrom } = useMemo(() => todaysQuests(gameState, gameDay), [gameState, gameDay]);
   const days = useMemo(() => weekDays(gameState, gameDay), [gameState, gameDay]);
+
+  // The Week tab (QH-4): the week and the open day are in the address (?week=…&day=…), replaced, not added to the
+  // history (Back still switches tabs). Future weeks and weeks before the account cannot be opened.
+  const currentWeek = mondayOfKey(gameDay);
+  const firstWeek = useMemo(() => earliestWeek(gameState, gameDay), [gameState, gameDay]);
+  const shownWeek = clampWeek(searchParams.get("week"), firstWeek, currentWeek);
+  const shownDays = useMemo(() => weekView(gameState, shownWeek, gameDay), [gameState, shownWeek, gameDay]);
+  const shownDay = defaultDay(shownDays, searchParams.get("day"));
+  const dayInfo = useMemo(() => dayDetail(gameState, shownDay, gameDay), [gameState, shownDay, gameDay]);
+  const setWeekParams = useCallback((week: string, day?: string) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", "week");
+    if (week) url.searchParams.set("week", week);
+    else url.searchParams.delete("week");
+    if (day) url.searchParams.set("day", day);
+    else url.searchParams.delete("day");
+    window.history.replaceState(null, "", url.toString());
+  }, []);
   const grid = useMemo(() => activityGrid(gameState, gameDay, 4), [gameState, gameDay]);
   const weekCount = useMemo(() => weekQuestCount(gameState, gameDay), [gameState, gameDay]);
   const earned = todayEarned(gameState, gameDay);
@@ -177,13 +199,33 @@ export default function QuestsPage() {
       ),
     },
     week: {
-      main: <WeekTab days={days} weekCount={weekCount} snapshot={snapshot} />,
-      rail: (
-        <>
-          <WeeklyBoss snapshot={snapshot} />
-          <TradingDaysPicker />
-        </>
+      main: (
+        <WeekTab
+          week={shownWeek}
+          days={shownDays}
+          selected={shownDay}
+          detail={dayInfo}
+          isCurrent={shownWeek === currentWeek}
+          canGoBack={shownWeek > firstWeek}
+          snapshot={snapshot}
+          onWeek={(w) => setWeekParams(w === currentWeek ? "" : w)}
+          onDay={(d) => setWeekParams(shownWeek === currentWeek ? "" : shownWeek, d)}
+          onOpenToday={() => setTab("today")}
+        />
       ),
+      rail:
+        shownWeek === currentWeek ? (
+          <>
+            <WeeklyBoss snapshot={snapshot} />
+            <TradingDaysPicker />
+          </>
+        ) : (
+          <>
+            <PastWeekBoss week={shownWeek} />
+            <WeekObjectives snapshot={snapshot} dayKey={shownWeek} past />
+            <WeekGoals snapshot={snapshot} dayKey={shownWeek} />
+          </>
+        ),
     },
     history: {
       main: (

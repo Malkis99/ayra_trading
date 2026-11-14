@@ -6,7 +6,7 @@ import { useApp } from "@/lib/context";
 import { DAY_MODES, type DayMode } from "@/lib/quest-engine";
 import { cn } from "@/components/ui/cn";
 
-const ICONS: Record<DayMode, typeof Moon> = { trading: LineChart, study: BookOpen, rest: Moon, recovery: Sprout };
+export const MODE_ICONS: Record<DayMode, typeof Moon> = { trading: LineChart, study: BookOpen, rest: Moon, recovery: Sprout };
 
 /**
  * The four day modes as a compact segmented row (docs/quests-ux-3.0-plan.md, 6): a tab only shows that mode; the active
@@ -29,7 +29,7 @@ export function ModeSwitch({ active, viewed, onView }: { active: DayMode; viewed
   return (
     <div role="tablist" aria-label={t.title} className="inline-flex w-full rounded-xl border border-line bg-s1 p-1 sm:w-auto" data-testid="mode-switch">
       {DAY_MODES.map((m, i) => {
-        const Icon = ICONS[m];
+        const Icon = MODE_ICONS[m];
         const selected = m === viewed;
         const isActive = m === active;
         return (
