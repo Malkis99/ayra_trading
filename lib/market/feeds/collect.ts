@@ -431,17 +431,23 @@ async function collectOnsFacts(o: CollectOptions, pending: EventRow[], budget: n
       const read = async () => {
         budget--;
         const result = onsGdpResult(await getOns(o.onsFetch ?? o.fetch, url, true), row);
-        if (!result) throw new Error("published bulletin lacks a verified figure");
+        if (!result) throw new Error(o.onsBudget ? "GET sent; official figure not yet verified in the bulletin" : "published bulletin lacks a verified figure");
         return result;
       };
       if (o.onsBudget) {
-        if (!await withOnsSlot(o.onsBudget, "fact", row.id, daily, read, onsPause, row.starts_at)) continue;
+        const verified = async () => ({ ...await read(), reference_period: row.reference_period });
+        if (!await withOnsSlot(o.onsBudget, "fact", row.id, daily, verified, onsPause, row.starts_at)) {
+          issues.push(`${row.id}: verification deferred; no GET sent`);
+          continue;
+        }
       } else {
         await o.db.saveResults([await read()]);
       }
       items++;
     } catch (error) {
-      issues.push(`${row.id}: ${error instanceof Error ? error.message : String(error)}`);
+      issues.push(`${row.id}: ${o.onsBudget && error instanceof ReleaseHttpError && error.status === 404
+        ? "GET sent; official bulletin not available (HTTP 404)"
+        : error instanceof Error ? error.message : String(error)}`);
       if (onsBackoff(error)) break;
     }
   }

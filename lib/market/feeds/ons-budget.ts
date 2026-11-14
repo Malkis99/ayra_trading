@@ -15,6 +15,7 @@ export async function withOnsSlot<T extends string | EventResult>(
   get: () => Promise<T>, pause: (error: unknown, now: number) => string | undefined, expectedStart?: string,
 ): Promise<T | null> {
   const token = await budget.reserve(kind, target, daily, expectedStart);
+  if (token === "exhausted") throw new Error("daily request budget exhausted; no GET sent");
   if (!token) return null;
   const start = performance.now();
   if (!await budget.charge(token)) return null;
@@ -30,6 +31,11 @@ export async function withOnsSlot<T extends string | EventResult>(
     await budget.finish(token, undefined, pause(error, Date.now()));
     throw error;
   }
-  await budget.finish(token, typeof value === "string" ? undefined : value);
+  try {
+    await budget.finish(token, typeof value === "string" ? undefined : value);
+  } catch (error) {
+    throw new Error("GET sent; " + (typeof value === "string" ? "attempt completion" : "result write") +
+      " not confirmed: " + (error instanceof Error ? error.message : String(error)));
+  }
   return value;
 }

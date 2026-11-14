@@ -39,6 +39,17 @@ test("failed HTTP response persists a pause and never replays the GET", async ()
   expect(rpc.finish).toHaveBeenCalledWith("token", undefined, pause);
 });
 
+test("exhaustion and an unconfirmed write have distinct diagnostics", async () => {
+  const rpc = budget();
+  const read = vi.fn(async () => ({ id: "ons:gdp", actual: "0.2%", previous: null, status: "released" as const, summary: null }));
+  rpc.reserve.mockResolvedValueOnce("exhausted");
+  await expect(withOnsSlot(rpc, "fact", "ons:gdp", null, read, () => undefined)).rejects.toThrow("budget exhausted; no GET sent");
+  expect(read).not.toHaveBeenCalled();
+  rpc.finish.mockRejectedValueOnce(new Error("provenance conflict"));
+  await expect(withOnsSlot(rpc, "fact", "ons:gdp", null, read, () => undefined)).rejects.toThrow("GET sent; result write not confirmed: provenance conflict");
+  expect(read).toHaveBeenCalledTimes(1);
+});
+
 test.skipIf(!process.env.ONS_TEST_PG_MODULE)("real PostgreSQL connections share five HTTP GETs", async () => {
   const { Pool } = createRequire(import.meta.url)(process.env.ONS_TEST_PG_MODULE!);
   const admin = new Pool({ host: "127.0.0.1", port: Number(process.env.ONS_TEST_PG_PORT), user: "postgres" });
@@ -102,11 +113,15 @@ test.skipIf(!process.env.ONS_TEST_PG_MODULE)("real PostgreSQL connections share 
       return path;
     };
     const elapsed = performance.now();
+    const attempt = (kind: "schedule" | "move", target: string, path: string) =>
+      withOnsSlot(rpc, kind, target, owner, () => read(path), () => undefined).catch(error => {
+        expect(error.message).toBe("daily request budget exhausted; no GET sent");
+      });
     await Promise.all(Array.from({ length: 12 }, (_, i) =>
-      withOnsSlot(rpc, "schedule", "schedule-" + i, owner, () => read("schedule"), () => undefined)));
+      attempt("schedule", "schedule-" + i, "schedule")));
     for (let round = 0; round < 3; round++) {
       await Promise.all(Array.from({ length: 8 }, (_, i) =>
-        withOnsSlot(rpc, "move", `move-${round}-${i}`, owner, () => read("detail"), () => undefined)));
+        attempt("move", `move-${round}-${i}`, "detail")));
     }
     expect(hits).toEqual(["GET /schedule", "GET /schedule", "GET /schedule", "GET /detail", "GET /detail"]);
     console.info("ONS PostgreSQL + HTTP:", hits.length, "GET,", Math.round(performance.now() - elapsed), "ms");
@@ -152,11 +167,20 @@ test.skipIf(!process.env.ONS_TEST_PG_MODULE)("real PostgreSQL connections share 
     const result = { id, actual: "+0.2%", previous: "0.0%", reference_period: "2026-09", release_stage: "regular",
       result_meta: { period: "2026-09", series: "ECYX", unit: "percent-mom", adjustment: "SA" } };
     const finish = () => call("public.ons_finish_slot($1,$2,NULL)", [fact, result]);
-    expect(await finish()).toBe("complete");
-    expect(await finish()).toBe("complete");
+    expect(await finish()).toBe("saved");
+    expect(await finish()).toBe("saved");
     expect(await reserveFact()).toBeNull();
     const saved = await db.query("SELECT id,status,actual,previous FROM public.market_events WHERE id=$1", [id]);
     expect(saved.rows).toEqual([{ id, status: "released", actual: "+0.2%", previous: "0.0%" }]);
+    const movedId = "ons:gb_gdp_first:2026-q3";
+    await db.query("RESET ROLE");
+    await db.query(`INSERT INTO public.market_events
+      (id,source,country,kind,code,title,importance,starts_at,reference_period,release_stage,source_uid)
+      VALUES ($1,'ons','gb','release','gb_gdp_first','GDP',3,$2,'2026-Q3','preliminary','/releases/test')`, [movedId, starts]);
+    const moved = await call("public.ons_reserve_slot('fact',$1,NULL,$2)", [movedId, starts]);
+    expect(await rpc.charge(moved)).toBe(true);
+    await db.query("UPDATE public.market_events SET starts_at=starts_at+interval '1 hour' WHERE id=$1", [movedId]);
+    expect(await call("public.ons_finish_slot($1,$2,NULL)", [moved, { ...result, id: movedId }])).toBe("release changed during verification");
   } finally {
     await db?.end();
     await admin.query("DROP DATABASE IF EXISTS " + database);

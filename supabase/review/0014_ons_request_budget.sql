@@ -61,7 +61,7 @@ BEGIN
 END $$;
 
 CREATE FUNCTION public.ons_reserve_slot(p_kind text, p_target text, p_daily uuid DEFAULT NULL, p_expected_start timestamptz DEFAULT NULL)
-RETURNS uuid LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog AS $$
+RETURNS text LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog AS $$
 DECLARE
   v_now timestamptz;
   v_day date;
@@ -127,7 +127,13 @@ BEGIN
     WHERE utc_day = v_day AND pool = v_pool AND slot = candidate
       AND (charged_at IS NOT NULL OR reserved_until > v_now)
   ) ORDER BY candidate LIMIT 1;
-  IF v_slot IS NULL THEN RETURN NULL; END IF;
+  IF v_slot IS NULL THEN
+    IF (SELECT count(*) FROM ons_internal.slots
+        WHERE utc_day = v_day AND pool = v_pool AND charged_at IS NOT NULL)
+        = (CASE v_pool WHEN 'schedule' THEN 3 ELSE 2 END)
+    THEN RETURN 'exhausted'; END IF;
+    RETURN NULL;
+  END IF;
   INSERT INTO ons_internal.slots(utc_day, pool, slot, token, target, fast, snapshot, reserved_until)
   VALUES (v_day, v_pool, v_slot, v_token, p_target, p_daily IS NULL, v_snapshot, v_now + interval '30 seconds')
   ON CONFLICT (utc_day, pool, slot) DO UPDATE
@@ -135,7 +141,7 @@ BEGIN
       reserved_until = excluded.reserved_until
     WHERE slots.charged_at IS NULL AND slots.reserved_until <= v_now;
   IF NOT FOUND THEN RETURN NULL; END IF;
-  RETURN v_token;
+  RETURN v_token::text;
 END $$;
 
 CREATE FUNCTION public.ons_charge_slot(p_token uuid)
@@ -173,6 +179,7 @@ DECLARE
   v_slot ons_internal.slots%ROWTYPE;
   v_snapshot jsonb;
   v_outcome text := 'complete';
+  v_applied jsonb;
 BEGIN
   PERFORM 1 FROM ons_internal.state FOR UPDATE;
   SELECT * INTO v_slot FROM ons_internal.slots WHERE token = p_token AND charged_at IS NOT NULL;
@@ -199,7 +206,19 @@ BEGIN
       OR p_result->>'actual' IS NULL
     THEN v_outcome := 'release changed during verification';
     ELSE
-      v_outcome := coalesce(public.market_events_apply(jsonb_build_array(p_result), 'result')->0->>'conflict', 'complete');
+      v_applied := public.market_events_apply(jsonb_build_array(p_result), 'result')->0;
+      IF v_applied->>'conflict' IS NOT NULL THEN
+        v_outcome := 'provenance conflict: ' || (v_applied->>'conflict');
+      ELSIF v_applied->>'id' IS DISTINCT FROM v_slot.target OR NOT EXISTS (
+        SELECT 1 FROM public.market_events WHERE id = v_slot.target AND status = 'released'
+          AND actual = p_result->>'actual'
+          AND (p_result->>'previous' IS NULL OR previous = p_result->>'previous')
+          AND result_meta = p_result->'result_meta'
+      ) THEN
+        v_outcome := 'result write not confirmed by RPC 0012';
+      ELSE
+        v_outcome := 'saved';
+      END IF;
     END IF;
   END IF;
   UPDATE ons_internal.slots SET completed_at = clock_timestamp(), outcome = v_outcome WHERE token = p_token;

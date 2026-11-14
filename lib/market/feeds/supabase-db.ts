@@ -46,7 +46,7 @@ export function supabaseOnsBudget(db: SupabaseClient): OnsBudget {
     async finish(token, result, pause) {
       const args = { p_token: token, p_result: result ?? null, p_pause: pause ?? null };
       const outcome = await rpc("ons_finish_slot", args).catch(() => rpc("ons_finish_slot", args));
-      if (outcome !== "complete") throw new Error("ONS verification: " + outcome);
+      if (outcome !== (result ? "saved" : "complete")) throw new Error("ONS verification: " + outcome);
     },
   };
 }
