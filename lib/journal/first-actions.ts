@@ -21,7 +21,8 @@ export function hasRecordsOfKind(snapshot: JournalSnapshot, batches: ImportBatch
     case "weekPlan":
       return snapshot.weekPlans.length > 0;
     case "note":
-      return snapshot.notes.length > 0;
+      // backtest results are kept as notes but are not «a note» (QH-6.1)
+      return snapshot.notes.some((n) => n.templateKey !== "backtest");
     case "noTrade":
       return snapshot.noTrades.length > 0;
     case "screenshot":

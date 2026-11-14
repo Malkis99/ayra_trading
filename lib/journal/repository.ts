@@ -16,6 +16,7 @@ import type { AttachmentMetadata } from "./attachments/types";
 import { IndexedDBAttachmentRepository } from "./attachments/indexeddb-repository";
 import { AppStorage } from "@/lib/storage";
 import { sanitizePreferences } from "./preferences";
+import { stampReview } from "./backtest";
 import type { JournalPreferences } from "./types";
 
 const JOURNAL_STORAGE_KEY = "ayra_journal_v1";
@@ -338,7 +339,11 @@ export class LocalStorageJournalRepository implements JournalRepository {
 
   saveTrade(trade: Trade): Trade {
     const data = this.loadData();
-    const saved = this.upsert(data.trades, trade, (t) => t.id === trade.id);
+    // the time the review first became complete (QH-6.1): set here once, never moved, never taken from the caller
+    // (a deleted copy counts too: restoring a trade does not make its old review «done now»)
+    const prev = data.trades.find((t) => t.id === trade.id);
+    const stamped = stampReview(prev, trade, this.now());
+    const saved = this.upsert(data.trades, stamped, (t) => t.id === trade.id);
     this.saveData(data);
     return saved;
   }
@@ -430,7 +435,9 @@ export class LocalStorageJournalRepository implements JournalRepository {
     for (const t of trades) {
       if (liveIds.has(t.id)) continue;
       const index = data.trades.findIndex((x) => x.id === t.id);
-      const fresh = { ...t, updatedAt: this.stampAfter(index >= 0 ? data.trades[index].updatedAt : undefined), deletedAt: null };
+      // an imported file never says when the person reviewed a trade here (QH-6.1)
+      const { reviewedAt: _reviewed, ...clean } = t;
+      const fresh = { ...clean, updatedAt: this.stampAfter(index >= 0 ? data.trades[index].updatedAt : undefined), deletedAt: null };
       if (index >= 0) data.trades[index] = fresh;
       else data.trades.push(fresh);
       liveIds.add(t.id);

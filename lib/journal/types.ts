@@ -175,6 +175,12 @@ export interface Trade extends SyncMeta {
   entryReason?: string; // Max 500 chars
   mistakes: string[]; // Mistake IDs catalog
   executionRating?: number; // 1-5
+  /**
+   * When the review (entry reason, emotions, execution rating) first became complete through the person own save
+   * (QH-6.1). Set once by the local repository, never moved; import never sets it; sync carries it as it is.
+   * Trades reviewed before QH-6.1 have none.
+   */
+  reviewedAt?: string;
   notes?: string; // Max 1000 chars
   verification: TradeVerification; // 'unverified' for manual
   source: TradeSource; // 'manual'
@@ -397,7 +403,28 @@ export type NoteTemplateKey =
   | "session_review"
   | "weekly_mistake"
   | "idea"
-  | "lesson";
+  | "lesson"
+  /** A structured backtest result (QH-6.1): the note body is its conclusion, `backtest` holds the numbers. */
+  | "backtest";
+
+export const BACKTEST_TIMEFRAMES = ["M5", "M15", "H1", "H4", "D1"] as const;
+export type BacktestTimeframe = (typeof BACKTEST_TIMEFRAMES)[number];
+
+/** The saved result of a manual backtest (docs/quest-hub-qh6-spec.md, 4). Kept inside a note: no table of its own. */
+export interface BacktestResult {
+  instrument: string; // UPPERCASE, max 20
+  timeframe: BacktestTimeframe;
+  periodFrom: string; // YYYY-MM-DD
+  periodTo: string; // YYYY-MM-DD
+  setup: string; // max 80 (a strategy name or own text)
+  strategyId?: string | null;
+  setups: number;
+  wins: number;
+  losses: number;
+  breakeven: number;
+  avgWinR?: number | null;
+  avgLossR?: number | null;
+}
 
 export interface NoteLinks {
   tradeId?: string;
@@ -414,6 +441,8 @@ export interface Note extends SyncMeta {
   pinned: boolean;
   links?: NoteLinks;
   templateKey?: NoteTemplateKey;
+  /** Only on a backtest result (templateKey "backtest"). */
+  backtest?: BacktestResult;
   createdAt: string; // ISO String
   updatedAt: string; // ISO String
   archivedAt?: string | null;
