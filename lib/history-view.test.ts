@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { INITIAL_GAME_STATE, checkAndApplyDateResets, completeQuest, completeSelfReportQuest, gameDayKey, replaceQuest, setDayMode, type GameState } from "./game";
+import { INITIAL_GAME_STATE, checkAndApplyDateResets, completeQuest, grantFirstAction, completeSelfReportQuest, gameDayKey, replaceQuest, setDayMode, type GameState } from "./game";
 import { HISTORY_WEEKS, historyDefaultDay, historyMap, historyStats, mapLook } from "./history-view";
 import { addDaysToKey } from "./day-key";
 
@@ -123,6 +123,17 @@ describe("QH-5 history: 12 weeks of saved days", () => {
     expect(historyDefaultDay(map, "2026-11-20")).toBe("2026-11-02");
     const fresh = started("2026-11-05");
     expect(historyDefaultDay(historyMap(fresh, "2026-11-05"), null)).toBe("2026-11-05");
+  });
+
+  it("the period totals are the day statistics: a one-time first-action reward is not in them (the label says so)", () => {
+    let s = started("2026-11-02");
+    s = tickAll(s, "2026-11-02", 1);
+    const dayXp = s.dailyStats["2026-11-02"].xpGained;
+    const first = grantFirstAction(s, "trade", at("2026-11-02T12:00:00Z"));
+    expect(first.xp).toBeGreaterThan(0);
+    s = checkAndApplyDateResets(first.state, at("2026-11-03T06:00:00Z"));
+    const stats = historyStats(s, historyMap(s, "2026-11-03"));
+    expect(stats.xp).toBe(dayXp);
   });
 
   it("reading the history changes nothing and creates no reward", () => {

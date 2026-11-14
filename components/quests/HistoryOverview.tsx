@@ -92,6 +92,10 @@ export function HistoryStatsBlock({ stats }: { stats: HistoryStats }) {
           </div>
         </div>
       </div>
+      <p className="flex items-start gap-2 text-xs text-mu" data-testid="history-totals-note">
+        <Info size={14} aria-hidden="true" className="mt-px shrink-0" />
+        {v.totalsNote}
+      </p>
       <p className="flex items-start gap-2 text-xs text-mu" data-testid="history-reliability">
         <Info size={14} aria-hidden="true" className="mt-px shrink-0" />
         {stats.snapshotsFrom ? formatString(v.reliability, { date: formatDayKey(stats.snapshotsFrom, lang, { day: "numeric", month: "long" }) }) : v.reliabilityNone}
