@@ -11,14 +11,17 @@ import { mondayOfKey } from "@/lib/day-key";
 import { formatString } from "@/lib/i18n";
 import { GAME_CONFIG } from "@/lib/game-config";
 import { QUEST_POOL, type QuestTemplate } from "@/lib/quests";
-import { activityGrid, nextStep, todayEarned, todaysQuests, weekDays, weekQuestCount } from "@/lib/quests-view";
+import { nextStep, todayEarned, todaysQuests, weekDays, weekQuestCount } from "@/lib/quests-view";
 import { QuestsHeader } from "@/components/quests/QuestsHeader";
 import { TodayView } from "@/components/quests/TodayView";
 import { WeekCard, WeekTab } from "@/components/quests/WeekTab";
 import { PastWeekBoss, TradingDaysPicker, WeekGoals, WeekObjectives, WeeklyBoss } from "@/components/quests/WeekMissions";
 import { clampWeek, dayDetail, defaultDay, earliestWeek, weekView } from "@/lib/week-view";
 import { GoalsCard } from "@/components/quests/GoalsCard";
-import { DisciplineSummary, StreakRuleCard } from "@/components/quests/DisciplineTab";
+import { StreakRuleCard } from "@/components/quests/DisciplineTab";
+import { ActivityMap, HistoryStatsBlock } from "@/components/quests/HistoryOverview";
+import { DayPanel } from "@/components/quests/DayPanel";
+import { historyDefaultDay, historyMap, historyStats } from "@/lib/history-view";
 import { HistoryTab } from "@/components/quests/HistoryTab";
 import { CreatorsRules, CreatorsSoon } from "@/components/quests/CreatorsTab";
 import { HUB_TABS, HubColumns, HubTabs, parseHubTab, type HubTab } from "@/components/quests/HubLayout";
@@ -62,6 +65,17 @@ export default function QuestsPage() {
   const shownDays = useMemo(() => weekView(gameState, shownWeek, gameDay), [gameState, shownWeek, gameDay]);
   const shownDay = defaultDay(shownDays, searchParams.get("day"));
   const dayInfo = useMemo(() => dayDetail(gameState, shownDay, gameDay), [gameState, shownDay, gameDay]);
+  // The History tab (QH-5): 12 weeks from the same day views; the open day is in the address (?day=…, replaced)
+  const histMap = useMemo(() => historyMap(gameState, gameDay), [gameState, gameDay]);
+  const histStats = useMemo(() => historyStats(gameState, histMap), [gameState, histMap]);
+  const histDay = historyDefaultDay(histMap, activeTab === "history" ? searchParams.get("day") : null);
+  const histDetail = useMemo(() => dayDetail(gameState, histDay, gameDay), [gameState, histDay, gameDay]);
+  const selectHistoryDay = useCallback((day: string) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", "history");
+    url.searchParams.set("day", day);
+    window.history.replaceState(null, "", url.toString());
+  }, []);
   const setWeekParams = useCallback((week: string, day?: string) => {
     const url = new URL(window.location.href);
     url.searchParams.set("tab", "week");
@@ -71,7 +85,6 @@ export default function QuestsPage() {
     else url.searchParams.delete("day");
     window.history.replaceState(null, "", url.toString());
   }, []);
-  const grid = useMemo(() => activityGrid(gameState, gameDay, 4), [gameState, gameDay]);
   const weekCount = useMemo(() => weekQuestCount(gameState, gameDay), [gameState, gameDay]);
   const earned = todayEarned(gameState, gameDay);
   const coreDone = core.filter((q) => gameState.completedQuestsToday[q.id]).length;
@@ -229,8 +242,10 @@ export default function QuestsPage() {
     },
     history: {
       main: (
-        <div className="space-y-5">
-          <DisciplineSummary grid={grid} />
+        <div className="space-y-4">
+          <HistoryStatsBlock stats={histStats} />
+          <ActivityMap map={histMap} selected={histDay} onSelect={selectHistoryDay} />
+          <DayPanel detail={histDetail} snapshot={snapshot} onOpenToday={() => setTab("today")} />
           <HistoryTab />
         </div>
       ),

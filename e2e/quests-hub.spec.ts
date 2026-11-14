@@ -167,7 +167,8 @@ test.describe("Quest Hub (QH-1)", () => {
     await expect(page.getByTestId("streak-current")).toContainText("4");
     await expect(page.getByTestId("streak-best")).toContainText("9");
     await expect(page.getByTestId("shield-count")).toContainText("Доступно щитов");
-    await expect(page.getByTestId("activity-cell")).toHaveCount(28);
+    await expect(page.getByTestId("activity-cell")).toHaveCount(84);
+    await page.getByTestId("history-toggle").click();
     await expect(page.getByTestId("history-item")).toHaveCount(1);
     await expect(page.getByTestId("hub-rail").getByTestId("goals-card")).toBeVisible();
     await expect(page.getByTestId("streak-rule")).toBeVisible();

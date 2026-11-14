@@ -53,9 +53,9 @@ test.describe("Quests page (Q1)", () => {
     const yesterday = page.locator(`[data-testid="week-day-${daysAgo(1)}"]`);
     if (await yesterday.count()) await expect(yesterday).toHaveAttribute("data-status", "done");
 
-    await page.getByRole("tab", { name: "История" }).click(); // discipline is the top of History
+    await page.getByRole("tab", { name: "История" }).click(); // the 12-week map is on History (QH-5)
     const cells = page.getByTestId("activity-cell");
-    await expect(cells).toHaveCount(28);
+    await expect(cells).toHaveCount(84);
     await expect(page.locator(`[data-testid="activity-cell"][data-status="rest"]`)).toHaveCount(1);
     await expect(page.locator(`[data-testid="activity-cell"][data-status="done"][data-quests="2"]`)).toHaveCount(1);
   });
@@ -110,6 +110,7 @@ test.describe("Quests page (Q1)", () => {
     await q.card.getByTestId("quest-complete").click();
     await expect(page.getByTestId(`quest-card-${q.id}`).getByTestId("quest-done")).toBeVisible();
     await page.getByRole("tab", { name: "История" }).click();
+    await page.getByTestId("history-toggle").click(); // the full list is folded under the day panel (QH-5)
     const item = page.getByTestId("history-item").first();
     await expect(item).toContainText(/\d{2}:\d{2}/);
     await expect(item.getByTestId("quest-badge-self")).toBeVisible();

@@ -61,7 +61,8 @@ export function weekView(state: WeekState, weekStart: string, today: string): We
       coins: snap ? snap.totals.coins : stat?.coinsGained || 0,
     };
     if (snap?.mode) view.mode = snap.mode;
-    if (snap && snap.core.length > 0) view.core = { done: snap.core.filter((id) => !!snap.done[id]).length, total: snap.core.length };
+    // a rest day has no missions (its snapshot keeps the slots of the mode before the rest; they were not asked for)
+    if (snap && snap.mode !== "rest" && snap.core.length > 0) view.core = { done: snap.core.filter((id) => !!snap.done[id]).length, total: snap.core.length };
     // a snapshot of a rest day is a rest day even when another quest was done
     if (snap?.restDay && view.status === "done" && snap.mode === "rest") view.status = "rest";
     if (cell.isToday) view.source = "none";
