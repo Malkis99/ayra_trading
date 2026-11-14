@@ -216,9 +216,10 @@ export function DayPanel({ detail, snapshot, onOpenToday }: { detail: DayDetail;
     if (snap.passed.includes(id)) return { mark: "passed", sub: v.statusPassed };
     return { mark: "open", sub: v.statusOpen };
   };
-  const missionIds = snap.core;
+  // a rest day asks for no missions: the slots kept from the mode before the rest are not shown as «not done»
+  const missionIds = snap.mode === "rest" ? [] : snap.core;
   const coreDone = missionIds.filter((id) => !!snap.done[id]).length;
-  const shown = new Set([...snap.core, ...snap.bonus]);
+  const shown = new Set(snap.mode === "rest" ? [] : [...snap.core, ...snap.bonus]);
   const other = Object.keys(snap.done).filter((id) => !shown.has(id));
   const gaps = snap.incomplete || [];
 
@@ -256,7 +257,7 @@ export function DayPanel({ detail, snapshot, onOpenToday }: { detail: DayDetail;
               </ul>
             </Block>
           )}
-          {(snap.bonus.length > 0 || snap.replaced.length > 0) && (
+          {snap.mode !== "rest" && (snap.bonus.length > 0 || snap.replaced.length > 0) && (
             <Block title={v.extras} testId="day-extras">
               <ul className="divide-y divide-line/60">
                 {snap.bonus.map((id) => (

@@ -83,6 +83,7 @@ test.describe("Q1 data safety", () => {
     for (const name of ["Today", "Week", "History", "Creators"]) await expect(page.getByTestId("hub-tabs").getByRole("tab", { name })).toBeVisible();
     await expect(page.getByTestId("device-note")).toContainText("Progress is kept on this device");
     await page.getByRole("tab", { name: "History" }).click();
-    await expect(page.getByText("Activity over 4 weeks")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Activity map" })).toBeVisible(); // QH-5: the 12-week map
+    await expect(page.getByTestId("history-stats")).toContainText("Active days");
   });
 });
