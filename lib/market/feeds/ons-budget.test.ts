@@ -7,10 +7,10 @@ import { onsTransport } from "./ons-http";
 
 const budget = () => ({
   daily: vi.fn(), due: vi.fn(), reserve: vi.fn(async () => "token"),
-  charge: vi.fn(async () => true), finish: vi.fn(async () => {}),
+  charge: vi.fn(async (): Promise<boolean> => true), finish: vi.fn(async () => {}),
 }) satisfies OnsBudget;
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.restoreAllMocks(); });
 
 test("lost charge response and expired reservation send zero HTTP requests", async () => {
   const rpc = budget();
