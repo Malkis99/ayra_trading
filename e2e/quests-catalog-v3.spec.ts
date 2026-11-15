@@ -67,13 +67,14 @@ test.describe("Quest catalog 3 (QH-6.3)", () => {
       const page = await context.newPage();
       await seedGame(context, baseGame({ lastQuestDate: yesterday }), { ayra_journal_v1: journal({ trades }) });
       await page.goto("/quests");
-      await expect.poll(async () => (await game(page)).questDay?.studyPending).toBeUndefined();
+      // the day set is made and the journal has reported its trades (the study choice is settled)
+      await expect.poll(async () => { const g = await game(page); return g.questDay?.day === today && g.journalFirstTradeDay !== undefined && !g.questDay?.studyPending; }).toBe(true);
       await activateMode(page, "study");
       await expect(missions(page)).toHaveCount(3);
       expect(await missionIds(page)).toEqual([first, "m_backtest", "m_lesson"]);
       for (const row of await missions(page).all()) {
         await expect(row.getByTestId("quest-complete")).toHaveCount(0);
-        await expect(row.getByTestId("quest-reward")).toHaveText("Награда — скоро");
+        await expect(row.getByTestId("quest-reward")).toHaveText("+40 XP · +10 Coins");
       }
       await page.reload();
       expect(await missionIds(page)).toEqual([first, "m_backtest", "m_lesson"]);
@@ -157,22 +158,60 @@ test.describe("Quest catalog 3 (QH-6.3)", () => {
     expect(((await journalSaved(page)).plans || [])[0].prepConfirmedAt).toBeTruthy();
   });
 
-  test("a mission confirmed by the journal shows done but pays nothing yet (no XP, no Coins, no history)", async ({ context, page }) => {
-    const lesson = { id: "note_l1", templateKey: "lesson", title: "", body: "Урок: я жду закрытия свечи над уровнем, прежде чем входить в сделку.", tags: [], pinned: false, createdAt: `${today}T05:00:00.000Z`, updatedAt: `${today}T05:00:00.000Z`, archivedAt: null };
-    await seedGame(context, baseGame({ lastQuestDate: yesterday, journalFirstTradeDay: null }), { ayra_journal_v1: journal({ notes: [lesson] }) });
-    await page.goto("/quests");
-    await activateMode(page, "study");
-    const before = await game(page);
-    const row = page.getByTestId("quest-card-m_lesson");
-    await expect(row).toHaveAttribute("data-done", "true");
-    await expect(row.getByRole("button")).toHaveCount(0);
+  test("QH-6.4: a lesson saved in the Journal pays «Lesson» once — on the Journal page, without opening Quests", async ({ context, page }) => {
+    const studyDay = { day: today, mode: "study", catalogVersion: 3, core: ["m_observation", "m_backtest", "m_lesson"], bonus: ["q_read_pages", "q_logic_puzzle"], studyFirst: "m_observation" };
+    await seedGame(context, baseGame({ lastQuestDate: today, questDay: studyDay, journalFirstTradeDay: null, firstActions: { note: "2026-10-01T00:00:00.000Z" } }), { ayra_journal_v1: journal() });
+    await page.goto("/journal?tab=notes&new=lesson");
+    const modal = page.getByTestId("note-modal");
+    await expect(modal).toBeVisible();
+    await modal.locator("textarea").fill("Урок: я жду закрытия свечи над уровнем, прежде чем входить в сделку. Проверю это на десяти сделках.");
+    const coins0 = (await game(page)).coins;
+    await modal.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await expect.poll(async () => (await game(page)).completedQuestsToday.m_lesson).toBe(true);
+    const g = await game(page);
+    expect(g.coins - coins0).toBe(10);
+    const h = g.history.find((x) => x.questId === "m_lesson")!;
+    expect(h).toMatchObject({ xp: 40, coins: 10, completedAt: today });
+    expect(h.at).toBeTruthy();
+    // a reload, the Quests page and another save of the same note pay nothing more
     await page.reload();
+    await page.goto("/quests");
     await expect(page.getByTestId("quest-card-m_lesson")).toHaveAttribute("data-done", "true");
-    const after = await game(page);
-    expect(after.xp).toBe(before.xp);
-    expect(after.coins).toBe(before.coins);
-    expect(after.history.filter((h) => h.questId.startsWith("m_"))).toEqual([]);
-    expect(after.completedQuestsToday.m_lesson).toBeUndefined();
+    await page.waitForTimeout(800);
+    const again = await game(page);
+    expect(again.coins).toBe(g.coins);
+    expect(again.history.filter((x) => x.questId === "m_lesson")).toHaveLength(1);
+  });
+
+  test("QH-6.4: two tabs open when the journal confirms a mission — it is paid once", async ({ context }) => {
+    const lesson = { id: "note_l1", templateKey: "lesson", title: "", body: "Урок: я жду закрытия свечи над уровнем, прежде чем входить в сделку по плану.", tags: [], pinned: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), archivedAt: null };
+    const studyDay = { day: today, mode: "study", catalogVersion: 3, core: ["m_observation", "m_backtest", "m_lesson"], bonus: ["q_read_pages", "q_logic_puzzle"], studyFirst: "m_observation" };
+    await seedGame(context, baseGame({ lastQuestDate: today, questDay: studyDay, journalFirstTradeDay: null, firstActions: { note: "2026-10-01T00:00:00.000Z" } }), { ayra_journal_v1: journal({ notes: [lesson] }) });
+    const a = await context.newPage();
+    const b = await context.newPage();
+    // the seed is written by the first tab; the second one opens right after it, both with the journal bridge running
+    await a.goto("/quests");
+    await b.goto("/journal");
+    await expect.poll(async () => (await game(a)).completedQuestsToday.m_lesson).toBe(true);
+    await a.reload();
+    await b.reload();
+    await a.waitForTimeout(1000);
+    const g = await game(b);
+    expect(g.history.filter((x) => x.questId === "m_lesson")).toHaveLength(1);
+    expect(g.coins).toBe(10);
+  });
+
+  test("QH-6.4: imported or yesterday's notes pay nothing", async ({ context, page }) => {
+    const imported = { id: "imp1", templateKey: "lesson", title: "", body: "Импортированный урок: длинный текст, похожий на настоящий вывод из учёбы.", tags: [], pinned: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), archivedAt: null, importBatchId: "b1", importedAt: new Date().toISOString() };
+    const old = { id: "old1", templateKey: "lesson", title: "", body: "Вчерашний урок: жду закрытия свечи над уровнем, прежде чем входить в сделку.", tags: [], pinned: false, createdAt: `${yesterday}T12:00:00.000Z`, updatedAt: `${yesterday}T12:00:00.000Z`, archivedAt: null };
+    const studyDay = { day: today, mode: "study", catalogVersion: 3, core: ["m_observation", "m_backtest", "m_lesson"], bonus: ["q_read_pages", "q_logic_puzzle"], studyFirst: "m_observation" };
+    await seedGame(context, baseGame({ lastQuestDate: today, questDay: studyDay, journalFirstTradeDay: null, firstActions: { note: "2026-10-01T00:00:00.000Z" } }), { ayra_journal_v1: journal({ notes: [imported, old] }) });
+    await page.goto("/quests");
+    await expect(page.getByTestId("quest-card-m_lesson")).toBeVisible();
+    await page.waitForTimeout(1500);
+    const g = await game(page);
+    expect(g.completedQuestsToday.m_lesson).toBeUndefined();
+    expect(g.coins).toBe(0);
   });
 
   test("rest: no missions and nothing «not done»", async ({ context, page }) => {

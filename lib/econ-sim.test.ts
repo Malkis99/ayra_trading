@@ -25,20 +25,22 @@ describe("economy simulation on the real game rules", () => {
     expect(farmer.coins).toBeLessThanOrEqual(active.coins);
   });
 
+  // Catalog 3 (QH-6.4): only the missions of the active set are paid, three a day at most. The farmer picks the mode with
+  // the richest self-reports and does not do that mode's missions, so it can end with less than the active player — never
+  // with more than what the same journal actions give.
   it("duplicates, future-dated trades, extra trades, double clicks and repeated claims give the farmer nothing extra", () => {
-    // farmer and active do the same journal actions; the farmer's extra attempts must add no XP beyond self-reports
-    expect(farmer.totalXp - farmer.selfXp).toBe(active.totalXp - active.selfXp);
+    expect(farmer.totalXp - farmer.selfXp).toBeLessThanOrEqual(active.totalXp - active.selfXp);
   });
 
-  it("the farmer's only XP edge is self-reports (choosing the richest mode before the first reward)", () => {
-    expect(farmer.totalXp - active.totalXp).toBe(farmer.selfXp - active.selfXp);
+  it("the farmer's only possible XP edge is self-reports (choosing the richest mode before the first reward)", () => {
+    expect(farmer.totalXp - active.totalXp).toBeLessThanOrEqual(farmer.selfXp - active.selfXp);
     expect(farmer.selfXp).toBeGreaterThanOrEqual(active.selfXp);
   });
 
-  it("switching modes after rewards gives nothing extra: the mode hopper ends with the farmer's XP and coins (UX3-1)", () => {
+  it("switching modes again and again gives nothing over an honest active day: three missions at most, self-reports within the cap (UX3-1)", () => {
     const hopper = simulate("hopper", days);
-    expect(hopper.coins).toBe(farmer.coins);
-    expect(hopper.totalXp).toBe(farmer.totalXp);
+    expect(hopper.coins).toBeLessThanOrEqual(active.coins);
+    expect(hopper.totalXp - hopper.selfXp).toBeLessThanOrEqual(active.totalXp - active.selfXp);
     for (const d of hopper.log) expect(d.selfXp).toBeLessThanOrEqual(GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP);
   });
 

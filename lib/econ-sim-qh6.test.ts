@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { GAME_CONFIG } from "./game-config";
-import { PLAYERS, missionSplit, simulateCurrent, simulateProposed, variantOf } from "./econ-sim-qh6";
+import { PLAYERS, missionSplit, simulateCurrent, simulateLive, simulateProposed, variantOf } from "./econ-sim-qh6";
 
 // QH-6 proposal checks on the real game rules (docs/quest-hub-qh6-spec.md, section 5). Nothing here changes the game.
 
-const runs = PLAYERS.map((p) => ({ p, cur: simulateCurrent(p, 90), a: simulateProposed(p, 90), split: missionSplit(p, 90) }));
+const runs = PLAYERS.map((p) => ({ p, cur: simulateCurrent(p, 90), a: simulateProposed(p, 90), live: simulateLive(p, 90), split: missionSplit(p, 90) }));
 
 describe("QH-6 economy simulation (90 days, real rules)", () => {
   it("never more than three verified missions a day, whatever the player does", () => {
@@ -51,3 +51,32 @@ describe("QH-6 economy simulation (90 days, real rules)", () => {
     }
   });
 });
+
+describe("QH-6.4 the 90 days again, on the real confirmation (journal records → claim)", () => {
+  it("the real claim pays exactly the missions and coins of the model: nothing lost, nothing extra", () => {
+    for (const r of runs) {
+      expect(r.live.missions).toBe(r.a.missions);
+      expect(r.live.coins).toBe(r.a.coins);
+    }
+  });
+
+  it("never more than three paid missions a day; coins under the daily cap; self-reports within their cap", () => {
+    for (const r of runs) {
+      expect(r.live.maxMissionsDay).toBeLessThanOrEqual(GAME_CONFIG.CORE_QUESTS_PER_DAY);
+      expect(r.live.maxCoinsDay).toBeLessThanOrEqual(GAME_CONFIG.DAILY_COIN_CAP);
+      expect(r.live.selfXp).toBeLessThanOrEqual(GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP * 90);
+    }
+  });
+
+  it("the maximiser's repeats, reloads, copies, imports and mode changes pay nothing: three missions a day, no more", () => {
+    const m = runs.find((r) => r.p === "maximiser")!;
+    expect(m.live.missions).toBe(90 * 3);
+  });
+
+  it("the learner who never trades gets every mission it does (study without trades: «Observation»)", () => {
+    const l = runs.find((r) => r.p === "learner")!;
+    expect(l.live.tradeLog).toBe(0);
+    expect(l.live.missions).toBe(l.split.other);
+  });
+});
+

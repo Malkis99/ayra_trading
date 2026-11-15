@@ -20,7 +20,7 @@ import {
   MarketMiniCard,
   TopicOfDayCard,
 } from "@/components/home/SharedBlocks";
-import { UNPAID_MISSIONS, isJournalConfirmed } from "@/lib/quests";
+import { isJournalConfirmed } from "@/lib/quests";
 import { todaysQuests } from "@/lib/quests-view";
 import { TITLES, FRAMES, ITEMS } from "@/lib/items";
 import { dayKeyInZone } from "@/lib/day-key";
@@ -324,7 +324,7 @@ export default function HomePage() {
                       <span>{title}</span>
                     </div>
                     <span className="text-mu no-underline">
-                      {UNPAID_MISSIONS.has(q.id) ? dict.questsPage.q2.mission.rewardSoon : `+${q.xpReward} XP`} · {dict.categories[q.category] || q.category}
+                      +{q.xpReward} XP · {dict.categories[q.category] || q.category}
                     </span>
                   </button>
                 );

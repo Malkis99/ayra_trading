@@ -31,6 +31,10 @@ export type MissionId =
   | "m_mistake" // Recovery 2
   | "m_plan_tomorrow"; // Recovery 3
 
+/** Every verifiable mission (the three of each mode; «Observation» stands in for «Trade review»). */
+export const MISSION_IDS: readonly MissionId[] = ["q_bias", "q_riskcheck", "q_reflect", "m_trade_review", "m_observation", "m_backtest", "m_lesson", "m_day_state", "m_mistake", "m_plan_tomorrow"];
+export const isMissionId = (id: string): id is MissionId => (MISSION_IDS as readonly string[]).includes(id);
+
 /** Shortest texts (owner decisions 2026-11-14). */
 export const MISSION_TEXT_MIN = { review: 40, sessionNote: 80, observation: 60, lesson: 60, mistake: 80 } as const;
 

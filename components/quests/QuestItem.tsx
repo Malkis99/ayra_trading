@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowRight, Check, MoreHorizontal, RotateCcw, XCircle } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { formatString } from "@/lib/i18n";
-import { UNPAID_MISSIONS, isJournalConfirmed, questReward, type QuestTemplate } from "@/lib/quests";
+import { isJournalConfirmed, questReward, type QuestTemplate } from "@/lib/quests";
 import { JOURNAL_LINK } from "@/lib/quests-view";
 import { Button, buttonClasses } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
@@ -54,12 +54,7 @@ export function QuestItem(props: QuestItemProps) {
   // confirmed by the journal: the app-closed quests and the catalog-3 missions (never ticked, never replaced)
   const appClosed = isJournalConfirmed(quest.id);
   const reward = questReward(quest);
-  // a catalog-3 mission gives nothing yet (QH-6.4): no number is shown for it
-  const rewardText = UNPAID_MISSIONS.has(quest.id)
-    ? m.rewardSoon
-    : reward.coins > 0
-      ? formatString(dict.questsPage.todayTab.rewardXpCoins, { xp: reward.xp, coins: reward.coins })
-      : formatString(dict.questsPage.todayTab.rewardXp, { xp: reward.xp });
+  const rewardText = reward.coins > 0 ? formatString(dict.questsPage.todayTab.rewardXpCoins, { xp: reward.xp, coins: reward.coins }) : formatString(dict.questsPage.todayTab.rewardXp, { xp: reward.xp });
   const mission = variant === "mission";
   const isPassed = !!passed && !done;
   const canAct = !done && !isPassed && !readOnly;

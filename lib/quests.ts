@@ -32,12 +32,25 @@ export interface QuestTemplate {
  * the review). Only these give coins, and they cannot be ticked by hand. Every other quest is self-reported: XP only
  * (owner decision 2026-10-27; coins already earned for them are kept).
  */
-export const APP_CLOSED_QUESTS: ReadonlySet<string> = new Set(["q_tradelog", "q_bias", "q_riskcheck", "q_reflect"]);
+export const APP_CLOSED_QUESTS: ReadonlySet<string> = new Set([
+  "q_tradelog",
+  "q_bias",
+  "q_riskcheck",
+  "q_reflect",
+  // the missions of catalog 3 (QH-6.4: closed and paid by the journal checks of lib/missions.ts, owner decision В14)
+  "m_trade_review",
+  "m_observation",
+  "m_backtest",
+  "m_lesson",
+  "m_day_state",
+  "m_mistake",
+  "m_plan_tomorrow",
+]);
 
 /**
  * The verifiable missions of QH-6 that are new in catalog 3 (docs/quest-hub-qh6-spec.md, 2). They are confirmed only by
- * saved journal data (lib/missions.ts), are never ticked or replaced, and give nothing yet: their reward is wired in
- * QH-6.4. Not part of QUEST_POOL (the pool of quests a day may offer as extras).
+ * saved journal data (lib/missions.ts), are never ticked or replaced, and are paid like every app-closed quest (QH-6.4,
+ * 40 XP + 10 Coins). Not part of QUEST_POOL (the pool of quests a day may offer as extras).
  */
 export const MISSION_TEMPLATES: QuestTemplate[] = [
   {
@@ -45,8 +58,8 @@ export const MISSION_TEMPLATES: QuestTemplate[] = [
     category: "Trading",
     durationMinutes: 15,
     difficulty: "Medium",
-    xpReward: 0,
-    coinsReward: 0,
+    xpReward: 40,
+    coinsReward: 10,
     statKey: "Trading",
     verificationType: "JournalCheck",
     titleKey: "quest.m_trade_review.title",
@@ -61,8 +74,8 @@ export const MISSION_TEMPLATES: QuestTemplate[] = [
     category: "Trading",
     durationMinutes: 15,
     difficulty: "Medium",
-    xpReward: 0,
-    coinsReward: 0,
+    xpReward: 40,
+    coinsReward: 10,
     statKey: "Trading",
     verificationType: "JournalCheck",
     titleKey: "quest.m_observation.title",
@@ -77,8 +90,8 @@ export const MISSION_TEMPLATES: QuestTemplate[] = [
     category: "Discipline",
     durationMinutes: 30,
     difficulty: "Medium",
-    xpReward: 0,
-    coinsReward: 0,
+    xpReward: 40,
+    coinsReward: 10,
     statKey: "Discipline",
     verificationType: "JournalCheck",
     titleKey: "quest.m_backtest.title",
@@ -93,8 +106,8 @@ export const MISSION_TEMPLATES: QuestTemplate[] = [
     category: "Discipline",
     durationMinutes: 10,
     difficulty: "Medium",
-    xpReward: 0,
-    coinsReward: 0,
+    xpReward: 40,
+    coinsReward: 10,
     statKey: "Discipline",
     verificationType: "JournalCheck",
     titleKey: "quest.m_lesson.title",
@@ -109,8 +122,8 @@ export const MISSION_TEMPLATES: QuestTemplate[] = [
     category: "Psychology",
     durationMinutes: 5,
     difficulty: "Medium",
-    xpReward: 0,
-    coinsReward: 0,
+    xpReward: 40,
+    coinsReward: 10,
     statKey: "Psychology",
     verificationType: "JournalCheck",
     titleKey: "quest.m_day_state.title",
@@ -125,8 +138,8 @@ export const MISSION_TEMPLATES: QuestTemplate[] = [
     category: "Psychology",
     durationMinutes: 15,
     difficulty: "Medium",
-    xpReward: 0,
-    coinsReward: 0,
+    xpReward: 40,
+    coinsReward: 10,
     statKey: "Psychology",
     verificationType: "JournalCheck",
     titleKey: "quest.m_mistake.title",
@@ -141,8 +154,8 @@ export const MISSION_TEMPLATES: QuestTemplate[] = [
     category: "Discipline",
     durationMinutes: 10,
     difficulty: "Medium",
-    xpReward: 0,
-    coinsReward: 0,
+    xpReward: 40,
+    coinsReward: 10,
     statKey: "Discipline",
     verificationType: "JournalCheck",
     titleKey: "quest.m_plan_tomorrow.title",
@@ -154,11 +167,11 @@ export const MISSION_TEMPLATES: QuestTemplate[] = [
   },
 ];
 
-/** Missions confirmed by the journal that give no reward yet (QH-6.4). */
-export const UNPAID_MISSIONS: ReadonlySet<string> = new Set(MISSION_TEMPLATES.map((q) => q.id));
+/** The missions new in catalog 3 (study and recovery): a set holding one of them is a catalog-3 set. */
+export const CATALOG3_MISSIONS: ReadonlySet<string> = new Set(MISSION_TEMPLATES.map((q) => q.id));
 
-/** Confirmed by the journal, never ticked by hand and never replaced: the app-closed quests and the new missions. */
-export const JOURNAL_CONFIRMED: ReadonlySet<string> = new Set([...APP_CLOSED_QUESTS, ...UNPAID_MISSIONS]);
+/** Confirmed by the journal, never ticked by hand and never replaced (the app-closed quests, the missions included). */
+export const JOURNAL_CONFIRMED: ReadonlySet<string> = APP_CLOSED_QUESTS;
 export const isJournalConfirmed = (id: string): boolean => JOURNAL_CONFIRMED.has(id);
 
 /**
@@ -166,7 +179,6 @@ export const isJournalConfirmed = (id: string): boolean => JOURNAL_CONFIRMED.has
  * whatever their card said before; self-reported quests give their XP and no coins.
  */
 export function questReward(q: Pick<QuestTemplate, "id" | "xpReward" | "coinsReward">): { xp: number; coins: number } {
-  if (UNPAID_MISSIONS.has(q.id)) return { xp: 0, coins: 0 };
   return APP_CLOSED_QUESTS.has(q.id) ? { xp: GAME_CONFIG.QUEST_XP, coins: GAME_CONFIG.QUEST_COINS } : { xp: q.xpReward, coins: 0 };
 }
 

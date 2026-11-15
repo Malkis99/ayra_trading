@@ -15,12 +15,14 @@ import {
   INITIAL_GAME_STATE,
   checkAndApplyDateResets,
   claimDailyReward,
+  claimMissions,
   completeQuest,
   completeSelfReportQuest,
   evaluatePlanQuestClosure,
   recordLoggedTrade,
   recordNoTradeEntry,
   recordNoteSaved,
+  recordJournalTrades,
   recordScreenshotAdded,
   setDayMode,
   xpForNextLevel,
@@ -30,6 +32,8 @@ import { GAME_CONFIG } from "./game-config";
 import { addDaysToKey, weekdayOfKey } from "./day-key";
 import { APP_CLOSED_QUESTS, getDeterministicDailyQuests, getTodaysQuests, getWeightedDailyQuests } from "./quests";
 import { poolForMode, programFor, type DayMode, type DaySet } from "./quest-engine";
+import { firstTradeDay, isMissionId, type MissionData } from "./missions";
+import type { Note, Trade, TradingPlan } from "./journal/types";
 
 /**
  * The day set as catalog 2 made it (before QH-6.3: three quests of the mode's pool, self-reports included, and two
@@ -63,7 +67,7 @@ export const VARIANTS: Record<"A" | "B" | "C", MissionRate> = {
 
 export interface Outcome {
   player: Player;
-  rules: "current" | "A" | "B" | "C";
+  rules: "current" | "A" | "A live" | "B" | "C";
   days: number;
   totalXp: number;
   coins: number;
@@ -318,6 +322,133 @@ export function simulateProposed(player: Player, days = 90, start = "2026-11-16"
     maxCoinsDay = Math.max(maxCoinsDay, s.coins - coins0);
   }
   return { player, rules: "A", days, totalXp: totalXpOf(s), coins: s.coins, level: s.level, selfXp, missions, maxCoinsDay, maxMissionsDay, tradeLog };
+}
+
+/* ------------------------------------------------------------------ QH-6.4: the real confirmation, end to end */
+
+/**
+ * Variant A as the game now runs it (QH-6.4): the game makes the day set (catalog 3), the journal reports its trades
+ * (the study choice), every mission is paid only by the claim on saved journal records — a day plan, its review, notes of
+ * each template, backtest results, trade reviews, tomorrow's plan — and habits are the real extras of the day set
+ * (self-reports, the 90 XP cap). The maximiser also tries everything the protections must stop: the same save again,
+ * a reload, a second claim, a copy of yesterday's note, an imported note, mode changes after the rewards.
+ */
+export function simulateLive(player: Player, days = 90, start = "2026-11-16"): Outcome {
+  let s = startState(start);
+  const j: Journal = { trades: [], notes: [], noTrades: [] };
+  const plans: TradingPlan[] = [];
+  const notes: Note[] = [];
+  const trades: Trade[] = [];
+  const journal = (): MissionData => ({ plans, notes, trades, timezone: "UTC" });
+  let selfXp = 0;
+  let missions = 0;
+  let maxCoinsDay = 0;
+  let maxMissionsDay = 0;
+  let tradeLog = 0;
+  const iso = (day: string, hhmm: string) => `${day}T${hhmm}:00.000Z`;
+  const savePlan = (p: TradingPlan) => {
+    const k = plans.findIndex((x) => x.date === p.date);
+    if (k >= 0) plans[k] = p;
+    else plans.push(p);
+  };
+  const saveNote = (n: Note, time: string, day: string) => {
+    notes.push(n);
+    s = recordNoteSaved(s, n, notes, at(day, time)).state; // the journal's own note XP (once a day), as today
+  };
+  const paidMissions = () => Object.keys(s.completedQuestsToday).filter(isMissionId).length;
+
+  for (let i = 0; i < days; i++) {
+    const day = addDaysToKey(start, i);
+    const b = behaviour(player, i, day);
+    const coins0 = s.coins;
+    s = checkAndApplyDateResets(s, at(day, "06:00"));
+    s = recordJournalTrades(s, firstTradeDay(trades, "UTC"), at(day, "06:00")); // the journal is read
+    if (!b.open) continue;
+    if (b.mode !== s.questDay?.mode) s = setDayMode(s, b.mode, at(day, "06:05")).state;
+    s = claimDailyReward(s, at(day, "07:00")).state;
+    const done0 = paidMissions();
+    const claim = (time: string) => {
+      s = claimMissions(s, journal(), at(day, time)).state;
+    };
+
+    if (b.mode === "trading") {
+      const p: TradingPlan = {
+        date: day,
+        bias: [{ instrument: "EURUSD", direction: "bullish" }],
+        levels: b.missions >= 1 ? [{ instrument: "EURUSD", price: 1.0832, label: "POI" }] : [],
+        events: [],
+        limits: { maxTrades: 3, maxRiskPerTrade: { type: "percent", value: 1 } },
+        checklist: [{ key: "risk_limits_checked", done: b.missions >= 2 }],
+        createdAt: iso(day, "07:30"),
+        firstSavedAt: iso(day, "07:30"),
+        updatedAt: iso(day, "07:30"),
+      };
+      savePlan(p);
+      s = evaluatePlanQuestClosure(s, p, [], plans, notes, at(day, "07:30")).state;
+      s = journalDay(s, j, day, i, b.trades, b.extras);
+      for (const t of j.trades.filter((x) => x.openedAt.startsWith(day))) trades.push({ ...t, createdAt: t.openedAt, updatedAt: t.openedAt } as unknown as Trade);
+      if (b.extras) saveNote({ id: `n${i}`, templateKey: "lesson", body: `${LONG} Day ${i}.`, tags: [], pinned: false, createdAt: iso(day, "15:00"), updatedAt: iso(day, "15:00"), archivedAt: null }, "15:00", day);
+      if (b.missions >= 3) {
+        const reviewed: TradingPlan = { ...p, review: { rating: 4, followedPlan: "yes", emotions: ["calm"], whatWorked: `Waited for the retest and kept the risk, day ${i}.`, lesson: "Patience pays off again.", completedAt: iso(day, "20:00") }, updatedAt: iso(day, "20:00") };
+        savePlan(reviewed);
+        s = evaluatePlanQuestClosure(s, reviewed, j.trades.filter((t) => t.openedAt.startsWith(day)), plans, notes, at(day, "20:05")).state;
+      }
+      claim("20:06"); // the journal bridge after the saves
+    } else if (b.mode === "study") {
+      const first = s.questDay!.core[0];
+      for (let k = 0; k < b.missions; k++) {
+        const id = s.questDay!.core[k];
+        if (id === "m_trade_review") {
+          // a past trade gets its review today (the repository stamps reviewedAt when it first becomes complete)
+          const t = trades.find((x) => !x.reviewedAt && (x.createdAt || x.openedAt) < iso(day, "00:00"));
+          if (t) Object.assign(t, { entryReason: "Retest of the London high", emotions: ["calm"], executionRating: 4, reviewedAt: iso(day, "11:00") });
+        } else if (id === "m_observation") {
+          saveNote({ id: `o${i}`, templateKey: "idea", body: `Observation ${i}: EURUSD swept the Asian high and returned to the range — a false breakout.`, tags: [], pinned: false, createdAt: iso(day, "11:00"), updatedAt: iso(day, "11:00"), archivedAt: null }, "11:00", day);
+        } else if (id === "m_backtest") {
+          const from = addDaysToKey("2025-01-01", i);
+          notes.push({ id: `b${i}`, templateKey: "backtest", body: `Conclusion ${i}: the retest works in London, not in Asia; only London entries from now on.`, tags: [], pinned: false, createdAt: iso(day, "13:00"), updatedAt: iso(day, "13:00"), archivedAt: null, backtest: { instrument: "EURUSD", timeframe: "H1", periodFrom: from, periodTo: addDaysToKey(from, 90), setup: "Retest", strategyId: null, setups: 20, wins: 11, losses: 7, breakeven: 2, avgWinR: null, avgLossR: null } });
+        } else if (id === "m_lesson") {
+          saveNote({ id: `l${i}`, templateKey: "lesson", body: `${LONG} Day ${i}.`, tags: [], pinned: false, createdAt: iso(day, "15:00"), updatedAt: iso(day, "15:00"), archivedAt: null }, "15:00", day);
+        }
+      }
+      void first;
+      claim("15:10");
+    } else if (b.mode === "recovery") {
+      for (let k = 0; k < b.missions; k++) {
+        const id = s.questDay!.core[k];
+        if (id === "m_day_state") savePlan({ date: day, bias: [], levels: [], events: [], checklist: [], createdAt: iso(day, "19:00"), firstSavedAt: iso(day, "19:00"), updatedAt: iso(day, "19:00"), review: { rating: 3, followedPlan: "partly", emotions: ["tired"], completedAt: iso(day, "19:00") } });
+        if (id === "m_mistake") saveNote({ id: `w${i}`, templateKey: "weekly_mistake", body: `Mistake ${i}: moved the stop twice on Friday. From now on the stop stays where the day plan put it, no exceptions.`, tags: [], pinned: false, createdAt: iso(day, "19:10"), updatedAt: iso(day, "19:10"), archivedAt: null }, "19:10", day);
+        if (id === "m_plan_tomorrow") savePlan({ date: addDaysToKey(day, 1), bias: [{ instrument: "EURUSD", direction: "bearish" }], levels: [], events: [], checklist: [], createdAt: iso(day, "21:00"), firstSavedAt: iso(day, "21:00"), updatedAt: iso(day, "21:00") });
+      }
+      claim("21:05");
+    }
+
+    if (player === "maximiser") {
+      // everything the protections must stop: the same claim again, a reload, a copy of yesterday's note, an imported
+      // note, more mode changes after the rewards
+      claim("21:30");
+      s = claimMissions(JSON.parse(JSON.stringify(s)), journal(), at(day, "21:31")).state;
+      const copy = notes.find((n) => n.templateKey === "lesson" && n.createdAt < iso(day, "00:00"));
+      if (copy) notes.push({ ...copy, id: `copy${i}`, createdAt: iso(day, "21:32"), updatedAt: iso(day, "21:32") });
+      notes.push({ id: `imp${i}`, templateKey: "lesson", body: `Imported lesson ${i} from another app, long enough to look like a real lesson.`, tags: [], pinned: false, createdAt: iso(day, "21:33"), updatedAt: iso(day, "21:33"), archivedAt: null, importBatchId: `batch${i}`, importedAt: iso(day, "21:33") });
+      for (const m of ["study", "recovery", "trading"] as DayMode[]) {
+        s = setDayMode(s, m, at(day, "21:40")).state;
+        claim("21:41");
+      }
+    }
+
+    // habits: the real extras of the day set (self-reports within the 90 XP cap), as many as the player ticks
+    const r = tickSelf(s, day, b.habits, "21:50");
+    s = r.s;
+    selfXp += r.xp;
+
+    const closed = paidMissions() - done0;
+    if (s.completedQuestsToday.q_tradelog) tradeLog++;
+    missions += closed;
+    maxMissionsDay = Math.max(maxMissionsDay, paidMissions());
+    maxCoinsDay = Math.max(maxCoinsDay, s.coins - coins0);
+  }
+  return { player, rules: "A live", days, totalXp: totalXpOf(s), coins: s.coins, level: s.level, selfXp, missions, maxCoinsDay, maxMissionsDay, tradeLog };
 }
 
 /**

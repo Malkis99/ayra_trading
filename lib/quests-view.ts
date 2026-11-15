@@ -5,9 +5,8 @@
  */
 import type { GameState } from "./game";
 import { addDaysToKey, mondayOfKey } from "./day-key";
-import { UNPAID_MISSIONS, getTodaysQuests, isJournalConfirmed, questById, type QuestTemplate } from "./quests";
+import { CATALOG3_MISSIONS, getTodaysQuests, isJournalConfirmed, questById, type QuestTemplate } from "./quests";
 import type { DayMode, ReasonKey } from "./quest-engine";
-import { checkMissions, type MissionData, type MissionId } from "./missions";
 
 export type DayStatus = "done" | "rest" | "shield" | "none" | "noData" | "today" | "future" | "beforeStart";
 
@@ -121,17 +120,6 @@ export function journalHref(questId: string, reason?: ReasonKey | null): string 
   return JOURNAL_LINK[questId] || "/journal";
 }
 
-/**
- * Which new missions (catalog 3, no reward yet) the saved journal confirms today, in slot order — one record confirms one
- * mission and never more than three a day (lib/missions.ts). Only for display: nothing is saved or given.
- */
-export function missionLiveDone(ids: string[], data: MissionData, dayKey: string): Record<string, boolean> {
-  const missions = ids.filter((id) => UNPAID_MISSIONS.has(id)) as MissionId[];
-  if (missions.length === 0) return {};
-  const out: Record<string, boolean> = {};
-  for (const c of checkMissions(missions, data, dayKey).checks) if (c.done) out[c.id] = true;
-  return out;
-}
 
 /** Self-reported quests that belong to the evening: never the first suggestion of a day. */
 const EVENING_QUESTS: ReadonlySet<string> = new Set(["q_sleep_prep"]);
@@ -146,14 +134,13 @@ export function nextStep(
   state: ViewState,
   core: QuestTemplate[],
   mode: DayMode = "trading",
-  reasonOf?: (questId: string) => ReasonKey | null,
-  liveDone: Record<string, boolean> = {}
+  reasonOf?: (questId: string) => ReasonKey | null
 ): NextStep {
   if (state.isRestDay || mode === "rest") return { kind: "rest" };
-  const open = (id: string) => !state.completedQuestsToday[id] && !liveDone[id] && !state.passedQuestsToday[id];
+  const open = (id: string) => !state.completedQuestsToday[id] && !state.passedQuestsToday[id];
   const tpl = (id: string) => core.find((q) => q.id === id) || questById(id);
   // catalog 3: the day review is a step only when it is one of the day's missions (a set before catalog 3 keeps its rule)
-  const catalog3 = core.some((q) => UNPAID_MISSIONS.has(q.id));
+  const catalog3 = core.some((q) => CATALOG3_MISSIONS.has(q.id));
   const reviewOpen = open("q_reflect") && (core.some((q) => q.id === "q_reflect") || (!catalog3 && (mode === "trading" || mode === "study")));
   const order: string[] = [
     ...(mode === "trading" ? PREPARATION.filter(open) : []),

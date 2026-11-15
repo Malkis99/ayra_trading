@@ -1,7 +1,7 @@
 import type { ProfileDetails } from "./profile";
 import { GAME_CONFIG } from "./game-config";
 import { dayKeyInZone, mondayOfKey } from "./day-key";
-import { APP_CLOSED_QUESTS, JOURNAL_CONFIRMED, getTodaysQuests, pickReplacement } from "./quests";
+import { APP_CLOSED_QUESTS, JOURNAL_CONFIRMED, getTodaysQuests, pickReplacement, questById } from "./quests";
 import {
   composeSwitchedSet,
   defaultModeFor,
@@ -14,7 +14,7 @@ import {
   type DaySet,
   type WeekChallenge,
 } from "./quest-engine";
-import { candidateSources, type MissionData } from "./missions";
+import { MISSION_IDS, candidateSources, checkMissions, isMissionId, type MissionCheck, type MissionData, type MissionId, type MissionLedger } from "./missions";
 import {
   addDaySnapshot,
   addWeekSnapshot,
@@ -161,6 +161,11 @@ export interface GameState {
    * is read (recordJournalTrades). It decides the first study mission of a new day (catalog 3). Absent until reported.
    */
   journalFirstTradeDay?: string | null;
+  /**
+   * Which record confirmed each mission of the game day (QH-6.4, lib/missions.ts): one record pays one mission, a mission
+   * is paid once, never more than three a day. Kept for the day it names; another day starts empty.
+   */
+  missionLedger?: MissionLedger;
   /** The week challenge, chosen once per week (Q2; no rewards yet). */
   questWeek?: WeekChallenge;
   /** Closed game days as they were (QH-3, lib/day-snapshots.ts): written once at the day change, read-only, newest first. */
@@ -968,12 +973,20 @@ export function evaluatePlanQuestClosure(
   };
   const missionDone = (id: "q_bias" | "q_riskcheck" | "q_reflect") => candidateSources(id, missionData, todayStr).length > 0;
 
+  // catalog 3 (QH-6.4): the day's missions are paid only through the claim (its set, its ledger, three a day at most)
+  const catalog3 = newState.questDay?.day === todayStr && (newState.questDay.catalogVersion ?? 0) >= 3;
+  if (catalog3) {
+    const claim = claimMissions(newState, missionData, currentDate);
+    newState = claim.state;
+    closedQuests.push(...claim.claimed);
+  }
+
   // 1. q_daily_bias (or q_bias)
   const hasBiasWithInst =
     Array.isArray(plan.bias) &&
     plan.bias.some((b: any) => b.instrument && b.instrument.trim().length > 0);
 
-  if (missionDone("q_bias") && !newState.completedQuestsToday["q_bias"]) {
+  if (!catalog3 && missionDone("q_bias") && !newState.completedQuestsToday["q_bias"]) {
     const res = completeQuest(
       newState,
       "q_bias",
@@ -993,7 +1006,7 @@ export function evaluatePlanQuestClosure(
     plan.limits?.maxDailyLoss?.value != null ||
     plan.limits?.maxTrades != null;
 
-  if (missionDone("q_riskcheck") && !newState.completedQuestsToday["q_riskcheck"]) {
+  if (!catalog3 && missionDone("q_riskcheck") && !newState.completedQuestsToday["q_riskcheck"]) {
     const res = completeQuest(
       newState,
       "q_riskcheck",
@@ -1008,7 +1021,7 @@ export function evaluatePlanQuestClosure(
   }
 
   // 3. q_reflect (reflection): the review completed today (40+ characters) or today's «Session review» note (80+)
-  if (missionDone("q_reflect") && !newState.completedQuestsToday["q_reflect"]) {
+  if (!catalog3 && missionDone("q_reflect") && !newState.completedQuestsToday["q_reflect"]) {
     const res = completeQuest(
       newState,
       "q_reflect",
@@ -1539,6 +1552,88 @@ export function setDayMode(
       dailyStats: leavingRest ? recordDailyStatEvent(s.dailyStats, today, { type: "restDayOff" }) : s.dailyStats,
     },
   };
+}
+
+/* ------------------------------------------------------------------ verifiable missions (QH-6.4) */
+
+/** The day-statistics category a mission is counted in (the trading three keep the ones they always had). */
+const MISSION_CATEGORY: Record<MissionId, string> = {
+  q_bias: "trading",
+  q_riskcheck: "trading",
+  q_reflect: "psychology",
+  m_trade_review: "trading",
+  m_observation: "trading",
+  m_backtest: "discipline",
+  m_lesson: "discipline",
+  m_day_state: "psychology",
+  m_mistake: "psychology",
+  m_plan_tomorrow: "discipline",
+};
+
+/**
+ * The missions the saved journal confirms now and that are not paid yet (pure). Only the missions of today's active set
+ * (catalog 3), never on a rest day or with the clock moved back. The day's ledger keeps what is already paid — a paid
+ * mission, or one paid before the ledger existed, counts for the three and keeps its record.
+ */
+export function pendingMissionClaims(
+  state: GameState,
+  data: MissionData,
+  currentDate: Date = new Date()
+): { state: GameState; day: string; fresh: MissionCheck[]; ledger: MissionLedger } | null {
+  const s = checkAndApplyDateResets(state, currentDate);
+  const today = gameDayKey(s, currentDate);
+  const qd = s.questDay;
+  if (!qd || qd.day !== today || (qd.catalogVersion ?? 0) < 3 || s.isRestDay || qd.mode === "rest" || isClockBehind(s, currentDate)) return null;
+  const ids = shownSet(s, today).core.filter(isMissionId);
+  if (ids.length === 0) return null;
+  const claims: Partial<Record<MissionId, string>> = { ...(s.missionLedger?.day === today ? s.missionLedger.claims : {}) };
+  for (const id of MISSION_IDS) if (s.completedQuestsToday[id] && !claims[id]) claims[id] = `paid:${id}`;
+  const res = checkMissions(ids, { ...data, timezone: s.profile?.timezone }, today, { day: today, claims });
+  return { state: s, day: today, fresh: res.checks.filter((c) => c.done && !c.claimed && !s.completedQuestsToday[c.id]), ledger: res.ledger };
+}
+
+/**
+ * Pays the missions the saved journal confirms (QH-6.4; owner decision В14: 40 XP + 10 Coins each, the daily coin cap
+ * applies). Called after a journal save (lib/game-context.tsx, under the lock shared by all tabs) and by the day plan's
+ * closure. A mission is paid once a day, one record pays one mission, at most three a day whatever the mode changes;
+ * only records made today count, so old records, imported notes and other days are never paid. The confirmation time
+ * and the reward go to the history (and so to the day snapshot); the record that confirmed it stays in the ledger.
+ */
+export function claimMissions(
+  state: GameState,
+  data: MissionData,
+  currentDate: Date = new Date()
+): { state: GameState; claimed: MissionId[]; xp: number; coins: number; leveledUp: boolean; newLevel?: number; newlyUnlocked: string[] } {
+  const pending = pendingMissionClaims(state, data, currentDate);
+  if (!pending || pending.fresh.length === 0) {
+    return { state: pending ? pending.state : checkAndApplyDateResets(state, currentDate), claimed: [], xp: 0, coins: 0, leveledUp: false, newlyUnlocked: [] };
+  }
+  let next = pending.state;
+  const claimed: MissionId[] = [];
+  const newlyUnlocked: string[] = [];
+  let leveledUp = false;
+  let newLevel: number | undefined;
+  const xp0 = next.xp;
+  const level0 = next.level;
+  const coins0 = next.coins;
+  for (const c of pending.fresh) {
+    const tpl = questById(c.id);
+    const r = completeQuest(next, c.id, tpl?.fallbackTitleRu || c.id, MISSION_CATEGORY[c.id], QUEST_XP, QUEST_COINS, currentDate);
+    if (r.state.completedQuestsToday[c.id] && !next.completedQuestsToday[c.id]) claimed.push(c.id);
+    if (r.leveledUp) {
+      leveledUp = true;
+      newLevel = r.newLevel;
+    }
+    newlyUnlocked.push(...r.newlyUnlocked);
+    next = r.state;
+  }
+  // the ledger keeps only what is paid (a refused payment leaves its record free)
+  const claims: Partial<Record<MissionId, string>> = {};
+  for (const [id, src] of Object.entries(pending.ledger.claims) as Array<[MissionId, string]>) if (next.completedQuestsToday[id]) claims[id] = src;
+  next = { ...next, missionLedger: { day: pending.day, claims } };
+  let xp = next.xp - xp0;
+  for (let lv = level0; lv < next.level; lv++) xp += xpForNextLevel(lv);
+  return { state: next, claimed, xp, coins: next.coins - coins0, leveledUp, newLevel, newlyUnlocked };
 }
 
 /**

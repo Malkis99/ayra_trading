@@ -6,6 +6,7 @@ import {
   INITIAL_GAME_STATE,
   checkAndApplyDateResets,
   recordJournalTrades,
+  claimMissions,
   completeSelfReportQuest,
   claimDailyReward as claimDailyRewardLogic,
   changePlan as changePlanLogic,
@@ -43,6 +44,7 @@ import { AvatarAppearance, validateAvatarAppearance } from "@/lib/avatar";
 import type { ProfileDetails } from "@/lib/profile";
 import { generateProgram } from "@/lib/awakening";
 import { AppStorage } from "@/lib/storage";
+import type { MissionData } from "./missions";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
 import { dayKeyInZone } from "@/lib/day-key";
 import { GameStore, browserLock, revOf, type Change } from "@/lib/game-store";
@@ -174,6 +176,8 @@ interface GameContextType {
   updateTimezone: (timezone: string) => void;
   /** The journal reports the game day of its earliest live trade (null: none) once it is read (catalog 3 study choice). */
   recordJournalTrades: (firstTradeDay: string | null) => void;
+  /** Pays the missions the saved journal confirms (QH-6.4), under the lock shared by all tabs, on fresh data. */
+  claimMissions: (data: MissionData) => Promise<{ claimed: string[]; xp: number; coins: number; leveledUp: boolean; newLevel?: number }>;
   /** Saves the edit-profile form: nickname (already accepted by the server for accounts), bio and optional details. */
   saveProfileEdits: (edits: { name: string; bio: string; details: ProfileDetails }) => void;
   /** Accounts: the cloud nickname is the source of truth; copies it into the local state without a chronicle entry. */
@@ -518,6 +522,16 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     update((prev) => recordJournalTrades(prev, firstTradeDay, new Date()));
   }, [update]);
 
+  // The missions the saved journal confirms (QH-6.4): the same rules on the freshest saved state, one tab at a time
+  const claimMissionsCb = useCallback(
+    (data: MissionData) =>
+      applyLocked((s) => {
+        const res = claimMissions(s, data, new Date());
+        return { state: res.state, result: { claimed: res.claimed as string[], xp: res.xp, coins: res.coins, leveledUp: res.leveledUp, newLevel: res.newLevel } };
+      }, { claimed: [] as string[], xp: 0, coins: 0, leveledUp: false, newLevel: undefined as number | undefined }),
+    [applyLocked]
+  );
+
   // A quest ticked by the person (Quests, Home). Quests the app checks itself close only by themselves; a
   // self-reported quest gives XP, never coins (owner decision 2026-10-27).
   const questChange = useCallback(
@@ -856,6 +870,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         updateMinorMode,
         updateTimezone,
         recordJournalTrades: recordJournalTradesCb,
+        claimMissions: claimMissionsCb,
         saveProfileEdits,
         syncCloudNickname,
       }}

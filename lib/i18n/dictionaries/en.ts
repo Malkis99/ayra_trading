@@ -2758,8 +2758,7 @@ export const en: Dictionary = {
         noTrade: "Not entering a trade is a decision too",
         noTradeCriterion: "the decision is logged in the journal as «No trade»",
         noTradeGo: "Log it",
-        rewardSoon: "Reward coming soon",
-        rewardSoonNote: "The check already works; the reward for this mission comes in the next update",
+        claimed: "Mission «{title}» confirmed: +{xp} XP · +{coins} Coins",
       },
       short: {
         q_bias: "Market direction",
