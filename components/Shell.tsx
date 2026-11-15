@@ -18,6 +18,7 @@ import { Toast } from "@/components/Toast";
 import { Language } from "@/lib/i18n/types";
 import { JournalProvider } from "@/lib/journal/context";
 import { JournalTradesSync } from "@/components/JournalTradesSync";
+import { MissionClaimSync } from "@/components/MissionClaimSync";
 import { ProfileTimezoneSync } from "@/components/ProfileTimezoneSync";
 import { CloudDownloadNotice, GlobalInitialSyncDialog } from "@/components/journal/InitialSyncDialog";
 import { SyncConflictDialog } from "@/components/journal/SyncConflictDialog";
@@ -293,6 +294,8 @@ export function Shell({
             <ProfileTimezoneSync />
             {/* The journal's trades for the day's study mission (catalog 3); renders nothing */}
             <JournalTradesSync />
+            {/* The day's missions are paid after a journal save (QH-6.4); renders nothing */}
+            <MissionClaimSync />
           </JournalProvider>
         </GameProvider>
       </AuthProvider>

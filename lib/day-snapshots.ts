@@ -31,6 +31,8 @@ export interface DoneEntry {
   xp?: number;
   coins?: number;
   source: "journal" | "self";
+  /** The journal record that confirmed a verifiable mission (QH-6.4 ledger: `plan:<day>:prep`, `note:<id>`…). */
+  missionSource?: string;
   /** The mode it was done in, when known (a core quest kept after a mode change). */
   mode?: DayMode;
 }
@@ -119,6 +121,7 @@ export function trackReplacement(set: DaySet | undefined, from: string, to: stri
 /** What a closing day is made of (the game state before the day change clears it). */
 export interface ClosingDay {
   lastQuestDate: string;
+  missionLedger?: { day: string; claims: Partial<Record<string, string>> };
   questDay?: DaySet;
   isRestDay: boolean;
   completedQuestsToday: Record<string, boolean>;
@@ -169,6 +172,8 @@ export function buildDaySnapshot(s: ClosingDay, shieldUsed: boolean, at: Date): 
       entry.xp = h.xp || 0;
       entry.coins = h.coins || 0;
     }
+    const source = s.missionLedger?.day === day ? s.missionLedger.claims[id] : undefined;
+    if (source) entry.missionSource = source;
     const carried = qd?.carried?.[id];
     if (carried) entry.mode = carried;
     done[id] = entry;

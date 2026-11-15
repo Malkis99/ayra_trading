@@ -78,7 +78,8 @@ describe("quests the app checks vs self-reported", () => {
       // what the card shows = what is paid (app-closed quests: QUEST_XP / QUEST_COINS in lib/game.ts)
       expect(r).toEqual(APP_CLOSED_QUESTS.has(q.id) ? { xp: GAME_CONFIG.QUEST_XP, coins: GAME_CONFIG.QUEST_COINS } : { xp: q.xpReward, coins: 0 });
     }
-    expect([...APP_CLOSED_QUESTS].sort()).toEqual(["q_bias", "q_reflect", "q_riskcheck", "q_tradelog"]);
+    // QH-6.4 (owner decision В14): the catalog-3 missions are app-closed and paid like the trading ones
+    expect([...APP_CLOSED_QUESTS].sort()).toEqual(["m_backtest", "m_day_state", "m_lesson", "m_mistake", "m_observation", "m_plan_tomorrow", "m_trade_review", "q_bias", "q_reflect", "q_riskcheck", "q_tradelog"]);
   });
 });
 

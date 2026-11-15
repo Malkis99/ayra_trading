@@ -14,9 +14,13 @@ import {
 } from "./game";
 import { GameStore } from "./game-store";
 import { QUEST_CATALOG_VERSION, REPLACED_BY_MISSIONS, extrasForMode, generateDaySet, type DayMode } from "./quest-engine";
-import { JOURNAL_CONFIRMED, MISSION_TEMPLATES, QUEST_POOL, UNPAID_MISSIONS, getTodaysQuests, isJournalConfirmed, questById, questReward } from "./quests";
-import { JOURNAL_LINK, missionLiveDone } from "./quests-view";
-import { MAX_CORE_MISSIONS_PER_DAY, candidateSources, firstTradeDay, missionsForMode, ownText, type MissionData } from "./missions";
+import { CATALOG3_MISSIONS, JOURNAL_CONFIRMED, MISSION_TEMPLATES, QUEST_POOL, getTodaysQuests, isJournalConfirmed, questById, questReward } from "./quests";
+import { JOURNAL_LINK } from "./quests-view";
+import { MAX_CORE_MISSIONS_PER_DAY, candidateSources, checkMissions, firstTradeDay, isMissionId, missionsForMode, ownText, type MissionData } from "./missions";
+
+/** The missions of a list the saved journal confirms (slot order, one record a mission, three at most). */
+const confirmed = (ids: string[], data: MissionData, day: string) =>
+  Object.fromEntries(checkMissions(ids.filter(isMissionId), data, day).checks.filter((c) => c.done).map((c) => [c.id, true]));
 import { GAME_CONFIG } from "./game-config";
 import { ru } from "./i18n/dictionaries/ru";
 import type { Note, Trade, TradingPlan } from "./journal/types";
@@ -65,12 +69,12 @@ describe("QH-6.3 catalog 3: the day set", () => {
     expect(rest.bonus).toEqual([]);
   });
 
-  it("the nine missions are the approved ones; none needs a trade; they give nothing yet", () => {
+  it("the nine missions are the approved ones; none needs a trade; each is paid at the approved rate (QH-6.4)", () => {
     const all = new Set([...missionsForMode("trading", true), ...missionsForMode("study", true), ...missionsForMode("study", false), ...missionsForMode("recovery", true)]);
     expect([...all].sort()).toEqual(["m_backtest", "m_day_state", "m_lesson", "m_mistake", "m_observation", "m_plan_tomorrow", "m_trade_review", "q_bias", "q_reflect", "q_riskcheck"]);
     expect((all as Set<string>).has("q_tradelog")).toBe(false);
     for (const t of MISSION_TEMPLATES) {
-      expect(questReward(t)).toEqual({ xp: 0, coins: 0 });
+      expect(questReward(t)).toEqual({ xp: GAME_CONFIG.QUEST_XP, coins: GAME_CONFIG.QUEST_COINS });
       expect(QUEST_POOL.some((q) => q.id === t.id)).toBe(false); // never offered as an extra
       expect(questById(t.id)).toBe(t);
     }
@@ -226,11 +230,11 @@ describe("QH-6.3 mode changes: three missions, paid ones keep their slot, nothin
     };
     for (const mode of MODES) {
       const set = generateDaySet(started(), DAY, mode);
-      expect(Object.keys(missionLiveDone(set.core, data, DAY)).length).toBeLessThanOrEqual(3);
+      expect(Object.keys(confirmed(set.core, data, DAY)).length).toBeLessThanOrEqual(3);
     }
     // a broken list of every mission still confirms at most three
     const everything = [...missionsForMode("trading", false), ...missionsForMode("study", false), ...missionsForMode("recovery", false)];
-    expect(Object.keys(missionLiveDone(everything, data, DAY)).length).toBeLessThanOrEqual(3);
+    expect(Object.keys(confirmed(everything, data, DAY)).length).toBeLessThanOrEqual(3);
   });
 });
 
@@ -360,7 +364,7 @@ describe("QH-6.3 links, texts and no new rewards", () => {
     expect(JOURNAL_LINK.m_day_state).toBe("/journal?tab=plan&focus=review");
     expect(JOURNAL_LINK.m_mistake).toBe("/journal?tab=notes&new=weekly_mistake");
     expect(JOURNAL_LINK.m_plan_tomorrow).toBe("/journal?tab=plan&day=tomorrow");
-    for (const id of UNPAID_MISSIONS) {
+    for (const id of CATALOG3_MISSIONS) {
       expect(ru.questsPage.q2.criteria[id as keyof typeof ru.questsPage.q2.criteria]).toBeTruthy();
       expect(ru.questsPage.q2.journalCta[id as keyof typeof ru.questsPage.q2.journalCta]).toBeTruthy();
     }
@@ -375,13 +379,10 @@ describe("QH-6.3 links, texts and no new rewards", () => {
     expect(candidateSources("m_observation", { ...d, notes: [filled] }, DAY)).toEqual(["note:i1"]);
   });
 
-  it("the journal report and the live checks give nothing: no XP, no Coins, no history", () => {
+  it("the journal report gives nothing: no XP, no Coins, no history", () => {
     const s = started();
     const before = wealth(s);
     expect(wealth(recordJournalTrades(s, "2026-11-01", at(`${DAY}T09:00:00Z`)))).toBe(before);
     expect(wealth(recordJournalTrades(s, null, at(`${DAY}T09:00:00Z`)))).toBe(before);
-    const data: MissionData = { plans: [plan({ date: "2026-11-17", createdAt: `${DAY}T21:00:00.000Z` })], notes: [], trades: [], timezone: "UTC" };
-    expect(missionLiveDone(["m_plan_tomorrow"], data, DAY)).toEqual({ m_plan_tomorrow: true });
-    expect(wealth(s)).toBe(before);
   });
 });
