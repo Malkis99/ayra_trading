@@ -253,3 +253,40 @@ describe("QH-6.4 the rest of the economy stays as it is", () => {
     expect(r.state.missionLedger).toBeUndefined();
   });
 });
+
+describe("new-user acceptance (2026-11-15): «Day review» is never paid around the claim", () => {
+  const SESSION = "Итог сессии: два входа по плану, один пропуск без сожалений; риск держал в пределах лимита дня.";
+
+  it("saving a «Session review» note on a catalog-3 day pays nothing by itself; the claim pays it with its record", () => {
+    const s = started();
+    const n = note("s1", "session_review", SESSION);
+    const saved = recordNoteSaved(s, n, [n], t("20:00"));
+    expect(saved.state.completedQuestsToday.q_reflect).toBeUndefined();
+    expect(saved.state.coins).toBe(s.coins); // only the note's own XP, no coins
+    const r = claimMissions(saved.state, data({ notes: [n] }), t("20:01"));
+    expect(r.claimed).toEqual(["q_reflect"]);
+    expect(r.state.missionLedger!.claims.q_reflect).toBe("note:s1");
+  });
+
+  it("a «Session review» note on a study day after three paid missions is not a fourth paid mission", () => {
+    let s = setDayMode(started(), "study", t("07:00")).state;
+    const d = data({ notes: [note("i1", "idea", IDEA), backtest("b1"), note("l1", "lesson", LESSON)] });
+    s = claimMissions(s, d, t("15:00")).state;
+    expect(Object.keys(s.missionLedger!.claims)).toHaveLength(3);
+    const coins = s.coins;
+    const n = note("s1", "session_review", SESSION, { createdAt: iso("20:00") });
+    s = recordNoteSaved(s, n, [...d.notes, n], t("20:00")).state;
+    s = claimMissions(s, { ...d, notes: [...d.notes, n] }, t("20:01")).state;
+    expect(s.completedQuestsToday.q_reflect).toBeUndefined();
+    expect(s.coins).toBe(coins);
+    expect(Object.keys(s.completedQuestsToday).filter((id) => /^(q_bias|q_riskcheck|q_reflect|m_)/.test(id))).toHaveLength(3);
+  });
+
+  it("a day set from before catalog 3 keeps the old closing by the note", () => {
+    let s = started();
+    s = { ...s, questDay: { day: DAY, mode: "trading", catalogVersion: 2, core: ["q_walk", "q_meditate", "q_nosocial"], bonus: [] } };
+    const n = note("s1", "session_review", SESSION);
+    expect(recordNoteSaved(s, n, [n], t("20:00")).state.completedQuestsToday.q_reflect).toBe(true);
+  });
+});
+

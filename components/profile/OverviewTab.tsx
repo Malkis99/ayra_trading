@@ -14,6 +14,7 @@ import { useJournal } from "@/lib/journal/context";
 import { calculateKpis } from "@/lib/journal/overview";
 import { todaysQuests } from "@/lib/quests-view";
 import { questShortTitle } from "@/components/quests/quest-text";
+import { questReward } from "@/lib/quests";
 import { recentAchievements } from "@/lib/profile";
 import { formatString } from "@/lib/i18n";
 import { cn } from "@/components/ui/cn";
@@ -207,7 +208,11 @@ export function OverviewTab({ onOpenAchievements, onEditProfile }: { onOpenAchie
                 <span className={cn("min-w-0 flex-1 truncate", done ? "text-mu line-through" : "text-tx")}>
                   {questShortTitle(dict, lang, q)}
                 </span>
-                <span className="shrink-0 text-xs tabular-nums text-mu">+{q.xpReward} XP</span>
+                <span className="shrink-0 text-xs tabular-nums text-mu">
+                  {questReward(q).coins > 0
+                    ? formatString(dict.questsPage.todayTab.rewardXpCoins, { xp: questReward(q).xp, coins: questReward(q).coins })
+                    : formatString(dict.questsPage.todayTab.rewardXp, { xp: questReward(q).xp })}
+                </span>
               </li>
             );
           })}

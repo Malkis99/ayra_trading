@@ -2053,8 +2053,12 @@ export function recordNoteSaved(
     }
   }
 
-  // Session Review template note body >= 80 chars auto-closes q_reflect
+  // Session Review template note body >= 80 chars auto-closes q_reflect — only for a day set from before catalog 3.
+  // On a catalog-3 day «Day review» is a mission: it is paid only by claimMissions (the active set, the ledger of
+  // sources, three a day, the QH-6.2 text rules), never here (found by the new-user acceptance test).
+  const catalog3Day = newState.questDay?.day === todayStr && (newState.questDay.catalogVersion ?? 0) >= 3;
   if (
+    !catalog3Day &&
     note.templateKey === "session_review" &&
     bodyText.length >= 80 &&
     !newState.completedQuestsToday["q_reflect"]
