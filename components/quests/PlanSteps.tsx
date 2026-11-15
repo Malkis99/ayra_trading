@@ -13,7 +13,20 @@ import { buttonClasses } from "@/components/ui/Button";
  * The day plan in the journal as one short checklist (the morning protocol and the end-of-day review). It has no reward
  * of its own; a step that closes an existing journal quest shows that reward, the others are preparation only.
  */
-export function PlanSteps({ protocol, ritual, hrefFor, nextQuestId }: { protocol: MissionStep[]; ritual: MissionStep[]; hrefFor: (step: MissionStep) => string; nextQuestId?: string }) {
+export function PlanSteps({
+  protocol,
+  ritual,
+  hrefFor,
+  nextQuestId,
+  missionTitle,
+}: {
+  protocol: MissionStep[];
+  ritual: MissionStep[];
+  hrefFor: (step: MissionStep) => string;
+  nextQuestId?: string;
+  /** Catalog 3: a step that is part of one of the day's missions names that mission instead of repeating its reward. */
+  missionTitle?: (questId: string) => string | undefined;
+}) {
   const { dict } = useApp();
   const p = dict.questsPage.q2.page;
   const t = dict.questsPage.q2.protocol;
@@ -35,7 +48,11 @@ export function PlanSteps({ protocol, ritual, hrefFor, nextQuestId }: { protocol
         <span className={s.state === "done" ? "min-w-0 flex-1 text-sm text-mu" : "min-w-0 flex-1 text-sm text-tx"}>
           {next && <span className="block text-[11px] font-bold uppercase tracking-[0.12em] text-vi">{dict.questsPage.q2.mission.next}</span>}
           {t.steps[s.key]}
-          {s.rewardQuest && <span className="block text-xs font-semibold text-tx/70">{formatString(t.rewardStep, { reward: rewardText(s.rewardQuest) })}</span>}
+          {s.rewardQuest && (
+            <span className="block text-xs font-semibold text-tx/70" data-testid={`mission-step-note-${s.key}`}>
+              {missionTitle?.(s.rewardQuest) ? formatString(t.inMission, { title: missionTitle(s.rewardQuest)! }) : formatString(t.rewardStep, { reward: rewardText(s.rewardQuest) })}
+            </span>
+          )}
         </span>
         {s.state !== "done" && (
           <Link href={hrefFor(s)} className={buttonClasses(next ? "primary" : "ghost", "sm", "shrink-0")} data-testid={`mission-step-go-${s.key}`} aria-label={`${p.go}: ${t.steps[s.key]}`}>

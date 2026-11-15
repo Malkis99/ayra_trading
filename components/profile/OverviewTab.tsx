@@ -13,6 +13,7 @@ import { useGame } from "@/lib/game-context";
 import { useJournal } from "@/lib/journal/context";
 import { calculateKpis } from "@/lib/journal/overview";
 import { todaysQuests } from "@/lib/quests-view";
+import { questShortTitle } from "@/components/quests/quest-text";
 import { recentAchievements } from "@/lib/profile";
 import { formatString } from "@/lib/i18n";
 import { cn } from "@/components/ui/cn";
@@ -204,7 +205,7 @@ export function OverviewTab({ onOpenAchievements, onEditProfile }: { onOpenAchie
                   {done && <Check size={12} strokeWidth={3} />}
                 </span>
                 <span className={cn("min-w-0 flex-1 truncate", done ? "text-mu line-through" : "text-tx")}>
-                  {lang === "ru" ? q.fallbackTitleRu : q.fallbackTitleEn}
+                  {questShortTitle(dict, lang, q)}
                 </span>
                 <span className="shrink-0 text-xs tabular-nums text-mu">+{q.xpReward} XP</span>
               </li>

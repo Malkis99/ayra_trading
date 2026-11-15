@@ -35,7 +35,7 @@ test.describe("Quest Hub missions (QH-2)", () => {
 
     const risk = page.getByTestId("quest-card-q_riskcheck");
     await expect(risk).toHaveAttribute("data-state", "next");
-    await expect(risk.getByRole("heading", { name: "Лимит риска на день" })).toBeVisible();
+    await expect(risk.getByRole("heading", { name: "Контроль риска" })).toBeVisible();
     await expect(risk.getByTestId("quest-criterion")).toContainText("Готово, когда:");
     await expect(risk.getByTestId("quest-badge-journal")).toHaveText("Журнал");
     await expect(risk.getByTestId("quest-reward")).toHaveText("+40 XP · +10 Coins");

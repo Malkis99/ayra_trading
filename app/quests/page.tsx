@@ -11,6 +11,7 @@ import { mondayOfKey } from "@/lib/day-key";
 import { formatString } from "@/lib/i18n";
 import { GAME_CONFIG } from "@/lib/game-config";
 import { questById, type QuestTemplate } from "@/lib/quests";
+import { pendingMissionClaims } from "@/lib/game";
 import { nextStep, todayEarned, todaysQuests, weekDays, weekQuestCount } from "@/lib/quests-view";
 import { QuestsHeader } from "@/components/quests/QuestsHeader";
 import { TodayView } from "@/components/quests/TodayView";
@@ -31,7 +32,7 @@ import { questTitle } from "@/components/quests/quest-text";
 export default function QuestsPage() {
   const { dict, lang, showToast } = useApp();
   const { gameState, gameDay, rewards, passQuest, replaceQuest, setDayMode, fixWeekChallenge, recordWeekBossResult } = useGame();
-  const { trades, plans, weekPlans, noTrades, ready: journalReady, cloudSettled } = useJournal();
+  const { trades, plans, weekPlans, noTrades, notes, ready: journalReady, cloudSettled, getAllRecords } = useJournal();
   const searchParams = useSearchParams();
   const activeTab = parseHubTab(searchParams.get("tab"));
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -88,6 +89,17 @@ export default function QuestsPage() {
   const weekCount = useMemo(() => weekQuestCount(gameState, gameDay), [gameState, gameDay]);
   const earned = todayEarned(gameState, gameDay);
   const coreDone = core.filter((q) => gameState.completedQuestsToday[q.id]).length;
+  // QH-6.5: while a cloud journal loads its copy, missions are not paid yet (lib/game.ts claims only after it). The page
+  // says so, and marks the missions the journal already confirms. Only shown — the payment is MissionClaimSync's.
+  const syncing = journalReady && !cloudSettled;
+  const waitingSync = useMemo(() => {
+    if (!syncing) return new Set<string>();
+    const all = getAllRecords();
+    const pending = pendingMissionClaims(gameState, { plans: all.plans || [], notes: all.notes || [], trades: all.trades || [], timezone: gameState.profile?.timezone }, new Date());
+    return new Set<string>((pending?.fresh || []).map((c) => c.id));
+    // the journal lists change after every save
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncing, gameState, getAllRecords, plans, notes, trades]);
 
   // What the engine reads from the journal (no second journal, no second plan)
   const snapshot: JournalSnapshot = useMemo(
@@ -197,6 +209,8 @@ export default function QuestsPage() {
           mode={mode}
           nextQuestId={next.kind === "quest" || next.kind === "journal" ? next.quest.id : undefined}
           snapshot={snapshot}
+          syncing={syncing}
+          waitingSync={waitingSync}
           onActivate={changeMode}
           onComplete={complete}
           onPass={pass}

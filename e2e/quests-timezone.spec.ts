@@ -1,15 +1,13 @@
 import { test, expect, type Page } from "@playwright/test";
 import { baseGame, readGame, seedGame, totalXp } from "./helpers/quests";
-import { questById } from "../lib/quests";
 
 // One game day by the account time zone for Quests, Home and Profile; time zone changes and midnight never give a
 // closed day again and never lock today's quests (docs/quests-2.0-plan.md, 4.2).
 
-/** The first mission of Quests and its full title (Home and Profile show the full title, Quests the short one). */
+/** The title of the first mission of Quests (QH-6.5: Home and Profile show the same name). */
 async function firstCoreTitleOnQuests(page: Page) {
   await page.goto("/quests");
-  const id = ((await page.locator('[data-testid="missions"] [data-testid^="quest-card-"]').first().getAttribute("data-testid")) || "").replace("quest-card-", "");
-  return questById(id)?.fallbackTitleRu;
+  return (await page.locator('[data-testid="missions"] [data-testid^="quest-card-"] h3').first().textContent())?.trim();
 }
 
 test.describe("Game day and time zones", () => {
