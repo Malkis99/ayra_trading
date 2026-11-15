@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { INITIAL_GAME_STATE, checkAndApplyDateResets, completeSelfReportQuest, setDayMode, type GameState } from "./game";
+import { INITIAL_GAME_STATE, checkAndApplyDateResets, completeQuest, completeSelfReportQuest, setDayMode, type GameState } from "./game";
 import { clampWeek, dayDetail, defaultDay, earliestWeek, weekSummary, weekView } from "./week-view";
 import { journalOnDay } from "./quest-engine";
 
@@ -21,7 +21,9 @@ describe("QH-4 week view: days from snapshots, the history, or nothing", () => {
   it("a snapshot day shows its mode and missions done; a history-only day shows its quests; a skipped day has no record", () => {
     // 2026-11-02 (Mon): history only (before snapshots); 11-03: snapshot; 11-04: not opened; 11-05: today
     let s = started("2026-11-03");
-    s = tick(s, "2026-11-03T09:00:00Z");
+    // catalog 3: a mission closes from the journal (completeQuest stands in for it); an extra is ticked and is not a mission
+    s = completeQuest(s, "q_bias", "Bias", "Trading", 40, 10, at("2026-11-03T09:00:00Z")).state;
+    s = tick(s, "2026-11-03T09:05:00Z");
     s = checkAndApplyDateResets(s, at("2026-11-05T07:00:00Z"));
     s = {
       ...s,
@@ -82,7 +84,7 @@ describe("QH-4 week view: days from snapshots, the history, or nothing", () => {
         { id: "t2", openedAt: "2026-11-03T12:00:00Z" },
         { id: "t3", openedAt: "2026-11-04T10:00:00Z", deletedAt: null },
       ],
-      plans: [{ date: "2026-11-03", bias: [{ instrument: "EURUSD" }], levels: [1], limits: { maxTrades: 3 }, checklist: [], createdAt: "2026-11-03T08:00:00Z" }],
+      plans: [{ date: "2026-11-03", bias: [{ instrument: "EURUSD", direction: "bullish" }], levels: [{ price: 1.0832 }], limits: { maxTrades: 3 }, checklist: [], createdAt: "2026-11-03T08:00:00Z" }],
       weekPlans: [],
       noTrades: [{ id: "n1", date: "2026-11-03" }],
       timezone: "UTC",

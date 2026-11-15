@@ -14,10 +14,15 @@
  */
 import { generateProgram, type AwakeningProgram } from "./awakening";
 import { addDaysToKey, dayKeyInZone, mondayOfKey, weekdayOfKey } from "./day-key";
-import { APP_CLOSED_QUESTS, QUEST_POOL, getDeterministicDailyQuests, getWeightedDailyQuests, type QuestTemplate } from "./quests";
+import { APP_CLOSED_QUESTS, JOURNAL_CONFIRMED, QUEST_POOL, getDeterministicDailyQuests, getWeightedDailyQuests, type QuestTemplate } from "./quests";
+import { isValidBias, isValidLevel, hasValidLimits, missionsForMode, RISK_CHECK_KEY } from "./missions";
 
-/** Bumped when the catalog or the generation rules change; saved with each generated set. */
-export const QUEST_CATALOG_VERSION = 2;
+/**
+ * Bumped when the catalog or the generation rules change; saved with each generated set.
+ * 3 (QH-6.3): the three missions of a day are the fixed verifiable missions of its mode (lib/missions.ts); self-reports
+ * are only extras.
+ */
+export const QUEST_CATALOG_VERSION = 3;
 
 export type DayMode = "trading" | "study" | "rest" | "recovery";
 export const DAY_MODES: DayMode[] = ["trading", "study", "rest", "recovery"];
@@ -75,6 +80,17 @@ export const QUEST_CATALOG: QuestDefinition[] = [
   { id: "eod_ritual", kind: "composite", confirmation: "journal", modes: ["trading", "study"], includes: ["q_reflect"] },
 ];
 
+/**
+ * Self-reported quests that a verifiable mission replaces from catalog 3 («30 minutes of backtest», «review a mistake»):
+ * the mission checks the same work in the journal, so the tick-box twin is no longer offered.
+ */
+export const REPLACED_BY_MISSIONS: ReadonlySet<string> = new Set(["q_backtest", "q_review_mistake"]);
+
+/** The extras a mode may offer from catalog 3: self-reported quests only (the journal checks belong to the missions). */
+export function extrasForMode(mode: DayMode): QuestTemplate[] {
+  return poolForMode(mode).filter((q) => !JOURNAL_CONFIRMED.has(q.id) && !REPLACED_BY_MISSIONS.has(q.id));
+}
+
 /** Pool quests that may be offered in a mode. */
 export function poolForMode(mode: DayMode): QuestTemplate[] {
   if (mode === "rest") return [];
@@ -111,6 +127,14 @@ export interface DaySet {
   /** QH-3 tracking for the day snapshot (lib/day-snapshots.ts): every quest the active set showed today. Absent on a set
    * saved by an older version (that day is then marked incomplete, nothing is guessed). */
   offered?: string[];
+  /**
+   * The first study mission of the day (catalog 3): «Trade review» when the journal had a trade before this day,
+   * «Observation» when it had none. Chosen once, when the day's set is made, and kept for the whole day — a trade
+   * written later, or a mode change, does not switch it (owner decision В11).
+   */
+  studyFirst?: StudyFirst;
+  /** The set was made before the journal reported its trades: the study choice is settled once when it does. */
+  studyPending?: boolean;
   /** Mode changes of the day (QH-3 tracking). */
   modeChanges?: Array<{ to: DayMode; at: string }>;
   /** Replacements of the day, kept across mode changes (QH-3 tracking). */
@@ -123,20 +147,52 @@ export function programFor(state: { onboarding?: { status?: string; answers?: Re
   return generateProgram((state.onboarding.answers || {}) as Record<string, unknown>, !!state.profile?.minorMode);
 }
 
+export type StudyFirst = "m_trade_review" | "m_observation";
+
 /**
- * The day's quests for a mode: weighted by the onboarding program (getWeightedDailyQuests), only quests that fit the mode,
- * never a quest that needs a trade. Deterministic for the person, the day and the mode.
+ * What the game knows about the journal's trades: the game day of the earliest live trade (null: no trades), reported by
+ * the journal when it is read (lib/game.ts: recordJournalTrades). Undefined until the journal has reported once.
+ */
+export interface JournalTradesHint {
+  journalFirstTradeDay?: string | null;
+}
+
+/** The journal had a trade before the day: true / false, or null while the journal has not reported yet. */
+export function tradesBefore(state: JournalTradesHint, dayKey: string): boolean | null {
+  if (state.journalFirstTradeDay === undefined) return null;
+  return state.journalFirstTradeDay !== null && state.journalFirstTradeDay < dayKey;
+}
+
+export const studyFirstFor = (hasTrades: boolean | null): StudyFirst => (hasTrades ? "m_trade_review" : "m_observation");
+
+/**
+ * The day's set for a mode (catalog 3): the three verifiable missions of the mode (lib/missions.ts) — a rest day has none —
+ * and two extras: self-reported quests that fit the mode, weighted by the onboarding program. No mission needs a trade.
+ * Deterministic for the person, the day and the mode. `studyFirst` is the study choice already made for the day (a mode
+ * change keeps it); without it the choice is made now from what the journal reported.
  */
 export function generateDaySet(
-  state: { createdAt?: string; onboarding?: { status?: string; answers?: Record<string, unknown> }; profile?: { minorMode?: boolean } },
+  state: { createdAt?: string; onboarding?: { status?: string; answers?: Record<string, unknown> }; profile?: { minorMode?: boolean } } & JournalTradesHint,
   dayKey: string,
-  mode: DayMode
+  mode: DayMode,
+  studyFirst?: StudyFirst
 ): DaySet {
-  const pool = poolForMode(mode);
+  const known = tradesBefore(state, dayKey);
+  const first = studyFirst ?? studyFirstFor(known);
+  const extras = extrasForMode(mode);
   const program = programFor(state);
   const seed = (state.createdAt || "user_default").slice(0, 10);
-  const picked = pool.length ? (program ? getWeightedDailyQuests(dayKey, seed, program, pool) : getDeterministicDailyQuests(dayKey, pool)) : { core: [], bonus: [] };
-  return { day: dayKey, mode, catalogVersion: QUEST_CATALOG_VERSION, core: picked.core.map((q) => q.id), bonus: picked.bonus.map((q) => q.id) };
+  const picked = extras.length ? (program ? getWeightedDailyQuests(dayKey, seed, program, extras) : getDeterministicDailyQuests(dayKey, extras)) : { core: [], bonus: [] };
+  const set: DaySet = {
+    day: dayKey,
+    mode,
+    catalogVersion: QUEST_CATALOG_VERSION,
+    core: missionsForMode(mode, first === "m_trade_review"),
+    bonus: mode === "rest" ? [] : [...picked.core, ...picked.bonus].slice(0, 2).map((q) => q.id),
+    studyFirst: first,
+  };
+  if (!studyFirst && known === null) set.studyPending = true;
+  return set;
 }
 
 /**
@@ -146,7 +202,7 @@ export function generateDaySet(
  * off for today («not today», replaced) are not offered again.
  */
 export function composeSwitchedSet(
-  current: { core: string[]; mode: DayMode; carried?: Record<string, DayMode> },
+  current: { core: string[]; mode: DayMode; carried?: Record<string, DayMode>; bonus?: string[] },
   fresh: DaySet,
   done: Record<string, boolean>,
   passed: Record<string, boolean>
@@ -163,15 +219,27 @@ export function composeSwitchedSet(
     if (from !== fresh.mode) carried[id] = from;
   });
   const free = (id: string) => !used.has(id) && (!passed[id] || !!done[id]);
-  const candidates = [...fresh.core, ...fresh.bonus, ...poolForMode(fresh.mode).map((q) => q.id)];
+  // catalog 3: the slots hold only the mode's missions (a self-report never becomes a mission); a mission put off for
+  // today keeps its slot, shown as put off, so the day still has three
+  const missionsOnly = fresh.catalogVersion >= 3;
+  const candidates = missionsOnly ? fresh.core : [...fresh.core, ...fresh.bonus, ...poolForMode(fresh.mode).map((q) => q.id)];
   for (let i = 0; i < slots; i++) {
     if (core[i]) continue;
-    const pick = [fresh.core[i], ...candidates].find((id) => !!id && free(id));
+    const pick = [fresh.core[i], ...candidates].find((id) => !!id && free(id)) ?? (missionsOnly ? fresh.core.find((id) => !used.has(id)) : undefined);
     if (!pick) continue;
     core[i] = pick;
     used.add(pick);
   }
-  const set: DaySet = { ...fresh, core: core.filter((id): id is string => !!id), bonus: fresh.bonus.filter((id) => !used.has(id)) };
+  // catalog 3: a day offers at most as many extras as one set has (two), whatever the mode changes — the extras done
+  // keep their place and a new mode only fills the places still free (a mode change never opens more self-reports)
+  const bonus = missionsOnly
+    ? (() => {
+        const kept = (current.bonus || []).filter((id) => done[id] && !used.has(id));
+        const room = Math.max(0, fresh.bonus.length - kept.length);
+        return [...kept, ...fresh.bonus.filter((id) => !used.has(id) && !kept.includes(id) && free(id)).slice(0, room)];
+      })()
+    : fresh.bonus.filter((id) => !used.has(id));
+  const set: DaySet = { ...fresh, core: core.filter((id): id is string => !!id), bonus };
   if (Object.keys(carried).length > 0) set.carried = carried;
   return set;
 }
@@ -238,11 +306,11 @@ export function planFor(snap: JournalSnapshot, dayKey: string): JPlan | null {
 
 /** The same checks lib/game.ts uses to close the plan quests (kept in one place for the reasons shown on screen). */
 export const planChecks = {
-  bias: (p: JPlan | null) => !!p && Array.isArray(p.bias) && p.bias.some((b) => !!b.instrument && b.instrument.trim().length > 0),
-  limits: (p: JPlan | null) => !!p && (p.limits?.maxRiskPerTrade?.value != null || p.limits?.maxDailyLoss?.value != null || p.limits?.maxTrades != null),
-  riskChecked: (p: JPlan | null) =>
-    !!p && Array.isArray(p.checklist) && p.checklist.some((c) => (c.key === "risk_limits_checked" || (c.text || "").toLowerCase().includes("риск")) && !!c.done),
-  levels: (p: JPlan | null) => !!p && Array.isArray(p.levels) && p.levels.length > 0,
+  // catalog 3 (QH-6.2 rules): a real direction, a level with a price, valid limits, the standard «limits checked» item
+  bias: (p: JPlan | null) => !!p && Array.isArray(p.bias) && p.bias.some((b) => isValidBias(b as never)),
+  limits: (p: JPlan | null) => !!p && hasValidLimits(p as never),
+  riskChecked: (p: JPlan | null) => !!p && Array.isArray(p.checklist) && p.checklist.some((c) => c.key === RISK_CHECK_KEY && !!c.done),
+  levels: (p: JPlan | null) => !!p && Array.isArray(p.levels) && p.levels.some((l) => isValidLevel(l as never)),
   events: (p: JPlan | null) => !!p && Array.isArray(p.events) && p.events.length > 0,
   reviewText: (p: JPlan | null) => (p?.review?.whatWorked || "").length + (p?.review?.whatToImprove || "").length + (p?.review?.lesson || "").length,
   reviewDone: (p: JPlan | null) => !!p?.review?.completedAt && planChecks.reviewText(p) >= 40,
@@ -253,6 +321,7 @@ export type ReasonKey =
   | "selfReport"
   | "noPlan"
   | "noBias"
+  | "noLevels"
   | "noLimits"
   | "riskNotChecked"
   | "noReview"
@@ -263,7 +332,7 @@ export function reasonFor(questId: string, done: boolean, snap: JournalSnapshot,
   if (done) return null;
   if (!APP_CLOSED_QUESTS.has(questId)) return "selfReport";
   const plan = planFor(snap, dayKey);
-  if (questId === "q_bias") return !plan ? "noPlan" : "noBias";
+  if (questId === "q_bias") return !plan ? "noPlan" : !planChecks.bias(plan) ? "noBias" : "noLevels";
   if (questId === "q_riskcheck") return !plan ? "noPlan" : !planChecks.limits(plan) ? "noLimits" : "riskNotChecked";
   if (questId === "q_reflect") return !plan ? "noPlan" : "noReview";
   return "selfReport";

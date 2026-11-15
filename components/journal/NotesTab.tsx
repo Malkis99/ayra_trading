@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useApp } from "@/lib/context";
 import { useJournal } from "@/lib/journal/context";
-import { Note } from "@/lib/journal/types";
+import { Note, NoteTemplateKey } from "@/lib/journal/types";
 import { NoteModal } from "./NoteModal";
 import { BacktestModal } from "./BacktestModal";
 import { backtestWinRate, readBacktest } from "@/lib/journal/backtest";
@@ -38,6 +38,25 @@ export function NotesTab() {
   // backtest results (QH-6.1) open their own form
   const [isBacktestOpen, setIsBacktestOpen] = useState(false);
   const [editingBacktest, setEditingBacktest] = useState<Note | null>(null);
+  // a new note of a template, opened by a link from Quests (`?tab=notes&new=lesson`)
+  const [newTemplate, setNewTemplate] = useState<NoteTemplateKey | undefined>(undefined);
+
+  // A mission link opens the form of its note once; the parameter is then removed (a reload does not open it again)
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const wanted = url.searchParams.get("new");
+    if (!wanted) return;
+    url.searchParams.delete("new");
+    window.history.replaceState(window.history.state, "", url.toString());
+    if (wanted === "backtest") {
+      setEditingBacktest(null);
+      setIsBacktestOpen(true);
+    } else if (wanted === "idea" || wanted === "lesson" || wanted === "weekly_mistake" || wanted === "session_review") {
+      setEditingNote(null);
+      setNewTemplate(wanted);
+      setIsNoteModalOpen(true);
+    }
+  }, []);
   const bt = dict.journal.backtest;
   const dayLabel = (key: string) => new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "en-US", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${key}T00:00:00Z`));
 
@@ -109,6 +128,7 @@ export function NotesTab() {
 
   const handleOpenCreateModal = () => {
     setEditingNote(null);
+    setNewTemplate(undefined);
     setIsNoteModalOpen(true);
   };
 
@@ -338,8 +358,12 @@ export function NotesTab() {
       {/* Note Edit Modal */}
       <NoteModal
         isOpen={isNoteModalOpen}
-        onClose={() => setIsNoteModalOpen(false)}
+        onClose={() => {
+          setIsNoteModalOpen(false);
+          setNewTemplate(undefined);
+        }}
         initialNote={editingNote}
+        initialTemplateKey={editingNote ? undefined : newTemplate}
       />
     </div>
   );

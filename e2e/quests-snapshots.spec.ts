@@ -13,7 +13,8 @@ const addDays = (key: string, n: number) => {
 };
 
 async function tickFirstSelf(page: Page) {
-  const card = page.locator('[data-testid="missions"] [data-testid^="quest-card-"]').filter({ has: page.getByTestId("quest-complete") }).first();
+  // catalog 3: the missions are journal checks; the self-reports are the extras
+  const card = page.locator('[data-testid^="quest-card-"]').filter({ has: page.getByTestId("quest-complete") }).first();
   const id = ((await card.getAttribute("data-testid")) || "").replace("quest-card-", "");
   await card.getByTestId("quest-complete").click();
   await expect(page.getByTestId(`quest-card-${id}`).getByTestId("quest-done")).toBeVisible();

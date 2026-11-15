@@ -10,8 +10,9 @@ import { bossConditions, bossState, lastWeekTradeCount, pickBoss, reasonFor, typ
 import { mondayOfKey } from "@/lib/day-key";
 import { formatString } from "@/lib/i18n";
 import { GAME_CONFIG } from "@/lib/game-config";
-import { QUEST_POOL, type QuestTemplate } from "@/lib/quests";
-import { nextStep, todayEarned, todaysQuests, weekDays, weekQuestCount } from "@/lib/quests-view";
+import { questById, type QuestTemplate } from "@/lib/quests";
+import { missionLiveDone, nextStep, todayEarned, todaysQuests, weekDays, weekQuestCount } from "@/lib/quests-view";
+import type { MissionData } from "@/lib/missions";
 import { QuestsHeader } from "@/components/quests/QuestsHeader";
 import { TodayView } from "@/components/quests/TodayView";
 import { WeekCard, WeekTab } from "@/components/quests/WeekTab";
@@ -31,7 +32,7 @@ import { questTitle } from "@/components/quests/quest-text";
 export default function QuestsPage() {
   const { dict, lang, showToast } = useApp();
   const { gameState, gameDay, rewards, passQuest, replaceQuest, setDayMode, fixWeekChallenge, recordWeekBossResult } = useGame();
-  const { trades, plans, weekPlans, noTrades, ready: journalReady, cloudSettled } = useJournal();
+  const { trades, plans, weekPlans, noTrades, notes, ready: journalReady, cloudSettled } = useJournal();
   const searchParams = useSearchParams();
   const activeTab = parseHubTab(searchParams.get("tab"));
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -87,7 +88,10 @@ export default function QuestsPage() {
   }, []);
   const weekCount = useMemo(() => weekQuestCount(gameState, gameDay), [gameState, gameDay]);
   const earned = todayEarned(gameState, gameDay);
-  const coreDone = core.filter((q) => gameState.completedQuestsToday[q.id]).length;
+  // the catalog-3 missions are checked on the saved journal (display only; nothing is given for them yet)
+  const missionData: MissionData = useMemo(() => ({ plans, notes, trades, timezone: gameState.profile?.timezone }), [plans, notes, trades, gameState.profile?.timezone]);
+  const liveDone = useMemo(() => missionLiveDone(core.map((q) => q.id), missionData, gameDay), [core, missionData, gameDay]);
+  const coreDone = core.filter((q) => gameState.completedQuestsToday[q.id] || liveDone[q.id]).length;
 
   // What the engine reads from the journal (no second journal, no second plan)
   const snapshot: JournalSnapshot = useMemo(
@@ -95,7 +99,7 @@ export default function QuestsPage() {
     [trades, plans, weekPlans, noTrades, gameState.profile?.timezone]
   );
   const mode: DayMode = gameState.isRestDay ? "rest" : gameState.questDay?.day === gameDay ? gameState.questDay.mode : "trading";
-  const next = nextStep(gameState, core, mode, (id) => reasonFor(id, !!gameState.completedQuestsToday[id], snapshot, gameDay));
+  const next = nextStep(gameState, core, mode, (id) => reasonFor(id, !!gameState.completedQuestsToday[id], snapshot, gameDay), liveDone);
 
   // The week challenge is saved once a week, and only when last week's data exists to choose it from
   const week = mondayOfKey(gameDay);
@@ -154,7 +158,7 @@ export default function QuestsPage() {
       const max = GAME_CONFIG.QUEST_REPLACEMENTS_PER_DAY;
       const res = await replaceQuest(q.id, [...core, ...bonus].map((x) => x.id));
       if (res.success) {
-        const to = QUEST_POOL.find((x) => x.id === res.replacementId);
+        const to = res.replacementId ? questById(res.replacementId) : undefined;
         showToast(formatString(t.q1.today.replaceDone, { title: to ? questTitle(dict, lang, to) : "" }));
       } else if (res.reason === "notSaved") {
         showToast(t.q1.today.notSaved);
@@ -197,6 +201,7 @@ export default function QuestsPage() {
           mode={mode}
           nextQuestId={next.kind === "quest" || next.kind === "journal" ? next.quest.id : undefined}
           snapshot={snapshot}
+          missionData={missionData}
           onActivate={changeMode}
           onComplete={complete}
           onPass={pass}

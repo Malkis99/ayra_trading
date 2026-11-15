@@ -20,6 +20,7 @@ import {
   bossState,
   defaultModeFor,
   endOfDayRitual,
+  extrasForMode,
   generateDaySet,
   morningProtocol,
   pickBoss,
@@ -28,7 +29,8 @@ import {
   weekObjectives,
   type JournalSnapshot,
 } from "./quest-engine";
-import { APP_CLOSED_QUESTS, getDeterministicDailyQuests, getTodaysQuests } from "./quests";
+import { APP_CLOSED_QUESTS, getDeterministicDailyQuests, getTodaysQuests, isJournalConfirmed } from "./quests";
+import { missionsForMode } from "./missions";
 
 const at = (iso: string) => new Date(iso);
 const empty: JournalSnapshot = { trades: [], plans: [], weekPlans: [], noTrades: [], timezone: "UTC" };
@@ -73,11 +75,14 @@ describe("the day set is generated once and saved", () => {
   it("a new day gets a set; reading it again gives the same set; it fits the mode", () => {
     const s = fresh({ lastQuestDate: "2026-11-11" });
     expect(s.questDay?.day).toBe("2026-11-12");
-    expect(s.questDay?.catalogVersion).toBe(2);
+    expect(s.questDay?.catalogVersion).toBe(3);
     const again = checkAndApplyDateResets(JSON.parse(JSON.stringify(s)), at("2026-11-12T18:00:00Z"));
     expect(again.questDay).toEqual(s.questDay);
-    const allowed = new Set(poolForMode("trading").map((q) => q.id));
-    for (const id of [...s.questDay!.core, ...s.questDay!.bonus]) expect(allowed.has(id)).toBe(true);
+    // catalog 3: the three verifiable missions of the mode; the extras are self-reports of the mode
+    expect(s.questDay!.core).toEqual(missionsForMode("trading", false));
+    const extras = new Set(extrasForMode("trading").map((q) => q.id));
+    expect(s.questDay!.bonus).toHaveLength(2);
+    for (const id of s.questDay!.bonus) expect(extras.has(id)).toBe(true);
   });
 
   it("the set is personal: it follows the onboarding program", () => {
@@ -150,12 +155,14 @@ describe("day modes", () => {
     expect(s.questDay?.core).toEqual(trading.core);
     s = setDayMode(s, "study", now).state;
     expect(s.questDay?.core).toEqual(study.core);
-    const allowed = new Set(poolForMode("study").map((q) => q.id));
-    for (const id of study.core) expect(allowed.has(id)).toBe(true);
+    expect(study.core).toEqual(missionsForMode("study", false));
+    const extras = new Set(extrasForMode("study").map((q) => q.id));
+    for (const id of study.bonus) expect(extras.has(id)).toBe(true);
   });
 
   it("after a reward any mode can be made active: the done quest keeps its slot and nothing is paid again (UX3-1)", () => {
-    let s = fresh({ lastQuestDate: "2026-11-11" });
+    // a day that began on catalog 2 (self-reports in the slots) keeps working the same way
+    let s = withSet(fresh({ lastQuestDate: "2026-11-11" }), ["q_walk", "q_meditate", "q_nosocial"], ["q_gym"]);
     const selfQuest = s.questDay!.core.find((id) => !APP_CLOSED_QUESTS.has(id))!;
     const slot = s.questDay!.core.indexOf(selfQuest);
     const r0 = completeSelfReportQuest(s, selfQuest, "x", "Mental", 999, now);
@@ -174,6 +181,8 @@ describe("day modes", () => {
       expect(s.questDay!.core).toHaveLength(3);
       expect(new Set(s.questDay!.core).size).toBe(3); // never one quest in two slots
       if (m !== "trading") expect(s.questDay!.carried?.[selfQuest]).toBe("trading");
+      // the open slots of the new mode take only its missions (catalog 3): no self-report becomes a mission
+      for (const id of s.questDay!.core) if (id !== selfQuest) expect(isJournalConfirmed(id)).toBe(true);
     }
     // the slot is paid: ticking it again (in any mode, any number of times) gives nothing
     for (let i = 0; i < 3; i++) {
@@ -188,7 +197,8 @@ describe("day modes", () => {
     const before = JSON.stringify(s);
     const study = modeSetPreview(s, "study", now);
     expect(JSON.stringify(s)).toBe(before);
-    const onlyThere = study.core.find((id) => !s.questDay!.core.includes(id) && !s.questDay!.bonus.includes(id) && !APP_CLOSED_QUESTS.has(id))!;
+    for (const id of study.core) expect(isJournalConfirmed(id)).toBe(true); // catalog 3: the slots are missions
+    const onlyThere = study.bonus.find((id) => !s.questDay!.core.includes(id) && !s.questDay!.bonus.includes(id) && !isJournalConfirmed(id))!;
     expect(onlyThere).toBeDefined();
     const early = completeSelfReportQuest(s, onlyThere, "x", "Mental", 999, now);
     expect(early.xpGiven).toBe(0);
@@ -264,7 +274,7 @@ describe("day modes", () => {
       expect(s.questDay!.legacy).toBeUndefined();
     }
     // Q2: a saved day with a reward and no `carried` field
-    let q2 = fresh({ lastQuestDate: "2026-11-11" });
+    let q2 = withSet(fresh({ lastQuestDate: "2026-11-11" }), ["q_walk", "q_meditate", "q_nosocial"], ["q_gym"]);
     const selfQuest = q2.questDay!.core.find((id) => !APP_CLOSED_QUESTS.has(id))!;
     q2 = completeSelfReportQuest(q2, selfQuest, "x", "Mental", 999, now).state;
     expect(q2.questDay!.carried).toBeUndefined();
@@ -364,9 +374,13 @@ describe("evaluators: real status and why not done", () => {
   });
 
   it("morning protocol and ritual steps follow the day plan", () => {
-    const snap = { ...empty, plans: [plan({ bias: [{ instrument: "EURUSD" }], levels: [{ price: 1.1 }], limits: { maxTrades: 3 }, checklist: [{ key: "risk_limits_checked", done: true }] })] };
+    const snap = { ...empty, plans: [plan({ bias: [{ instrument: "EURUSD", direction: "bullish" }], levels: [{ price: 1.1 }], limits: { maxTrades: 3 }, checklist: [{ key: "risk_limits_checked", done: true }] })] };
     const p = morningProtocol(snap, day, {});
     expect(p.steps.map((s) => s.state)).toEqual(["done", "done", "open", "done"]);
+    // catalog 3 (QH-6.2 rules): no direction chosen, a level without a price, an own «риск» item — not done
+    const weak = { ...empty, plans: [plan({ bias: [{ instrument: "EURUSD" }], levels: [{ label: "POI" }], limits: { maxTrades: 3 }, checklist: [{ text: "Проверил риск", done: true }] })] };
+    expect(morningProtocol(weak, day, {}).steps.map((s) => s.state)).toEqual(["open", "open", "open", "open"]);
+    expect(reasonFor("q_bias", false, { ...empty, plans: [plan({ bias: [{ instrument: "EURUSD", direction: "neutral" }] })] }, day)).toBe("noLevels");
     expect(p.steps.filter((s) => s.rewardQuest).map((s) => s.rewardQuest)).toEqual(["q_bias", "q_riskcheck"]);
     expect(endOfDayRitual(snap, day, {}).steps[0].state).toBe("open");
   });

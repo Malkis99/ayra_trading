@@ -60,7 +60,8 @@ test.describe("Quest Engine (Q2)", () => {
     }
     // a viewed mode shows its quests read-only: no «Done» button anywhere in it
     await expect(page.getByTestId("mission-morning_protocol")).toHaveCount(0);
-    await expect(page.getByTestId("mission-eod_ritual")).toBeVisible();
+    // catalog 3: the day review is a trading mission; a study day has no evening step
+    await expect(page.getByTestId("mission-eod_ritual")).toHaveCount(0);
     await expect(page.getByTestId("mode-panel").getByTestId("quest-preview-only").first()).toBeVisible();
     await expect(page.getByTestId("mode-panel").getByTestId("quest-complete")).toHaveCount(0);
     const after = await game(page);
@@ -70,23 +71,28 @@ test.describe("Quest Engine (Q2)", () => {
   });
 
   test("modes: after a reward any mode can be made active; the done quest stays in its place; nothing is paid twice", async ({ context, page }) => {
-    await seedGame(context, baseGame({ lastQuestDate: yesterday }), { ayra_journal_v1: journal() });
+    // catalog 3: the slots are journal missions; «Preparation» was closed by today's day plan (40 XP + 10 Coins)
+    const questDay = { day: today, mode: "trading", catalogVersion: 3, core: ["q_bias", "q_riskcheck", "q_reflect"], bonus: ["q_walk", "q_gym"], studyFirst: "m_observation" };
+    await seedGame(
+      context,
+      baseGame({
+        lastQuestDate: today,
+        questDay,
+        journalFirstTradeDay: null,
+        xp: 40,
+        coins: 10,
+        completedQuestsToday: { q_bias: true },
+        history: [{ questId: "q_bias", questTitle: "Daily Bias перед сессией", category: "Trading", xp: 40, coins: 10, completedAt: today, at: `${today}T07:40:00.000Z` }],
+      }),
+      { ayra_journal_v1: journal() }
+    );
     await page.goto("/quests");
-    await expect(page.getByTestId("mission-morning_protocol")).toBeVisible();
-    await activateMode(page, "study");
-    await expect(page.getByText("Активный режим: Учёба. Выполненное сегодня сохранено.")).toBeVisible();
-    const xp0 = totalXp(await game(page));
-
-    const core = page.locator('[data-testid="mode-panel"] [data-testid^="quest-card-"]');
-    const card = core.filter({ has: page.getByTestId("quest-badge-self") }).first();
-    const doneId = ((await card.getAttribute("data-testid")) || "").replace("quest-card-", "");
-    await card.getByTestId("quest-complete").click();
-    await expect(card.getByTestId("quest-done")).toBeVisible();
-    await expect.poll(async () => totalXp(await game(page))).toBeGreaterThan(xp0);
+    await expect(page.getByTestId("quest-card-q_bias").getByTestId("quest-done")).toBeVisible();
+    const doneId = "q_bias";
     const paid = await game(page);
-    const slot = paid.questDay!.core.indexOf(doneId);
+    const slot = 0;
 
-    for (const m of ["recovery", "trading", "rest", "trading", "study"] as const) {
+    for (const m of ["study", "recovery", "trading", "rest", "trading", "study"] as const) {
       await activateMode(page, m);
       await expect.poll(async () => (await game(page)).questDay?.mode).toBe(m === "rest" ? "rest" : m);
       const g = await game(page);
@@ -100,7 +106,7 @@ test.describe("Quest Engine (Q2)", () => {
       expect(g.questDay!.core[slot]).toBe(doneId);
       await expect(page.getByTestId(`quest-card-${doneId}`).getByTestId("quest-done")).toBeVisible();
       await expect(page.getByTestId("core-count")).toContainText(/^[1-3] \/ 3$/);
-      if (m !== "study") await expect(page.getByTestId(`quest-card-${doneId}`).getByTestId("quest-carried")).toHaveText("Из режима «Учёба»");
+      if (m !== "trading") await expect(page.getByTestId(`quest-card-${doneId}`).getByTestId("quest-carried")).toHaveText("Из режима «Торговля»");
     }
     // a double click and a reload do not add anything either
     await page.reload();
@@ -153,7 +159,7 @@ test.describe("Quest Engine (Q2)", () => {
     const risk = page.getByTestId("quest-card-q_riskcheck");
     await expect(risk).toHaveAttribute("data-state", "next");
     await expect(risk).toContainText("Следующий шаг");
-    await expect(risk.getByTestId("quest-criterion")).toHaveText("Готово, когда: в плане дня заданы лимиты риска и в чек-листе отмечена их проверка");
+    await expect(risk.getByTestId("quest-criterion")).toHaveText("Готово, когда: в плане дня заданы корректные лимиты риска и в чек-листе отмечен пункт «Проверил лимиты риска»");
     await expect(page.locator('[aria-current="step"]')).toHaveCount(1);
     await expect(page.getByTestId("mission-step-risk")).not.toHaveAttribute("data-next", "true");
     // a self-report says so and never looks like a journal check
@@ -251,8 +257,10 @@ test.describe("Quest Engine (Q2)", () => {
     await b.goto("/quests");
     await expect(a.getByTestId("quests-hero")).toBeVisible();
     await expect(b.getByTestId("quests-hero")).toBeVisible();
-    const card = a.locator('[data-testid="mode-panel"] [data-testid^="quest-card-"]').filter({ has: a.getByTestId("quest-badge-self") }).first();
-    const doneId = ((await card.getAttribute("data-testid")) || "").replace("quest-card-", "");
+    // catalog 3: the self-reports are the extras
+    const first = a.locator('[data-testid^="quest-card-"]').filter({ has: a.getByTestId("quest-complete") }).first();
+    const doneId = ((await first.getAttribute("data-testid")) || "").replace("quest-card-", "");
+    const card = a.getByTestId(`quest-card-${doneId}`);
     await card.getByTestId("quest-complete").click();
     await expect(card.getByTestId("quest-done")).toBeVisible();
     await expect.poll(async () => (await game(a)).completedQuestsToday[doneId]).toBe(true);
@@ -262,7 +270,7 @@ test.describe("Quest Engine (Q2)", () => {
     await b.getByTestId("mode-activate").click();
     await expect.poll(async () => (await game(b)).questDay?.mode).toBe("study");
     const g = await game(b);
-    expect(g.questDay!.core).toContain(doneId);
+    expect([...g.questDay!.core, ...g.questDay!.bonus]).toContain(doneId); // the done extra keeps its place
     expect(totalXp(g)).toBe(totalXp(paid));
     expect(g.coins).toBe(paid.coins);
     // tab A follows; the done quest is still done, and clicking around adds nothing

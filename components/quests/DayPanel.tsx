@@ -6,7 +6,7 @@ import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { formatString } from "@/lib/i18n";
 import { GAME_CONFIG } from "@/lib/game-config";
-import { APP_CLOSED_QUESTS, QUEST_POOL } from "@/lib/quests";
+import { isJournalConfirmed, questById } from "@/lib/quests";
 import { journalOnDay, type JournalSnapshot } from "@/lib/quest-engine";
 import type { DayDetail, HistoryEntry } from "@/lib/week-view";
 import type { DaySnapshot, DoneEntry } from "@/lib/day-snapshots";
@@ -67,10 +67,10 @@ export function DayPanel({ detail, snapshot, onOpenToday }: { detail: DayDetail;
   const time = (iso?: string) => (iso ? new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "en-US", { hour: "2-digit", minute: "2-digit", timeZone: tz || undefined }).format(new Date(iso)) : "");
   const reward = (xp?: number, coins?: number) => (xp == null ? undefined : coins ? `+${xp} XP · +${coins} Coins` : `+${xp} XP`);
   const titleOf = (id: string, saved?: string) => {
-    const tpl = QUEST_POOL.find((q) => q.id === id);
+    const tpl = questById(id);
     return tpl ? questShortTitle(dict, lang, tpl) : historyTitle(dict, id, saved || id);
   };
-  const sourceOf = (id: string) => (APP_CLOSED_QUESTS.has(id) ? p.journal : p.self);
+  const sourceOf = (id: string) => (isJournalConfirmed(id) ? p.journal : p.self);
   const doneSub = (id: string, at?: string) => (at ? formatString(v.statusDone, { source: sourceOf(id), time: time(at) }) : formatString(v.statusDoneNoTime, { source: sourceOf(id) }));
 
   const header = (chips: React.ReactNode) => (
