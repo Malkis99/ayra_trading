@@ -44,7 +44,7 @@ test.describe("Quest Hub: missions and a loading cloud journal (QH-6.5)", () => 
   test.use({ reducedMotion: "reduce" });
   test.setTimeout(120_000);
 
-  test("while the cloud copy loads: a message, the mission marked «counts after the sync», nothing paid; then paid once", async ({ page, request }) => {
+  test("while the cloud copy loads: a message, the mission marked «waiting for the sync» (no promise), nothing paid; then paid once", async ({ page, request }) => {
     const { userId } = await setUp(page, request);
     const held: Route[] = [];
     let release = false;
@@ -58,7 +58,7 @@ test.describe("Quest Hub: missions and a loading cloud journal (QH-6.5)", () => 
 
     await expect(page.getByTestId("missions-syncing")).toBeVisible();
     const lesson = page.getByTestId("quest-card-m_lesson");
-    await expect(lesson.getByTestId("quest-waiting-sync")).toBeVisible();
+    await expect(lesson.getByTestId("quest-waiting-sync")).toHaveText("Ожидает синхронизации Журнала. Награда появится после успешной проверки, если игровой день ещё не закончился");
     await expect(lesson).toHaveAttribute("data-done", "false"); // «Done» only after the reward is saved
     await page.waitForTimeout(1500);
     const before = await game(page, userId);

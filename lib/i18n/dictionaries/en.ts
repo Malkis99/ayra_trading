@@ -2760,7 +2760,7 @@ export const en: Dictionary = {
         sourceLabel: "Source: {source}",
         goAria: "{cta}: {title}",
         syncing: "The Journal is loading its cloud copy. Missions from new records count after the sync, if it finishes within the same game day.",
-        waitingSync: "Record found — counts after the sync",
+        waitingSync: "Waiting for the Journal to sync. The reward appears after a successful check, if the game day has not ended yet",
         selfCap: "Self-reports today: {xp} of {cap} XP",
         noTrade: "Not entering a trade is a decision too",
         noTradeCriterion: "the decision is logged in the journal as «No trade»",
