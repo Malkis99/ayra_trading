@@ -563,6 +563,7 @@ export const ru = {
       evening: "Добрый вечер",
     },
     title: "{name}, твой путь продолжается",
+    titleFirst: "{name}, твой путь начинается",
     stats: {
       quests: "Задания: {count}/3",
       levelXp: "Ур. {level} · {xp}/{nextXp} XP",

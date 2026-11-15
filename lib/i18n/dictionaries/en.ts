@@ -565,6 +565,7 @@ export const en: Dictionary = {
       evening: "Good evening",
     },
     title: "{name}, your path continues",
+    titleFirst: "{name}, your path begins",
     stats: {
       quests: "Quests: {count}/3",
       levelXp: "Lv. {level} · {xp}/{nextXp} XP",

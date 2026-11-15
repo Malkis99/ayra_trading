@@ -20,8 +20,9 @@ import {
   MarketMiniCard,
   TopicOfDayCard,
 } from "@/components/home/SharedBlocks";
-import { isJournalConfirmed } from "@/lib/quests";
-import { todaysQuests } from "@/lib/quests-view";
+import { isJournalConfirmed, questReward } from "@/lib/quests";
+import { journalHref, todaysQuests } from "@/lib/quests-view";
+import { useRouter } from "next/navigation";
 import { questShortTitle } from "@/components/quests/quest-text";
 import { TITLES, FRAMES, ITEMS } from "@/lib/items";
 import { dayKeyInZone } from "@/lib/day-key";
@@ -55,14 +56,16 @@ export default function HomePage() {
   const xpPercent = Math.min(100, Math.round((gameState.xp / nextLevelXp) * 100));
 
   // the game day in the account's time zone: the same «today» as on Quests and Profile
+  const router = useRouter();
   const todayIso = gameDay;
   const dailyQuests = todaysQuests(gameState, todayIso).core;
 
-  // A quest the app checks itself closes by itself; a self-reported one gives its XP (no coins)
+  // A quest the app checks itself closes from the journal: its row leads to the journal form that closes it (new-user
+  // acceptance: a tick-box look with only a toast left a newcomer stuck); a self-reported one gives its XP (no coins)
   const handleQuestClick = (questId: string, fallbackTitle: string, category: string, xp: number) => {
     if (gameState.completedQuestsToday[questId]) return;
     if (isJournalConfirmed(questId)) {
-      showToast(dict.questsPage.todayTab.autoCloses);
+      router.push(journalHref(questId));
       return;
     }
     const res = completeQuest(questId, fallbackTitle, category, xp);
@@ -251,7 +254,7 @@ export default function HomePage() {
       <div className="card bg-gradient-to-r from-s1 via-[#1c1b28] to-s1">
         <div className="text-xs text-mu">{greeting || dict.home.greetings.afternoon}</div>
         <h1 className="font-serif text-2xl font-bold text-tx md:text-3xl mt-1">
-          {formatString(dict.home.title, { name: gameState.name })}
+          {formatString((gameState.history || []).length === 0 ? dict.home.titleFirst : dict.home.title, { name: gameState.name })}
         </h1>
 
         <div className="mt-3 flex flex-wrap gap-2">
@@ -324,7 +327,11 @@ export default function HomePage() {
                       <span>{title}</span>
                     </div>
                     <span className="text-mu no-underline">
-                      +{q.xpReward} XP · {dict.categories[q.category] || q.category}
+                      {(() => {
+                        // what the quest really gives (the missions: 40 XP + 10 Coins), not the template's old number
+                        const r = questReward(q);
+                        return r.coins > 0 ? formatString(dict.questsPage.todayTab.rewardXpCoins, { xp: r.xp, coins: r.coins }) : formatString(dict.questsPage.todayTab.rewardXp, { xp: r.xp });
+                      })()}
                     </span>
                   </button>
                 );

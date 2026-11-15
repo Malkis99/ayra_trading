@@ -6,7 +6,10 @@ import {
   completeSelfReportQuest,
   evaluatePlanQuestClosure,
   pendingMissionClaims,
+  recordLoggedTrade,
+  recordNoTradeEntry,
   recordNoteSaved,
+  recordScreenshotAdded,
   selfReportXpOn,
   setDayMode,
   xpForNextLevel,
@@ -16,7 +19,7 @@ import { GameStore } from "./game-store";
 import { GAME_CONFIG } from "./game-config";
 import { LocalStorageJournalRepository } from "./journal/repository";
 import type { BacktestResult, Note, Trade, TradingPlan } from "./journal/types";
-import type { MissionData } from "./missions";
+import { MISSION_IDS, type MissionData } from "./missions";
 
 // QH-6.4 (docs/quest-hub-qh6-spec.md, 6, 8): the verifiable missions are paid from the saved journal — 40 XP + 10 Coins,
 // once per mission and day, one record per mission, three a day at most, never for old, imported or other days' records.
@@ -253,3 +256,67 @@ describe("QH-6.4 the rest of the economy stays as it is", () => {
     expect(r.state.missionLedger).toBeUndefined();
   });
 });
+
+describe("new-user acceptance (2026-11-15): «Day review» is never paid around the claim", () => {
+  const SESSION = "Итог сессии: два входа по плану, один пропуск без сожалений; риск держал в пределах лимита дня.";
+
+  it("saving a «Session review» note on a catalog-3 day pays nothing by itself; the claim pays it with its record", () => {
+    const s = started();
+    const n = note("s1", "session_review", SESSION);
+    const saved = recordNoteSaved(s, n, [n], t("20:00"));
+    expect(saved.state.completedQuestsToday.q_reflect).toBeUndefined();
+    expect(saved.state.coins).toBe(s.coins); // only the note's own XP, no coins
+    const r = claimMissions(saved.state, data({ notes: [n] }), t("20:01"));
+    expect(r.claimed).toEqual(["q_reflect"]);
+    expect(r.state.missionLedger!.claims.q_reflect).toBe("note:s1");
+  });
+
+  it("a «Session review» note on a study day after three paid missions is not a fourth paid mission", () => {
+    let s = setDayMode(started(), "study", t("07:00")).state;
+    const d = data({ notes: [note("i1", "idea", IDEA), backtest("b1"), note("l1", "lesson", LESSON)] });
+    s = claimMissions(s, d, t("15:00")).state;
+    expect(Object.keys(s.missionLedger!.claims)).toHaveLength(3);
+    const coins = s.coins;
+    const n = note("s1", "session_review", SESSION, { createdAt: iso("20:00") });
+    s = recordNoteSaved(s, n, [...d.notes, n], t("20:00")).state;
+    s = claimMissions(s, { ...d, notes: [...d.notes, n] }, t("20:01")).state;
+    expect(s.completedQuestsToday.q_reflect).toBeUndefined();
+    expect(s.coins).toBe(coins);
+    expect(Object.keys(s.completedQuestsToday).filter((id) => /^(q_bias|q_riskcheck|q_reflect|m_)/.test(id))).toHaveLength(3);
+  });
+
+  it("a day set from before catalog 3 keeps the old closing by the note", () => {
+    let s = started();
+    s = { ...s, questDay: { day: DAY, mode: "trading", catalogVersion: 2, core: ["q_walk", "q_meditate", "q_nosocial"], bonus: [] } };
+    const n = note("s1", "session_review", SESSION);
+    expect(recordNoteSaved(s, n, [n], t("20:00")).state.completedQuestsToday.q_reflect).toBe(true);
+  });
+});
+
+describe("every path that pays: core missions only through the claim, three a day (owner point 4)", () => {
+  const SESSION = "Итог сессии: два входа по плану, один пропуск без сожалений; риск держал в пределах лимита дня.";
+  const paidMissions = (s: GameState) => MISSION_IDS.filter((id) => s.completedQuestsToday[id]);
+
+  it("plan saves, notes of every template, a trade, «no trade», a screenshot and mode changes never pay a 4th mission or one outside the ledger", () => {
+    let s = setDayMode(started(), "study", t("07:00")).state;
+    const notes: Note[] = [note("i1", "idea", IDEA), backtest("b1"), note("l1", "lesson", LESSON)];
+    s = claimMissions(s, data({ notes }), t("12:00")).state;
+    expect(paidMissions(s)).toEqual(["m_observation", "m_backtest", "m_lesson"]);
+    const full = plan({ review: review() });
+    const tomorrow = plan({ date: "2026-11-17", createdAt: iso("21:00"), firstSavedAt: iso("21:00") });
+    const extra = [note("s1", "session_review", SESSION, { createdAt: iso("18:00") }), note("w1", "weekly_mistake", MISTAKE, { createdAt: iso("18:05") })];
+    for (const mode of ["study", "trading", "recovery", "rest", "trading"] as const) {
+      s = setDayMode(s, mode, t("18:00")).state;
+      s = evaluatePlanQuestClosure(s, full, [], [full, tomorrow], [...notes, ...extra], t("18:10")).state;
+      for (const n of extra) s = recordNoteSaved(s, n, [...notes, ...extra], t("18:20")).state;
+      s = recordLoggedTrade(s, { id: `tr_${mode}`, accountId: "a", instrument: "EURUSD", direction: "long", openedAt: iso("10:00"), verification: "unverified" } as never, [], t("18:30")).state;
+      s = recordNoTradeEntry(s, { id: `nt_${mode}`, date: iso("16:00"), reason: "setup_incomplete" } as never, [], t("18:31")).state;
+      s = recordScreenshotAdded(s, { hash: `h_${mode}`, width: 1200, height: 800 }, t("18:32")).state;
+      s = claimMissions(s, data({ plans: [full, tomorrow], notes: [...notes, ...extra] }), t("18:40")).state;
+      expect(paidMissions(s)).toHaveLength(3);
+      // every paid mission has its record in the day's ledger: nothing was paid around the claim
+      for (const id of paidMissions(s)) expect(s.missionLedger!.claims[id]).toBeTruthy();
+    }
+  });
+});
+
