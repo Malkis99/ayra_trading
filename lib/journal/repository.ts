@@ -307,7 +307,11 @@ export class LocalStorageJournalRepository implements JournalRepository {
 
   saveNote(note: Note): Note {
     const data = this.loadData();
-    const saved = this.upsert(data.notes, note, (n) => n.id === note.id);
+    // a note that came from an import stays marked as imported after any edit (it never closes a mission, QH-6.2):
+    // the note forms build a fresh object and would otherwise drop the mark
+    const prev = data.notes.find((n) => n.id === note.id);
+    const kept = prev?.importBatchId && !note.importBatchId ? { ...note, importBatchId: prev.importBatchId, importedAt: prev.importedAt } : note;
+    const saved = this.upsert(data.notes, kept, (n) => n.id === note.id);
     this.saveData(data);
     return saved;
   }
