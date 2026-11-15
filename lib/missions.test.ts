@@ -33,6 +33,8 @@ const trade = (id: string, over: Partial<Trade> = {}): Trade => ({
   emotions: [], mistakes: [], verification: "unverified", source: "manual", createdAt: at("2026-11-10", "10:00"), updatedAt: at("2026-11-10", "10:00"),
   schemaVersion: 6, ...over,
 } as Trade);
+/** The fields of a complete trade review (isTradeReviewed). */
+const REVIEW: Partial<Trade> = { entryReason: "Retest of the London high", emotions: ["calm"], executionRating: 4 };
 const data = (over: Partial<MissionData> = {}): MissionData => ({ plans: [], notes: [], trades: [], timezone: "UTC", ...over });
 const done = (id: MissionId, d: MissionData, day = DAY) => candidateSources(id, d, day).length > 0;
 
@@ -83,7 +85,60 @@ describe("QH-6.2: trading — Preparation, Risk control, Day review", () => {
     expect(done("q_riskcheck", data({ plans: [plan({ limits: {} })] }))).toBe(false);
     expect(done("q_riskcheck", data({ plans: [plan({ checklist: [{ text: "Проверил риск", done: true }] })] }))).toBe(false);
     expect(done("q_riskcheck", data({ plans: [plan({ checklist: [{ key: "risk_limits_checked", done: false }] })] }))).toBe(false);
-    expect(done("q_riskcheck", data({ plans: [plan({ limits: { maxDailyLoss: { value: 2, unit: "percent" } as never } })] }))).toBe(true);
+    expect(done("q_riskcheck", data({ plans: [plan({ limits: { maxDailyLoss: { type: "percent", value: 2 } } })] }))).toBe(true);
+  });
+
+  it("Preparation needs a real direction and a real level: no empty, unknown or broken values (review of #177)", () => {
+    const prep = (over: Partial<TradingPlan>) => done("q_bias", data({ plans: [plan(over)] }));
+    // the direction: an instrument and one of the plan's directions
+    expect(prep({ bias: [{ instrument: "", direction: "bullish" }] })).toBe(false);
+    expect(prep({ bias: [{ instrument: "   ", direction: "bearish" }] })).toBe(false);
+    expect(prep({ bias: [{ instrument: "EURUSD", direction: "" as never }] })).toBe(false);
+    expect(prep({ bias: [{ instrument: "EURUSD", direction: "up" as never }] })).toBe(false);
+    expect(prep({ bias: [{ instrument: "EURUSD" } as never] })).toBe(false);
+    expect(prep({ bias: [null as never] })).toBe(false);
+    for (const direction of ["bullish", "bearish", "neutral"] as const) expect(prep({ bias: [{ instrument: "EURUSD", direction }] })).toBe(true);
+    // the level: a positive finite price
+    expect(prep({ levels: [{ instrument: "EURUSD", label: "POI" }] })).toBe(false); // an empty row added by «+ level»
+    expect(prep({ levels: [{ price: 0 }] })).toBe(false);
+    expect(prep({ levels: [{ price: -1.1 }] })).toBe(false);
+    expect(prep({ levels: [{ price: Number.NaN }] })).toBe(false);
+    expect(prep({ levels: [{ price: Number.POSITIVE_INFINITY }] })).toBe(false);
+    expect(prep({ levels: [{ price: "1.1" as never }] })).toBe(false);
+    expect(prep({ levels: [null as never] })).toBe(false);
+    expect(prep({ levels: [{ price: 0 }, { price: 1.0832 }] })).toBe(true); // one real level is enough
+    // an incomplete plan
+    expect(prep({ bias: [{ instrument: "EURUSD", direction: "bullish" }], levels: [{ label: "POI" }] })).toBe(false);
+    expect(prep({ bias: [{ instrument: "", direction: "bullish" }], levels: [{ price: 1.1 }] })).toBe(false);
+    expect(prep({ bias: undefined as never, levels: undefined as never })).toBe(false);
+  });
+
+  it("Risk control needs valid limits: positive finite R or % (no more than 100%), a whole positive number of trades (review of #177)", () => {
+    const risk = (limits: TradingPlan["limits"], checklist = [{ key: "risk_limits_checked", done: true }]) => done("q_riskcheck", data({ plans: [plan({ limits, checklist })] }));
+    expect(risk({ maxRiskPerTrade: { type: "r", value: 1 } })).toBe(true);
+    expect(risk({ maxRiskPerTrade: { type: "percent", value: 0.5 } })).toBe(true);
+    expect(risk({ maxDailyLoss: { type: "r", value: 3 } })).toBe(true);
+    expect(risk({ maxTrades: 2 })).toBe(true);
+    // zero, negative, broken
+    expect(risk({ maxRiskPerTrade: { type: "r", value: 0 } })).toBe(false);
+    expect(risk({ maxRiskPerTrade: { type: "r", value: -1 } })).toBe(false);
+    expect(risk({ maxDailyLoss: { type: "percent", value: Number.NaN } })).toBe(false);
+    expect(risk({ maxDailyLoss: { type: "percent", value: Number.POSITIVE_INFINITY } })).toBe(false);
+    expect(risk({ maxDailyLoss: { type: "percent", value: "2" as never } })).toBe(false);
+    expect(risk({ maxDailyLoss: { value: 2 } as never })).toBe(false); // no unit
+    expect(risk({ maxDailyLoss: { type: "usd", value: 2 } as never })).toBe(false); // an unknown unit
+    expect(risk({ maxRiskPerTrade: { type: "percent", value: 150 } })).toBe(false); // more than the whole account
+    expect(risk({ maxTrades: 0 })).toBe(false);
+    expect(risk({ maxTrades: -2 })).toBe(false);
+    expect(risk({ maxTrades: 2.5 })).toBe(false);
+    expect(risk({ maxTrades: Number.NaN })).toBe(false);
+    // one broken limit spoils the set; an empty set is not a limit
+    expect(risk({ maxTrades: 3, maxDailyLoss: { type: "r", value: -2 } })).toBe(false);
+    expect(risk({})).toBe(false);
+    expect(risk(undefined)).toBe(false);
+    // the standard checklist item stays required
+    expect(risk({ maxTrades: 3 }, [])).toBe(false);
+    expect(risk({ maxTrades: 3 }, [{ key: "risk_limits_checked", done: false }])).toBe(false);
   });
 
   it("Day review: a review completed today with 40+ characters, or today's «Session review» note of 80+", () => {
@@ -98,11 +153,37 @@ describe("QH-6.2: trading — Preparation, Risk control, Day review", () => {
 
 describe("QH-6.2: study — Trade review / Observation, Backtest, Lesson", () => {
   it("Trade review: a past trade whose review became complete today; old reviews without a time and today's trades do not count", () => {
-    expect(done("m_trade_review", data({ trades: [trade("t1", { reviewedAt: at(DAY, "11:00") })] }))).toBe(true);
+    expect(done("m_trade_review", data({ trades: [trade("t1", { ...REVIEW, reviewedAt: at(DAY, "11:00") })] }))).toBe(true);
     // reviewed before QH-6.1: complete review, no reviewedAt
-    expect(done("m_trade_review", data({ trades: [trade("t1", { entryReason: "R", emotions: ["calm"], executionRating: 4 })] }))).toBe(false);
-    expect(done("m_trade_review", data({ trades: [trade("t1", { reviewedAt: at("2026-11-15", "11:00") })] }))).toBe(false);
-    expect(done("m_trade_review", data({ trades: [trade("t2", { createdAt: at(DAY, "09:00"), openedAt: at(DAY, "09:00"), reviewedAt: at(DAY, "11:00") })] }))).toBe(false);
+    expect(done("m_trade_review", data({ trades: [trade("t1", REVIEW)] }))).toBe(false);
+    expect(done("m_trade_review", data({ trades: [trade("t1", { ...REVIEW, reviewedAt: at("2026-11-15", "11:00") })] }))).toBe(false);
+    expect(done("m_trade_review", data({ trades: [trade("t2", { ...REVIEW, createdAt: at(DAY, "09:00"), openedAt: at(DAY, "09:00"), reviewedAt: at(DAY, "11:00") })] }))).toBe(false);
+  });
+
+  it("Trade review: the review must still be complete — a removed reason, emotions or rating takes the confirmation away (review of #177)", () => {
+    const reviewed = (over: Partial<Trade>) => done("m_trade_review", data({ trades: [trade("t1", { ...REVIEW, reviewedAt: at(DAY, "11:00"), ...over })] }));
+    expect(reviewed({})).toBe(true);
+    expect(reviewed({ entryReason: undefined })).toBe(false);
+    expect(reviewed({ entryReason: "   " })).toBe(false);
+    expect(reviewed({ emotions: [] })).toBe(false);
+    expect(reviewed({ emotions: undefined as never })).toBe(false);
+    expect(reviewed({ executionRating: undefined })).toBe(false);
+    expect(reviewed({ executionRating: 0 })).toBe(false);
+    expect(reviewed({ executionRating: 6 })).toBe(false);
+    expect(reviewed({ executionRating: 3.5 })).toBe(false);
+    // a stamp alone (a copy that never had the fields) is not a review
+    expect(done("m_trade_review", data({ trades: [trade("t1", { reviewedAt: at(DAY, "11:00") })] }))).toBe(false);
+    // through the repository: the review is cleared before the first check → nothing to confirm (the time stays)
+    localStorage.clear();
+    const repo = new LocalStorageJournalRepository();
+    repo.saveTrade(trade("t9"));
+    const stamped = repo.saveTrade({ ...trade("t9"), ...REVIEW });
+    expect(stamped.reviewedAt).toBeTruthy();
+    const cleared = repo.saveTrade({ ...stamped, entryReason: "" });
+    expect(cleared.reviewedAt).toBe(stamped.reviewedAt);
+    const day = stamped.reviewedAt!.slice(0, 10);
+    expect(candidateSources("m_trade_review", data({ trades: [stamped] }), day)).toEqual(["trade:t9:review"]);
+    expect(candidateSources("m_trade_review", data({ trades: [cleared] }), day)).toEqual([]);
   });
 
   it("Observation and Lesson: a new note of 60+ characters made today; a copy of an older text does not count", () => {
@@ -149,6 +230,38 @@ describe("QH-6.2: recovery — Day state, Mistake review, Plan for tomorrow", ()
     // … until the person confirms it on that day
     expect(done("q_bias", data({ plans: [{ ...tomorrow, prepConfirmedAt: at("2026-11-17", "07:00") }] }), "2026-11-17")).toBe(true);
   });
+
+  it("a plan is «made» at its first real save (firstSavedAt), not when its draft was opened; old plans fall back to createdAt (review of #177)", () => {
+    // the draft of tomorrow's plan was opened yesterday evening and first saved today
+    const opened = plan({ date: "2026-11-17", createdAt: at("2026-11-15", "22:00"), firstSavedAt: at(DAY, "21:00") });
+    expect(done("m_plan_tomorrow", data({ plans: [opened] }))).toBe(true);
+    expect(done("m_plan_tomorrow", data({ plans: [opened] }), "2026-11-15")).toBe(false);
+    // today's plan: the draft opened last night, filled and saved this morning → today's work, no extra confirmation
+    expect(done("q_bias", data({ plans: [plan({ createdAt: at("2026-11-15", "23:00"), firstSavedAt: at(DAY, "07:00") })] }))).toBe(true);
+    // a plan saved before the field existed: createdAt as before
+    expect(done("m_plan_tomorrow", data({ plans: [plan({ date: "2026-11-17", createdAt: at(DAY, "21:00") })] }))).toBe(true);
+  });
+
+  it("the repository stamps firstSavedAt once, at the first save; it never moves and ignores what the copy says (review of #177)", () => {
+    localStorage.clear();
+    const repo = new LocalStorageJournalRepository();
+    const draft = plan({ date: "2026-11-17", createdAt: at("2026-11-10", "08:00") }); // a draft opened long ago
+    const first = repo.saveTradingPlan(draft);
+    expect(first.firstSavedAt).toBeTruthy();
+    expect(first.firstSavedAt).not.toBe(draft.createdAt);
+    expect(first.createdAt).toBe(draft.createdAt); // createdAt is untouched (the plan-discipline reward reads it)
+    // later saves — and a copy that claims another time — keep the first one
+    const later = repo.saveTradingPlan({ ...draft, note: "edit", firstSavedAt: at("2030-01-01", "00:00") });
+    expect(later.firstSavedAt).toBe(first.firstSavedAt);
+    // a plan saved before the field existed stays without it (it is not made now)
+    localStorage.clear();
+    const legacyRepo = new LocalStorageJournalRepository();
+    legacyRepo.replaceAllRecords({ ...legacyRepo.getAllRecords(), plans: [plan({ date: "2026-11-20" })] });
+    expect(legacyRepo.saveTradingPlan(plan({ date: "2026-11-20", note: "edit" })).firstSavedAt).toBeUndefined();
+    // a plan deleted and made again is a new plan
+    legacyRepo.deleteTradingPlan("2026-11-20");
+    expect(legacyRepo.saveTradingPlan(plan({ date: "2026-11-20" })).firstSavedAt).toBeTruthy();
+  });
 });
 
 describe("QH-6.2: imports, copies, repeated saves", () => {
@@ -175,7 +288,8 @@ describe("QH-6.2: imports, copies, repeated saves", () => {
 });
 
 describe("QH-6.2: one source, one mission a day — mode changes and two tabs", () => {
-  const reviewPlan = plan({ review: { rating: 4, followedPlan: "yes", emotions: ["calm"], whatWorked: text(60), completedAt: at(DAY, "19:00") } });
+  // only the review part: the direction and the limits would close two more trading missions (three a day at most)
+  const reviewPlan = plan({ bias: [], levels: [], limits: {}, review: { rating: 4, followedPlan: "yes", emotions: ["calm"], whatWorked: text(60), completedAt: at(DAY, "19:00") } });
 
   it("a mode change: the day review used by «Day state» cannot also close «Day review»; another source can", () => {
     const d = data({ plans: [reviewPlan] });
@@ -201,6 +315,30 @@ describe("QH-6.2: one source, one mission a day — mode changes and two tabs", 
     const bAfterA = checkMissions(ids, d, DAY, a.ledger);
     expect(bAfterA.checks.every((c) => c.claimed)).toBe(true);
     expect(bAfterA.ledger).toBe(a.ledger);
+  });
+
+  it("never more than three missions a day, whatever list is passed: repeats, a mix of modes, unknown ids (review of #177)", () => {
+    const rich = data({
+      plans: [plan({ review: { rating: 4, followedPlan: "yes", emotions: ["calm"], whatWorked: text(60), completedAt: at(DAY, "19:00") } })],
+      notes: [note("l1", "lesson", text(70)), note("w1", "weekly_mistake", text(90, "w")), note("i1", "idea", text(70, "i")), btNote("b1")],
+    });
+    // nine ids of three modes, every one with a source of its own
+    const all: MissionId[] = ["q_bias", "q_riskcheck", "q_reflect", "m_observation", "m_backtest", "m_lesson", "m_day_state", "m_mistake", "m_plan_tomorrow"];
+    const r = checkMissions(all, rich, DAY);
+    expect(r.checks.filter((c) => c.done)).toHaveLength(3);
+    expect(Object.keys(r.ledger.claims)).toHaveLength(3);
+    // a repeated id is checked once
+    const dup = checkMissions(["m_lesson", "m_lesson", "m_lesson"], rich, DAY);
+    expect(dup.checks).toHaveLength(1);
+    // claims kept from earlier in the day count towards the three (a mode change after three is closed adds nothing)
+    const morning = checkMissions(["q_bias", "q_riskcheck", "q_reflect"], rich, DAY);
+    expect(morning.checks.every((c) => c.done)).toBe(true);
+    const evening = checkMissions(["m_observation", "m_backtest", "m_lesson"], rich, DAY, morning.ledger);
+    expect(evening.checks.some((c) => c.done)).toBe(false);
+    expect(evening.ledger).toBe(morning.ledger);
+    // an unknown id confirms nothing and does not break the check
+    const odd = checkMissions(["x_unknown" as MissionId, "m_lesson"], rich, DAY);
+    expect(odd.checks.map((c) => c.done)).toEqual([false, true]);
   });
 
   it("a ledger of another day is not carried over", () => {
@@ -231,7 +369,7 @@ describe("QH-6.2: time zones and midnight", () => {
 
 describe("QH-6.2: no reward, nothing changed", () => {
   it("the checks never change their input and give no XP or Coins (they only name the confirming record)", () => {
-    const d = data({ plans: [plan()], notes: [note("l1", "lesson", text(70)), btNote("b1")], trades: [trade("t1", { reviewedAt: at(DAY, "11:00") })] });
+    const d = data({ plans: [plan()], notes: [note("l1", "lesson", text(70)), btNote("b1")], trades: [trade("t1", { ...REVIEW, reviewedAt: at(DAY, "11:00") })] });
     const snapshot = JSON.stringify(d);
     const r = checkMissions(["q_bias", "q_riskcheck", "q_reflect", "m_trade_review", "m_backtest", "m_lesson"], d, DAY);
     expect(JSON.stringify(d)).toBe(snapshot);

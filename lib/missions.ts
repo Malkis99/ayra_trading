@@ -13,8 +13,8 @@
  *   gives the same answer and nothing new.
  */
 import { addDaysToKey, dayKeyInZone } from "./day-key";
-import { backtestFingerprint, isCompleteBacktest, readBacktest } from "./journal/backtest";
-import type { Note, Trade, TradingPlan } from "./journal/types";
+import { backtestFingerprint, isCompleteBacktest, isTradeReviewed, readBacktest } from "./journal/backtest";
+import type { Note, PlanBiasItem, PlanLevelItem, RiskLimit, Trade, TradingPlan } from "./journal/types";
 import type { DayMode } from "./quest-engine";
 
 export type MissionId =
@@ -92,13 +92,48 @@ function isNewResult(n: Note, all: Note[]): boolean {
 const planOn = (plans: TradingPlan[], day: string) => live(plans).find((p) => p.date === day) || null;
 
 /**
+ * When the plan was made: its first real save (`firstSavedAt`, set by the repository). Plans saved before the field
+ * existed fall back to `createdAt`, which the plan screen sets when its draft is opened.
+ */
+const madeAt = (p: TradingPlan) => p.firstSavedAt || p.createdAt;
+
+/**
  * Today's plan is today's work: made today, or — when made in advance — confirmed today (В16). A plan made yesterday
  * «for tomorrow» does not count today by itself.
  */
-const planIsToday = (p: TradingPlan, day: string, tz?: string) => dayOf(p.createdAt, tz) === day || dayOf(p.prepConfirmedAt, tz) === day;
+const planIsToday = (p: TradingPlan, day: string, tz?: string) => dayOf(madeAt(p), tz) === day || dayOf(p.prepConfirmedAt, tz) === day;
 
-const hasBias = (p: TradingPlan) => (p.bias || []).some((b) => !!b.instrument && b.instrument.trim().length > 0);
-const hasLimits = (p: TradingPlan) => p.limits?.maxRiskPerTrade?.value != null || p.limits?.maxDailyLoss?.value != null || p.limits?.maxTrades != null;
+const BIAS_DIRECTIONS: readonly string[] = ["bullish", "bearish", "neutral"] satisfies PlanBiasItem["direction"][];
+const RISK_LIMIT_TYPES: readonly string[] = ["r", "percent"] satisfies RiskLimit["type"][];
+const positive = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v > 0;
+
+/** A direction for a named instrument: an instrument and one of the directions the plan knows. */
+export const isValidBias = (b: PlanBiasItem | null | undefined) =>
+  !!b && typeof b.instrument === "string" && b.instrument.trim().length > 0 && BIAS_DIRECTIONS.includes(b.direction);
+/** A zone of interest with a real price (a positive finite number); a row with no price, or a broken one, is not a level. */
+export const isValidLevel = (l: PlanLevelItem | null | undefined) => !!l && positive(l.price);
+/** A risk limit in R or % of the account: a positive finite value, a share of the account no more than 100%. */
+export const isValidRiskLimit = (l: RiskLimit | null | undefined) =>
+  !!l && RISK_LIMIT_TYPES.includes(l.type) && positive(l.value) && (l.type !== "percent" || l.value <= 100);
+/**
+ * The plan has structured limits: at least one, and every one that is filled in is valid (risk per trade, daily loss,
+ * the number of trades as a positive whole number). Zero, negative or broken values do not count.
+ */
+export function hasValidLimits(p: TradingPlan): boolean {
+  const l = p.limits;
+  if (!l) return false;
+  const filled = [l.maxRiskPerTrade, l.maxDailyLoss, l.maxTrades].filter((v) => v != null);
+  if (filled.length === 0) return false;
+  if (l.maxRiskPerTrade != null && !isValidRiskLimit(l.maxRiskPerTrade)) return false;
+  if (l.maxDailyLoss != null && !isValidRiskLimit(l.maxDailyLoss)) return false;
+  if (l.maxTrades != null && !(Number.isInteger(l.maxTrades) && l.maxTrades > 0)) return false;
+  return true;
+}
+/** A trade review that is still complete (entry reason, an emotion, an execution rating 1–5) — not only stamped once. */
+const reviewComplete = (t: Trade) => isTradeReviewed(t) && Number.isInteger(t.executionRating) && t.executionRating! >= 1 && t.executionRating! <= 5;
+
+const hasBias = (p: TradingPlan) => (p.bias || []).some(isValidBias);
+const hasLevel = (p: TradingPlan) => (p.levels || []).some(isValidLevel);
 const riskChecked = (p: TradingPlan) => (p.checklist || []).some((c) => c.key === RISK_CHECK_KEY && c.done);
 const reviewTextLen = (p: TradingPlan) => len(p.review?.whatWorked) + len(p.review?.whatToImprove) + len(p.review?.lesson);
 
@@ -116,10 +151,10 @@ export function candidateSources(id: MissionId, data: MissionData, day: string):
   switch (id) {
     case "q_bias":
       // a direction for an instrument and at least one zone of interest, in today's plan made or confirmed today
-      return plan && hasBias(plan) && (plan.levels || []).length > 0 && planIsToday(plan, day, tz) ? [`plan:${day}:prep`] : [];
+      return plan && hasBias(plan) && hasLevel(plan) && planIsToday(plan, day, tz) ? [`plan:${day}:prep`] : [];
     case "q_riskcheck":
-      // a structured limit and the standard checklist item, in today's plan made or confirmed today
-      return plan && hasLimits(plan) && riskChecked(plan) && planIsToday(plan, day, tz) ? [`plan:${day}:risk`] : [];
+      // valid structured limits and the standard checklist item, in today's plan made or confirmed today
+      return plan && hasValidLimits(plan) && riskChecked(plan) && planIsToday(plan, day, tz) ? [`plan:${day}:risk`] : [];
     case "q_reflect": {
       const out: string[] = [];
       if (plan && dayOf(plan.review?.completedAt, tz) === day && reviewTextLen(plan) >= MISSION_TEXT_MIN.review) out.push(`plan:${day}:review`);
@@ -127,9 +162,10 @@ export function candidateSources(id: MissionId, data: MissionData, day: string):
     }
     case "m_trade_review":
       // a past trade (written before today) whose review first became complete today (QH-6.1 reviewedAt; trades
-      // reviewed before QH-6.1 have none). A trade written today with its review is not «a past trade reviewed».
+      // reviewed before QH-6.1 have none). A trade written today with its review is not «a past trade reviewed». The
+      // review must still be complete now: removing the reason, the emotions or the rating takes the confirmation away.
       return live(data.trades)
-        .filter((t) => dayOf(t.reviewedAt, tz) === day && (dayOf(t.createdAt || t.openedAt, tz) || day) < day)
+        .filter((t) => dayOf(t.reviewedAt, tz) === day && reviewComplete(t) && (dayOf(t.createdAt || t.openedAt, tz) || day) < day)
         .sort((a, b) => (a.reviewedAt || "").localeCompare(b.reviewedAt || ""))
         .map((t) => `trade:${t.id}:review`);
     case "m_observation":
@@ -149,10 +185,15 @@ export function candidateSources(id: MissionId, data: MissionData, day: string):
     case "m_plan_tomorrow": {
       const tomorrow = addDaysToKey(day, 1);
       const next = planOn(data.plans, tomorrow);
-      return next && dayOf(next.createdAt, tz) === day && (hasBias(next) || len(next.note) > 0) ? [`plan:${tomorrow}:made`] : [];
+      return next && dayOf(madeAt(next), tz) === day && (hasBias(next) || len(next.note) > 0) ? [`plan:${tomorrow}:made`] : [];
     }
+    default:
+      return []; // an unknown id confirms nothing
   }
 }
+
+/** A day has three core missions (one mode); the checks never confirm more, whatever list they are given. */
+export const MAX_CORE_MISSIONS_PER_DAY = 3;
 
 /** Which source each mission of the day used. Kept for the day; a claim is never moved or reused by another mission. */
 export interface MissionLedger {
@@ -178,13 +219,16 @@ export function checkMissions(ids: MissionId[], data: MissionData, day: string, 
   const claims: Partial<Record<MissionId, string>> = ledger && ledger.day === day ? { ...ledger.claims } : {};
   const used = new Set(Object.values(claims));
   const checks: MissionCheck[] = [];
-  for (const id of ids) {
+  // A broken list (repeats, more than one mode) confirms nothing extra: each id once, and at most three claims a day
+  // (claims kept from earlier in the day — after a mode change too — count towards the three).
+  for (const id of Array.from(new Set(ids))) {
     const had = claims[id];
     if (had) {
       checks.push({ id, done: true, source: had, claimed: true });
       continue;
     }
-    const pick = candidateSources(id, data, day).find((s) => !used.has(s));
+    const full = Object.keys(claims).length >= MAX_CORE_MISSIONS_PER_DAY;
+    const pick = full ? undefined : candidateSources(id, data, day).find((s) => !used.has(s));
     if (pick) {
       claims[id] = pick;
       used.add(pick);
