@@ -10,7 +10,7 @@ import { JOURNAL_LINK } from "@/lib/quests-view";
 import { Button, buttonClasses } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
 import { VerificationBadge } from "./VerificationBadge";
-import { CATEGORY_LOOK, questCriterion, questShortTitle } from "./quest-text";
+import { CATEGORY_LOOK, missionSourceLabel, questCriterion, questShortTitle } from "./quest-text";
 
 export interface QuestItemProps {
   quest: QuestTemplate;
@@ -30,6 +30,8 @@ export interface QuestItemProps {
   replacedFromTitle?: string;
   journalHref?: string;
   journalCta?: string;
+  /** The journal has a record for it, but the cloud copy is still loading: it is paid after the sync (QH-6.5). */
+  waitingSync?: boolean;
   busy?: boolean;
   replaceUsed: number;
   replaceMax: number;
@@ -44,13 +46,14 @@ export interface QuestItemProps {
  * a line); an extra is a quieter compact row. A self-report is never shown as a journal check.
  */
 export function QuestItem(props: QuestItemProps) {
-  const { quest, variant, slot, done, doneAt, passed, readOnly, next, carriedLabel, replacedFromTitle, journalHref, journalCta, busy } = props;
+  const { quest, variant, slot, done, doneAt, passed, readOnly, next, carriedLabel, replacedFromTitle, journalHref, journalCta, waitingSync, busy } = props;
   const { dict, lang } = useApp();
   const c = dict.questsPage.q1.card;
   const p = dict.questsPage.q2.page;
   const m = dict.questsPage.q2.mission;
   const title = questShortTitle(dict, lang, quest);
   const criterion = questCriterion(dict, quest);
+  const source = missionSourceLabel(dict, quest.id);
   // confirmed by the journal: the app-closed quests and the catalog-3 missions (never ticked, never replaced)
   const appClosed = isJournalConfirmed(quest.id);
   const reward = questReward(quest);
@@ -70,7 +73,12 @@ export function QuestItem(props: QuestItemProps) {
       {mission ? m.viewOnly : p.preview}
     </span>
   ) : appClosed ? (
-    <Link href={journalHref || JOURNAL_LINK[quest.id] || "/journal"} data-testid="quest-journal-link" className={buttonClasses(next ? "primary" : "secondary", size, "gap-2 whitespace-nowrap")}>
+    <Link
+      href={journalHref || JOURNAL_LINK[quest.id] || "/journal"}
+      data-testid="quest-journal-link"
+      aria-label={formatString(m.goAria, { cta: journalCta || p.go, title })}
+      className={buttonClasses(next ? "primary" : "secondary", size, "gap-2 whitespace-nowrap")}
+    >
       {journalCta || p.go}
       {next && <ArrowRight size={16} aria-hidden="true" className="shrink-0" />}
     </Link>
@@ -176,15 +184,21 @@ export function QuestItem(props: QuestItemProps) {
           </p>
         )}
         {notes}
+        {!done && waitingSync && (
+          <p className="mt-0.5 text-xs font-semibold text-[#e5b98a]" data-testid="quest-waiting-sync">
+            {m.waitingSync}
+          </p>
+        )}
         {done && (
           <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs font-semibold text-success" data-testid="quest-done">
             <Check size={14} aria-hidden="true" className="shrink-0" />
             {doneAt ? formatString(m.doneAt, { time: doneAt }) : m.done}
-            <span className="m-done-reward font-normal text-mu">· {rewardText}</span>
+            <span className="m-done-reward font-normal text-mu">· {appClosed ? formatString(m.credited, { reward: rewardText }) : rewardText}</span>
           </p>
         )}
         <div className="m-meta mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-mu">
           {badge}
+          {source && <span data-testid="quest-source">{source}</span>}
           <span>{formatString(m.minutes, { n: quest.durationMinutes })}</span>
           <span className="m-reward-inline font-semibold text-tx" aria-hidden="true">
             {rewardText}
@@ -194,7 +208,7 @@ export function QuestItem(props: QuestItemProps) {
 
       <div className="m-foot">
         <span className={cn("m-reward whitespace-nowrap text-sm font-semibold", done ? "text-mu" : "text-tx")} data-testid="quest-reward">
-          {rewardText}
+          {done && appClosed ? formatString(m.creditedColumn, { reward: rewardText }) : rewardText}
         </span>
         {action && <div className="m-action text-right">{action}</div>}
       </div>

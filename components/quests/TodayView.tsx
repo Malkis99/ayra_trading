@@ -29,6 +29,10 @@ interface Props {
   /** The quest of the «next step»: it is marked in its own row (a mission, a day plan step or an extra). */
   nextQuestId?: string;
   snapshot: JournalSnapshot;
+  /** The journal's cloud copy is still loading: missions from new records are paid after the sync (QH-6.5). */
+  syncing?: boolean;
+  /** Missions the journal already confirms that wait for the sync to be paid. */
+  waitingSync?: ReadonlySet<string>;
   onActivate: (m: DayMode) => void;
   onComplete: (q: QuestTemplate) => void;
   onPass: (q: QuestTemplate) => void;
@@ -41,7 +45,7 @@ const byIds = (ids: string[]) => ids.map((id) => questById(id)).filter((q): q is
  * Today (docs/quest-hub-plan.md, 4.1): the three missions of the day are rows and the one focus; the next step is marked
  * inside its row. Below them, quieter: the day plan, extra challenges and everyday habits (self-reports) apart.
  */
-export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId, snapshot, onActivate, onComplete, onPass, onReplace }: Props) {
+export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId, snapshot, syncing, waitingSync, onActivate, onComplete, onPass, onReplace }: Props) {
   const { dict, lang } = useApp();
   const { gameState, gameDay } = useGame();
   const p = dict.questsPage.q2.page;
@@ -108,6 +112,7 @@ export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId
         replacedFromTitle={fromTitle(q.id)}
         journalHref={isJournalConfirmed(q.id) ? journalHref(q.id, key) : undefined}
         journalCta={journalCta(q.id, key)}
+        waitingSync={isActiveView && !!waitingSync?.has(q.id)}
         busy={busyId === q.id}
         replaceUsed={gameState.replacementsUsedToday}
         replaceMax={GAME_CONFIG.QUEST_REPLACEMENTS_PER_DAY}
@@ -157,6 +162,12 @@ export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId
           </div>
         )}
 
+        {syncing && viewed !== "rest" && (
+          <p role="status" className="rounded-xl border border-[#e5b98a]/40 bg-[#e5b98a]/[0.06] px-3 py-2 text-sm text-tx" data-testid="missions-syncing">
+            {m.syncing}
+          </p>
+        )}
+
         <div id="mode-panel" role="tabpanel" aria-labelledby={`mode-tab-${viewed}`} data-testid="mode-panel" data-mode={viewed}>
           {viewed === "rest" ? (
             <div className="flex items-center gap-4 rounded-2xl border border-line bg-s1 p-5" data-testid="rest-panel">
@@ -178,7 +189,12 @@ export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId
       {viewed !== "rest" && (
         <section aria-labelledby="more-title" className="space-y-3">
           <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-            <h2 id="more-title" className="text-base font-bold text-tx">{m.extras}</h2>
+            <div className="min-w-0">
+              <h2 id="more-title" className="text-base font-bold text-tx">{m.extras}</h2>
+              <p className="mt-0.5 text-xs text-mu" data-testid="extras-note">
+                {formatString(m.extrasNote, { cap: GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP })}
+              </p>
+            </div>
             <span className="text-xs text-mu" data-testid="self-cap">
               {formatString(m.selfCap, { xp: selfReportXpOn(gameState, gameDay), cap: GAME_CONFIG.SELF_REPORT_DAILY_XP_CAP })}
             </span>
@@ -186,7 +202,17 @@ export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId
           <div className="grid items-start gap-3 lg:grid-cols-2">
             {hasPlan && (
               <div className="min-w-0">
-                <PlanSteps protocol={protocol} ritual={ritual} hrefFor={stepHref} nextQuestId={isActiveView && !shownCore.some((q) => q.id === nextQuestId) ? nextQuestId : undefined} />
+                <PlanSteps
+                  protocol={protocol}
+                  ritual={ritual}
+                  hrefFor={stepHref}
+                  nextQuestId={isActiveView && !shownCore.some((q) => q.id === nextQuestId) ? nextQuestId : undefined}
+                  missionTitle={(id) => {
+                    // catalog 3: the plan's steps are parts of the day's missions; their reward is the mission's, not a second one
+                    const tpl = shownCore.find((q) => q.id === id);
+                    return tpl ? questShortTitle(dict, lang, tpl) : undefined;
+                  }}
+                />
               </div>
             )}
             <div className="min-w-0 space-y-3">

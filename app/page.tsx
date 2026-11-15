@@ -22,6 +22,7 @@ import {
 } from "@/components/home/SharedBlocks";
 import { isJournalConfirmed } from "@/lib/quests";
 import { todaysQuests } from "@/lib/quests-view";
+import { questShortTitle } from "@/components/quests/quest-text";
 import { TITLES, FRAMES, ITEMS } from "@/lib/items";
 import { dayKeyInZone } from "@/lib/day-key";
 import { chosenBias } from "@/lib/journal/types";
@@ -302,8 +303,7 @@ export default function HomePage() {
             <div className="space-y-2">
               {dailyQuests.map((q) => {
                 const isDone = !!gameState.completedQuestsToday[q.id];
-                const title =
-                  lang === "ru" ? q.fallbackTitleRu : q.fallbackTitleEn;
+                const title = questShortTitle(dict, lang, q);
 
                 return (
                   <button

@@ -16,10 +16,19 @@ export function questWhy(dict: Dictionary, lang: Lang, q: Pick<QuestTemplate, "i
   return t?.why || (lang === "ru" ? q.fallbackWhyRu : q.fallbackWhyEn);
 }
 
-/** Title of a history entry: the dictionary when the quest is known, else the title saved at that time. */
+/**
+ * Title of a history entry (QH-6.5: the same short name as on «Today», «Week» and «History»): the short name, then the
+ * dictionary title, else the title saved at that time. The saved entry itself is never changed.
+ */
 export function historyTitle(dict: Dictionary, questId: string, saved: string): string {
+  const short = (dict.questsPage.q2.short as Record<string, string | undefined>)[questId];
   const t = (dict.questTemplates as Record<string, { title: string } | undefined>)[questId];
-  return t?.title || saved;
+  return short || t?.title || saved;
+}
+
+/** Which journal record confirms a verifiable mission (shown on its row), or undefined for other quests. */
+export function missionSourceLabel(dict: Dictionary, questId: string): string | undefined {
+  return (dict.questsPage.q2.missionSource as Record<string, string | undefined>)[questId];
 }
 
 /** Category look on this page: calm tones, no gold (gold is for achievements and rare items only). */
