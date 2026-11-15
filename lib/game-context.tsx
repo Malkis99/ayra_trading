@@ -5,6 +5,7 @@ import {
   GameState,
   INITIAL_GAME_STATE,
   checkAndApplyDateResets,
+  recordJournalTrades,
   completeSelfReportQuest,
   claimDailyReward as claimDailyRewardLogic,
   changePlan as changePlanLogic,
@@ -171,6 +172,8 @@ interface GameContextType {
   updateAvatarAppearance: (appearance: AvatarAppearance) => void;
   updateMinorMode: (minorMode: boolean) => void;
   updateTimezone: (timezone: string) => void;
+  /** The journal reports the game day of its earliest live trade (null: none) once it is read (catalog 3 study choice). */
+  recordJournalTrades: (firstTradeDay: string | null) => void;
   /** Saves the edit-profile form: nickname (already accepted by the server for accounts), bio and optional details. */
   saveProfileEdits: (edits: { name: string; bio: string; details: ProfileDetails }) => void;
   /** Accounts: the cloud nickname is the source of truth; copies it into the local state without a chronicle entry. */
@@ -510,6 +513,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     update((prev) => (prev.profile.timezone === timezone ? prev : checkAndApplyDateResets({ ...prev, profile: { ...prev.profile, timezone } }, new Date())));
   }, [update]);
 
+  // What the journal has (catalog 3: «Trade review» or «Observation» for a new day); gives nothing
+  const recordJournalTradesCb = useCallback((firstTradeDay: string | null) => {
+    update((prev) => recordJournalTrades(prev, firstTradeDay, new Date()));
+  }, [update]);
+
   // A quest ticked by the person (Quests, Home). Quests the app checks itself close only by themselves; a
   // self-reported quest gives XP, never coins (owner decision 2026-10-27).
   const questChange = useCallback(
@@ -847,6 +855,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         updateAvatarAppearance,
         updateMinorMode,
         updateTimezone,
+        recordJournalTrades: recordJournalTradesCb,
         saveProfileEdits,
         syncCloudNickname,
       }}

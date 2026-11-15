@@ -17,6 +17,8 @@ import {
   INSTRUMENT_AUTOCOMPLETE,
 } from "@/lib/journal/types";
 import { getLocalDateString, getMondayLocalDateString } from "@/lib/date-utils";
+import { dayKeyInZone } from "@/lib/day-key";
+import { formatString } from "@/lib/i18n";
 import {
   Calendar as CalendarIcon,
   ChevronLeft,
@@ -43,7 +45,7 @@ export const STANDARD_CHECKLIST_KEYS = [
 
 export function TradingPlanTab() {
   const { dict, lang, showToast } = useApp();
-  const { gameState, checkAndClosePlanQuests } = useGame();
+  const { gameState, gameDay, checkAndClosePlanQuests } = useGame();
   const {
     plans,
     weekPlans,
@@ -94,6 +96,15 @@ export function TradingPlanTab() {
 
   // Selected Day (Date object & YYYY-MM-DD string)
   const [selectedDayDate, setSelectedDayDate] = useState<Date>(new Date());
+
+  // A link from Quests to tomorrow's plan (`?day=tomorrow`, the mission «Plan for tomorrow»): open that day once
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("day") !== "tomorrow") return;
+    setSelectedDayDate(new Date(Date.now() + 24 * 60 * 60 * 1000));
+    url.searchParams.delete("day");
+    window.history.replaceState(window.history.state, "", url.toString());
+  }, []);
   const dayStr = useMemo(() => {
     return getLocalDateString(selectedDayDate, gameState.profile?.timezone);
   }, [selectedDayDate, gameState.profile?.timezone]);
@@ -146,8 +157,8 @@ export function TradingPlanTab() {
   useEffect(() => {
     // Flush pending day plan first if switching days
     if (pendingDayPlanRef.current) {
-      saveTradingPlan(pendingDayPlanRef.current);
-      checkAndClosePlanQuests(pendingDayPlanRef.current, trades);
+      // the saved copy carries the time of the first save (catalog 3: «made today»)
+      checkAndClosePlanQuests(saveTradingPlan(pendingDayPlanRef.current), trades);
       pendingDayPlanRef.current = null;
     }
 
@@ -194,8 +205,8 @@ export function TradingPlanTab() {
   // Flush on unmount & window unload
   const flushPending = useCallback(() => {
     if (pendingDayPlanRef.current) {
-      saveTradingPlan(pendingDayPlanRef.current);
-      checkAndClosePlanQuests(pendingDayPlanRef.current, trades);
+      // the saved copy carries the time of the first save (catalog 3: «made today»)
+      checkAndClosePlanQuests(saveTradingPlan(pendingDayPlanRef.current), trades);
       pendingDayPlanRef.current = null;
     }
     if (pendingWeekPlanRef.current) {
@@ -230,8 +241,8 @@ export function TradingPlanTab() {
         if (daySaveTimer.current) clearTimeout(daySaveTimer.current);
         daySaveTimer.current = setTimeout(() => {
           if (pendingDayPlanRef.current) {
-            saveTradingPlan(pendingDayPlanRef.current);
-            checkAndClosePlanQuests(pendingDayPlanRef.current, trades);
+            // the saved copy carries the time of the first save (catalog 3: «made today»)
+            checkAndClosePlanQuests(saveTradingPlan(pendingDayPlanRef.current), trades);
             pendingDayPlanRef.current = null;
             setSaveStatus("saved");
           }
@@ -382,7 +393,8 @@ export function TradingPlanTab() {
     if (dayPlan.bias.length >= 8) return;
     updateDayPlan((prev) => ({
       ...prev,
-      bias: [...prev.bias, { instrument: "XAUUSD", direction: "neutral", note: "" }],
+      // an empty row: the person chooses the instrument and the direction (owner decision for QH-6.3)
+      bias: [...prev.bias, { instrument: "", note: "" }],
     }));
   };
 
@@ -762,6 +774,43 @@ export function TradingPlanTab() {
             )}
           </div>
 
+          {/* A plan made on an earlier day counts for today's «Preparation» only after today's confirmation (В16) */}
+          {(() => {
+            const tz = gameState.profile?.timezone;
+            const dayOf = (iso?: string) => (iso && !Number.isNaN(Date.parse(iso)) ? dayKeyInZone(new Date(iso), tz) : null);
+            const made = dayOf(dayPlan.firstSavedAt || dayPlan.createdAt);
+            const inAdvance = dayStr === gameDay && !!getTradingPlan(dayStr) && !!made && made < gameDay;
+            if (!inAdvance) return null;
+            const confirmed = dayOf(dayPlan.prepConfirmedAt) === gameDay;
+            const tp = dict.journal.tradingPlan;
+            const time = confirmed
+              ? new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "en-US", { hour: "2-digit", minute: "2-digit", timeZone: tz || undefined }).format(new Date(dayPlan.prepConfirmedAt!))
+              : "";
+            return (
+              <div className="card p-4 border border-vi/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3" data-testid="prep-confirm">
+                <div className="min-w-0">
+                  <h4 className="font-bold text-sm text-tx">{tp.prepConfirmTitle}</h4>
+                  <p className="text-xs text-mu mt-0.5">{tp.prepConfirmText}</p>
+                </div>
+                {confirmed ? (
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-success shrink-0" data-testid="prep-confirmed">
+                    <Check size={14} aria-hidden="true" />
+                    {formatString(tp.prepConfirmedAt, { time })}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => updateDayPlan((prev) => ({ ...prev, prepConfirmedAt: new Date().toISOString() }))}
+                    className="btn-primary text-xs py-2 px-3 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi"
+                    data-testid="prep-confirm-btn"
+                  >
+                    {tp.prepConfirmBtn}
+                  </button>
+                )}
+              </div>
+            );
+          })()}
+
           {/* Card Blocks Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* BLOCK 1: BIAS */}
@@ -850,6 +899,11 @@ export function TradingPlanTab() {
                             {dict.journal.overview.bias.neutral}
                           </button>
                         </div>
+                        {!bItem.direction && (
+                          <span className="text-[11px] text-mu" data-testid="bias-direction-empty">
+                            {dict.journal.tradingPlan.directionNotChosen}
+                          </span>
+                        )}
 
                         <button
                           onClick={() => handleDeleteBias(idx)}

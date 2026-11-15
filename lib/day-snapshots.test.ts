@@ -143,22 +143,24 @@ describe("QH-3 day snapshots: rest, mode changes, replacements", () => {
 
   it("replacements: from → to, the new quest is offered, the replaced one is not «not today»; a pass is", () => {
     let s = started("2026-11-10");
-    const core = s.questDay!.core.filter((id) => !["q_bias", "q_riskcheck", "q_reflect", "q_tradelog"].includes(id));
-    const r = replaceQuest(s, core[0], [...s.questDay!.core, ...s.questDay!.bonus], at("2026-11-10T08:00:00Z"));
+    // catalog 3: the missions are never replaced; the self-reported extras are
+    const extras = s.questDay!.bonus;
+    expect(replaceQuest(s, s.questDay!.core[0], [...s.questDay!.core, ...extras], at("2026-11-10T08:00:00Z")).success).toBe(false);
+    const r = replaceQuest(s, extras[0], [...s.questDay!.core, ...extras], at("2026-11-10T08:00:00Z"));
     expect(r.success).toBe(true);
-    s = passQuest(r.state, core[1], at("2026-11-10T09:00:00Z"));
+    s = passQuest(r.state, extras[1], at("2026-11-10T09:00:00Z"));
     s = checkAndApplyDateResets(s, noon("2026-11-11"));
     const snap = s.questDays![0];
-    expect(snap.replaced).toEqual([{ from: core[0], to: r.replacementId }]);
+    expect(snap.replaced).toEqual([{ from: extras[0], to: r.replacementId }]);
     expect(snap.offered).toContain(r.replacementId);
-    expect(snap.core).toContain(r.replacementId);
-    expect(snap.passed).toEqual([core[1]]);
+    expect(snap.passed).toEqual([extras[1]]);
   });
 
   it("a replacement survives a later mode change in the snapshot", () => {
     let s = started("2026-11-10");
-    const id = s.questDay!.core.find((x) => !["q_bias", "q_riskcheck", "q_reflect", "q_tradelog"].includes(x))!;
+    const id = s.questDay!.bonus[0]; // catalog 3: an extra (missions are never replaced)
     const r = replaceQuest(s, id, [...s.questDay!.core, ...s.questDay!.bonus], at("2026-11-10T08:00:00Z"));
+    expect(r.success).toBe(true);
     s = setDayMode(r.state, "study", at("2026-11-10T09:00:00Z")).state;
     s = checkAndApplyDateResets(s, noon("2026-11-11"));
     expect(s.questDays![0].replaced).toEqual([{ from: id, to: r.replacementId }]);
@@ -218,7 +220,7 @@ describe("QH-3 day snapshots: two tabs", () => {
     expect(ra.saved && rb.saved).toBe(true);
     const tick = (store: GameStore<GameState>) =>
       store.applyLocked(() => stale, (fresh) => {
-        const id = fresh.questDay!.core.find((x) => !["q_bias", "q_riskcheck", "q_reflect", "q_tradelog"].includes(x))!;
+        const id = fresh.questDay!.bonus[0]; // catalog 3: a self-reported extra (the missions are journal checks)
         const r = completeSelfReportQuest(fresh, id, id, "Mental", 30, now);
         return { state: r.state, result: r.xpGiven };
       });

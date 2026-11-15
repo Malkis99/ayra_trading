@@ -17,6 +17,7 @@ import { SearchModal } from "@/components/SearchModal";
 import { Toast } from "@/components/Toast";
 import { Language } from "@/lib/i18n/types";
 import { JournalProvider } from "@/lib/journal/context";
+import { JournalTradesSync } from "@/components/JournalTradesSync";
 import { ProfileTimezoneSync } from "@/components/ProfileTimezoneSync";
 import { CloudDownloadNotice, GlobalInitialSyncDialog } from "@/components/journal/InitialSyncDialog";
 import { SyncConflictDialog } from "@/components/journal/SyncConflictDialog";
@@ -290,6 +291,8 @@ export function Shell({
             <GlobalInitialSyncDialog />
             {/* Time zone of the account in the cloud profile (after each cloud exchange; guests never) */}
             <ProfileTimezoneSync />
+            {/* The journal's trades for the day's study mission (catalog 3); renders nothing */}
+            <JournalTradesSync />
           </JournalProvider>
         </GameProvider>
       </AuthProvider>

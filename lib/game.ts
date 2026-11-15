@@ -1,7 +1,7 @@
 import type { ProfileDetails } from "./profile";
 import { GAME_CONFIG } from "./game-config";
 import { dayKeyInZone, mondayOfKey } from "./day-key";
-import { APP_CLOSED_QUESTS, getTodaysQuests, pickReplacement } from "./quests";
+import { APP_CLOSED_QUESTS, JOURNAL_CONFIRMED, getTodaysQuests, pickReplacement } from "./quests";
 import {
   composeSwitchedSet,
   defaultModeFor,
@@ -9,10 +9,12 @@ import {
   legacyDaySet,
   poolForMode,
   QUEST_CATALOG,
+  studyFirstFor,
   type DayMode,
   type DaySet,
   type WeekChallenge,
 } from "./quest-engine";
+import { candidateSources, type MissionData } from "./missions";
 import {
   addDaySnapshot,
   addWeekSnapshot,
@@ -154,6 +156,11 @@ export interface GameState {
   coinLogSince?: string;
   /** The day's quest set, generated once per game day (Q2, lib/quest-engine.ts). */
   questDay?: DaySet;
+  /**
+   * The game day of the journal's earliest live trade (null: the journal has no trades), reported by the journal when it
+   * is read (recordJournalTrades). It decides the first study mission of a new day (catalog 3). Absent until reported.
+   */
+  journalFirstTradeDay?: string | null;
   /** The week challenge, chosen once per week (Q2; no rewards yet). */
   questWeek?: WeekChallenge;
   /** Closed game days as they were (QH-3, lib/day-snapshots.ts): written once at the day change, read-only, newest first. */
@@ -950,12 +957,23 @@ export function evaluatePlanQuestClosure(
   const closedQuests: string[] = [];
   let xpAwarded = 0;
 
+  // The three trading missions close by the checks of lib/missions.ts (catalog 3, docs/quest-hub-qh6-spec.md, 6.1): a real
+  // direction and a level, in a plan made today or confirmed today (В7, В16); valid limits and the standard «limits
+  // checked» item (В9); the day review. The rates are unchanged. The plan-discipline and review XP below keep their rules.
+  const missionData: MissionData = {
+    plans: [plan, ...(allPlans || []).filter((p: any) => p && p.date !== plan.date)],
+    notes: allNotes || [],
+    trades: [],
+    timezone: newState.profile?.timezone,
+  };
+  const missionDone = (id: "q_bias" | "q_riskcheck" | "q_reflect") => candidateSources(id, missionData, todayStr).length > 0;
+
   // 1. q_daily_bias (or q_bias)
   const hasBiasWithInst =
     Array.isArray(plan.bias) &&
     plan.bias.some((b: any) => b.instrument && b.instrument.trim().length > 0);
 
-  if (hasBiasWithInst && !newState.completedQuestsToday["q_bias"]) {
+  if (missionDone("q_bias") && !newState.completedQuestsToday["q_bias"]) {
     const res = completeQuest(
       newState,
       "q_bias",
@@ -975,15 +993,7 @@ export function evaluatePlanQuestClosure(
     plan.limits?.maxDailyLoss?.value != null ||
     plan.limits?.maxTrades != null;
 
-  const isRiskLimitChecked =
-    Array.isArray(plan.checklist) &&
-    plan.checklist.some(
-      (c: any) =>
-        (c.key === "risk_limits_checked" || c.text?.toLowerCase().includes("риск")) &&
-        c.done
-    );
-
-  if (hasLimitFilled && isRiskLimitChecked && !newState.completedQuestsToday["q_riskcheck"]) {
+  if (missionDone("q_riskcheck") && !newState.completedQuestsToday["q_riskcheck"]) {
     const res = completeQuest(
       newState,
       "q_riskcheck",
@@ -997,21 +1007,8 @@ export function evaluatePlanQuestClosure(
     closedQuests.push("q_riskcheck");
   }
 
-  // 3. q_reflect (reflection)
-  const reviewTextLen =
-    (plan.review?.whatWorked || "").length +
-    (plan.review?.whatToImprove || "").length +
-    (plan.review?.lesson || "").length;
-
-  const isReviewDone = plan.review?.completedAt != null && reviewTextLen >= 40;
-
-  const isSessionNoteDone = allNotes.some((n: any) => {
-    const isTodayNote = typeof n.createdAt === "string" && dayKeyInZone(new Date(n.createdAt), newState.profile?.timezone) === todayStr;
-    const isSessionTemplate = n.templateKey === "session_review";
-    return isTodayNote && isSessionTemplate && (n.body || "").length >= 80;
-  });
-
-  if ((isReviewDone || isSessionNoteDone) && !newState.completedQuestsToday["q_reflect"]) {
+  // 3. q_reflect (reflection): the review completed today (40+ characters) or today's «Session review» note (80+)
+  if (missionDone("q_reflect") && !newState.completedQuestsToday["q_reflect"]) {
     const res = completeQuest(
       newState,
       "q_reflect",
@@ -1404,7 +1401,7 @@ export function replaceQuest(
   }
   const replacements = newState.questReplacements || {};
   if (
-    APP_CLOSED_QUESTS.has(questId) ||
+    JOURNAL_CONFIRMED.has(questId) ||
     newState.completedQuestsToday[questId] ||
     Object.prototype.hasOwnProperty.call(replacements, questId) ||
     isClockBehind(newState, currentDate)
@@ -1476,6 +1473,9 @@ export function modeSetPreview(state: GameState, mode: DayMode, currentDate: Dat
   const day = s.questDay && s.questDay.day === today ? s.questDay : generateDaySet(s, today, defaultModeFor(today, s.tradingDays));
   const current: DayMode = s.isRestDay ? "rest" : day.mode;
   const before = day.modeBeforeRest ?? (current === "rest" ? defaultModeFor(today, s.tradingDays) : current);
+  // the study choice made for the day stays for the whole day (a set from before catalog 3 has none: chosen now)
+  // (a choice still waiting for the journal stays waiting: it is settled once, when the journal reports)
+  const fresh = (m: DayMode) => generateDaySet(s, today, m, day.studyPending ? undefined : day.studyFirst);
   const shown = shownSet(s, today);
   if (mode === "rest") return { ...day, mode: "rest", core: [], bonus: [] };
   if (mode === current || (current === "rest" && mode === before)) {
@@ -1483,8 +1483,8 @@ export function modeSetPreview(state: GameState, mode: DayMode, currentDate: Dat
     return { ...rest, mode, core: shown.core, bonus: shown.bonus };
   }
   return composeSwitchedSet(
-    { core: shown.core, mode: current === "rest" ? before : current, carried: day.carried },
-    generateDaySet(s, today, mode),
+    { core: shown.core, mode: current === "rest" ? before : current, carried: day.carried, bonus: shown.bonus },
+    fresh(mode),
     s.completedQuestsToday,
     s.passedQuestsToday
   );
@@ -1539,6 +1539,26 @@ export function setDayMode(
       dailyStats: leavingRest ? recordDailyStatEvent(s.dailyStats, today, { type: "restDayOff" }) : s.dailyStats,
     },
   };
+}
+
+/**
+ * The journal reports its trades (the game day of the earliest live trade, null when there is none), once it has been
+ * read. Kept for the next day sets. A set made today before the journal ever reported (`studyPending`) gets its study
+ * choice settled now, once; after that the choice stays for the day whatever the journal does (owner decision В11).
+ * Changes nothing else and gives nothing.
+ */
+export function recordJournalTrades(state: GameState, firstTradeDay: string | null, currentDate: Date = new Date()): GameState {
+  const s = checkAndApplyDateResets(state, currentDate);
+  const today = gameDayKey(s, currentDate);
+  let next: GameState = s.journalFirstTradeDay === firstTradeDay ? s : { ...s, journalFirstTradeDay: firstTradeDay };
+  const day = next.questDay;
+  if (day && day.day === today && day.studyPending) {
+    const first = studyFirstFor(firstTradeDay !== null && firstTradeDay < today);
+    const swap = (ids: string[]) => ids.map((id) => (id === "m_trade_review" || id === "m_observation" ? first : id));
+    const { studyPending: _settled, ...rest } = day;
+    next = { ...next, questDay: { ...rest, studyFirst: first, core: swap(day.core), ...(day.offered ? { offered: Array.from(new Set(swap(day.offered))) } : {}) } };
+  }
+  return next;
 }
 
 /** Trading days (0 = Monday … 6 = Sunday). Today's set stays; the choice applies from the next generated day. */

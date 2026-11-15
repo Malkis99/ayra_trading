@@ -340,9 +340,14 @@ export interface StorageUsage {
 
 export interface PlanBiasItem {
   instrument: string; // UPPERCASE
-  direction: "bullish" | "bearish" | "neutral";
+  /** Absent on a row just added: the person chooses it (QH-6.3: «+ direction» preselects nothing). */
+  direction?: "bullish" | "bearish" | "neutral";
   note?: string; // Max 200 chars
 }
+
+/** Direction rows the person has finished (a row just added has no direction yet and is not shown elsewhere). */
+export type ChosenBias = PlanBiasItem & { direction: NonNullable<PlanBiasItem["direction"]> };
+export const chosenBias = (bias: PlanBiasItem[] | undefined | null): ChosenBias[] => (bias || []).filter((b): b is ChosenBias => !!b && !!b.direction);
 
 export interface PlanLevelItem {
   instrument?: string; // UPPERCASE

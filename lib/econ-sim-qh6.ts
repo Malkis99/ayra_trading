@@ -28,8 +28,22 @@ import {
 } from "./game";
 import { GAME_CONFIG } from "./game-config";
 import { addDaysToKey, weekdayOfKey } from "./day-key";
-import { APP_CLOSED_QUESTS, getTodaysQuests } from "./quests";
-import type { DayMode } from "./quest-engine";
+import { APP_CLOSED_QUESTS, getDeterministicDailyQuests, getTodaysQuests, getWeightedDailyQuests } from "./quests";
+import { poolForMode, programFor, type DayMode, type DaySet } from "./quest-engine";
+
+/**
+ * The day set as catalog 2 made it (before QH-6.3: three quests of the mode's pool, self-reports included, and two
+ * extras). «Today's rules» of this simulation keep that set, so the comparison stays the one of the spec (section 5).
+ */
+function catalog2Set(s: GameState, day: string, mode: DayMode): DaySet {
+  const pool = poolForMode(mode);
+  const program = programFor(s);
+  const seed = (s.createdAt || "user_default").slice(0, 10);
+  const picked = pool.length ? (program ? getWeightedDailyQuests(day, seed, program, pool) : getDeterministicDailyQuests(day, pool)) : { core: [], bonus: [] };
+  const core = picked.core.map((q) => q.id);
+  const bonus = picked.bonus.map((q) => q.id);
+  return { day, mode, catalogVersion: 2, core, bonus, offered: [...core, ...bonus] };
+}
 
 export type Player = "trader" | "learner" | "casual" | "maximiser";
 export const PLAYERS: Player[] = ["trader", "learner", "casual", "maximiser"];
@@ -103,7 +117,7 @@ function plan(day: string, opts: { levels: boolean; review: boolean }) {
     bias: [{ instrument: "EURUSD", direction: "bullish" }],
     levels: opts.levels ? [{ instrument: "EURUSD", price: 1.1, label: "POI" }] : [],
     events: [],
-    limits: { maxTrades: 3, maxRiskPerTrade: { value: 1, unit: "percent" } },
+    limits: { maxTrades: 3, maxRiskPerTrade: { type: "percent", value: 1 } },
     checklist: [{ key: "risk_limits_checked", done: true }],
     createdAt: `${day}T07:30:00Z`,
     review: opts.review ? { rating: 4, followedPlan: "yes", emotions: ["calm"], whatWorked: "Waited for the retest and kept the risk.", lesson: "Patience pays off again.", completedAt: `${day}T20:00:00Z` } : undefined,
@@ -197,6 +211,8 @@ export function simulateCurrent(player: Player, days = 90, start = "2026-11-16")
     s = checkAndApplyDateResets(s, at(day, "06:00"));
     if (!b.open) continue;
     if (b.mode !== s.questDay?.mode) s = setDayMode(s, b.mode, at(day, "06:05")).state;
+    // today's rules: the day set of catalog 2 (before any reward, as a mode chosen in the morning had it)
+    if (b.mode !== "rest") s = { ...s, questDay: catalog2Set(s, day, b.mode) };
     s = claimDailyReward(s, at(day, "07:00")).state;
     const isMission = (id: string) => (APP_CLOSED_QUESTS.has(id) && id !== "q_tradelog") || id.startsWith("m_");
     const done0 = Object.keys(s.completedQuestsToday).filter(isMission).length;

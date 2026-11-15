@@ -20,10 +20,11 @@ import {
   MarketMiniCard,
   TopicOfDayCard,
 } from "@/components/home/SharedBlocks";
-import { APP_CLOSED_QUESTS } from "@/lib/quests";
+import { UNPAID_MISSIONS, isJournalConfirmed } from "@/lib/quests";
 import { todaysQuests } from "@/lib/quests-view";
 import { TITLES, FRAMES, ITEMS } from "@/lib/items";
 import { dayKeyInZone } from "@/lib/day-key";
+import { chosenBias } from "@/lib/journal/types";
 
 export default function HomePage() {
   const { setAddTradeModalOpen, showToast, dict, lang } = useApp();
@@ -59,7 +60,7 @@ export default function HomePage() {
   // A quest the app checks itself closes by itself; a self-reported one gives its XP (no coins)
   const handleQuestClick = (questId: string, fallbackTitle: string, category: string, xp: number) => {
     if (gameState.completedQuestsToday[questId]) return;
-    if (APP_CLOSED_QUESTS.has(questId)) {
+    if (isJournalConfirmed(questId)) {
       showToast(dict.questsPage.todayTab.autoCloses);
       return;
     }
@@ -323,7 +324,7 @@ export default function HomePage() {
                       <span>{title}</span>
                     </div>
                     <span className="text-mu no-underline">
-                      +{q.xpReward} XP · {dict.categories[q.category] || q.category}
+                      {UNPAID_MISSIONS.has(q.id) ? dict.questsPage.q2.mission.rewardSoon : `+${q.xpReward} XP`} · {dict.categories[q.category] || q.category}
                     </span>
                   </button>
                 );
@@ -484,9 +485,9 @@ export default function HomePage() {
                     <span className="text-[10px] text-mu block font-medium">
                       {dict.journal.tradingPlan.biasTitle}
                     </span>
-                    {todayPlan?.bias && todayPlan.bias.length > 0 ? (
+                    {chosenBias(todayPlan?.bias).length > 0 ? (
                       <div className="flex flex-wrap gap-1">
-                        {todayPlan.bias.slice(0, 3).map((b, i) => (
+                        {chosenBias(todayPlan?.bias).slice(0, 3).map((b, i) => (
                           <span
                             key={i}
                             className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${

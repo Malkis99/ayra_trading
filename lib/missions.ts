@@ -16,6 +16,8 @@ import { addDaysToKey, dayKeyInZone } from "./day-key";
 import { backtestFingerprint, isCompleteBacktest, isTradeReviewed, readBacktest } from "./journal/backtest";
 import type { Note, PlanBiasItem, PlanLevelItem, RiskLimit, Trade, TradingPlan } from "./journal/types";
 import type { DayMode } from "./quest-engine";
+import { ru } from "./i18n/dictionaries/ru";
+import { en } from "./i18n/dictionaries/en";
 
 export type MissionId =
   | "q_bias" // Trading 1: Preparation
@@ -63,10 +65,41 @@ export function hasTradesBefore(trades: Trade[], dayKey: string, tz?: string): b
   return trades.some((t) => !t.deletedAt && dayKeyInZone(new Date(t.createdAt || t.openedAt), tz) < dayKey);
 }
 
+/** The game day of the journal's earliest live trade (when it was written, else opened), or null when there is none. */
+export function firstTradeDay(trades: Trade[], tz?: string): string | null {
+  let first: string | null = null;
+  for (const t of trades) {
+    if (t.deletedAt) continue;
+    const at = t.createdAt || t.openedAt;
+    if (!at || Number.isNaN(Date.parse(at))) continue;
+    const day = dayKeyInZone(new Date(at), tz);
+    if (first === null || day < first) first = day;
+  }
+  return first;
+}
+
 const live = <T extends { deletedAt?: string | null }>(xs: T[]) => xs.filter((x) => !x.deletedAt);
 const dayOf = (iso: string | undefined | null, tz?: string) => (iso && !Number.isNaN(Date.parse(iso)) ? dayKeyInZone(new Date(iso), tz) : null);
 const len = (s: string | undefined | null) => (s || "").trim().length;
-const normText = (s: string | undefined | null) => (s || "").replace(/\s+/g, " ").trim().toLowerCase();
+
+/**
+ * The headings a note form puts into a new note of a template (ru and en): they are the form's text, not the person's
+ * (found in QH-6.3: an untouched «Idea» template is about 70 characters). A note counts only by what the person wrote.
+ */
+const SCAFFOLD_LINES: ReadonlySet<string> = new Set(
+  [ru, en]
+    .flatMap((d) => [d.journal.notes.templateBodySession, d.journal.notes.templateBodyMistake, d.journal.notes.templateBodyIdea, d.journal.notes.templateBodyLesson])
+    .flatMap((body) => body.split("\n"))
+    .map((line) => line.trim().toLowerCase())
+    .filter((line) => line.length > 0)
+);
+/** The person's own text of a note: the template's headings taken out. */
+export const ownText = (body: string | undefined | null) =>
+  (body || "")
+    .split("\n")
+    .filter((line) => !SCAFFOLD_LINES.has(line.trim().toLowerCase()))
+    .join("\n");
+const normText = (s: string | undefined | null) => ownText(s).replace(/\s+/g, " ").trim().toLowerCase();
 
 /** A note made by the person today: not imported, created on the game day. */
 const madeToday = (n: Note, day: string, tz?: string) => !n.deletedAt && !n.importBatchId && dayOf(n.createdAt, tz) === day;
@@ -109,7 +142,7 @@ const positive = (v: unknown): v is number => typeof v === "number" && Number.is
 
 /** A direction for a named instrument: an instrument and one of the directions the plan knows. */
 export const isValidBias = (b: PlanBiasItem | null | undefined) =>
-  !!b && typeof b.instrument === "string" && b.instrument.trim().length > 0 && BIAS_DIRECTIONS.includes(b.direction);
+  !!b && typeof b.instrument === "string" && b.instrument.trim().length > 0 && !!b.direction && BIAS_DIRECTIONS.includes(b.direction);
 /** A zone of interest with a real price (a positive finite number); a row with no price, or a broken one, is not a level. */
 export const isValidLevel = (l: PlanLevelItem | null | undefined) => !!l && positive(l.price);
 /** A risk limit in R or % of the account: a positive finite value, a share of the account no more than 100%. */
@@ -144,7 +177,7 @@ export function candidateSources(id: MissionId, data: MissionData, day: string):
   const notes = data.notes;
   const notesOf = (template: Note["templateKey"], min: number) =>
     live(notes)
-      .filter((n) => n.templateKey === template && madeToday(n, day, tz) && len(n.body) >= min && isNewText(n, notes))
+      .filter((n) => n.templateKey === template && madeToday(n, day, tz) && len(ownText(n.body)) >= min && isNewText(n, notes))
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       .map((n) => `note:${n.id}`);
 

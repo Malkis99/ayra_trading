@@ -5,8 +5,9 @@
  */
 import type { GameState } from "./game";
 import { addDaysToKey, mondayOfKey } from "./day-key";
-import { APP_CLOSED_QUESTS, QUEST_POOL, getTodaysQuests, type QuestTemplate } from "./quests";
+import { UNPAID_MISSIONS, getTodaysQuests, isJournalConfirmed, questById, type QuestTemplate } from "./quests";
 import type { DayMode, ReasonKey } from "./quest-engine";
+import { checkMissions, type MissionData, type MissionId } from "./missions";
 
 export type DayStatus = "done" | "rest" | "shield" | "none" | "noData" | "today" | "future" | "beforeStart";
 
@@ -94,18 +95,42 @@ export type PlanFocus = "bias" | "levels" | "events" | "limits" | "checklist" | 
 
 export const planHref = (focus: PlanFocus) => `/journal?tab=plan&focus=${focus}`;
 
-/** Where the journal closes each quest the app checks: straight to the field that closes it. */
+/** A new note of a template opens its form on the Notes tab (`/journal?tab=notes&new=…`). */
+export const newNoteHref = (template: "idea" | "lesson" | "weekly_mistake" | "backtest") => `/journal?tab=notes&new=${template}`;
+
+/** Where the journal closes each quest the app checks: straight to the field or form that closes it. */
 export const JOURNAL_LINK: Record<string, string> = {
   q_tradelog: "/journal?tab=trades",
   q_bias: planHref("bias"),
   q_riskcheck: planHref("limits"),
   q_reflect: planHref("review"),
+  // the missions of catalog 3 (QH-6.3)
+  m_trade_review: "/journal?tab=trades",
+  m_observation: newNoteHref("idea"),
+  m_backtest: newNoteHref("backtest"),
+  m_lesson: newNoteHref("lesson"),
+  m_day_state: planHref("review"),
+  m_mistake: newNoteHref("weekly_mistake"),
+  m_plan_tomorrow: "/journal?tab=plan&day=tomorrow",
 };
 
 /** The exact place for a journal quest, from why it is still open (risk: limits first, then the «limits checked» item). */
 export function journalHref(questId: string, reason?: ReasonKey | null): string {
   if (questId === "q_riskcheck" && reason === "riskNotChecked") return planHref("checklist");
+  if (questId === "q_bias" && reason === "noLevels") return planHref("levels");
   return JOURNAL_LINK[questId] || "/journal";
+}
+
+/**
+ * Which new missions (catalog 3, no reward yet) the saved journal confirms today, in slot order — one record confirms one
+ * mission and never more than three a day (lib/missions.ts). Only for display: nothing is saved or given.
+ */
+export function missionLiveDone(ids: string[], data: MissionData, dayKey: string): Record<string, boolean> {
+  const missions = ids.filter((id) => UNPAID_MISSIONS.has(id)) as MissionId[];
+  if (missions.length === 0) return {};
+  const out: Record<string, boolean> = {};
+  for (const c of checkMissions(missions, data, dayKey).checks) if (c.done) out[c.id] = true;
+  return out;
 }
 
 /** Self-reported quests that belong to the evening: never the first suggestion of a day. */
@@ -117,11 +142,19 @@ const PREPARATION: readonly string[] = ["q_bias", "q_riskcheck"];
  * The one useful next action of the active mode: the day's preparation in the journal first (trading), then the core
  * quests, then the day review, and evening habits last. Never a quest put off for today.
  */
-export function nextStep(state: ViewState, core: QuestTemplate[], mode: DayMode = "trading", reasonOf?: (questId: string) => ReasonKey | null): NextStep {
+export function nextStep(
+  state: ViewState,
+  core: QuestTemplate[],
+  mode: DayMode = "trading",
+  reasonOf?: (questId: string) => ReasonKey | null,
+  liveDone: Record<string, boolean> = {}
+): NextStep {
   if (state.isRestDay || mode === "rest") return { kind: "rest" };
-  const open = (id: string) => !state.completedQuestsToday[id] && !state.passedQuestsToday[id];
-  const tpl = (id: string) => core.find((q) => q.id === id) || QUEST_POOL.find((q) => q.id === id);
-  const reviewOpen = open("q_reflect") && (mode === "trading" || mode === "study" || core.some((q) => q.id === "q_reflect"));
+  const open = (id: string) => !state.completedQuestsToday[id] && !liveDone[id] && !state.passedQuestsToday[id];
+  const tpl = (id: string) => core.find((q) => q.id === id) || questById(id);
+  // catalog 3: the day review is a step only when it is one of the day's missions (a set before catalog 3 keeps its rule)
+  const catalog3 = core.some((q) => UNPAID_MISSIONS.has(q.id));
+  const reviewOpen = open("q_reflect") && (core.some((q) => q.id === "q_reflect") || (!catalog3 && (mode === "trading" || mode === "study")));
   const order: string[] = [
     ...(mode === "trading" ? PREPARATION.filter(open) : []),
     ...core.filter((q) => open(q.id) && q.id !== "q_reflect" && !EVENING_QUESTS.has(q.id)).map((q) => q.id),
@@ -131,11 +164,11 @@ export function nextStep(state: ViewState, core: QuestTemplate[], mode: DayMode 
   const id = order.find((x) => !!tpl(x));
   const quest = id ? tpl(id) : undefined;
   if (!quest) return { kind: "done" };
-  if (APP_CLOSED_QUESTS.has(quest.id)) return { kind: "journal", quest, href: journalHref(quest.id, reasonOf?.(quest.id)) };
+  if (isJournalConfirmed(quest.id)) return { kind: "journal", quest, href: journalHref(quest.id, reasonOf?.(quest.id)) };
   return { kind: "quest", quest };
 }
 
 /** A quest of the history: checked by the journal or ticked by the person. */
 export function historySource(questId: string): "journal" | "self" {
-  return APP_CLOSED_QUESTS.has(questId) ? "journal" : "self";
+  return isJournalConfirmed(questId) ? "journal" : "self";
 }

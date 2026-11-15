@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Trade, Account } from "@/lib/journal/types";
+import { Trade, Account, chosenBias } from "@/lib/journal/types";
 import { CalendarDayStat } from "@/lib/journal/stats";
 import { useJournal } from "@/lib/journal/context";
 import { useApp } from "@/lib/context";
@@ -132,10 +132,10 @@ export const DayTradesModal: React.FC<DayTradesModalProps> = ({
               )}
             </div>
 
-            {plan.bias && plan.bias.length > 0 && (
+            {chosenBias(plan.bias).length > 0 && (
               <div className="flex flex-wrap gap-1 items-center text-[11px]">
                 <span className="text-mu">{dict.journal.tradingPlan.biasTitle}:</span>
-                {plan.bias.map((b, idx) => (
+                {chosenBias(plan.bias).map((b, idx) => (
                   <span
                     key={idx}
                     className={`px-1.5 py-0.2 rounded font-bold text-[10px] ${

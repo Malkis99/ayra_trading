@@ -93,10 +93,12 @@ describe("QH-5 history: 12 weeks of saved days", () => {
 
   it("a day with a mode change and a replacement is a snapshot day with its missions", () => {
     let s = started("2026-11-03");
-    const id = s.questDay!.core.find((x) => !["q_bias", "q_riskcheck", "q_reflect", "q_tradelog"].includes(x))!;
+    // catalog 3: an extra is replaced (missions never are); two trading missions close, then the day turns to study and
+    // the two done slots keep their place
+    const id = s.questDay!.bonus[0];
     s = replaceQuest(s, id, [...s.questDay!.core, ...s.questDay!.bonus], at("2026-11-03T07:00:00Z")).state;
-    s = setDayMode(s, "study", at("2026-11-03T08:00:00Z")).state;
     s = tickAll(s, "2026-11-03", 2);
+    s = setDayMode(s, "study", at("2026-11-03T10:00:00Z")).state;
     s = checkAndApplyDateResets(s, at("2026-11-04T06:00:00Z"));
     const d = historyMap(s, "2026-11-04").flat().find((x) => x.key === "2026-11-03")!;
     expect(d).toMatchObject({ source: "snapshot", mode: "study", core: { done: 2, total: 3 } });

@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from "react";
 import { CalendarCheck, ChevronDown, NotebookPen, Plus, Ban } from "lucide-react";
 import type { Trade, TradingPlan } from "@/lib/journal/types";
+import { chosenBias } from "@/lib/journal/types";
 import { summarizeToday } from "@/lib/journal/overview";
 import { formatString } from "@/lib/i18n";
 import type { Dictionary } from "@/lib/i18n/types";
@@ -96,9 +97,9 @@ export function TodayPanel({
         </div>
 
         <Block title={t.todayPlan}>
-          {plan && plan.bias.length > 0 ? (
+          {plan && chosenBias(plan.bias).length > 0 ? (
             <ul className="flex flex-wrap gap-1.5">
-              {plan.bias.map((b, i) => (
+              {chosenBias(plan.bias).map((b, i) => (
                 <li key={`${b.instrument}-${i}`} className={cn("rounded-full border px-2.5 py-1 text-xs font-semibold", BIAS_TONE[b.direction])}>
                   {b.instrument} · {t.bias[b.direction]}
                 </li>

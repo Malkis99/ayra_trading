@@ -35,10 +35,138 @@ export interface QuestTemplate {
 export const APP_CLOSED_QUESTS: ReadonlySet<string> = new Set(["q_tradelog", "q_bias", "q_riskcheck", "q_reflect"]);
 
 /**
+ * The verifiable missions of QH-6 that are new in catalog 3 (docs/quest-hub-qh6-spec.md, 2). They are confirmed only by
+ * saved journal data (lib/missions.ts), are never ticked or replaced, and give nothing yet: their reward is wired in
+ * QH-6.4. Not part of QUEST_POOL (the pool of quests a day may offer as extras).
+ */
+export const MISSION_TEMPLATES: QuestTemplate[] = [
+  {
+    id: "m_trade_review",
+    category: "Trading",
+    durationMinutes: 15,
+    difficulty: "Medium",
+    xpReward: 0,
+    coinsReward: 0,
+    statKey: "Trading",
+    verificationType: "JournalCheck",
+    titleKey: "quest.m_trade_review.title",
+    fallbackTitleRu: "Разбор сделок",
+    fallbackTitleEn: "Trade review",
+    whyReasonKey: "quest.m_trade_review.why",
+    fallbackWhyRu: "Разбор прошлой сделки: причина входа, эмоции и оценка исполнения.",
+    fallbackWhyEn: "Review a past trade: entry reason, emotions and execution rating.",
+  },
+  {
+    id: "m_observation",
+    category: "Trading",
+    durationMinutes: 15,
+    difficulty: "Medium",
+    xpReward: 0,
+    coinsReward: 0,
+    statKey: "Trading",
+    verificationType: "JournalCheck",
+    titleKey: "quest.m_observation.title",
+    fallbackTitleRu: "Наблюдение",
+    fallbackTitleEn: "Observation",
+    whyReasonKey: "quest.m_observation.why",
+    fallbackWhyRu: "Разбор графика без сделки: что видно и какой вывод.",
+    fallbackWhyEn: "Study a chart without a trade: what you see and what you conclude.",
+  },
+  {
+    id: "m_backtest",
+    category: "Discipline",
+    durationMinutes: 30,
+    difficulty: "Medium",
+    xpReward: 0,
+    coinsReward: 0,
+    statKey: "Discipline",
+    verificationType: "JournalCheck",
+    titleKey: "quest.m_backtest.title",
+    fallbackTitleRu: "Бэктест",
+    fallbackTitleEn: "Backtest",
+    whyReasonKey: "quest.m_backtest.why",
+    fallbackWhyRu: "Проверка сетапа на истории и сохранённый результат.",
+    fallbackWhyEn: "Test a setup on history and save the result.",
+  },
+  {
+    id: "m_lesson",
+    category: "Discipline",
+    durationMinutes: 10,
+    difficulty: "Medium",
+    xpReward: 0,
+    coinsReward: 0,
+    statKey: "Discipline",
+    verificationType: "JournalCheck",
+    titleKey: "quest.m_lesson.title",
+    fallbackTitleRu: "Урок",
+    fallbackTitleEn: "Lesson",
+    whyReasonKey: "quest.m_lesson.why",
+    fallbackWhyRu: "Короткий вывод из учёбы своими словами.",
+    fallbackWhyEn: "A short takeaway from your study, in your own words.",
+  },
+  {
+    id: "m_day_state",
+    category: "Psychology",
+    durationMinutes: 5,
+    difficulty: "Medium",
+    xpReward: 0,
+    coinsReward: 0,
+    statKey: "Psychology",
+    verificationType: "JournalCheck",
+    titleKey: "quest.m_day_state.title",
+    fallbackTitleRu: "Состояние дня",
+    fallbackTitleEn: "Day state",
+    whyReasonKey: "quest.m_day_state.why",
+    fallbackWhyRu: "Оценка дня и эмоции — без текста.",
+    fallbackWhyEn: "Rate the day and name the emotions — no text needed.",
+  },
+  {
+    id: "m_mistake",
+    category: "Psychology",
+    durationMinutes: 15,
+    difficulty: "Medium",
+    xpReward: 0,
+    coinsReward: 0,
+    statKey: "Psychology",
+    verificationType: "JournalCheck",
+    titleKey: "quest.m_mistake.title",
+    fallbackTitleRu: "Разбор ошибки",
+    fallbackTitleEn: "Mistake review",
+    whyReasonKey: "quest.m_mistake.why",
+    fallbackWhyRu: "Разбор одной прошлой ошибки и что изменить.",
+    fallbackWhyEn: "Review one past mistake and what to change.",
+  },
+  {
+    id: "m_plan_tomorrow",
+    category: "Discipline",
+    durationMinutes: 10,
+    difficulty: "Medium",
+    xpReward: 0,
+    coinsReward: 0,
+    statKey: "Discipline",
+    verificationType: "JournalCheck",
+    titleKey: "quest.m_plan_tomorrow.title",
+    fallbackTitleRu: "План на завтра",
+    fallbackTitleEn: "Plan for tomorrow",
+    whyReasonKey: "quest.m_plan_tomorrow.why",
+    fallbackWhyRu: "Черновик плана следующего дня.",
+    fallbackWhyEn: "A draft plan for the next day.",
+  },
+];
+
+/** Missions confirmed by the journal that give no reward yet (QH-6.4). */
+export const UNPAID_MISSIONS: ReadonlySet<string> = new Set(MISSION_TEMPLATES.map((q) => q.id));
+
+/** Confirmed by the journal, never ticked by hand and never replaced: the app-closed quests and the new missions. */
+export const JOURNAL_CONFIRMED: ReadonlySet<string> = new Set([...APP_CLOSED_QUESTS, ...UNPAID_MISSIONS]);
+export const isJournalConfirmed = (id: string): boolean => JOURNAL_CONFIRMED.has(id);
+
+/**
  * What a quest really gives. Quests the app closes itself are paid the same (lib/game.ts: QUEST_XP and QUEST_COINS),
  * whatever their card said before; self-reported quests give their XP and no coins.
  */
 export function questReward(q: Pick<QuestTemplate, "id" | "xpReward" | "coinsReward">): { xp: number; coins: number } {
+  if (UNPAID_MISSIONS.has(q.id)) return { xp: 0, coins: 0 };
   return APP_CLOSED_QUESTS.has(q.id) ? { xp: GAME_CONFIG.QUEST_XP, coins: GAME_CONFIG.QUEST_COINS } : { xp: q.xpReward, coins: 0 };
 }
 
@@ -394,6 +522,11 @@ export const QUEST_POOL: QuestTemplate[] = [
   },
 ];
 
+/** A quest or a mission by id (the pool and the catalog-3 missions); undefined for an unknown id. */
+export function questById(id: string): QuestTemplate | undefined {
+  return QUEST_POOL.find((q) => q.id === id) || MISSION_TEMPLATES.find((q) => q.id === id);
+}
+
 /** The day's quests from a pool by the date alone (the pool defaults to every quest, as before Q2). */
 export function getDeterministicDailyQuests(dateStr: string, sourcePool: readonly QuestTemplate[] = QUEST_POOL): {
   core: QuestTemplate[];
@@ -520,7 +653,7 @@ export function pickReplacement(
   if (!original) return null;
   const maxXp = questReward(original).xp;
   const candidates = allowed.filter(
-    (q) => q.id !== originalId && !excluded.has(q.id) && !APP_CLOSED_QUESTS.has(q.id) && q.xpReward <= maxXp
+    (q) => q.id !== originalId && !excluded.has(q.id) && !JOURNAL_CONFIRMED.has(q.id) && q.xpReward <= maxXp
   );
   if (candidates.length === 0) return null;
   // same category first, then a stable order for this day
@@ -537,7 +670,7 @@ export function getTodaysQuests(
   replacements: Record<string, string> = {},
   stored?: { core: string[]; bonus: string[] } | null
 ): { core: QuestTemplate[]; bonus: QuestTemplate[]; replacedFrom: Record<string, string> } {
-  const byId = (ids: string[]) => ids.map((id) => QUEST_POOL.find((q) => q.id === id)).filter((q): q is QuestTemplate => !!q);
+  const byId = (ids: string[]) => ids.map((id) => questById(id)).filter((q): q is QuestTemplate => !!q);
   const base = stored ? { core: byId(stored.core), bonus: byId(stored.bonus) } : getDeterministicDailyQuests(dayKey);
   const replacedFrom: Record<string, string> = {};
   // a replacement can be replaced again: follow the chain to the quest shown now
@@ -545,7 +678,7 @@ export function getTodaysQuests(
     let current = t;
     const seen = new Set<string>([t.id]);
     for (let toId = replacements[current.id]; toId && !seen.has(toId); toId = replacements[current.id]) {
-      const to = QUEST_POOL.find((x) => x.id === toId);
+      const to = questById(toId);
       if (!to) break;
       seen.add(toId);
       current = to;

@@ -8,8 +8,9 @@ import { useGame } from "@/lib/game-context";
 import { formatString } from "@/lib/i18n";
 import { GAME_CONFIG } from "@/lib/game-config";
 import { modeSetPreview, selfReportXpOn } from "@/lib/game";
-import { APP_CLOSED_QUESTS, QUEST_POOL, type QuestTemplate } from "@/lib/quests";
-import { journalHref, planHref } from "@/lib/quests-view";
+import { APP_CLOSED_QUESTS, UNPAID_MISSIONS, isJournalConfirmed, questById, type QuestTemplate } from "@/lib/quests";
+import { journalHref, missionLiveDone, planHref } from "@/lib/quests-view";
+import type { MissionData } from "@/lib/missions";
 import { endOfDayRitual, morningProtocol, noTradesOn, reasonFor, type DayMode, type JournalSnapshot, type MissionStep } from "@/lib/quest-engine";
 import { Button, buttonClasses } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
@@ -29,19 +30,21 @@ interface Props {
   /** The quest of the «next step»: it is marked in its own row (a mission, a day plan step or an extra). */
   nextQuestId?: string;
   snapshot: JournalSnapshot;
+  /** The saved journal the catalog-3 missions are checked on (display only: they give nothing yet). */
+  missionData: MissionData;
   onActivate: (m: DayMode) => void;
   onComplete: (q: QuestTemplate) => void;
   onPass: (q: QuestTemplate) => void;
   onReplace: (q: QuestTemplate) => void;
 }
 
-const byIds = (ids: string[]) => ids.map((id) => QUEST_POOL.find((q) => q.id === id)).filter((q): q is QuestTemplate => !!q);
+const byIds = (ids: string[]) => ids.map((id) => questById(id)).filter((q): q is QuestTemplate => !!q);
 
 /**
  * Today (docs/quest-hub-plan.md, 4.1): the three missions of the day are rows and the one focus; the next step is marked
  * inside its row. Below them, quieter: the day plan, extra challenges and everyday habits (self-reports) apart.
  */
-export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId, snapshot, onActivate, onComplete, onPass, onReplace }: Props) {
+export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId, snapshot, missionData, onActivate, onComplete, onPass, onReplace }: Props) {
   const { dict, lang } = useApp();
   const { gameState, gameDay } = useGame();
   const p = dict.questsPage.q2.page;
@@ -60,7 +63,10 @@ export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId
   const shownCore = preview ? byIds(preview.core) : core;
   const shownBonus = preview ? byIds(preview.bonus) : bonus;
   const carried = (preview ? preview.carried : gameState.questDay?.day === gameDay ? gameState.questDay.carried : undefined) || {};
-  const coreDone = shownCore.filter((q) => done[q.id]).length;
+  // catalog-3 missions: done when the saved journal confirms them today (shown only; their reward comes in QH-6.4)
+  const liveDone = useMemo(() => missionLiveDone(shownCore.map((q) => q.id), missionData, gameDay), [shownCore, missionData, gameDay]);
+  const isDone = (id: string) => !!done[id] || !!liveDone[id];
+  const coreDone = shownCore.filter((q) => isDone(q.id)).length;
 
   // when a quest was done today: the last entry of the day's history (shown on the row, in the account time zone)
   const doneAt = useMemo(() => {
@@ -78,12 +84,13 @@ export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId
   const journalCta = (id: string, key: ReturnType<typeof reasonKey>) => {
     const c = q2.journalCta;
     if (id === "q_riskcheck") return key === "riskNotChecked" ? c.q_riskcheckChecked : c.q_riskcheck;
+    if (id === "q_bias" && key === "noLevels") return c.q_biasLevels;
     return id in c ? c[id as keyof typeof c] : undefined;
   };
   const fromTitle = (id: string) => {
     if (preview) return undefined;
     const from = replacedFrom[id];
-    const tpl = from ? QUEST_POOL.find((x) => x.id === from) : undefined;
+    const tpl = from ? questById(from) : undefined;
     return tpl ? questShortTitle(dict, lang, tpl) : undefined;
   };
 
@@ -96,14 +103,14 @@ export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId
         quest={q}
         variant={variant}
         slot={slot}
-        done={!!done[q.id]}
+        done={isDone(q.id)}
         doneAt={doneAt[q.id]}
-        passed={!!passed[q.id] && !done[q.id]}
+        passed={!!passed[q.id] && !isDone(q.id)}
         readOnly={!isActiveView}
         next={isActiveView && q.id === nextQuestId}
         carriedLabel={from ? formatString(p.from, { mode: q2.modes[from] }) : undefined}
         replacedFromTitle={fromTitle(q.id)}
-        journalHref={APP_CLOSED_QUESTS.has(q.id) ? journalHref(q.id, key) : undefined}
+        journalHref={isJournalConfirmed(q.id) ? journalHref(q.id, key) : undefined}
         journalCta={journalCta(q.id, key)}
         busy={busyId === q.id}
         replaceUsed={gameState.replacementsUsedToday}
@@ -117,7 +124,9 @@ export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId
 
   const stepHref = (s: MissionStep) => (s.key === "risk" ? journalHref("q_riskcheck", reasonKey("q_riskcheck")) : planHref(s.key === "calendar" ? "events" : s.key));
   const protocol = viewed === "trading" ? morningProtocol(snapshot, gameDay, done).steps : [];
-  const ritual = viewed === "trading" || viewed === "study" ? endOfDayRitual(snapshot, gameDay, done).steps : [];
+  // catalog 3: the day review is a trading mission (a study day before catalog 3 kept it as its evening step)
+  const catalog3 = shownCore.some((q) => UNPAID_MISSIONS.has(q.id));
+  const ritual = viewed === "trading" || (viewed === "study" && !catalog3) ? endOfDayRitual(snapshot, gameDay, done).steps : [];
   const noTrades = noTradesOn(snapshot, gameDay);
   const challenges = shownBonus.filter((q) => !HABIT_QUESTS.has(q.id));
   const habits = shownBonus.filter((q) => HABIT_QUESTS.has(q.id));

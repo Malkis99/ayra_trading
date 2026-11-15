@@ -1,12 +1,15 @@
 import { test, expect, type Page } from "@playwright/test";
 import { baseGame, readGame, seedGame, totalXp } from "./helpers/quests";
+import { questById } from "../lib/quests";
 
 // One game day by the account time zone for Quests, Home and Profile; time zone changes and midnight never give a
 // closed day again and never lock today's quests (docs/quests-2.0-plan.md, 4.2).
 
+/** The first mission of Quests and its full title (Home and Profile show the full title, Quests the short one). */
 async function firstCoreTitleOnQuests(page: Page) {
   await page.goto("/quests");
-  return (await page.locator('[data-testid^="quest-card-"] h3').first().textContent())?.trim();
+  const id = ((await page.locator('[data-testid="missions"] [data-testid^="quest-card-"]').first().getAttribute("data-testid")) || "").replace("quest-card-", "");
+  return questById(id)?.fallbackTitleRu;
 }
 
 test.describe("Game day and time zones", () => {
@@ -36,7 +39,8 @@ test.describe("Game day and time zones", () => {
     await seedGame(context, baseGame({ lastQuestDate: "", profile: { ...baseGame().profile, timezone: "Pacific/Kiritimati" } }));
     await page.goto("/quests");
     await expect.poll(async () => (await readGame(page)).lastQuestDate).toBe("2026-11-13");
-    const card = page.locator('[data-testid^="quest-card-"]').filter({ has: page.getByTestId("quest-badge-self") }).first();
+    const first = page.locator('[data-testid^="quest-card-"]').filter({ has: page.getByTestId("quest-complete") }).first();
+    const card = page.getByTestId(((await first.getAttribute("data-testid")) || "").trim());
     await card.getByTestId("quest-complete").click();
     await expect(card.getByTestId("quest-done")).toBeVisible();
     const xp1 = totalXp(await readGame(page));
@@ -56,7 +60,7 @@ test.describe("Game day and time zones", () => {
     }
     // the quest done earlier stays done, the others stay open
     await expect(page.getByTestId("quest-done").first()).toBeVisible();
-    await expect(page.locator('[data-testid^="quest-card-"]').filter({ has: page.getByTestId("quest-badge-self") }).getByTestId("quest-complete").first()).toBeVisible();
+    await expect(page.locator('[data-testid^="quest-card-"]').getByTestId("quest-complete").first()).toBeVisible();
   });
 
   test("midnight while the tab is open: a new day once, yesterday's rewards are not given again", async ({ context, page }) => {
