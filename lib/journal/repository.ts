@@ -19,6 +19,19 @@ import { sanitizePreferences } from "./preferences";
 import { stampReview } from "./backtest";
 import type { JournalPreferences } from "./types";
 
+/**
+ * `firstSavedAt` of a day plan the person saves: the time of its first real save, never taken from the saved copy.
+ * - a time already saved is kept;
+ * - a live plan saved before the field existed gets none (it was not made now; the checks fall back to createdAt);
+ * - a new plan, or one brought back after deletion, gets `now`.
+ */
+export function stampFirstSave(prev: TradingPlan | undefined, next: TradingPlan, now: string): TradingPlan {
+  const { firstSavedAt: _ignored, ...rest } = next;
+  if (prev?.firstSavedAt && !prev.deletedAt) return { ...rest, firstSavedAt: prev.firstSavedAt };
+  if (prev && !prev.deletedAt) return rest;
+  return { ...rest, firstSavedAt: now };
+}
+
 const JOURNAL_STORAGE_KEY = "ayra_journal_v1";
 /**
  * v5: primaryPropAccountId stored explicitly.
@@ -263,7 +276,7 @@ export class LocalStorageJournalRepository implements JournalRepository {
 
   saveTradingPlan(plan: TradingPlan): TradingPlan {
     const data = this.loadData();
-    const saved = this.upsert(data.plans, plan, (p) => p.date === plan.date);
+    const saved = this.upsert(data.plans, stampFirstSave(data.plans.find((p) => p.date === plan.date), plan, this.now()), (p) => p.date === plan.date);
     this.saveData(data);
     return saved;
   }
@@ -307,7 +320,11 @@ export class LocalStorageJournalRepository implements JournalRepository {
 
   saveNote(note: Note): Note {
     const data = this.loadData();
-    const saved = this.upsert(data.notes, note, (n) => n.id === note.id);
+    // a note that came from an import stays marked as imported after any edit (it never closes a mission, QH-6.2):
+    // the note forms build a fresh object and would otherwise drop the mark
+    const prev = data.notes.find((n) => n.id === note.id);
+    const kept = prev?.importBatchId && !note.importBatchId ? { ...note, importBatchId: prev.importBatchId, importedAt: prev.importedAt } : note;
+    const saved = this.upsert(data.notes, kept, (n) => n.id === note.id);
     this.saveData(data);
     return saved;
   }

@@ -386,6 +386,17 @@ export interface TradingPlan extends SyncMeta {
   checklist: PlanChecklistItem[];
   note?: string; // Max 500 chars
   review?: DayReview;
+  /**
+   * The person confirmed today that the direction and the zones of interest of a plan made in advance are still current
+   * (QH-6, owner decision В16). Only this makes a plan made on an earlier day count for today’s «Preparation».
+   */
+  prepConfirmedAt?: string;
+  /**
+   * The first real save of the plan (QH-6.2 review), set by the repository and never moved. `createdAt` is when the
+   * plan screen opened the draft and stays as it was: the existing plan-discipline rewards read it. Plans saved before
+   * this field existed have none.
+   */
+  firstSavedAt?: string;
   createdAt: string; // ISO String
   updatedAt: string; // ISO String
 }
