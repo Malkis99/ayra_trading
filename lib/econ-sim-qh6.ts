@@ -14,6 +14,7 @@
 import {
   INITIAL_GAME_STATE,
   checkAndApplyDateResets,
+  acceptMission,
   claimDailyReward,
   claimMissions,
   completeQuest,
@@ -273,6 +274,7 @@ export function simulateProposed(player: Player, days = 90, start = "2026-11-16"
     s = checkAndApplyDateResets(s, at(day, "06:00"));
     if (!b.open) continue;
     if (b.mode !== s.questDay?.mode) s = setDayMode(s, b.mode, at(day, "06:05")).state;
+    for (const id of s.questDay?.core || []) s = acceptMission(s, id, at(day, "06:06")).state; // QH-6.6: the day's quests accepted
     s = claimDailyReward(s, at(day, "07:00")).state;
     const done = () => Object.keys(s.completedQuestsToday).filter((id) => (APP_CLOSED_QUESTS.has(id) && id !== "q_tradelog") || id.startsWith("m_")).length;
     const done0 = done();
@@ -281,17 +283,22 @@ export function simulateProposed(player: Player, days = 90, start = "2026-11-16"
       // Preparation needs a direction and a POI; risk needs limits and the checklist item; review 40+ characters.
       // The real journal rule closes the existing quests at today's rate (variant A = today's QUEST_XP/QUEST_COINS).
       const prep = plan(day, { levels: b.missions >= 1, review: false });
-      if (b.missions >= 1) s = evaluatePlanQuestClosure(s, prep, [], [prep], j.notes, at(day, "07:30")).state;
+      if (b.missions >= 1) {
+        s = evaluatePlanQuestClosure(s, prep, [], [prep], j.notes, at(day, "07:30")).state;
+        s = claimMissions(s, { plans: [prep] as never, notes: j.notes as never, trades: [], timezone: "UTC" }, at(day, "07:31")).state; // «Verify»
+      }
       s = journalDay(s, j, day, i, b.trades, b.extras);
       if (b.extras) s = note(s, j, day, `n${i}`, "lesson", "15:00");
       if (b.missions >= 3) {
         const p = plan(day, { levels: true, review: true });
         s = evaluatePlanQuestClosure(s, p, j.trades.filter((t) => t.openedAt.startsWith(day)), [p], j.notes, at(day, "20:05")).state;
+        s = claimMissions(s, { plans: [p] as never, notes: j.notes as never, trades: [], timezone: "UTC" }, at(day, "20:06")).state; // «Verify»
       }
       // the maximiser tries to close the same missions again (a second tab, a reload): nothing more
       if (player === "maximiser") {
         const p = plan(day, { levels: true, review: true });
         s = evaluatePlanQuestClosure(s, p, [], [p], j.notes, at(day, "20:10")).state;
+        s = claimMissions(s, { plans: [p] as never, notes: j.notes as never, trades: [], timezone: "UTC" }, at(day, "20:11")).state; // «Verify»
       }
     } else if (b.mode === "study" || b.mode === "recovery") {
       const ids = b.mode === "recovery" ? RECOVERY : j.trades.length > 0 ? STUDY : STUDY_NO_TRADES;
@@ -365,6 +372,7 @@ export function simulateLive(player: Player, days = 90, start = "2026-11-16"): O
     s = recordJournalTrades(s, firstTradeDay(trades, "UTC"), at(day, "06:00")); // the journal is read
     if (!b.open) continue;
     if (b.mode !== s.questDay?.mode) s = setDayMode(s, b.mode, at(day, "06:05")).state;
+    for (const id of s.questDay?.core || []) s = acceptMission(s, id, at(day, "06:06")).state; // QH-6.6: the day's quests accepted
     s = claimDailyReward(s, at(day, "07:00")).state;
     const done0 = paidMissions();
     const claim = (time: string) => {
@@ -433,6 +441,7 @@ export function simulateLive(player: Player, days = 90, start = "2026-11-16"): O
       notes.push({ id: `imp${i}`, templateKey: "lesson", body: `Imported lesson ${i} from another app, long enough to look like a real lesson.`, tags: [], pinned: false, createdAt: iso(day, "21:33"), updatedAt: iso(day, "21:33"), archivedAt: null, importBatchId: `batch${i}`, importedAt: iso(day, "21:33") });
       for (const m of ["study", "recovery", "trading"] as DayMode[]) {
         s = setDayMode(s, m, at(day, "21:40")).state;
+        for (const id of s.questDay?.core || []) s = acceptMission(s, id, at(day, "21:40")).state;
         claim("21:41");
       }
     }

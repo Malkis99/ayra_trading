@@ -65,7 +65,9 @@ export default function HomePage() {
   const handleQuestClick = (questId: string, fallbackTitle: string, category: string, xp: number) => {
     if (gameState.completedQuestsToday[questId]) return;
     if (isJournalConfirmed(questId)) {
-      router.push(journalHref(questId));
+      // QH-6.6: a mission not accepted yet is accepted on Quests; an accepted one leads to its journal form
+      const accepted = gameState.questAccepted?.day === todayIso && !!(gameState.questAccepted.at as Record<string, string | undefined>)[questId];
+      router.push(accepted ? journalHref(questId) : "/quests");
       return;
     }
     const res = completeQuest(questId, fallbackTitle, category, xp);

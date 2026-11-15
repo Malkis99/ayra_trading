@@ -28,6 +28,7 @@ async function setUp(page: Page, request: import("@playwright/test").APIRequestC
       g.lastQuestDate = today;
       g.journalFirstTradeDay = null;
       g.questDay = { day: today, mode: "study", catalogVersion: 3, core: ["m_observation", "m_backtest", "m_lesson"], bonus: ["q_read_pages", "q_logic_puzzle"], studyFirst: "m_observation" };
+      g.questAccepted = { day: today, at: { m_lesson: new Date().toISOString() } }; // QH-6.6: the quest is accepted
       g.completedQuestsToday = {};
       localStorage.setItem(gk, JSON.stringify(g));
       const jk = `ayra:${id}:ayra_journal_v1`;
@@ -67,6 +68,9 @@ test.describe("Quest Hub: missions and a loading cloud journal (QH-6.5)", () => 
     release = true;
     for (const r of held.splice(0)) await r.continue();
     await expect(page.getByTestId("missions-syncing")).toHaveCount(0, { timeout: 30_000 });
+    // QH-6.6: after the sync the quest is ready; «Verify» pays it
+    await expect(lesson).toHaveAttribute("data-quest", "ready");
+    await lesson.getByTestId("quest-verify").click();
     await expect(lesson).toHaveAttribute("data-done", "true");
     await expect(lesson.getByTestId("quest-done")).toContainText("начислено +40 XP · +10 Coins");
     const after = await game(page, userId);

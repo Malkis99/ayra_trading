@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   INITIAL_GAME_STATE,
+  acceptMission,
   checkAndApplyDateResets,
+  claimMissions,
   completeQuest,
   completeSelfReportQuest,
   evaluatePlanQuestClosure,
@@ -238,9 +240,16 @@ describe("QH-6.3 mode changes: three missions, paid ones keep their slot, nothin
   });
 });
 
-describe("QH-6.3 the trading missions close by the QH-6.2 checks (same rates)", () => {
+describe("QH-6.3 the trading missions close by the QH-6.2 checks (same rates; QH-6.6: accepted, then verified)", () => {
   const when = at(`${DAY}T08:00:00Z`);
-  const close = (p: TradingPlan, s = started()) => evaluatePlanQuestClosure(s, p, [], [p], [], when);
+  // the day's missions accepted, the plan saved, then «Verify» (the one claim)
+  const close = (p: TradingPlan, s = started()) => {
+    let acc = s;
+    for (const id of acc.questDay?.core || []) acc = acceptMission(acc, id, when).state;
+    const saved = evaluatePlanQuestClosure(acc, p, [], [p], [], when);
+    const r = claimMissions(saved.state, { plans: [p], notes: [], trades: [], timezone: "UTC" }, when);
+    return { state: r.state, closedQuests: r.claimed as string[] };
+  };
 
   it("Preparation needs a chosen direction and a level with a price; Risk control needs the standard item", () => {
     expect(close(plan()).closedQuests).toEqual(expect.arrayContaining(["q_bias", "q_riskcheck"]));

@@ -18,7 +18,7 @@ import { Toast } from "@/components/Toast";
 import { Language } from "@/lib/i18n/types";
 import { JournalProvider } from "@/lib/journal/context";
 import { JournalTradesSync } from "@/components/JournalTradesSync";
-import { MissionClaimSync } from "@/components/MissionClaimSync";
+import { QuestReadyBar } from "@/components/QuestReadyBar";
 import { ProfileTimezoneSync } from "@/components/ProfileTimezoneSync";
 import { CloudDownloadNotice, GlobalInitialSyncDialog } from "@/components/journal/InitialSyncDialog";
 import { SyncConflictDialog } from "@/components/journal/SyncConflictDialog";
@@ -294,8 +294,8 @@ export function Shell({
             <ProfileTimezoneSync />
             {/* The journal's trades for the day's study mission (catalog 3); renders nothing */}
             <JournalTradesSync />
-            {/* The day's missions are paid after a journal save (QH-6.4); renders nothing */}
-            <MissionClaimSync />
+            {/* QH-6.6: an accepted quest whose record is saved is ready to verify (the bar pays nothing by itself) */}
+            <QuestReadyBar />
           </JournalProvider>
         </GameProvider>
       </AuthProvider>

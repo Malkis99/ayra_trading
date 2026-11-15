@@ -6,6 +6,7 @@ import { ArrowRight, Check, MoreHorizontal, RotateCcw, XCircle } from "lucide-re
 import { useApp } from "@/lib/context";
 import { formatString } from "@/lib/i18n";
 import { isJournalConfirmed, questReward, type QuestTemplate } from "@/lib/quests";
+import type { QuestState } from "@/lib/game";
 import { JOURNAL_LINK } from "@/lib/quests-view";
 import { Button, buttonClasses } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
@@ -32,6 +33,14 @@ export interface QuestItemProps {
   journalCta?: string;
   /** The journal has a record for it, but the cloud copy is still loading: it is paid after the sync (QH-6.5). */
   waitingSync?: boolean;
+  /** QH-6.6: the quest flow of a catalog-3 mission (absent: the quest has no acceptance, as before). */
+  questState?: QuestState;
+  /** Why the last «Verify» did not confirm it (already translated), shown under the criterion. */
+  verifyFailure?: string;
+  /** It was completed by a «Verify» just now: a short completion effect and the reward gained. */
+  justCompleted?: boolean;
+  onAccept?: () => void;
+  onVerify?: () => void;
   busy?: boolean;
   replaceUsed: number;
   replaceMax: number;
@@ -46,7 +55,7 @@ export interface QuestItemProps {
  * a line); an extra is a quieter compact row. A self-report is never shown as a journal check.
  */
 export function QuestItem(props: QuestItemProps) {
-  const { quest, variant, slot, done, doneAt, passed, readOnly, next, carriedLabel, replacedFromTitle, journalHref, journalCta, waitingSync, busy } = props;
+  const { quest, variant, slot, done, doneAt, passed, readOnly, next, carriedLabel, replacedFromTitle, journalHref, journalCta, waitingSync, questState, verifyFailure, justCompleted, busy } = props;
   const { dict, lang } = useApp();
   const c = dict.questsPage.q1.card;
   const p = dict.questsPage.q2.page;
@@ -63,8 +72,54 @@ export function QuestItem(props: QuestItemProps) {
   const canAct = !done && !isPassed && !readOnly;
   const size = mission ? "md" : "sm";
   const badge = <VerificationBadge source={appClosed ? "journal" : "self"} label={appClosed ? p.journal : p.self} />;
+  const q = dict.questsPage.q2.quest;
+  const href = journalHref || JOURNAL_LINK[quest.id] || "/journal";
+  const quested = mission && !!questState && !done && !isPassed && !readOnly;
 
-  const action = done ? null : isPassed ? (
+  // QH-6.6: accept → go to the Journal → verify (the verification pays through the one claim; nothing here pays)
+  const goLink = (primary: boolean) => (
+    <Link
+      href={href}
+      data-testid="quest-journal-link"
+      aria-label={formatString(q.goJournalAria, { title })}
+      className={buttonClasses(primary ? "primary" : "secondary", size, "gap-2 whitespace-nowrap")}
+    >
+      {q.goJournal}
+      {primary && <ArrowRight size={16} aria-hidden="true" className="shrink-0" />}
+    </Link>
+  );
+  const verifyButton = (primary: boolean) => (
+    <Button
+      data-testid="quest-verify"
+      variant={primary ? "primary" : "secondary"}
+      size={size}
+      disabled={busy}
+      aria-busy={busy || undefined}
+      aria-label={busy ? undefined : formatString(q.verifyAria, { title })}
+      onClick={props.onVerify}
+    >
+      {busy ? q.verifying : q.verify}
+    </Button>
+  );
+  const questAction = !quested ? null : questState === "available" ? (
+    <Button
+      data-testid="quest-accept"
+      variant={next ? "primary" : "secondary"}
+      size={size}
+      disabled={busy}
+      aria-label={formatString(q.acceptAria, { title })}
+      onClick={props.onAccept}
+    >
+      {q.accept}
+    </Button>
+  ) : (
+    <div className="quest-actions">
+      {questState === "ready" ? verifyButton(true) : goLink(true)}
+      {questState === "ready" ? goLink(false) : verifyButton(false)}
+    </div>
+  );
+
+  const action = done ? null : quested ? questAction : isPassed ? (
     <span className="text-sm font-semibold text-mu" data-testid="quest-passed">
       {p.passed}
     </span>
@@ -155,8 +210,10 @@ export function QuestItem(props: QuestItemProps) {
       data-passed={isPassed ? "true" : undefined}
       data-state={state}
       aria-current={next ? "step" : undefined}
+      data-quest={questState}
       className={cn(
         "mission-row rounded-2xl border transition-colors",
+        done && justCompleted && "quest-just-done",
         done
           ? "border-line bg-s1/60"
           : next
@@ -178,12 +235,24 @@ export function QuestItem(props: QuestItemProps) {
       <div className="m-body min-w-0">
         {next && <p className="mb-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-vi">{m.next}</p>}
         <h3 className={cn("text-[15px] font-semibold leading-snug sm:text-base", done ? "text-tx/80" : "text-tx")}>{title}</h3>
+        {quested && questState !== "available" && (
+          <p className={cn("quest-status mt-1 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-bold", questState === "ready" ? "bg-success/[0.12] text-success" : "bg-vi/15 text-vi")} data-testid="quest-status" data-state={questState}>
+            <span aria-hidden="true" className={cn("h-1.5 w-1.5 rounded-full", questState === "ready" ? "bg-success" : "bg-vi")} />
+            {questState === "ready" ? q.ready : q.inProgress}
+          </p>
+        )}
         {!done && criterion && (
           <p className="mt-0.5 text-[13px] leading-snug text-mu" data-testid="quest-criterion">
             <span className="font-semibold text-tx/85">{m.doneWhen}</span> {criterion}
           </p>
         )}
         {notes}
+        {quested && verifyFailure && (
+          <p role="status" className="mt-1.5 rounded-lg border border-[#e5b98a]/40 bg-[#e5b98a]/[0.06] px-2.5 py-1.5 text-xs text-tx" data-testid="quest-verify-failure">
+            <span className="font-semibold text-[#e5b98a]">{q.failTitle}:</span> {verifyFailure}
+          </p>
+        )}
+        {quested && questState === "available" && <p className="mt-1 text-xs text-mu" data-testid="quest-accept-hint">{q.acceptHint}</p>}
         {!done && waitingSync && (
           <p className="mt-0.5 text-xs font-semibold text-[#e5b98a]" data-testid="quest-waiting-sync">
             {m.waitingSync}
@@ -194,6 +263,11 @@ export function QuestItem(props: QuestItemProps) {
             <Check size={14} aria-hidden="true" className="shrink-0" />
             {doneAt ? formatString(m.doneAt, { time: doneAt }) : m.done}
             <span className="m-done-reward font-normal text-mu">· {appClosed ? formatString(m.credited, { reward: rewardText }) : rewardText}</span>
+          </p>
+        )}
+        {done && justCompleted && (
+          <p role="status" className="quest-gain mt-1 inline-flex items-center gap-1.5 rounded-full bg-success/[0.12] px-2 py-0.5 text-xs font-bold text-success" data-testid="quest-gained">
+            {q.success} · {formatString(q.gained, { xp: reward.xp, coins: reward.coins })}
           </p>
         )}
         <div className="m-meta mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-mu">

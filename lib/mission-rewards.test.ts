@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   INITIAL_GAME_STATE,
+  acceptMission,
   checkAndApplyDateResets,
   claimMissions,
   completeSelfReportQuest,
@@ -66,10 +67,18 @@ const result = (over: Partial<BacktestResult> = {}): BacktestResult => ({
 const backtest = (id: string, r = result()) => note(id, "backtest", "Вывод: ретест работает в Лондоне, в Азии — нет; беру только лондонские входы.", { backtest: r });
 const data = (over: Partial<MissionData> = {}): MissionData => ({ plans: [], notes: [], trades: [], timezone: "UTC", ...over });
 
+/** QH-6.6: a mission is paid only once accepted. The tests of the payment rules accept the shown missions, then claim. */
+const acceptShown = (s: GameState, when: Date) => {
+  let next = checkAndApplyDateResets(s, when);
+  for (const id of next.questDay?.core || []) next = acceptMission(next, id, when).state;
+  return next;
+};
+const claim = (s: GameState, d: MissionData, when: Date) => claimMissions(acceptShown(s, when), d, when);
+
 describe("QH-6.4 a confirmed mission is paid once, from the saved journal", () => {
   it("40 XP + 10 Coins; the time and the reward go to the history; the record goes to the ledger", () => {
     const s = started();
-    const r = claimMissions(s, data({ plans: [plan()] }), t("08:00"));
+    const r = claim(s, data({ plans: [plan()] }), t("08:00"));
     expect(r.claimed).toEqual(["q_bias", "q_riskcheck"]);
     expect(r.xp).toBe(2 * GAME_CONFIG.QUEST_XP);
     expect(r.coins).toBe(2 * GAME_CONFIG.QUEST_COINS);
@@ -80,11 +89,11 @@ describe("QH-6.4 a confirmed mission is paid once, from the saved journal", () =
 
   it("a double click, the same save again, a reload or a later check pay nothing more", () => {
     const d = data({ plans: [plan()] });
-    let s = claimMissions(started(), d, t("08:00")).state;
+    let s = claim(started(), d, t("08:00")).state;
     const once = paid(s);
     for (const when of ["08:00", "08:01", "12:00", "23:59"]) {
-      s = claimMissions(s, d, t(when)).state;
-      s = claimMissions(JSON.parse(JSON.stringify(s)), { ...d, plans: [{ ...plan(), updatedAt: iso(when) }] }, t(when)).state; // a copy (reload), a new save
+      s = claim(s, d, t(when)).state;
+      s = claim(JSON.parse(JSON.stringify(s)), { ...d, plans: [{ ...plan(), updatedAt: iso(when) }] }, t(when)).state; // a copy (reload), a new save
     }
     expect(paid(s)).toEqual(once);
     expect(pendingMissionClaims(s, d, t("23:59"))!.fresh).toEqual([]);
@@ -101,19 +110,25 @@ describe("QH-6.4 a confirmed mission is paid once, from the saved journal", () =
     const d = data({ plans: [plan()] });
     const stale = JSON.parse(saved.raw) as GameState;
     const [a, b] = [tab(), tab()];
-    const ra = await a.applyLocked(() => stale, (fresh) => { const r = claimMissions(fresh, d, now); return { state: r.state, result: r.claimed.length }; });
-    const rb = await b.applyLocked(() => stale, (fresh) => { const r = claimMissions(fresh, d, now); return { state: r.state, result: r.claimed.length }; });
+    const ra = await a.applyLocked(() => stale, (fresh) => { const r = claim(fresh, d, now); return { state: r.state, result: r.claimed.length }; });
+    const rb = await b.applyLocked(() => stale, (fresh) => { const r = claim(fresh, d, now); return { state: r.state, result: r.claimed.length }; });
     expect([ra.saved && ra.result, rb.saved && rb.result]).toEqual([2, 0]);
     const final = JSON.parse(saved.raw) as GameState;
     expect(final.coins - stale.coins).toBe(2 * GAME_CONFIG.QUEST_COINS);
   });
 
-  it("the day plan's save pays the trading missions through the same claim (and its ledger)", () => {
-    const s = started();
-    const r = evaluatePlanQuestClosure(s, plan({ review: review() }), [], [plan({ review: review() })], [], t("19:05"));
-    expect(r.closedQuests).toEqual(["q_bias", "q_riskcheck", "q_reflect"]);
+  it("QH-6.6: the day plan's save pays no mission by itself (even an accepted one); the verification pays it once", () => {
+    const s = acceptShown(started(), t("07:00"));
+    const saved = evaluatePlanQuestClosure(s, plan({ review: review() }), [], [plan({ review: review() })], [], t("19:05"));
+    expect(saved.closedQuests).toEqual([]);
+    // only the journal's own plan and review XP (В13): no mission, no Coins, no history entry
+    expect(saved.state.coins).toBe(s.coins);
+    expect(saved.state.history.length).toBe(s.history.length);
+    expect(Object.keys(saved.state.completedQuestsToday)).toEqual([]);
+    const r = claimMissions(saved.state, data({ plans: [plan({ review: review() })] }), t("19:06"));
+    expect(r.claimed).toEqual(["q_bias", "q_riskcheck", "q_reflect"]);
     expect(r.state.missionLedger!.claims.q_reflect).toBe(`plan:${DAY}:review`);
-    // the plan saved again later and the bridge's claim after it: nothing more
+    // the plan saved again later and another verification: nothing more
     const again = claimMissions(evaluatePlanQuestClosure(r.state, plan({ review: review() }), [], [], [], t("19:10")).state, data({ plans: [plan({ review: review() })] }), t("19:11"));
     expect(paid(again.state)).toEqual(paid(r.state));
   });
@@ -123,12 +138,12 @@ describe("QH-6.4 one record, one mission; three a day; only the active set", () 
   it("the day review used by «Day state» does not also pay «Day review» after a mode change; another record does", () => {
     let s = setDayMode(started(), "recovery", t("07:00")).state;
     const d = data({ plans: [{ ...plan({ bias: [], levels: [], limits: {} }), review: review() }] });
-    s = claimMissions(s, d, t("19:05")).state;
+    s = claim(s, d, t("19:05")).state;
     expect(s.completedQuestsToday.m_day_state).toBe(true);
     s = setDayMode(s, "trading", t("19:10")).state;
-    expect(claimMissions(s, d, t("19:11")).claimed).toEqual([]);
+    expect(claim(s, d, t("19:11")).claimed).toEqual([]);
     const withNote = { ...d, notes: [note("s1", "session_review", "Итог сессии: два входа по плану, один пропуск без сожалений; риск держал в пределах лимита.")] };
-    expect(claimMissions(s, withNote, t("19:12")).claimed).toEqual(["q_reflect"]);
+    expect(claim(s, withNote, t("19:12")).claimed).toEqual(["q_reflect"]);
   });
 
   it("never more than three paid missions a day, whatever the mode changes", () => {
@@ -137,12 +152,12 @@ describe("QH-6.4 one record, one mission; three a day; only the active set", () 
       plans: [plan({ review: review() }), plan({ date: "2026-11-17", createdAt: iso("21:00"), firstSavedAt: iso("21:00") })],
       notes: [note("l1", "lesson", LESSON), note("i1", "idea", IDEA), note("w1", "weekly_mistake", MISTAKE), backtest("b1")],
     });
-    s = claimMissions(s, all, t("08:00")).state; // trading: three
+    s = claim(s, all, t("08:00")).state; // trading: three
     expect(Object.keys(s.missionLedger!.claims)).toHaveLength(3);
     const three = paid(s);
     for (const m of ["study", "recovery", "rest", "trading", "study"] as const) {
       s = setDayMode(s, m, t("20:00")).state;
-      s = claimMissions(s, all, t("20:01")).state;
+      s = claim(s, all, t("20:01")).state;
     }
     expect(paid(s)).toEqual(three);
     expect(Object.keys(s.missionLedger!.claims)).toHaveLength(3);
@@ -150,10 +165,10 @@ describe("QH-6.4 one record, one mission; three a day; only the active set", () 
 
   it("a mission of another mode is not paid (only the active set); a rest day pays nothing", () => {
     const d = data({ notes: [note("l1", "lesson", LESSON)] });
-    expect(claimMissions(started(), d, t("12:30")).claimed).toEqual([]); // trading day: «Lesson» is not in it
+    expect(claim(started(), d, t("12:30")).claimed).toEqual([]); // trading day: «Lesson» is not in it
     const rest = setDayMode(started(), "rest", t("07:00")).state;
     expect(pendingMissionClaims(rest, data({ plans: [plan()] }), t("08:00"))).toBeNull();
-    expect(paid(claimMissions(rest, data({ plans: [plan()] }), t("08:00")).state)).toEqual(paid(rest));
+    expect(paid(claim(rest, data({ plans: [plan()] }), t("08:00")).state)).toEqual(paid(rest));
   });
 
   it("study without trades: «Observation», «Backtest», «Lesson» are paid; a copied backtest result is not", () => {
@@ -161,9 +176,9 @@ describe("QH-6.4 one record, one mission; three a day; only the active set", () 
     expect(s.questDay!.core).toEqual(["m_observation", "m_backtest", "m_lesson"]);
     const earlier = backtest("b0", result());
     const d = data({ notes: [{ ...earlier, createdAt: iso("10:00", "2026-11-10") }, backtest("b1", result()), note("i1", "idea", IDEA), note("l1", "lesson", LESSON)] });
-    const r = claimMissions(s, d, t("13:00"));
+    const r = claim(s, d, t("13:00"));
     expect(r.claimed).toEqual(["m_observation", "m_lesson"]); // b1 is the same result as the earlier b0
-    s = claimMissions(r.state, { ...d, notes: [...d.notes, backtest("b2", result({ setups: 12, wins: 6, losses: 5, breakeven: 1 }))] }, t("14:00")).state;
+    s = claim(r.state, { ...d, notes: [...d.notes, backtest("b2", result({ setups: 12, wins: 6, losses: 5, breakeven: 1 }))] }, t("14:00")).state;
     expect(s.completedQuestsToday.m_backtest).toBe(true);
   });
 });
@@ -175,7 +190,7 @@ describe("QH-6.4 nothing old, imported or from another day is paid", () => {
     repo.importNotes([{ ...note("imp1", "lesson", LESSON), importBatchId: "b1", importedAt: iso("10:00") }, { ...backtest("imp2"), importBatchId: "b1" }]);
     repo.saveNote(note("imp1", "lesson", `${LESSON} Дописал сегодня.`));
     const s = setDayMode(started(), "study", t("07:00")).state;
-    const r = claimMissions(s, data({ notes: repo.getAllRecords().notes }), t("13:00"));
+    const r = claim(s, data({ notes: repo.getAllRecords().notes }), t("13:00"));
     expect(r.claimed).toEqual([]);
   });
 
@@ -188,19 +203,19 @@ describe("QH-6.4 nothing old, imported or from another day is paid", () => {
     });
     for (const mode of ["trading", "study", "recovery"] as const) {
       const s = setDayMode(started({ journalFirstTradeDay: "2026-11-10" }), mode, t("07:00")).state;
-      expect(claimMissions(s, old, t("09:00")).claimed).toEqual([]);
+      expect(claim(s, old, t("09:00")).claimed).toEqual([]);
     }
     // a restored account with a long history: its XP, Coins and history stay; nothing is paid for the old journal
     const restored = started({ xp: 120, level: 9, coins: 777, history: [{ questId: "q_bias", questTitle: "Bias", category: "trading", xp: 40, coins: 10, completedAt: "2026-10-01" }] });
-    const r = claimMissions(restored, old, t("09:00"));
+    const r = claim(restored, old, t("09:00"));
     expect(r.claimed).toEqual([]);
     expect(paid(r.state)).toEqual(paid(restored));
   });
 
   it("a clock moved back pays nothing", () => {
-    let s = claimMissions(started(), data({ notes: [] }), t("15:00")).state;
+    let s = claim(started(), data({ notes: [] }), t("15:00")).state;
     s = { ...s, lastSeenAt: Date.parse("2026-11-16T15:00:00.000Z") } as GameState;
-    const r = claimMissions(s, data({ plans: [plan()] }), t("09:00"));
+    const r = claim(s, data({ plans: [plan()] }), t("09:00"));
     expect(r.claimed).toEqual([]);
   });
 
@@ -208,17 +223,17 @@ describe("QH-6.4 nothing old, imported or from another day is paid", () => {
     // Tbilisi = UTC+4: 19:30 UTC is 23:30 on 11-16
     let s = setDayMode(started({}, "Asia/Tbilisi"), "study", t("06:30")).state;
     const late = data({ notes: [note("l1", "lesson", LESSON, { createdAt: "2026-11-16T19:30:00.000Z" })], timezone: "Asia/Tbilisi" });
-    s = claimMissions(s, late, at("2026-11-16T19:31:00Z")).state;
+    s = claim(s, late, at("2026-11-16T19:31:00Z")).state;
     expect(s.completedQuestsToday.m_lesson).toBe(true);
     const next = checkAndApplyDateResets(s, at("2026-11-16T20:30:00Z")); // 00:30 on 11-17
-    const r = claimMissions(setDayMode(next, "study", at("2026-11-16T20:31:00Z")).state, late, at("2026-11-16T20:32:00Z"));
+    const r = claim(setDayMode(next, "study", at("2026-11-16T20:31:00Z")).state, late, at("2026-11-16T20:32:00Z"));
     expect(r.claimed).toEqual([]);
   });
 });
 
 describe("QH-6.4 the rest of the economy stays as it is", () => {
   it("mission XP is not self-report XP (the 90 XP cap of self-reports is untouched)", () => {
-    let s = claimMissions(started(), data({ plans: [plan()] }), t("08:00")).state;
+    let s = claim(started(), data({ plans: [plan()] }), t("08:00")).state;
     expect(selfReportXpOn(s, DAY)).toBe(0);
     const extra = s.questDay!.bonus[0];
     s = completeSelfReportQuest(s, extra, extra, "Mental", 999, t("09:00")).state;
@@ -232,19 +247,19 @@ describe("QH-6.4 the rest of the economy stays as it is", () => {
     const l = note("l1", "lesson", `${LESSON} Проверю это правило ещё на десяти сделках.`);
     const n = recordNoteSaved(s, l, [l], t("12:00"));
     expect(n.xpAwarded).toBeGreaterThan(0); // the existing note XP
-    s = claimMissions(n.state, data({ notes: [l] }), t("12:01")).state;
+    s = claim(n.state, data({ notes: [l] }), t("12:01")).state;
     expect(s.completedQuestsToday.m_lesson).toBe(true);
   });
 
   it("the day snapshot keeps the time, the reward and the record of each paid mission", () => {
-    let s = claimMissions(started(), data({ plans: [plan()] }), t("08:00")).state;
+    let s = claim(started(), data({ plans: [plan()] }), t("08:00")).state;
     s = checkAndApplyDateResets(s, t("06:00", "2026-11-17"));
     const snap = s.questDays![0];
     expect(snap.day).toBe(DAY);
     expect(snap.done.q_bias).toMatchObject({ source: "journal", at: "2026-11-16T08:00:00.000Z", xp: 40, coins: 10, missionSource: `plan:${DAY}:prep` });
     expect(snap.totals.selfXp).toBe(0);
     // the new day starts with an empty ledger
-    expect(claimMissions(s, data({ plans: [plan()] }), t("08:00", "2026-11-17")).claimed).toEqual([]);
+    expect(claim(s, data({ plans: [plan()] }), t("08:00", "2026-11-17")).claimed).toEqual([]);
   });
 
   it("a day set from before catalog 3 keeps the old closing of the trading quests (no ledger)", () => {
@@ -266,7 +281,7 @@ describe("new-user acceptance (2026-11-15): «Day review» is never paid around 
     const saved = recordNoteSaved(s, n, [n], t("20:00"));
     expect(saved.state.completedQuestsToday.q_reflect).toBeUndefined();
     expect(saved.state.coins).toBe(s.coins); // only the note's own XP, no coins
-    const r = claimMissions(saved.state, data({ notes: [n] }), t("20:01"));
+    const r = claim(saved.state, data({ notes: [n] }), t("20:01"));
     expect(r.claimed).toEqual(["q_reflect"]);
     expect(r.state.missionLedger!.claims.q_reflect).toBe("note:s1");
   });
@@ -274,12 +289,12 @@ describe("new-user acceptance (2026-11-15): «Day review» is never paid around 
   it("a «Session review» note on a study day after three paid missions is not a fourth paid mission", () => {
     let s = setDayMode(started(), "study", t("07:00")).state;
     const d = data({ notes: [note("i1", "idea", IDEA), backtest("b1"), note("l1", "lesson", LESSON)] });
-    s = claimMissions(s, d, t("15:00")).state;
+    s = claim(s, d, t("15:00")).state;
     expect(Object.keys(s.missionLedger!.claims)).toHaveLength(3);
     const coins = s.coins;
     const n = note("s1", "session_review", SESSION, { createdAt: iso("20:00") });
     s = recordNoteSaved(s, n, [...d.notes, n], t("20:00")).state;
-    s = claimMissions(s, { ...d, notes: [...d.notes, n] }, t("20:01")).state;
+    s = claim(s, { ...d, notes: [...d.notes, n] }, t("20:01")).state;
     expect(s.completedQuestsToday.q_reflect).toBeUndefined();
     expect(s.coins).toBe(coins);
     expect(Object.keys(s.completedQuestsToday).filter((id) => /^(q_bias|q_riskcheck|q_reflect|m_)/.test(id))).toHaveLength(3);
@@ -300,7 +315,7 @@ describe("every path that pays: core missions only through the claim, three a da
   it("plan saves, notes of every template, a trade, «no trade», a screenshot and mode changes never pay a 4th mission or one outside the ledger", () => {
     let s = setDayMode(started(), "study", t("07:00")).state;
     const notes: Note[] = [note("i1", "idea", IDEA), backtest("b1"), note("l1", "lesson", LESSON)];
-    s = claimMissions(s, data({ notes }), t("12:00")).state;
+    s = claim(s, data({ notes }), t("12:00")).state;
     expect(paidMissions(s)).toEqual(["m_observation", "m_backtest", "m_lesson"]);
     const full = plan({ review: review() });
     const tomorrow = plan({ date: "2026-11-17", createdAt: iso("21:00"), firstSavedAt: iso("21:00") });
@@ -312,7 +327,7 @@ describe("every path that pays: core missions only through the claim, three a da
       s = recordLoggedTrade(s, { id: `tr_${mode}`, accountId: "a", instrument: "EURUSD", direction: "long", openedAt: iso("10:00"), verification: "unverified" } as never, [], t("18:30")).state;
       s = recordNoTradeEntry(s, { id: `nt_${mode}`, date: iso("16:00"), reason: "setup_incomplete" } as never, [], t("18:31")).state;
       s = recordScreenshotAdded(s, { hash: `h_${mode}`, width: 1200, height: 800 }, t("18:32")).state;
-      s = claimMissions(s, data({ plans: [full, tomorrow], notes: [...notes, ...extra] }), t("18:40")).state;
+      s = claim(s, data({ plans: [full, tomorrow], notes: [...notes, ...extra] }), t("18:40")).state;
       expect(paidMissions(s)).toHaveLength(3);
       // every paid mission has its record in the day's ledger: nothing was paid around the claim
       for (const id of paidMissions(s)) expect(s.missionLedger!.claims[id]).toBeTruthy();
