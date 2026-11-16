@@ -24,13 +24,14 @@ test("keeps payrolls separate from unemployment and leaves the upstream update u
     actual: "+165K · 4.1%", previous: "4.2%", reference_period: "2026-10", release_stage: "regular",
     result_meta: { period: "2026-10", series: "us_nfp", unit: "thousand-change-and-percent", adjustment: "SA" } };
   expect(projectEconomy([nfp], now).us_nfp[0]).toMatchObject({
-    actual: 165, previous: null, scheduledAt: "2026-11-06T13:35:00Z", releasedAt: "2026-11-06T13:30:00Z",
+    actual: 165, unemployment: 4.1, previous: null, scheduledAt: "2026-11-06T13:35:00Z", releasedAt: "2026-11-06T13:30:00Z",
     sourceUpdatedAt: null, retrievedAt: null, sourceKind: "release",
     sourceUrl: "https://www.bls.gov/news.release/archives/empsit_11062026.htm",
   });
   expect(projectEconomy([{ ...nfp, id: "bls:unreviewed" }], now).us_nfp[0]).toMatchObject({
     releasedAt: null, sourceKind: "archive", sourceUrl: "https://www.bls.gov/bls/news-release/empsit.htm",
   });
+  expect(projectEconomy([{ ...nfp, actual: "+165K" }], now).us_nfp[0].unemployment).toBeUndefined();
 });
 
 test("only reviewed release identities receive a dated URL and official time", () => {
