@@ -19,6 +19,8 @@ import { QuestsHeader } from "@/components/quests/QuestsHeader";
 import { TodayView } from "@/components/quests/TodayView";
 import { WeekCard, WeekTab } from "@/components/quests/WeekTab";
 import { PastWeekBoss, TradingDaysPicker, WeekGoals, WeekObjectives, WeeklyBoss } from "@/components/quests/WeekMissions";
+import { LastWeekResult, WeekTrophies } from "@/components/quests/WeekChallenge";
+import { addDaysToKey } from "@/lib/day-key";
 import { clampWeek, dayDetail, defaultDay, earliestWeek, weekView } from "@/lib/week-view";
 import { GoalsCard } from "@/components/quests/GoalsCard";
 import { StreakRuleCard } from "@/components/quests/DisciplineTab";
@@ -293,6 +295,7 @@ export default function QuestsPage() {
         shownWeek === currentWeek ? (
           <>
             <WeeklyBoss snapshot={snapshot} />
+            <LastWeekResult week={currentWeek} onOpen={() => setWeekParams(addDaysToKey(currentWeek, -7))} />
             <TradingDaysPicker />
           </>
         ) : (
@@ -314,6 +317,7 @@ export default function QuestsPage() {
       ),
       rail: (
         <>
+          <WeekTrophies />
           <GoalsCard />
           <StreakRuleCard />
         </>

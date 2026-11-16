@@ -21,10 +21,14 @@ export function formatDayKey(key: string, lang: "ru" | "en", opts: Intl.DateTime
   return new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "en-US", { ...opts, timeZone: "UTC" }).format(new Date(Date.UTC(y, m - 1, d)));
 }
 
-/** «9–15 ноября», «27 октября – 2 ноября». */
-function weekRangeText(start: string, lang: "ru" | "en"): string {
+/** «9–15 ноября», «27 октября – 2 ноября»; English: «November 9–15», «October 27–November 2». */
+export function weekRangeText(start: string, lang: "ru" | "en"): string {
   const end = addDaysToKey(start, 6);
   const sameMonth = start.slice(0, 7) === end.slice(0, 7);
+  if (lang === "en") {
+    const to = sameMonth ? formatDayKey(end, lang, { day: "numeric" }) : formatDayKey(end, lang, { day: "numeric", month: "long" });
+    return `${formatDayKey(start, lang, { day: "numeric", month: "long" })}–${to}`;
+  }
   const from = sameMonth ? formatDayKey(start, lang, { day: "numeric" }) : formatDayKey(start, lang, { day: "numeric", month: "long" });
   return `${from}–${formatDayKey(end, lang, { day: "numeric", month: "long" })}`;
 }

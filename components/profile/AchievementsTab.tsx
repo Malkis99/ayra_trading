@@ -7,6 +7,7 @@ import { useGame } from "@/lib/game-context";
 import { cn } from "@/components/ui/cn";
 import { PROFILE_ACHIEVEMENTS, achievementProgress } from "@/lib/profile";
 import { formatString } from "@/lib/i18n";
+import { WeekTrophies } from "@/components/quests/WeekChallenge";
 
 /** Achievement cards: earned ones bright (gold is allowed here), the rest muted with a hint how to earn them. No losses. */
 export function AchievementsTab() {
@@ -58,6 +59,7 @@ export function AchievementsTab() {
           );
         })}
       </ul>
+      <WeekTrophies />
     </div>
   );
 }

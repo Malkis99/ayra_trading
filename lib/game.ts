@@ -11,9 +11,11 @@ import {
   QUEST_CATALOG,
   studyFirstFor,
   type DayMode,
+  type BossId,
   type DaySet,
   type WeekChallenge,
 } from "./quest-engine";
+import { readWeekTrophies, trophiesFromWeeks, trophyFor, withWeekTrophy, type WeekTrophy } from "./week-trophies";
 import { MAX_CORE_MISSIONS_PER_DAY, MISSION_IDS, candidateSources, checkMissions, explainMission, isMissionId, type MissionCheck, type MissionData, type MissionId, type MissionLedger, type MissionReason } from "./missions";
 import {
   addDaySnapshot,
@@ -67,7 +69,9 @@ export type ChronicleEventType =
   | { type: "profileUpdated" }
   | { type: "legacy"; text: string }
   /** One-time reward for the first action of a kind on this account (docs/economy-coins-plan.md). */
-  | { type: "firstAction"; kind: FirstActionKind; coins: number; xp: number };
+  | { type: "firstAction"; kind: FirstActionKind; coins: number; xp: number }
+  /** A won week challenge (QH-7): a trophy, no XP or Coins. */
+  | { type: "weekTrophy"; boss: BossId; week: string };
 
 export type FirstActionKind = keyof typeof GAME_CONFIG.FIRST_ACTION_REWARDS;
 
@@ -177,6 +181,8 @@ export interface GameState {
   questDays?: DaySnapshot[];
   /** Closed weeks (QH-3): written once at the week change, the challenge result once in the next week; no rewards. */
   questWeeks?: WeekSnapshot[];
+  /** Won week challenges (QH-7, lib/week-trophies.ts): one per week, never pruned or changed, newest first; no rewards. */
+  weekTrophies?: WeekTrophy[];
   /** Trading days, 0 = Monday … 6 = Sunday (empty or missing: every day). A change applies to the next generated day. */
   tradingDays?: number[];
   /** Grows with every saved change: the freshest copy wins between tabs (lib/game-store.ts). */
@@ -457,6 +463,8 @@ export function migrateState(rawState: any): GameState {
     // snapshots of closed days and weeks (QH-3): an old save has none; damaged entries are dropped, never guessed
     questDays: readDaySnapshots(rawState.questDays),
     questWeeks: readWeekSnapshots(rawState.questWeeks),
+    // trophies (QH-7): saved ones, plus a trophy for every win already written in a kept week snapshot (never recomputed)
+    weekTrophies: trophiesFromWeeks(readWeekTrophies(rawState.weekTrophies), readWeekSnapshots(rawState.questWeeks)),
     // the history starts when this version first runs on the device (earlier coins are in the balance only)
     coinLogSince: typeof rawState.coinLogSince === "string" ? rawState.coinLogSince : new Date().toISOString(),
   };
@@ -1752,7 +1760,12 @@ export function setTradingDays(state: GameState, days: number[]): GameState {
 export function recordWeekBossResult(state: GameState, week: string, result: NonNullable<WeekSnapshot["bossResult"]>, currentDate: Date = new Date()): GameState {
   const s = checkAndApplyDateResets(state, currentDate);
   const next = withBossResult(s.questWeeks, week, mondayOfKey(gameDayKey(s, currentDate)), result);
-  return next ? { ...s, questWeeks: next } : s;
+  if (!next) return s;
+  // a won week leaves a trophy in the same write (QH-7): once per week, no XP or Coins
+  const boss = next.find((w) => w.week === week)?.boss;
+  const trophies = boss ? withWeekTrophy(s.weekTrophies, trophyFor(week, boss, result)) : null;
+  if (!trophies || !boss) return { ...s, questWeeks: next };
+  return { ...s, questWeeks: next, weekTrophies: trophies, chronicle: addChronicleEvent(s.chronicle, { type: "weekTrophy", boss, week }) };
 }
 
 /** Saves the week challenge once per week (it does not change in the middle of a week). */

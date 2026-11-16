@@ -190,6 +190,11 @@ html[data-market-fullscreen] main { z-index: 95; }
 .mission-row.quest-just-done { animation: quest-done-glow 900ms ease-out 1; }
 .quest-gain { animation: quest-gain-in 450ms ease-out 1; }
 @media (prefers-reduced-motion: reduce) { .mission-row.quest-just-done, .quest-gain { animation: none; } }
+
+/* QH-7: a new weekly trophy appears once with a short gold glow (no motion with reduced motion: the «New trophy» line says it) */
+@keyframes trophy-reveal { 0% { opacity: 0; transform: scale(0.96); box-shadow: 0 0 0 0 rgb(214 169 74 / 0.5); } 60% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 8px rgb(214 169 74 / 0.12); } 100% { box-shadow: 0 0 0 0 rgb(214 169 74 / 0); } }
+.trophy-reveal { animation: trophy-reveal 1100ms ease-out 1; }
+@media (prefers-reduced-motion: reduce) { .trophy-reveal { animation: none; } }
 @container (min-width: 480px) {
   .mission-row { grid-template-areas: "num body menu" ". foot foot"; column-gap: 1rem; padding: 1rem 1.25rem; }
   .mission-row .m-menu { align-self: start; margin: -0.25rem -0.375rem 0 0; }
