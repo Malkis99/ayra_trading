@@ -18,6 +18,9 @@ import {
   type JournalSnapshot,
 } from "@/lib/quest-engine";
 import { buttonClasses } from "@/components/ui/Button";
+import { ChallengeDays, PhaseChip, TrophyCard, WeekTimeLeft } from "./WeekChallenge";
+import { closedPhase, currentPhase } from "@/lib/week-trophies";
+import { mondayOfKey } from "@/lib/day-key";
 import { cn } from "@/components/ui/cn";
 
 const WEEKDAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
@@ -104,9 +107,13 @@ export function WeeklyBoss({ snapshot, compact, onOpenWeek }: { snapshot: Journa
           <h3 className="font-serif text-lg font-bold text-tx">{b.names[boss]}</h3>
           <p className="text-xs text-mu">{basedOnData ? b.chosenFrom : b.chosenDefault}</p>
         </div>
-        <span className="basis-full text-sm font-semibold text-tx" data-testid="boss-overall">
-          {b.overall[overall]}
-        </span>
+        <div className="flex basis-full flex-wrap items-center gap-2">
+          <PhaseChip phase={currentPhase(overall)} />
+          <span className="text-sm font-semibold text-tx" data-testid="boss-overall">
+            {b.overall[overall]}
+          </span>
+        </div>
+        {!compact && <WeekTimeLeft />}
       </div>
       <ul className="mt-3 space-y-2">
         {conditions.map((c) => (
@@ -122,6 +129,7 @@ export function WeeklyBoss({ snapshot, compact, onOpenWeek }: { snapshot: Journa
           </li>
         ))}
       </ul>
+      {!compact && <ChallengeDays boss={boss} snapshot={snapshot} week={mondayOfKey(gameDay)} />}
       {compact ? (
         onOpenWeek && (
           <button type="button" onClick={onOpenWeek} className={buttonClasses("ghost", "md", "-ml-4 mt-1 gap-1 text-vi")} data-testid="boss-open-week">
@@ -130,9 +138,12 @@ export function WeeklyBoss({ snapshot, compact, onOpenWeek }: { snapshot: Journa
           </button>
         )
       ) : (
-        <p className="mt-3 text-xs text-mu" data-testid="boss-until-end">
-          {b.untilEnd} {b.noReward}
-        </p>
+        <div className="mt-3 space-y-1.5 text-xs text-mu">
+          <p data-testid="boss-victory-rule">{b.victoryRule}</p>
+          <p data-testid="boss-until-end">
+            {b.untilEnd} {b.afterEnd}
+          </p>
+        </div>
       )}
     </section>
   );
@@ -209,10 +220,15 @@ export function PastWeekBoss({ week }: { week: string }) {
   const snap = gameState.questWeeks?.find((w) => w.week === week);
   const result = snap?.bossResult;
   const state = !snap ? "unsaved" : !snap.boss ? "none" : result ? result.state : "pending";
+  const phase = closedPhase(snap);
+  const trophy = gameState.weekTrophies?.find((t) => t.week === week);
 
   return (
     <section className="rounded-2xl border border-vi/35 bg-gradient-to-b from-[#1d1b2a] to-s1 p-4" data-testid="past-boss" data-state={state}>
-      <div className="text-xs font-bold uppercase tracking-[0.14em] text-vi">{v.pastBoss}</div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs font-bold uppercase tracking-[0.14em] text-vi">{v.pastBoss}</div>
+        {phase !== "none" && <PhaseChip phase={phase} />}
+      </div>
       {snap?.boss ? (
         <>
           <div className="mt-2 flex items-center gap-3">
@@ -230,9 +246,15 @@ export function PastWeekBoss({ week }: { week: string }) {
           </div>
           {result ? (
             <>
-              <p className="mt-3 text-sm font-semibold text-tx" data-testid="past-boss-overall">
-                {b.overall[result.state]}
-              </p>
+              {trophy ? (
+                <div className="mt-3">
+                  <TrophyCard trophy={trophy} />
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-mu" data-testid="past-boss-overall">
+                  {phase === "notCompleted" ? b.notCompletedNote : phase === "notApplicable" ? b.notApplicableNote : b.overall[result.state]}
+                </p>
+              )}
               <ul className="mt-2 space-y-2">
                 {result.conditions.map((c) => (
                   <li key={c.key} data-testid={`past-boss-condition-${c.key}`} data-state={c.state} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-ink/55 px-3 py-2.5 text-sm">
@@ -249,7 +271,7 @@ export function PastWeekBoss({ week }: { week: string }) {
               </ul>
             </>
           ) : (
-            <p className="mt-3 text-sm text-mu">{v.pastBossPending}</p>
+            <p className="mt-3 text-sm text-mu">{b.checkingNote}</p>
           )}
         </>
       ) : (

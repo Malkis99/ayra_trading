@@ -133,6 +133,9 @@ export default function HomePage() {
             xp: entry.xp,
           });
           break;
+        case "weekTrophy":
+          text = formatString(dict.chronicleEvents.weekTrophy, { name: dict.questsPage.q2.boss.names[entry.boss] ?? entry.boss });
+          break;
         case "planChanged":
           text = formatString(dict.chronicleEvents.planChanged, { plan: entry.plan });
           break;
