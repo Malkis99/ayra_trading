@@ -49,15 +49,16 @@ for (const [width, lang] of [[390, "ru"], [1440, "en"]] as const) {
       await expect(finances.getByTestId("fiscal-debt").locator("dd").filter({ hasText: lang === "ru" ? "40,61 трлн USD" : "40.61 T USD" })).toBeVisible();
       await expect(finances.getByText(/FY 2027/)).toHaveCount(2);
       await expect(finances.getByTestId("fiscal-budget").getByText(lang === "ru" ? "−404,06 млрд USD" : "−404.06 B USD", { exact: true }).first()).toBeVisible();
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+      if (process.env.AYRA_ECO_SCREENSHOT_DIR) {
+        await finances.evaluate(element => element.scrollIntoView({ block: "start" }));
+        await page.screenshot({ path: `${process.env.AYRA_ECO_SCREENSHOT_DIR}/public-finances-${width}.png` });
+      }
       await finances.getByRole("button", { name: lang === "ru" ? "Максимум" : "Maximum" }).click();
       expect(requests.every(request => request.endsWith(":latest"))).toBeTruthy();
       await finances.getByTestId("fiscal-debt").getByRole("button", { name: /Загрузить историю|Load history/ }).click();
       await expect.poll(() => requests.filter(request => request.endsWith(":max"))).toEqual(["debt:max"]);
       await expect(finances.getByTestId("fiscal-debt").getByRole("button", { name: /Загрузить историю|Load history/ })).toHaveCount(0);
-      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
-      if (process.env.AYRA_ECO_SCREENSHOT_DIR) {
-        await finances.screenshot({ path: `${process.env.AYRA_ECO_SCREENSHOT_DIR}/public-finances-${width}.png` });
-      }
     } finally { finishDebt(); await page.context().close(); }
   });
 }
