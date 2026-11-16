@@ -1,10 +1,11 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { Language, Dictionary } from "@/lib/i18n/types";
 import { getDictionary } from "@/lib/i18n";
 import { AppStorage } from "@/lib/storage";
 import { LOCALE_CHOICE_EVENT } from "@/lib/profile-timezone";
+import { pushToast, shiftToast, toastDuration, type ToastItem, type ToastLevel } from "@/lib/toast-queue";
 
 interface AppContextType {
   lang: Language;
@@ -28,7 +29,11 @@ interface AppContextType {
   toastMessage: string | null;
   toastActionLabel: string | null;
   onToastAction: (() => void) | null;
-  showToast: (msg: string, actionLabel?: string, onAction?: () => void) => void;
+  /** "risk" for a trading-risk warning (a prop limit): a reward or other message never replaces it (lib/toast-queue). */
+  toastLevel: ToastLevel;
+  /** Closes the message on screen (the next waiting one, if any, comes up). */
+  dismissToast: () => void;
+  showToast: (msg: string, actionLabel?: string, onAction?: () => void, level?: ToastLevel) => void;
   userPlan: "Free" | "Pro" | "Elite";
   setUserPlan: (plan: "Free" | "Pro" | "Elite") => void;
 }
@@ -51,9 +56,9 @@ export function AppProvider({
   const [noteModalLinks, setNoteModalLinks] = useState<any>(undefined);
   const [noteModalTemplateKey, setNoteModalTemplateKey] = useState<any>(undefined);
   const [isSearchOpen, setSearchOpen] = useState<boolean>(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [toastActionLabel, setToastActionLabel] = useState<string | null>(null);
-  const [onToastAction, setOnToastAction] = useState<(() => void) | null>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const toastSeq = useRef(0);
+  const currentToast = toasts[0] ?? null;
   const [userPlan, setUserPlan] = useState<"Free" | "Pro" | "Elite">("Free");
 
   const dict = getDictionary(lang);
@@ -96,23 +101,21 @@ export function AppProvider({
     setNoteModalOpen(true);
   };
 
-  const showToast = (msg: string, actionLabel?: string, onAction?: () => void) => {
-    setToastMessage(msg);
-    setToastActionLabel(actionLabel || null);
-    setOnToastAction(onAction ? () => onAction : null);
-  };
+  const showToast = useCallback((msg: string, actionLabel?: string, onAction?: () => void, level: ToastLevel = "info") => {
+    const item: ToastItem = { id: ++toastSeq.current, message: msg, level, actionLabel: actionLabel || null, onAction: onAction || null };
+    setToasts((q) => pushToast(q, item));
+  }, []);
+  const dismissToast = useCallback(() => {
+    setToasts((q) => (q[0] ? shiftToast(q, q[0].id) : q));
+  }, []);
 
+  // each message keeps its own time on screen (a warning longer); then the next waiting one comes up
   useEffect(() => {
-    if (toastMessage) {
-      const duration = toastActionLabel ? 8000 : 2200;
-      const timer = setTimeout(() => {
-        setToastMessage(null);
-        setToastActionLabel(null);
-        setOnToastAction(null);
-      }, duration);
-      return () => clearTimeout(timer);
-    }
-  }, [toastMessage, toastActionLabel]);
+    if (!currentToast) return;
+    const id = currentToast.id;
+    const timer = setTimeout(() => setToasts((q) => shiftToast(q, id)), toastDuration(currentToast));
+    return () => clearTimeout(timer);
+  }, [currentToast]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -149,9 +152,11 @@ export function AppProvider({
         openNoteModal,
         isSearchOpen,
         setSearchOpen,
-        toastMessage,
-        toastActionLabel,
-        onToastAction,
+        toastMessage: currentToast?.message ?? null,
+        toastActionLabel: currentToast?.actionLabel ?? null,
+        onToastAction: currentToast?.onAction ?? null,
+        toastLevel: currentToast?.level ?? "info",
+        dismissToast,
         showToast,
         userPlan,
         setUserPlan,

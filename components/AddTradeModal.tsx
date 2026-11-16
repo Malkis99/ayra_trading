@@ -571,7 +571,8 @@ export function AddTradeModal({ isOpen, onClose, initialTrade, initialOpenedAt }
       : recordTrade(tradeToSave, trades);
 
     if (propToastText) {
-      showToast(propToastText);
+      // a prop-limit warning: a reward message never replaces it (lib/toast-queue)
+      showToast(propToastText, undefined, undefined, "risk");
     } else if (rewardRes.xpAwarded > 0) {
       showToast(`+${rewardRes.xpAwarded} XP (${dict.stats.trading})`);
     } else if (rewardRes.leveledUp) {
