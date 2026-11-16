@@ -2994,6 +2994,7 @@ export const en: Dictionary = {
           followPlan: "Follow the Plan",
           patience: "Patience Mastery",
           journalConsistency: "Journal Consistency",
+          preparationWeek: "Preparation Week",
         },
         conditions: {
           noFomoTag: "No trade tagged with the FOMO mistake",
@@ -3007,6 +3008,8 @@ export const en: Dictionary = {
           noImpulse: "No early-entry, overtrading or revenge tags",
           withinLimit: "No more trades than the plan's limit",
           tradesReviewed: "Every trade of the week is reviewed",
+          activeDays: "At least 3 different days with a plan, a review, a lesson or an analysis note",
+          weekSummary: "A week summary in the week plan (40+ characters, saved before the week ends)",
         },
         overall: {
           met: "No slips so far",
@@ -3024,6 +3027,11 @@ export const en: Dictionary = {
           notApplicable: "Not applicable",
           none: "No challenge",
         },
+        chosenPrep: "No trades last week — a preparation week: planning, reviews, study and analysis. No trading needed.",
+        prepRule: "A win: 3 different days with confirmed work in the Journal and a saved week summary. Records made that day count: a day plan, a review, a lesson, an observation, a backtest. Several records on one day are one active day.",
+        overallPrep: { met: "All conditions met", notMet: "Conditions not met", notApplicable: "Not applicable", insufficientData: "Not enough data", pending: "In progress" },
+        dayStatesPrep: { future: "ahead", noTrades: "no confirmed records", met: "active day", notMet: "no confirmed records", insufficientData: "little data" },
+        openJournal: "Open the Journal",
         victoryRule: "A win: by the end of the week every applicable condition is met on the week's trades. A week without trades is not a loss: the challenge does not apply, and there is no need to trade for it.",
         afterEnd: "After Sunday the result is recorded once from the Journal. A win becomes a trophy in your character's story. The challenge gives no XP or Coins.",
         timeLeftDays: "Week ends in: {d} d {h} h",

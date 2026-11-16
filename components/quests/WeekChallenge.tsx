@@ -77,7 +77,8 @@ export function ChallengeDays({ boss, snapshot, week }: { boss: BossId; snapshot
       <div className="text-xs font-semibold text-mu">{b.daysTitle}</div>
       <ol className="mt-1.5 grid grid-cols-7 gap-1" data-testid="challenge-days">
         {days.map((d, i) => {
-          const label = [b.dayStates[d.state], d.trades > 0 ? formatString(b.dayTrades, { n: d.trades }) : ""].filter(Boolean).join(", ");
+          const states = boss === "preparationWeek" ? b.dayStatesPrep : b.dayStates;
+          const label = [states[d.state], d.trades > 0 ? formatString(b.dayTrades, { n: d.trades }) : ""].filter(Boolean).join(", ");
           return (
             <li key={d.key} className="min-w-0 text-center" data-testid={`challenge-day-${d.key}`} data-state={d.state}>
               <div className="text-[11px] text-mu" aria-hidden="true">

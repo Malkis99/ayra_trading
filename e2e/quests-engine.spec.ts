@@ -12,7 +12,7 @@ const yesterday = (() => {
 })();
 
 type Saved = Awaited<ReturnType<typeof readGame>> & {
-  questDay?: { day: string; mode: string; core: string[]; bonus: string[]; carried?: Record<string, string> };
+  questDay?: { day: string; mode: string; core: string[]; bonus: string[]; carried?: Record<string, string>; studyPending?: boolean };
   tradingDays?: number[];
 };
 const game = (page: Page) => readGame(page) as Promise<Saved>;
@@ -35,6 +35,8 @@ test.describe("Quest Engine (Q2)", () => {
     await seedGame(context, baseGame({ lastQuestDate: yesterday }), { ayra_journal_v1: journal() });
     await page.goto("/quests");
     await expect.poll(async () => (await game(page)).questDay?.day).toBe(today);
+    // the study slot settles once after the journal is read (owner decision В11): the set is final after that
+    await expect.poll(async () => (await game(page)).questDay?.studyPending).toBeUndefined();
     const set = (await game(page)).questDay!;
     await page.reload();
     await expect(page.getByTestId("quests-hero")).toBeVisible();
@@ -191,14 +193,16 @@ test.describe("Quest Engine (Q2)", () => {
     await expect(page.getByTestId("quest-badge-self").first()).toHaveText("Самоотчёт");
   });
 
-  test("week: without trades the challenge is «not applicable»; trading days are saved for the next days", async ({ context, page }) => {
+  test("week: without trades the path is «Preparation week» (QH-7.1), trade objectives «not applicable»; trading days are saved for the next days", async ({ context, page }) => {
     await seedGame(context, baseGame({ lastQuestDate: yesterday }), { ayra_journal_v1: journal() });
     await page.goto("/quests");
     await expect.poll(async () => (await game(page)).questDay?.day).toBe(today);
+    await expect.poll(async () => (await game(page)).questDay?.studyPending).toBeUndefined();
     const before = (await game(page)).questDay;
     await page.getByRole("tab", { name: "Неделя" }).click();
-    await expect(page.getByTestId("weekly-boss")).toHaveAttribute("data-state", "notApplicable");
-    await expect(page.getByTestId("boss-overall")).toHaveText("Не применимо — на неделе нет сделок");
+    await expect(page.getByTestId("weekly-boss")).toHaveAttribute("data-boss", "preparationWeek");
+    await expect(page.getByTestId("weekly-boss")).toHaveAttribute("data-state", "pending");
+    await expect(page.getByTestId("boss-overall")).toHaveText("В процессе");
     await expect(page.getByTestId("objective-reviewTrades")).toHaveAttribute("data-state", "notApplicable");
     await page.getByTestId("trading-day-6").click();
     await expect.poll(async () => (await game(page)).tradingDays).toEqual([0, 1, 2, 3, 4, 5]);

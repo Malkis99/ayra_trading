@@ -59,15 +59,16 @@ test.describe("Week challenge cycle and trophies (QH-7)", () => {
     await page.clock.install({ time: new Date(NOW) });
   });
 
-  test("a new account: an active challenge with its rule, days and time left; no trophies, nothing invented", async ({ context, page }) => {
+  test("a new account (no trades): «Preparation week» with its rule, days and time left; no trophies, nothing invented", async ({ context, page }) => {
     await seedGame(context, baseGame({ lastQuestDate: "" }), { ayra_journal_v1: journal([]) });
     await page.goto("/quests?tab=week");
     const boss = page.getByTestId("weekly-boss");
     await expect(boss.getByTestId("challenge-phase")).toHaveAttribute("data-phase", "active");
     await expect(boss.getByTestId("challenge-time-left")).toHaveText("До конца недели: 4 дн. 14 ч");
-    await expect(boss.getByTestId("boss-victory-rule")).toContainText("Неделя без сделок — не поражение");
+    await expect(boss).toHaveAttribute("data-boss", "preparationWeek");
+    await expect(boss.getByTestId("boss-victory-rule")).toContainText("Победа — 3 разных дня с подтверждённой работой в Журнале");
     await expect(boss.getByTestId("boss-until-end")).toContainText("XP и Coins за испытание не начисляются");
-    // Mon, Tue: no trades (not failures); today Wednesday; Thu–Sun ahead
+    // Mon, Tue: no confirmed records (not failures); today Wednesday; Thu–Sun ahead
     await expect(boss.getByTestId(`challenge-day-${MONDAY}`)).toHaveAttribute("data-state", "noTrades");
     await expect(boss.getByTestId("challenge-day-2026-11-19")).toHaveAttribute("data-state", "future");
     await expect(page.getByTestId("last-week-result")).toHaveCount(0);

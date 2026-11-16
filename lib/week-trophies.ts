@@ -6,7 +6,7 @@
  */
 
 import { addDaysToKey, dayKeyInZone, weekdayOfKey } from "./day-key";
-import { bossConditions, bossState, type BossId, type CheckState, type JournalSnapshot } from "./quest-engine";
+import { bossConditions, bossState, prepActiveDay, type BossId, type CheckState, type JournalSnapshot } from "./quest-engine";
 import type { WeekSnapshot } from "./day-snapshots";
 
 export const TROPHY_VERSION = 1;
@@ -82,6 +82,8 @@ export function challengeDays(boss: BossId, snap: JournalSnapshot, week: string,
   return Array.from({ length: 7 }, (_, i) => {
     const key = addDaysToKey(week, i);
     if (key > today) return { key, state: "future" as const, trades: 0 };
+    // «Preparation week» (QH-7.1): a day is active by confirmed journal work, whatever the trades
+    if (boss === "preparationWeek") return { key, state: (prepActiveDay(snap, key) ? "met" : "noTrades") as ChallengeDayState, trades: 0 };
     const trades = (snap.trades || []).filter((t) => !t.deletedAt && dayOf(t.openedAt, snap.timezone) === key);
     if (trades.length === 0) return { key, state: "noTrades" as const, trades: 0 };
     const state = bossState(bossConditions(boss, { ...snap, trades }, key));
