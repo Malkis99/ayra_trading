@@ -7,6 +7,7 @@ import { economyText } from "@/lib/market/economy/dictionary";
 import { economyCodes, economyHistory, periodIndex, ranges, type HistoryRange, type Observation } from "@/lib/market/economy/project-calendar";
 import { useEconomyObservations } from "@/lib/market/economy/use-economy-observations";
 import { MarketPublicFinances } from "./MarketPublicFinances";
+import { MarketMonetary } from "./MarketMonetary";
 
 type Labels = typeof economyText.en;
 
@@ -119,9 +120,10 @@ export function MarketEconomy() {
         })}
       </div>
       <MarketPublicFinances lang={lang} />
+      <MarketMonetary lang={lang} />
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
         {t.categories.map((category, i) => (
-          i !== 4 && <div key={category} className="rounded-md border border-line bg-s1 p-3">
+          i !== 4 && i !== 5 && i !== 7 && <div key={category} className="rounded-md border border-line bg-s1 p-3">
             <h4 className="text-sm font-semibold text-tx">{category}</h4>
             <p className="mt-1 text-xs text-mu">{t.coverage[i]}</p>
             {i > 1 && <p className="mt-2 text-xs text-mu">{t.empty}</p>}
