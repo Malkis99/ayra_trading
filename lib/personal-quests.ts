@@ -1,8 +1,9 @@
 /**
  * QH-8.1 Personal Quests / «My path» — the model only (docs/quest-hub-qh8-spec.md).
  *
- * NOT WIRED: nothing in the game state, the store or the UI imports this module yet. It gives no XP and no Coins. The
- * rates below are the owner's approved variant C (В-19, QH-8.1 review); the game pays them only from QH-8.5 on.
+ * QH-8.2 wires only creating, keeping and abandoning runs (GameState.personalRuns). Nothing gives XP or Coins: daily
+ * marks (QH-8.3), settling and achievements (QH-8.4) and rewards (QH-8.5) are not called by the game. The rates below
+ * are the owner's approved variant C (В-19); the game shows them as a future reward and pays them only from QH-8.5 on.
  *
  * A personal quest is a 30-day run of one measurable daily action. Daily marks give nothing; after the period ends and
  * the final report is written, the run gets a completion rank by its confirmed days, and — only then, once per run — a
@@ -103,6 +104,12 @@ export type PQStatus = "active" | "awaitingReport" | "completed" | "abandoned";
 export interface PQRun {
   /** This run (a repeat of a quest is a new run with a new id). */
   id: string;
+  /** When it was created (ISO). */
+  createdAt?: string;
+  /** When it was abandoned (ISO). */
+  abandonedAt?: string;
+  /** The abandoned run this one restarts (В-22); the old run stays in the history. */
+  restartOf?: string;
   /** The quest it belongs to (repeats share it). */
   questId: string;
   category: PQCategoryId;
@@ -161,7 +168,17 @@ export function phaseOf(run: PQRun, today: string): PQStatus {
 
 /* ------------------------------------------------------------------ starting a run */
 
-export type StartFailure = "maxActive" | "sameQuestActive" | "categoryActive" | "unknownCategory" | "verificationNotAllowed" | "missingFields";
+export type StartFailure = "maxActive" | "sameQuestActive" | "categoryActive" | "unknownCategory" | "verificationNotAllowed" | "missingFields" | "tooLong";
+
+/** The text fields of a run and their longest length (a UX limit, not a business number). */
+export const PQ_FIELD_MAX = { title: 80, goal: 200, dailyAction: 140, startState: 300, expectedResult: 300 } as const;
+export type PQField = keyof typeof PQ_FIELD_MAX;
+export const PQ_FIELDS = Object.keys(PQ_FIELD_MAX) as PQField[];
+
+/** Trims and joins repeated spaces (line breaks kept out: every field is one paragraph). */
+export const cleanField = (v: unknown): string => (typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "");
+
+export type PQStartInput = Pick<PQRun, "questId" | "category" | "verification" | PQField>;
 
 /**
  * A new run may start when fewer than 3 runs are active, the same quest has no active run (a repeat starts only after
@@ -169,16 +186,126 @@ export type StartFailure = "maxActive" | "sameQuestActive" | "categoryActive" | 
  * verification, and every field is filled. An abandoned run frees its slot at once (В-22): the restart is a new run
  * with its own id, its own 30-day period and no progress; the abandoned run stays in the history.
  */
-export function canStart(runs: PQRun[], next: Pick<PQRun, "questId" | "category" | "verification" | "title" | "goal" | "dailyAction">, today: string): StartFailure | null {
+export function canStart(runs: PQRun[], next: PQStartInput, today: string): StartFailure | null {
   const cat = categoryOf(next.category);
   if (!cat) return "unknownCategory";
   if (!cat.verification.includes(next.verification)) return "verificationNotAllowed";
-  if (![next.title, next.goal, next.dailyAction].every((x) => typeof x === "string" && x.trim().length > 0)) return "missingFields";
+  if (!PQ_FIELDS.every((f) => cleanField(next[f]).length > 0)) return "missingFields";
+  if (PQ_FIELDS.some((f) => cleanField(next[f]).length > PQ_FIELD_MAX[f])) return "tooLong";
   const active = runs.filter((r) => phaseOf(r, today) === "active" || phaseOf(r, today) === "awaitingReport");
   if (active.length >= PQ_MAX_ACTIVE) return "maxActive";
   if (active.some((r) => r.questId === next.questId)) return "sameQuestActive";
   if (active.some((r) => r.category === next.category)) return "categoryActive";
   return null;
+}
+
+/** Active runs on `today` (a run awaiting its report holds its slot), oldest first. */
+export const activeRuns = (runs: readonly PQRun[], today: string): PQRun[] =>
+  runs.filter((r) => { const p = phaseOf(r, today); return p === "active" || p === "awaitingReport"; });
+
+/** The day of the period `today` is (1…30; past the end stays 30). */
+export function dayNumber(run: Pick<PQRun, "startDay">, today: string): number {
+  const d = Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${run.startDay}T00:00:00Z`)) / 86400000) + 1;
+  return Math.max(1, Math.min(PQ_PERIOD_DAYS, d));
+}
+
+/** Days left after `today`, today included (0 when the period is over). */
+export function daysLeft(run: Pick<PQRun, "startDay">, today: string): number {
+  const end = endDayOf(run);
+  if (today > end) return 0;
+  return Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000) + 1;
+}
+
+/* ------------------------------------------------------------------ keeping runs (QH-8.2) */
+
+/**
+ * Starts a run on `today` (the account's game day: never chosen, never in the past). Idempotent by `input.id`: the same
+ * request again (a double click, a reload, a second tab sending the same draft) returns the saved run, never a second
+ * one. Gives nothing.
+ */
+export function createRun(
+  runs: readonly PQRun[],
+  input: PQStartInput & { id: string; restartOf?: string },
+  today: string,
+  at: string
+): { runs: PQRun[]; run: PQRun; duplicate: boolean } | { failure: StartFailure | "badId" } {
+  const same = runs.find((r) => r.id === input.id);
+  if (same) return { runs: [...runs], run: same, duplicate: true };
+  if (!/^[A-Za-z0-9_-]{6,80}$/.test(input.id) || !/^[A-Za-z0-9_-]{6,80}$/.test(input.questId)) return { failure: "badId" };
+  const clean = { ...input, ...Object.fromEntries(PQ_FIELDS.map((f) => [f, cleanField(input[f])])) } as typeof input;
+  const failure = canStart([...runs], clean, today);
+  if (failure) return { failure };
+  const run: PQRun = {
+    id: clean.id,
+    questId: clean.questId,
+    category: clean.category,
+    verification: clean.verification,
+    title: clean.title,
+    goal: clean.goal,
+    dailyAction: clean.dailyAction,
+    startState: clean.startState,
+    expectedResult: clean.expectedResult,
+    startDay: today,
+    createdAt: at,
+    marks: [],
+    status: "active",
+    ...(clean.restartOf ? { restartOf: clean.restartOf } : {}),
+  };
+  return { runs: [run, ...runs], run, duplicate: false };
+}
+
+export type AbandonFailure = "notFound" | "notActive";
+
+/** Abandons an active run (also one awaiting its report): kept in the history as abandoned, no rank, no reward. */
+export function abandonRun(runs: readonly PQRun[], runId: string, today: string, at: string): { runs: PQRun[] } | { failure: AbandonFailure } {
+  const run = runs.find((r) => r.id === runId);
+  if (!run) return { failure: "notFound" };
+  const phase = phaseOf(run, today);
+  if (phase !== "active" && phase !== "awaitingReport") return { failure: "notActive" };
+  return { runs: runs.map((r) => (r.id === runId ? { ...r, status: "abandoned" as const, abandonedAt: at } : r)) };
+}
+
+export type RestartFailure = StartFailure | "badId" | "notFound" | "notAbandoned";
+
+/**
+ * Starts an abandoned quest again at once (В-22): a new run with the new id, the same quest and texts, its own 30 days
+ * from `today`, no marks. The abandoned run stays as it was. Idempotent by `newId`.
+ */
+export function restartRun(runs: readonly PQRun[], runId: string, newId: string, today: string, at: string): ReturnType<typeof createRun> | { failure: RestartFailure } {
+  const same = runs.find((r) => r.id === newId);
+  if (same) return { runs: [...runs], run: same, duplicate: true };
+  const old = runs.find((r) => r.id === runId);
+  if (!old) return { failure: "notFound" };
+  if (old.status !== "abandoned") return { failure: "notAbandoned" };
+  const { questId, category, verification, title, goal, dailyAction, startState, expectedResult } = old;
+  return createRun(runs, { id: newId, questId, category, verification, title, goal, dailyAction, startState, expectedResult, restartOf: old.id }, today, at);
+}
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const STATUSES: readonly PQStatus[] = ["active", "awaitingReport", "completed", "abandoned"];
+
+/**
+ * Runs from a saved game state (an old save has none). A damaged entry is dropped, never guessed; a repeated id keeps
+ * the first copy. Marks are kept as saved (QH-8.3 reads them).
+ */
+export function readPersonalRuns(raw: unknown): PQRun[] {
+  if (!Array.isArray(raw)) return [];
+  const out: PQRun[] = [];
+  for (const r of raw) {
+    if (!r || typeof r !== "object") continue;
+    const x = r as Partial<PQRun>;
+    if (typeof x.id !== "string" || !x.id || typeof x.questId !== "string" || !x.questId) continue;
+    const cat = categoryOf(String(x.category));
+    if (!cat || !cat.verification.includes(x.verification as PQVerification)) continue;
+    if (typeof x.startDay !== "string" || !DAY_RE.test(x.startDay) || !STATUSES.includes(x.status as PQStatus)) continue;
+    if (!PQ_FIELDS.every((f) => typeof x[f] === "string")) continue;
+    if (out.some((o) => o.id === x.id)) continue;
+    const marks = Array.isArray(x.marks)
+      ? x.marks.filter((m): m is PQMark => !!m && typeof m === "object" && typeof m.day === "string" && typeof m.savedOn === "string" && (m.source === "app" || m.source === "self"))
+      : [];
+    out.push({ ...(x as PQRun), marks });
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------------ settling a run */

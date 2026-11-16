@@ -2,7 +2,8 @@ import { test, expect, type Page } from "@playwright/test";
 import { baseGame, readGame, seedGame, utcDay } from "./helpers/quests";
 
 // Quest Hub QH-1 (docs/quest-hub-plan.md): four top-level tabs that switch the page, ?tab= in the address with Back and
-// Forward, the wide grid with the progress rail, «My goals» and discipline moved, «Creators» only says «soon».
+// Forward, the wide grid with the progress rail, «My goals» and discipline moved. «Creators (soon)» gave its place to «My path»
+// (QH-8.2): its old links open My path, whose rail keeps the honest «soon» note.
 
 const today = utcDay();
 const tabs = (page: Page) => page.getByTestId("hub-tabs");
@@ -53,10 +54,10 @@ test.describe("Quest Hub (QH-1)", () => {
     await expect(page.getByTestId("hub-panel")).toHaveAttribute("data-tab", "week");
 
     // a link opens its tab; a reload keeps it; an unknown value falls back to Today
-    await page.goto("/quests?tab=creators");
-    await expect(selected(page)).toHaveAttribute("data-testid", "hub-tab-creators");
+    await page.goto("/quests?tab=path");
+    await expect(selected(page)).toHaveAttribute("data-testid", "hub-tab-path");
     await page.reload();
-    await expect(page.getByTestId("creators-soon")).toBeVisible();
+    await expect(page.getByTestId("pq-main")).toBeVisible();
     await page.goto("/quests?tab=nope");
     await expect(selected(page)).toHaveAttribute("data-testid", "hub-tab-today");
   });
@@ -68,7 +69,7 @@ test.describe("Quest Hub (QH-1)", () => {
     await expect(tabs(page)).toHaveAttribute("aria-label", "Разделы заданий");
     const all = tabs(page).getByRole("tab");
     await expect(all).toHaveCount(4);
-    for (const id of ["today", "week", "history", "creators"]) {
+    for (const id of ["today", "week", "history", "path"]) {
       const tab = page.getByTestId(`hub-tab-${id}`);
       await expect(tab).toHaveAttribute("aria-controls", `quests-panel-${id}`);
       await expect(tab).toHaveAttribute("tabindex", id === "today" ? "0" : "-1");
@@ -83,11 +84,11 @@ test.describe("Quest Hub (QH-1)", () => {
     await expect(page.getByTestId("hub-tab-week")).toBeFocused();
     await expect(page.getByTestId("hub-tab-week")).toHaveAttribute("aria-selected", "true");
     await page.keyboard.press("End");
-    await expect(page.getByTestId("hub-tab-creators")).toBeFocused();
+    await expect(page.getByTestId("hub-tab-path")).toBeFocused();
     await page.keyboard.press("ArrowRight");
     await expect(page.getByTestId("hub-tab-today")).toBeFocused();
     await page.keyboard.press("ArrowLeft");
-    await expect(page.getByTestId("hub-tab-creators")).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByTestId("hub-tab-path")).toHaveAttribute("aria-selected", "true");
     await page.keyboard.press("Home");
     await expect(page.getByTestId("hub-tab-today")).toHaveAttribute("aria-selected", "true");
     await expect.poll(() => tabParam(page)).toBe("today");
@@ -101,7 +102,7 @@ test.describe("Quest Hub (QH-1)", () => {
     test(`${width}px: no horizontal scroll on any tab, buttons are named and big enough`, async ({ context, page }) => {
       await page.setViewportSize({ width, height: 900 });
       await seedGame(context, baseGame({ lastQuestDate: today, ...saved }));
-      for (const id of ["today", "week", "history", "creators"]) {
+      for (const id of ["today", "week", "history", "path"]) {
         await page.goto(`/quests?tab=${id}`);
         await expect(page.getByTestId("hub-panel")).toHaveAttribute("data-tab", id);
         const overflow = await page.evaluate(() => {
@@ -174,17 +175,16 @@ test.describe("Quest Hub (QH-1)", () => {
     await expect(page.getByTestId("streak-rule")).toBeVisible();
   });
 
-  test("Creators says «soon» honestly: no quests, no buttons, nothing changes in the game", async ({ context, page }) => {
+  test("old «Creators» links open My path; its rail keeps the honest «soon» note, with no creator quests or rewards", async ({ context, page }) => {
     await seedGame(context, baseGame({ lastQuestDate: today, ...saved }));
     await page.goto("/quests?tab=creators");
-    await expect(page.getByTestId("hub-tab-creators")).toContainText("Скоро");
-    const soon = page.getByTestId("creators-soon");
-    await expect(soon).toContainText("Скоро");
-    await expect(soon).toContainText("квестов и наград нет");
-    const panel = page.getByTestId("hub-panel");
-    await expect(panel.locator("button, a, input, select, textarea")).toHaveCount(0);
-    await expect(panel).not.toContainText(/\+\d+ XP|Coins ·/);
-    await expect(page.getByTestId("creators-rules")).toContainText("Нет наград за лайки, подписки и просмотры");
+    await expect(selected(page)).toHaveAttribute("data-testid", "hub-tab-path");
+    await expect(page.getByTestId("hub-tab-path")).toHaveText("Мой путь");
+    await expect(page.getByTestId("hub-tab-path")).not.toContainText("Скоро");
+    const soon = page.getByTestId("hub-rail").getByTestId("pq-creators-soon");
+    await expect(soon).toContainText("Квесты авторов — скоро");
+    await expect(soon).toContainText("квестов и наград авторов нет");
+    await expect(soon.locator("button, a, input")).toHaveCount(0);
   });
 
   test("switching tabs keeps every saved value: XP, Coins, level, items, titles, achievements, goals, history", async ({ context, page }) => {
@@ -192,7 +192,7 @@ test.describe("Quest Hub (QH-1)", () => {
     await page.goto("/quests");
     await expect(page.getByTestId("quests-hero")).toBeVisible();
     const before = await readGame(page);
-    for (const name of ["Неделя", "История", "Авторы", "Сегодня", "История", "Неделя"]) {
+    for (const name of ["Неделя", "История", "Мой путь", "Сегодня", "История", "Неделя"]) {
       await tabs(page).getByRole("tab", { name }).click();
       await page.waitForTimeout(100);
     }

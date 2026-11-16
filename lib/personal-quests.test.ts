@@ -19,8 +19,6 @@ import {
 } from "./personal-quests";
 import { ru } from "./i18n/dictionaries/ru";
 import { en } from "./i18n/dictionaries/en";
-import * as fs from "fs";
-import * as path from "path";
 
 // QH-8.1: the personal quest model (not wired to the game; no XP is given anywhere).
 
@@ -133,7 +131,7 @@ describe("settling (variant C; the game does not use it before QH-8.5)", () => {
 });
 
 describe("starting runs", () => {
-  const next = (questId: string, category: PQCategoryId = "habits") => ({ questId, category, verification: "self" as const, title: "t", goal: "g", dailyAction: "a" });
+  const next = (questId: string, category: PQCategoryId = "habits") => ({ questId, category, verification: "self" as const, title: "t", goal: "g", dailyAction: "a", startState: "s", expectedResult: "e" });
 
   it(`at most ${PQ_MAX_ACTIVE} active (a run awaiting its report counts); the same quest cannot run twice at once`, () => {
     const runs = [run({ questId: "a", category: "learning" }), run({ questId: "b", category: "discipline" }), run({ questId: "c", category: "psychology" })];
@@ -221,25 +219,10 @@ describe("the registry", () => {
     const banned = /(^|[^а-яё])(вес|похуд|калори|диет|диагноз)|weight|calori|diet|diagnos/i;
     for (const d of [ru, en]) {
       for (const id of ["physical", "psychology"] as const) {
-        const texts = [d.personalQuests.categories[id].name, d.personalQuests.categories[id].description, d.personalQuests.achievements[id].name, d.personalQuests.achievements[id].description];
+        const texts = [d.personalQuests.categories[id].name, d.personalQuests.categories[id].description, d.personalQuests.achievements[id].name, d.personalQuests.achievements[id].description, ...Object.values(d.personalQuests.path.examples[id]), ...Object.values(d.personalQuests.path.examplesMinor[id])];
         for (const t of texts) expect(t).not.toMatch(banned);
       }
     }
   });
 
-  it("not wired: no game, store or UI file imports the model or the simulation (no XP before QH-8.5)", () => {
-    const roots = ["lib", "components", "app"].map((d) => path.join(__dirname, "..", d));
-    const offenders: string[] = [];
-    const walk = (dir: string) => {
-      for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
-        const p = path.join(dir, f.name);
-        if (f.isDirectory()) walk(p);
-        else if (/\.(ts|tsx)$/.test(f.name) && !/\.test\.ts$/.test(f.name) && !/personal-quests\.ts$|econ-sim-qh8\.ts$/.test(f.name)) {
-          if (/from ["'][^"']*(personal-quests|econ-sim-qh8)["']|import\(["'][^"']*(personal-quests|econ-sim-qh8)["']\)/.test(fs.readFileSync(p, "utf8"))) offenders.push(p);
-        }
-      }
-    };
-    roots.forEach(walk);
-    expect(offenders).toEqual([]);
-  });
 });
