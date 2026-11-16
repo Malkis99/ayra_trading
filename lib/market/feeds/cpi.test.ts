@@ -160,3 +160,30 @@ it("times out a stalled CPI response body, aborts it and keeps the outcome pendi
     vi.useRealTimers();
   }
 });
+
+it.each([
+  { status: 302, media: "text/html", failure: "invalid", error: "location_present", body: "" },
+  { status: 200, media: "application/json", failure: "invalid", error: "unexpected archive content type", body: "{}" },
+  { status: 200, media: "text/html", failure: "invalid", error: "release date or reference period not verified", body: "<html>Access denied</html>" },
+] as const)("protects published facts on CPI HTTP $status ($error)", async ({ status, media, failure, error, body }) => {
+  const { db, runs } = memoryFeedsDb({ events });
+  const finish = vi.fn();
+  db.reserveRelease = async () => "lease";
+  db.finishRelease = finish;
+  const cpiRequests: string[] = [];
+  await collectFeeds({
+    scope: "releases", db, now, fetch: async (url, init) => {
+      if (!url.includes("bls.gov")) return { ok: true, status: 200, text: async () => "" };
+      cpiRequests.push(url);
+      expect(init?.redirect).toBe("manual");
+      const headers = new Headers({ "Content-Type": media });
+      if (status === 302) headers.set("Location", "https://example.test/not-an-official-release");
+      return { ok: status === 200, status, headers, text: async () => body };
+    },
+  });
+  expect(cpiRequests).toEqual([cpiReleaseUrl(day)]);
+  expect(finish).toHaveBeenCalledWith("lease", { verified: false, failure, results: [], absences: [] });
+  const run = runs.find(entry => entry.source === "bls-cpi-check");
+  expect(run).toMatchObject({ ok: false, items: 0, error: expect.stringContaining(error) });
+  expect(run?.error).not.toContain("example.test");
+});
