@@ -1,28 +1,11 @@
-import { economyText } from "@/lib/market/economy/dictionary";
+import { economyText, inflationText } from "@/lib/market/economy/dictionary";
 import { inflationCodes, type projectInflation } from "@/lib/market/economy/project-inflation";
-
-const labels = {
-  ru: {
-    metrics: ["Общий CPI · м/м", "Общий CPI · г/г", "Базовый CPI · м/м", "Базовый CPI · г/г"],
-    monthly: "Изменение за месяц, с сезонной корректировкой",
-    annual: "Изменение за год, без сезонной корректировки",
-    context: "CPI отражает изменение потребительских цен. Базовый CPI исключает продовольствие и энергию. Сравнивайте темпы внутри одной серии.",
-    higher: "Инфляция ускорилась", lower: "Инфляция замедлилась", same: "Темп не изменился",
-  },
-  en: {
-    metrics: ["Headline CPI · m/m", "Headline CPI · y/y", "Core CPI · m/m", "Core CPI · y/y"],
-    monthly: "Monthly change, seasonally adjusted",
-    annual: "Annual change, not seasonally adjusted",
-    context: "CPI tracks consumer prices. Core CPI excludes food and energy. Compare changes within the same series.",
-    higher: "Inflation accelerated", lower: "Inflation slowed", same: "Rate unchanged",
-  },
-};
 
 export function MarketInflation({ lang, data, loading }: {
   lang: "ru" | "en"; data?: ReturnType<typeof projectInflation>; loading: boolean;
 }) {
   const t = economyText[lang];
-  const copy = labels[lang];
+  const copy = inflationText[lang];
   const number = new Intl.NumberFormat(lang, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   const format = (value: number) => number.format(value) + "%";
   const date = new Intl.DateTimeFormat(lang, { dateStyle: "medium", timeZone: "America/New_York" });

@@ -66,3 +66,20 @@ export const economyText = {
     },
   },
 };
+
+export const inflationText = {
+  ru: {
+    metrics: ["Общий CPI · м/м", "Общий CPI · г/г", "Базовый CPI · м/м", "Базовый CPI · г/г"],
+    monthly: "Изменение за месяц, с сезонной корректировкой",
+    annual: "Изменение за год, без сезонной корректировки",
+    context: "CPI отражает изменение потребительских цен. Базовый CPI исключает продовольствие и энергию. Сравнивайте темпы внутри одной серии.",
+    higher: "Инфляция ускорилась", lower: "Инфляция замедлилась", same: "Темп не изменился",
+  },
+  en: {
+    metrics: ["Headline CPI · m/m", "Headline CPI · y/y", "Core CPI · m/m", "Core CPI · y/y"],
+    monthly: "Monthly change, seasonally adjusted",
+    annual: "Annual change, not seasonally adjusted",
+    context: "CPI tracks consumer prices. Core CPI excludes food and energy. Compare changes within the same series.",
+    higher: "Inflation accelerated", lower: "Inflation slowed", same: "Rate unchanged",
+  },
+};
