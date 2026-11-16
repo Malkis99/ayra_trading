@@ -3060,6 +3060,26 @@ export const en: Dictionary = {
       },
     },
   },
+  personalQuests: {
+    categories: {
+      discipline: { name: "Discipline", description: "Do what you planned every day: plan, routine, rules." },
+      physical: { name: "Physical growth", description: "The body as a trader's base: movement, sleep, recovery." },
+      learning: { name: "Learning", description: "Learn and reinforce something new every day: lessons, backtests, observations." },
+      psychology: { name: "Psychology", description: "Understand your emotions and decisions: the day's state, reviews of mistakes." },
+      trading: { name: "Trading", description: "The process, not the number of trades: preparation, review, following the strategy." },
+      habits: { name: "Habits", description: "Build useful habits and drop the ones in the way." },
+    },
+    achievements: {
+      discipline: { name: "Unbroken", description: "A personal Discipline quest completed with a rank." },
+      physical: { name: "Iron Will", description: "A personal Physical growth quest completed with a rank." },
+      learning: { name: "Knowledge Seeker", description: "A personal Learning quest completed with a rank." },
+      psychology: { name: "Master of Mind", description: "A personal Psychology quest completed with a rank." },
+      trading: { name: "Strategy Keeper", description: "A personal Trading quest completed with a rank." },
+      habits: { name: "Self Architect", description: "A personal Habits quest completed with a rank." },
+    },
+    ranks: { bronze: "Bronze", silver: "Silver", gold: "Gold", none: "No rank" },
+    verification: { app: "Confirmed by AYRA data", self: "Self-report" },
+  },
   quests: {
     title: "Quests",
     subtitle: "Personalized daily quests and discipline",
