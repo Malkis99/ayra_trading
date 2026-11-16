@@ -95,6 +95,7 @@ export function WeeklyBoss({ snapshot, compact, onOpenWeek }: { snapshot: Journa
   const conditions = bossConditions(boss, snapshot, gameDay);
   const overall = bossState(conditions);
   const basedOnData = (gameState.questWeek?.boss === boss && !!gameState.questWeek) || lastWeekTradeCount(snapshot, gameDay) > 0;
+  const prep = boss === "preparationWeek";
 
   return (
     <section className="rounded-2xl border border-vi/35 bg-gradient-to-b from-[#1d1b2a] to-s1 p-4" data-testid="weekly-boss" data-boss={boss} data-state={overall}>
@@ -105,12 +106,12 @@ export function WeeklyBoss({ snapshot, compact, onOpenWeek }: { snapshot: Journa
         <div className="min-w-0 flex-1">
           <div className="text-xs font-bold uppercase tracking-[0.14em] text-vi">{b.kicker}</div>
           <h3 className="font-serif text-lg font-bold text-tx">{b.names[boss]}</h3>
-          <p className="text-xs text-mu">{basedOnData ? b.chosenFrom : b.chosenDefault}</p>
+          <p className="text-xs text-mu">{prep ? b.chosenPrep : basedOnData ? b.chosenFrom : b.chosenDefault}</p>
         </div>
         <div className="flex basis-full flex-wrap items-center gap-2">
           <PhaseChip phase={currentPhase(overall)} />
           <span className="text-sm font-semibold text-tx" data-testid="boss-overall">
-            {b.overall[overall]}
+            {prep ? b.overallPrep[overall] : b.overall[overall]}
           </span>
         </div>
         {!compact && <WeekTimeLeft />}
@@ -139,10 +140,15 @@ export function WeeklyBoss({ snapshot, compact, onOpenWeek }: { snapshot: Journa
         )
       ) : (
         <div className="mt-3 space-y-1.5 text-xs text-mu">
-          <p data-testid="boss-victory-rule">{b.victoryRule}</p>
+          <p data-testid="boss-victory-rule">{prep ? b.prepRule : b.victoryRule}</p>
           <p data-testid="boss-until-end">
             {b.untilEnd} {b.afterEnd}
           </p>
+          {prep && (
+            <Link href="/journal?tab=plan" className={buttonClasses("ghost", "md", "-ml-3 text-vi")} data-testid="boss-open-journal">
+              {b.openJournal}
+            </Link>
+          )}
         </div>
       )}
     </section>

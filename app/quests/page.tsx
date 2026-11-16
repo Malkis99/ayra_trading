@@ -6,7 +6,7 @@ import { HardDrive } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useJournal } from "@/lib/journal/context";
-import { bossConditions, bossState, lastWeekTradeCount, pickBoss, reasonFor, type DayMode, type JournalSnapshot } from "@/lib/quest-engine";
+import { chooseWeekPath, closedBossResult, reasonFor, type DayMode, type JournalSnapshot } from "@/lib/quest-engine";
 import { mondayOfKey } from "@/lib/day-key";
 import { formatString } from "@/lib/i18n";
 import { GAME_CONFIG } from "@/lib/game-config";
@@ -148,20 +148,22 @@ export default function QuestsPage() {
   }, [syncing, gameState, getAllRecords, plans, notes, trades]);
 
   // What the engine reads from the journal (no second journal, no second plan)
+  // notes with deleted ones (as the mission checks read them: a deleted earlier copy still makes a text not new)
   const snapshot: JournalSnapshot = useMemo(
-    () => ({ trades, plans, weekPlans, noTrades, timezone: gameState.profile?.timezone }),
-    [trades, plans, weekPlans, noTrades, gameState.profile?.timezone]
+    () => ({ trades, plans, weekPlans, noTrades, notes: getAllRecords().notes || [], timezone: gameState.profile?.timezone }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [trades, plans, weekPlans, noTrades, notes, getAllRecords, gameState.profile?.timezone]
   );
   const mode: DayMode = gameState.isRestDay ? "rest" : gameState.questDay?.day === gameDay ? gameState.questDay.mode : "trading";
   const next = nextStep(gameState, core, mode, (id) => reasonFor(id, !!gameState.completedQuestsToday[id], snapshot, gameDay));
 
-  // The week challenge is saved once a week, and only when last week's data exists to choose it from
+  // The week's path is chosen once a week and saved (QH-7.1): only when the journal is read and, for a cloud journal,
+  // the cloud copy is in — a choice is never made from missing data (last week's trades may still be loading)
   const week = mondayOfKey(gameDay);
-  const hasLastWeek = lastWeekTradeCount(snapshot, gameDay) > 0;
   useEffect(() => {
-    if (gameState.questWeek?.week === week || !hasLastWeek) return;
-    fixWeekChallenge({ week, boss: pickBoss(snapshot, gameDay) });
-  }, [week, hasLastWeek, gameState.questWeek?.week, fixWeekChallenge, snapshot, gameDay]);
+    if (gameState.questWeek?.week === week || !journalReady || !cloudSettled) return;
+    fixWeekChallenge({ week, boss: chooseWeekPath(snapshot, gameDay) });
+  }, [week, journalReady, cloudSettled, gameState.questWeek?.week, fixWeekChallenge, snapshot, gameDay]);
 
   // A closed week keeps its challenge result, written once by the journal of this device (QH-3; nothing is given).
   // It waits until the journal is read AND, for a cloud journal, the cloud copy fetched after opening is in: while the
@@ -169,8 +171,8 @@ export default function QuestsPage() {
   const closedWeek = gameState.questWeeks?.find((w) => w.week < week && w.boss && !w.bossResult);
   useEffect(() => {
     if (!journalReady || !cloudSettled || !closedWeek?.boss) return;
-    const conditions = bossConditions(closedWeek.boss, snapshot, closedWeek.week);
-    recordWeekBossResult(closedWeek.week, { state: bossState(conditions), conditions, at: new Date().toISOString() });
+    const { state, conditions } = closedBossResult(closedWeek.boss, snapshot, closedWeek.week);
+    recordWeekBossResult(closedWeek.week, { state, conditions, at: new Date().toISOString() });
   }, [journalReady, cloudSettled, closedWeek, snapshot, recordWeekBossResult]);
 
   // One request at a time per page: a double click does not queue a second one (the store also checks it)

@@ -15,7 +15,7 @@
 import { generateProgram, type AwakeningProgram } from "./awakening";
 import { addDaysToKey, dayKeyInZone, mondayOfKey, weekdayOfKey } from "./day-key";
 import { APP_CLOSED_QUESTS, JOURNAL_CONFIRMED, QUEST_POOL, getDeterministicDailyQuests, getWeightedDailyQuests, type QuestTemplate } from "./quests";
-import { isValidBias, isValidLevel, hasValidLimits, missionsForMode, RISK_CHECK_KEY } from "./missions";
+import { candidateSources, isValidBias, isValidLevel, hasValidLimits, missionsForMode, ownText, MISSION_TEXT_MIN, RISK_CHECK_KEY, type MissionData, type MissionId } from "./missions";
 
 /**
  * Bumped when the catalog or the generation rules change; saved with each generated set.
@@ -281,6 +281,8 @@ export interface JWeekPlan {
   weekStartDate: string;
   goals?: string[];
   summary?: string;
+  /** When it was last saved (the week summary counts for «Preparation week» only when saved within the week). */
+  updatedAt?: string;
   deletedAt?: string | null;
 }
 export interface JNoTrade {
@@ -294,6 +296,8 @@ export interface JournalSnapshot {
   plans: JPlan[];
   weekPlans: JWeekPlan[];
   noTrades: JNoTrade[];
+  /** Journal notes (QH-7.1 «Preparation week» reads lessons, reviews, ideas and backtests; the trading challenges do not). */
+  notes?: MissionData["notes"];
   timezone?: string;
 }
 
@@ -478,7 +482,7 @@ export function weekGoals(snap: JournalSnapshot, dayKey: string): string[] {
 
 /* ------------------------------------------------------------------ Weekly Boss (quality of decisions, no rewards yet) */
 
-export type BossId = "noFomo" | "respectStop" | "riskGuardian" | "followPlan" | "patience" | "journalConsistency";
+export type BossId = "noFomo" | "respectStop" | "riskGuardian" | "followPlan" | "patience" | "journalConsistency" | "preparationWeek";
 
 /** Which mistake of last week chooses which challenge (the most frequent one wins; ties by this order). */
 const BOSS_BY_MISTAKE: Array<[BossId, string[]]> = [
@@ -528,6 +532,51 @@ function perTrade(trades: JTrade[], ok: (t: JTrade) => boolean, key: string, sou
 const hasNone = (...ms: string[]) => (t: JTrade) => !(t.mistakes || []).some((m) => ms.includes(m));
 const hasRisk = (t: JTrade) => t.stopLoss != null || t.riskAmount != null || t.riskPercent != null;
 
+/* ------------------------------------------------------------------ Preparation week (QH-7.1, owner decision В-17) */
+
+/** Active days needed in a «Preparation week». */
+export const PREP_ACTIVE_DAYS = 3;
+/**
+ * What makes a day active: a plan (the day's preparation or risk limits, or tomorrow's plan), a review (the day, a past
+ * trade, a mistake), a lesson, or analysis (an observation, a backtest) — each by the same checks as the Quest Hub
+ * missions (made that game day, own text, not imported, not a copy). The day state alone (a rating and an emotion) has
+ * no text and does not count.
+ */
+const PREP_SOURCES: readonly MissionId[] = ["q_bias", "q_riskcheck", "m_plan_tomorrow", "q_reflect", "m_trade_review", "m_mistake", "m_lesson", "m_observation", "m_backtest"];
+
+const missionData = (snap: JournalSnapshot): MissionData =>
+  ({ plans: snap.plans || [], notes: snap.notes || [], trades: snap.trades || [], timezone: snap.timezone }) as unknown as MissionData;
+
+/** The day has at least one confirmed piece of work (several records on one day are still one active day). */
+export function prepActiveDay(snap: JournalSnapshot, day: string): boolean {
+  const data = missionData(snap);
+  return PREP_SOURCES.some((id) => candidateSources(id, data, day).length > 0);
+}
+
+/**
+ * The week's summary in the journal's week plan: own text of at least 40 characters (as a day review), saved within the
+ * week. The save time must be known: without a valid one it is not confirmed (no new trophy from an unknown date).
+ * Results already recorded for earlier weeks are never recomputed (withBossResult), so their trophies stay.
+ */
+export function prepWeekSummary(snap: JournalSnapshot, weekStart: string): boolean {
+  const w = alive(snap.weekPlans).find((x) => x.weekStartDate === weekStart);
+  if (!w || ownText(w.summary).trim().length < MISSION_TEXT_MIN.review) return false;
+  if (!w.updatedAt || Number.isNaN(Date.parse(w.updatedAt))) return false;
+  const saved = dayKeyInZone(new Date(w.updatedAt), snap.timezone);
+  return saved >= weekStart && saved <= addDaysToKey(weekStart, 6);
+}
+
+function prepConditions(snap: JournalSnapshot, dayKey: string): BossCondition[] {
+  const { start, days } = weekRange(dayKey);
+  const active = days.filter((d) => prepActiveDay(snap, d)).length;
+  const summary = prepWeekSummary(snap, start);
+  // «pending» while it can still be done; a closed week turns it into «not met» (closedBossResult)
+  return [
+    { key: "activeDays", source: "auto", state: active >= PREP_ACTIVE_DAYS ? "met" : "pending", done: Math.min(active, PREP_ACTIVE_DAYS), total: PREP_ACTIVE_DAYS },
+    { key: "weekSummary", source: "auto", state: summary ? "met" : "pending", done: summary ? 1 : 0, total: 1 },
+  ];
+}
+
 /** The challenge's conditions on this week's trades. No trades → «not applicable», never failed. */
 export function bossConditions(boss: BossId, snap: JournalSnapshot, dayKey: string): BossCondition[] {
   const trades = weekTrades(snap, dayKey);
@@ -547,6 +596,8 @@ export function bossConditions(boss: BossId, snap: JournalSnapshot, dayKey: stri
       return [fromObjective("planBeforeTrades", "planFirst"), perTrade(trades, hasNone("ignored_plan"), "noIgnoredPlan", "self")];
     case "patience":
       return [perTrade(trades, hasNone("early_entry", "overtrading", "revenge_trade"), "noImpulse", "self"), fromObjective("tradeLimit", "withinLimit")];
+    case "preparationWeek":
+      return prepConditions(snap, dayKey);
     case "journalConsistency":
     default:
       return [fromObjective("reviewTrades", "tradesReviewed")];
@@ -557,6 +608,8 @@ export function bossConditions(boss: BossId, snap: JournalSnapshot, dayKey: stri
 export function bossState(conditions: BossCondition[]): CheckState {
   const applicable = conditions.filter((c) => c.state !== "notApplicable");
   if (applicable.length === 0) return "notApplicable";
+  // still to do and nothing missed (only «Preparation week» has conditions that are pending during the week)
+  if (applicable.some((c) => c.state === "pending") && !applicable.some((c) => c.state === "notMet")) return "pending";
   if (applicable.every((c) => c.state === "insufficientData")) return "insufficientData";
   return applicable.every((c) => c.state === "met" || c.state === "insufficientData") ? "met" : "notMet";
 }
@@ -571,8 +624,26 @@ export function lastWeekTradeCount(snap: JournalSnapshot, dayKey: string): numbe
   return weekTrades(snap, addDaysToKey(mondayOfKey(dayKey), -1)).length;
 }
 
-/** The week's challenge: the saved one for this week, else the one chosen from last week's data now. */
+/**
+ * The week's path, chosen once before the week's work counts (QH-7.1) and then saved for the whole week:
+ * - last week had trades → the trading challenge by last week's mistakes (as before);
+ * - this week already has trades (the week was first opened late) → the same trading choice (as before);
+ * - otherwise → «Preparation week»: planning, reviews, lessons and analysis, no trades needed.
+ * A mode change later in the week changes nothing: the saved path stays, one attempt and at most one trophy a week.
+ */
+export function chooseWeekPath(snap: JournalSnapshot, dayKey: string): BossId {
+  if (lastWeekTradeCount(snap, dayKey) > 0 || weekTrades(snap, dayKey).length > 0) return pickBoss(snap, dayKey);
+  return "preparationWeek";
+}
+
+/** The week's challenge: the saved one for this week, else the path that would be chosen now. */
 export function currentBoss(saved: WeekChallenge | undefined, snap: JournalSnapshot, dayKey: string): BossId {
   const week = mondayOfKey(dayKey);
-  return saved && saved.week === week ? saved.boss : pickBoss(snap, dayKey);
+  return saved && saved.week === week ? saved.boss : chooseWeekPath(snap, dayKey);
+}
+
+/** The result of a closed week: what was still «pending» when the week ended is «not met». */
+export function closedBossResult(boss: BossId, snap: JournalSnapshot, week: string): { state: CheckState; conditions: BossCondition[] } {
+  const conditions = bossConditions(boss, snap, week).map((c) => (c.state === "pending" ? { ...c, state: "notMet" as const } : c));
+  return { state: bossState(conditions), conditions };
 }
