@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fiscalRange, fiscalSources, formatUsd, type FiscalData, type FiscalPoint, type FiscalSeries } from "@/lib/market/economy/fiscal-data";
+import { fiscalRange, fiscalSources, formatUsd, type FiscalData, type FiscalPoint, type FiscalSeries, type FiscalSnapshot } from "@/lib/market/economy/fiscal-data";
 import { fiscalText } from "@/lib/market/economy/fiscal-dictionary";
 import { ranges, type HistoryRange } from "@/lib/market/economy/project-calendar";
 import { economyText } from "@/lib/market/economy/dictionary";
@@ -55,8 +55,7 @@ function FiscalChart({ points, series, column, lang }: { points: FiscalPoint[]; 
 export function MarketPublicFinances({ lang }: { lang: "ru" | "en" }) {
   const t = fiscalText[lang];
   const words = economyText[lang];
-  const [data, setData] = useState<FiscalData>();
-  const [failed, setFailed] = useState(false);
+  const [data, setData] = useState<Partial<FiscalData>>({});
   const [open, setOpen] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [range, setRange] = useState<HistoryRange>("1");
@@ -64,15 +63,17 @@ export function MarketPublicFinances({ lang }: { lang: "ru" | "en" }) {
   useEffect(() => {
     if (!open) return;
     const abort = new AbortController();
-    void fetch("/api/market-economy/treasury", { signal: abort.signal }).then(async response => {
-      if (!response.ok) throw new Error("Treasury unavailable");
-      const result = await response.json() as FiscalData;
-      if (!abort.signal.aborted) { setData(result); setFailed(false); }
-    }).catch(() => { if (!abort.signal.aborted) setFailed(true); });
+    for (const series of groups) void readFiscal(series, "latest", abort.signal).then(result => {
+      if (!abort.signal.aborted) setData(current => ({
+        ...current,
+        [series]: result.status === "error" && current[series]?.points.length
+          ? { ...current[series], status: "stale" } : result,
+      }));
+    });
     return () => abort.abort();
   }, [attempt, open]);
   const date = new Intl.DateTimeFormat(lang, { dateStyle: "medium", timeStyle: "short" });
-  const hasErrors = failed || groups.some(group => data?.[group].status === "error");
+  const hasErrors = groups.some(group => data[group]?.status === "error" || data[group]?.status === "stale");
   return <details id="public-finances" open={open} onToggle={event => setOpen(event.currentTarget.open)}
     className="scroll-mt-4 rounded-lg border border-line bg-s2 p-4" data-testid="market-public-finances">
     <summary className="cursor-pointer font-serif text-lg font-semibold text-tx">{t.title}</summary>
@@ -83,16 +84,15 @@ export function MarketPublicFinances({ lang }: { lang: "ru" | "en" }) {
           onClick={() => setRange(value)}
           className={`rounded border border-line px-2 py-1.5 text-xs ${range === value ? "bg-vi/15 text-vi" : "text-mu"}`}>{words.ranges[index]}</button>)}
       </div>
-      {!data && !failed && <p role="status" className="text-sm text-mu">{words.loading}</p>}
       {hasErrors && <div role="status" className="flex flex-wrap items-center justify-between gap-2 text-sm text-mu">
-        {words.error}
-        <button type="button" onClick={() => { setFailed(false); setAttempt(value => value + 1); }}
+        {groups.some(group => data[group]?.status === "error") ? words.error : t.stale}
+        <button type="button" onClick={() => setAttempt(value => value + 1)}
           className="rounded-md border border-line px-3 py-1 text-vi">{words.retry}</button>
       </div>}
       <div className="grid gap-3 xl:grid-cols-3">
         {groups.map(group => {
-          const row = data?.[group];
-          const points = fiscalRange(row?.points ?? [], range);
+          const row = data[group];
+          const points = row?.points ?? [];
           const latest = points[points.length - 1];
           const labels = t.metrics[group];
           const column = columns[group];
@@ -109,8 +109,9 @@ export function MarketPublicFinances({ lang }: { lang: "ru" | "en" }) {
                   <dt className="text-xs text-mu">{labels[index]}</dt>
                   <dd className="text-base font-semibold tabular-nums text-tx">{amount === null ? words.empty : formatUsd(amount, lang)}</dd>
                 </div>)}
-                {delta !== null && <div><dt className="text-xs text-mu">{t.change} · {words.ranges[ranges.indexOf(range)]}</dt>
-                  <dd className="text-base font-semibold tabular-nums text-tx">{formatUsd(delta, lang)}</dd></div>}
+                {delta !== null && <div><dt className="text-xs text-mu">{t.change}</dt>
+                  <dd className="text-base font-semibold tabular-nums text-tx">{formatUsd(delta, lang)}</dd>
+                  <dd className="text-xs text-mu">{points[0].date} — {latest.date}</dd></div>}
               </dl>
               {latest.ytd && <div className="rounded border border-line p-2 text-xs text-mu">
                 <p className="font-medium text-tx">{t.fytd} {latest.fiscalYear}</p>
@@ -124,8 +125,10 @@ export function MarketPublicFinances({ lang }: { lang: "ru" | "en" }) {
                   onClick={() => setColumns(current => ({ ...current, [group]: index }))}
                   className={`rounded border border-line px-2 py-1 text-xs ${column === index ? "bg-vi/15 text-vi" : "text-mu"}`}>{label}</button>)}
               </div>}
+              <p className="text-xs text-mu">{t.recent}</p>
               <FiscalChart points={points} series={group} column={column} lang={lang} />
-            </> : <p className="text-sm text-mu">{row?.status === "error" || failed ? words.unavailable : row ? words.empty : words.loading}</p>}
+            </> : <p className="text-sm text-mu">{row?.status === "error" ? words.unavailable : row ? words.empty : words.loading}</p>}
+            <FiscalHistory key={range} series={group} range={range} column={column} lang={lang} />
             <a href={fiscalSources[group]} target="_blank" rel="noreferrer" className="inline-block text-xs font-semibold text-vi">Treasury FiscalData ↗</a>
             <p className="text-xs text-mu">{t.notes[group]}</p>
           </section>;
@@ -137,4 +140,47 @@ export function MarketPublicFinances({ lang }: { lang: "ru" | "en" }) {
       </details>
     </div>}
   </details>;
+}
+
+async function readFiscal(series: FiscalSeries, range: HistoryRange | "latest", signal: AbortSignal): Promise<FiscalSnapshot> {
+  try {
+    const response = await fetch(`/api/market-economy/treasury?series=${series}&range=${range}`, { signal });
+    if (response.ok) return await response.json() as FiscalSnapshot;
+  } catch { /* Network errors have the same public state as unavailable data. */ }
+  return { status: "error", points: [] };
+}
+
+function FiscalHistory({ series, range, column, lang }: {
+  series: FiscalSeries; range: HistoryRange; column: number; lang: "ru" | "en";
+}) {
+  const words = economyText[lang];
+  const t = fiscalText[lang];
+  const [attempt, setAttempt] = useState(0);
+  const [history, setHistory] = useState<FiscalSnapshot>();
+  useEffect(() => {
+    if (attempt === 0) return;
+    const abort = new AbortController();
+    void readFiscal(series, range, abort.signal).then(result => {
+      if (!abort.signal.aborted) setHistory(result);
+    });
+    return () => abort.abort();
+  }, [attempt, range, series]);
+  const points = fiscalRange(history?.points ?? [], range);
+  const first = points[0]?.values[0];
+  const last = points.at(-1)?.values[0];
+  return <div className="space-y-2 border-t border-line pt-2">
+    {(!history || history.status === "error") && <button type="button" disabled={attempt > 0 && !history}
+      onClick={() => { setHistory(undefined); setAttempt(value => value + 1); }}
+      className="rounded border border-line px-2 py-1 text-xs text-vi">
+      {history ? words.retry : attempt > 0 ? words.loading : t.loadHistory + " · " + words.ranges[ranges.indexOf(range)]}
+    </button>}
+    {history?.status === "error" && <p role="status" className="text-xs text-mu">{words.error}</p>}
+    {history?.status === "stale" && <p role="status" className="text-xs text-vi">{t.stale}</p>}
+    {history && history.status !== "error" && <>
+      {series === "debt" && points.length > 1 && first && last && <p className="text-xs text-mu">
+        {t.change} · {points[0].date} — {points.at(-1)?.date} · {formatUsd(String(BigInt(last) - BigInt(first)), lang)}
+      </p>}
+      <FiscalChart points={points} series={series} column={column} lang={lang} />
+    </>}
+  </div>;
 }

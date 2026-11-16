@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test, vi } from "vitest";
 import { cents, fiscalRange, formatUsd, type FiscalSeries } from "./fiscal-data";
-import { loadTreasury, normalizeTreasury, TreasuryThrottle } from "./treasury";
+import { loadTreasury, normalizeTreasury } from "./treasury";
 
 function rows(series: FiscalSeries) {
   return JSON.parse(readFileSync(`lib/market/economy/fixtures/treasury-${series}.json`, "utf8")).data as Record<string, unknown>[];
@@ -56,9 +56,30 @@ describe("Treasury data", () => {
     request.mockResolvedValueOnce(Response.json({ data: [], meta: { count: 0, "total-count": 0, "total-pages": 0 } }));
     expect(await loadTreasury("debt", "2026-11-16", request)).toEqual([]);
     request.mockResolvedValueOnce(new Response(null, { status: 429, headers: { "Retry-After": "120" } }));
-    await expect(loadTreasury("debt", "2026-11-16", request)).rejects.toBeInstanceOf(TreasuryThrottle);
+    await expect(loadTreasury("debt", "2026-11-16", request)).rejects.toMatchObject({ category: "throttled", pages: 0 });
     request.mockResolvedValueOnce(new Response("<html>unavailable</html>", { headers: { "Content-Type": "text/html" } }));
     await expect(loadTreasury("debt", "2026-11-16", request)).rejects.toThrow("response unavailable");
+  });
+
+  test("recent debt uses a small bounded page and classifies timeouts without leaking the upstream error", async () => {
+    const request = vi.fn<Parameters<typeof fetch>, Promise<Response>>();
+    request.mockImplementationOnce(async (_url, init) => {
+      await new Promise<void>(resolve => init?.signal?.addEventListener("abort", () => resolve(), { once: true }));
+      throw new Error("mock timeout");
+    });
+    vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 1);
+      return controller.signal;
+    });
+    try {
+      await expect(loadTreasury("debt", "2026-11-16", request, "latest")).rejects.toMatchObject({ category: "timeout", pages: 0 });
+      const query = new URL(String(request.mock.calls[0][0])).searchParams;
+      expect(query.get("page[size]")).toBe("250");
+      expect(query.get("filter")).toContain("2026-08-18");
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 
   test("fetches the next bounded page and rejects a changed total", async () => {

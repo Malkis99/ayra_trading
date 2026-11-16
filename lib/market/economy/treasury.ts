@@ -1,4 +1,4 @@
-import { cents, type FiscalPoint, type FiscalSeries } from "./fiscal-data";
+import { cents, type FiscalPoint, type FiscalSeries, type FiscalRange } from "./fiscal-data";
 
 const base = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/";
 const maxPages = 20;
@@ -21,9 +21,17 @@ export class TreasuryThrottle extends Error {
   constructor(readonly until: number) { super("Treasury temporarily unavailable"); }
 }
 
-async function readPage(series: FiscalSeries, from: string, until: string, page: number, signal: AbortSignal, request: typeof fetch) {
+type Failure = "timeout" | "network" | "http" | "content_type" | "schema" | "pagination" | "validation" | "throttled";
+export class TreasuryFailure extends Error {
+  constructor(readonly category: Failure, readonly pages: number, readonly durationMs: number,
+    readonly retryAt?: number, message: string = category) { super(message); }
+}
+class PageError extends Error {
+  constructor(readonly category: Failure, message: string) { super(message); }
+}
+
+async function readPage(series: FiscalSeries, from: string, until: string, page: number, pageSize: number, signal: AbortSignal, request: typeof fetch) {
   const config = settings[series];
-  const { pageSize } = config;
   const url = new URL(config.path, base);
   const extra = "extraFilter" in config ? config.extraFilter : "";
   url.search = new URLSearchParams({ fields: config.fields, filter: `record_date:gte:${from},record_date:lte:${until}${extra}`,
@@ -35,16 +43,20 @@ async function readPage(series: FiscalSeries, from: string, until: string, page:
     const until = /^\d+$/.test(raw) ? now + Number(raw) * 1000 : Date.parse(raw);
     throw new TreasuryThrottle(Number.isFinite(until) ? Math.max(until, now + 60_000) : now + 300_000);
   }
-  if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) throw new Error("Treasury response unavailable");
-  const payload: unknown = await response.json();
-  if (!object(payload) || !Array.isArray(payload.data) || !payload.data.every(object) || !object(payload.meta)) throw new Error("Treasury schema mismatch");
+  if (!response.ok) throw new PageError("http", "Treasury response unavailable");
+  if (!response.headers.get("content-type")?.includes("application/json")) throw new PageError("content_type", "Treasury response unavailable");
+  const payload: unknown = await response.json().catch(error => {
+    if (signal.aborted) throw error;
+    throw new PageError("schema", "Treasury invalid JSON");
+  });
+  if (!object(payload) || !Array.isArray(payload.data) || !payload.data.every(object) || !object(payload.meta)) throw new PageError("schema", "Treasury schema mismatch");
   const total = payload.meta["total-count"];
   const pages = payload.meta["total-pages"];
   if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0 || typeof pages !== "number"
     || total > pageSize * maxPages || pages !== Math.ceil(total / pageSize)
     || payload.meta.count !== payload.data.length
     || payload.data.length !== Math.min(pageSize, Math.max(0, total - (page - 1) * pageSize))) {
-    throw new Error("Invalid Treasury pagination");
+    throw new PageError("pagination", "Invalid Treasury pagination");
   }
   return { rows: payload.data, total, pages };
 }
@@ -127,20 +139,40 @@ export function normalizeTreasury(series: FiscalSeries, rows: Row[]): FiscalPoin
   return points;
 }
 
-export async function loadTreasury(series: FiscalSeries, until: string, request = fetch, recentOnly = false) {
-  const signal = AbortSignal.timeout(recentOnly ? 12_000 : 40_000);
-  const from = recentOnly ? new Date(Date.parse(until) - 90 * 86_400_000).toISOString().slice(0, 10) : settings[series].from;
-  const first = await readPage(series, from, until, 1, signal, request);
-  const rows = first.rows;
-  // A short upper bound on simultaneous requests limits pressure on the public API.
-  for (let page = 2; page <= first.pages; page += 2) {
-    const batch = await Promise.all(Array.from({ length: Math.min(2, first.pages - page + 1) },
-      (_, index) => readPage(series, from, until, page + index, signal, request)));
-    for (const next of batch) {
-      if (next.total !== first.total || next.pages !== first.pages) throw new Error("Treasury pagination changed");
+export async function loadTreasury(series: FiscalSeries, until: string, request = fetch, range: FiscalRange = "max") {
+  const started = performance.now();
+  const signal = AbortSignal.timeout(range === "latest" ? 8_000 : 38_000);
+  const cutoff = new Date(until);
+  if (range === "latest") cutoff.setUTCDate(cutoff.getUTCDate() - 90);
+  else if (range !== "max") {
+    // Include the whole reference month for monthly flows.
+    if (series !== "debt") cutoff.setUTCDate(1);
+    const month = cutoff.getUTCMonth();
+    cutoff.setUTCFullYear(cutoff.getUTCFullYear() - Number(range));
+    if (cutoff.getUTCMonth() !== month) cutoff.setUTCDate(0);
+  }
+  const from = range === "max" ? settings[series].from : [settings[series].from, cutoff.toISOString().slice(0, 10)].sort()[1];
+  const size = range === "latest" ? 250 : settings[series].pageSize;
+  let processed = 0;
+  let validating = false;
+  try {
+    const first = await readPage(series, from, until, 1, size, signal, request);
+    processed++;
+    const rows = first.rows;
+    // One page at a time so Retry-After can stop any remaining requests.
+    for (let page = 2; page <= first.pages; page++) {
+      const next = await readPage(series, from, until, page, size, signal, request);
+      if (next.total !== first.total || next.pages !== first.pages) throw new PageError("pagination", "Treasury pagination changed");
+      processed++;
       rows.push(...next.rows);
     }
+    validating = true;
+    if (rows.some(row => dateOf(row) < from || dateOf(row) > until)) throw new Error("Treasury date outside requested range");
+    return normalizeTreasury(series, rows);
+  } catch (error) {
+    const category = signal.aborted ? "timeout" : error instanceof TreasuryThrottle ? "throttled"
+      : error instanceof PageError ? error.category : validating ? "validation" : "network";
+    throw new TreasuryFailure(category, processed, Math.round(performance.now() - started),
+      error instanceof TreasuryThrottle ? error.until : undefined, error instanceof Error ? error.message : undefined);
   }
-  if (rows.some(row => dateOf(row) < from || dateOf(row) > until)) throw new Error("Treasury date outside requested range");
-  return normalizeTreasury(series, rows);
 }

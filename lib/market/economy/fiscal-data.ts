@@ -5,7 +5,10 @@ export const fiscalSources = {
 };
 export type FiscalSeries = keyof typeof fiscalSources;
 export type FiscalPoint = { date: string; values: (string | null)[]; fiscalYear?: number; ytd?: string[] };
-export type FiscalData = Record<FiscalSeries, { status: "ready" | "stale" | "empty" | "error"; checkedAt?: string; partial?: boolean; points: FiscalPoint[] }>;
+export type FiscalSnapshot = { status: "ready" | "stale" | "empty" | "error"; checkedAt?: string; partial?: boolean; points: FiscalPoint[] };
+export type FiscalData = Record<FiscalSeries, FiscalSnapshot>;
+export const fiscalRanges = ["latest", "1", "3", "5", "10", "max"] as const;
+export type FiscalRange = typeof fiscalRanges[number];
 
 // All amounts crossing the HTTP boundary are integer cents encoded as strings.
 export function cents(value: unknown): bigint {

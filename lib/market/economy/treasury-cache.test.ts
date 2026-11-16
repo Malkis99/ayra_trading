@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { fiscalData, treasuryStatus } from "./treasury-cache";
-import { loadTreasury } from "./treasury";
+import { fiscalData, fiscalSeries, treasuryStatus } from "./treasury-cache";
+import { loadTreasury, TreasuryFailure } from "./treasury";
 
 vi.mock("next/cache", () => ({ unstable_cache: (load: () => unknown) => load }));
 vi.mock("./treasury", async () => ({
@@ -18,16 +18,28 @@ test("marks an old observation or an old cached response as stale", () => {
 
 test("coalesces simultaneous loads and cools down a failed dataset", async () => {
   const load = vi.mocked(loadTreasury);
-  load.mockImplementation(async (series, _until, _request, recent) => {
-    if (series === "interest" && recent) return [];
+  load.mockImplementation(async series => {
     if (series === "interest") throw new Error("temporarily unavailable");
     return [];
   });
   const [one, two] = await Promise.all([fiscalData(), fiscalData()]);
   expect(one).toEqual(two);
-  expect(one.interest).toMatchObject({ status: "empty", partial: true });
+  expect(one.interest.status).toBe("error");
   expect(one.debt.status).toBe("empty");
-  expect(load).toHaveBeenCalledTimes(4);
+  expect(load).toHaveBeenCalledTimes(3);
   await fiscalData();
-  expect(load.mock.calls.filter(([series, , , recent]) => series === "interest" && !recent)).toHaveLength(1);
+  expect(load.mock.calls.filter(([series]) => series === "interest")).toHaveLength(1);
+});
+
+test("logs structured diagnostics and honors Retry-After across ranges", async () => {
+  const load = vi.mocked(loadTreasury);
+  load.mockClear();
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+  load.mockRejectedValueOnce(new TreasuryFailure("throttled", 2, 243, Date.now() + 300_000, "untrusted detail"));
+  expect(await fiscalSeries("debt", "max")).toEqual({ status: "error", points: [] });
+  expect(await fiscalSeries("debt", "1")).toEqual({ status: "error", points: [] });
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(warning.mock.calls[0][0])).toEqual({
+    event: "treasury_read_failed", series: "debt", range: "max", category: "throttled", pages: 2, durationMs: 243,
+  });
 });
