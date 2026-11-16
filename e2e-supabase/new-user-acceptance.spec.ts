@@ -226,7 +226,8 @@ test.describe("NEW USER ACCEPTANCE", () => {
     await page.getByTestId("mode-study").click();
     await page.getByTestId("mode-activate").click();
     await page.waitForTimeout(800);
-    await page.getByTestId("quest-card-m_lesson").getByTestId("quest-accept").click(); // accepted: the limit still holds
+    // the three done slots stay after the mode change: the day has no free slot, so «Lesson» is not even offered
+    await expect(page.getByTestId("quest-card-m_lesson")).toHaveCount(0);
     await page.goto("/journal?tab=notes&new=lesson");
     await page.getByTestId("note-modal").locator("textarea").fill("Урок: я жду закрытия свечи над уровнем, прежде чем входить в сделку по плану.");
     await page.getByTestId("note-modal").getByRole("button", { name: "Сохранить", exact: true }).click();

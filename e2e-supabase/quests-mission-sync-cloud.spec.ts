@@ -25,6 +25,8 @@ async function setUp(page: Page, request: import("@playwright/test").APIRequestC
       localStorage.setItem(`ayra:${id}:ayra_sync_state`, JSON.stringify({ initialSyncAt: "2026-10-01T00:00:00.000Z", lastSyncAt: "2026-10-01T00:00:00.000Z" }));
       const gk = `ayra:${id}:ayra_demo_v1`;
       const g = JSON.parse(localStorage.getItem(gk) || "{}");
+      // the game day of the account (its time zone), not the UTC date: they differ late in the evening
+      today = g.lastQuestDate || today;
       g.lastQuestDate = today;
       g.journalFirstTradeDay = null;
       g.questDay = { day: today, mode: "study", catalogVersion: 3, core: ["m_observation", "m_backtest", "m_lesson"], bonus: ["q_read_pages", "q_logic_puzzle"], studyFirst: "m_observation" };
