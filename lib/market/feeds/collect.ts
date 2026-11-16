@@ -132,16 +132,54 @@ function withTimeout<T>(p: Promise<T>, timeout = TIMEOUT_MS): Promise<T> {
 }
 
 /** BLS publication HTML: one deadline covers headers AND body; abandon the request when it expires. */
-async function getBlsText(fetcher: Fetcher, url: string, singleRequest = false): Promise<string> {
+async function getBlsText(fetcher: Fetcher, url: string): Promise<string> {
   const abort = new AbortController();
   try {
     return await withTimeout((async () => {
-      const response = await fetcher(url, {headers:{"User-Agent":USER_AGENT,Accept:"text/html"},signal:abort.signal,...(singleRequest ? {redirect:"manual" as const} : {})});
+      const response = await fetcher(url, {headers:{"User-Agent":USER_AGENT,Accept:"text/html"},signal:abort.signal});
       if (!response.ok) throw new ReleaseHttpError(response.status, url, response.headers?.get("retry-after"));
       return response.text();
     })());
   } finally { abort.abort(); }
 }
+
+async function readCpiRelease(fetcher: Fetcher, day: string, period: string) {
+  const url = cpiReleaseUrl(day);
+  const abort = new AbortController();
+  try {
+    return await withTimeout((async () => {
+      const response = await fetcher(url, {
+        headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
+        redirect: "manual",
+        signal: abort.signal,
+      });
+      const mediaType = response.headers?.get("content-type")?.split(";")[0].trim().toLowerCase();
+      if (!response.ok) {
+        const detail = [
+          mediaType === "text/html" ? "html" : "other_or_missing_content_type",
+          response.headers?.get("location") ? "location_present" : "no_location",
+          response.headers?.get("retry-after") ? "retry_after_present" : "no_retry_after",
+        ].join(", ");
+        throw new ReleaseHttpError(response.status, `${url} (${detail})`, response.headers?.get("retry-after"));
+      }
+      if (mediaType && mediaType !== "text/html" && mediaType !== "application/xhtml+xml") {
+        throw new InvalidCpiRelease("CPI: unexpected archive content type");
+      }
+      try {
+        const release = parseCpiRelease(await response.text(), day);
+        if (release.period !== period) throw new Error("CPI: release period mismatch");
+        return release;
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith("CPI:")) throw new InvalidCpiRelease(error.message);
+        throw error;
+      }
+    })());
+  } finally {
+    abort.abort();
+  }
+}
+
+class InvalidCpiRelease extends Error {}
 
 /** Only the last 90 days (what the tables keep) and nothing far in the future (a feed's broken date). */
 export const NEWS_DAYS = 90;
@@ -592,8 +630,7 @@ async function priorityBls(o: CollectOptions, run: Run): Promise<void> {
       try {
         if (family === "cpi") {
           const day = nyDay(Date.parse(group[0].starts_at));
-          const release = parseCpiRelease(await getBlsText(o.fetch,cpiReleaseUrl(day),true),day);
-          if (release.period !== group[0].reference_period) throw new Error("CPI: release period mismatch");
+          const release = await readCpiRelease(o.fetch, day, group[0].reference_period!);
           outcome.results = cpiResults(group,release);
           outcome.absences = cpiAbsences(group,release);
           await cpiPrevious(o,outcome.results,group,release.period);
@@ -608,7 +645,7 @@ async function priorityBls(o: CollectOptions, run: Run): Promise<void> {
       } catch(error) {
         const status = error instanceof ReleaseHttpError ? error.status : null;
         await finishRelease(token,{verified:false,results:[],absences:[],
-          failure:status===403 ? "blocked" : status===429 ? "rate_limited" : status===null || status>=500 ? "transient" : "invalid",
+          failure:status===403 ? "blocked" : status===429 ? "rate_limited" : error instanceof InvalidCpiRelease ? "invalid" : status===null || status>=500 ? "transient" : "invalid",
           retryAt:error instanceof ReleaseHttpError && status===429 ? retryAfterAt(error.retryAfter, Date.now()) : undefined});
         throw error;
       }
@@ -636,7 +673,7 @@ async function blsFigures(o: CollectOptions, run: Run) {
     await run("bls-cpi-release", async () => {
       const day = nyDay(Date.parse(cpi.slice().sort((a,b) => a.starts_at.localeCompare(b.starts_at))[0].starts_at));
       const group = cpi.filter(e => nyDay(Date.parse(e.starts_at)) === day);
-      const release = parseCpiRelease(await get(o.fetch, cpiReleaseUrl(day)), day);
+      const release = await readCpiRelease(o.fetch, day, group[0].reference_period!);
       const figures = cpiResults(group, release);
       await cpiPrevious(o, figures, group, release.period);
       await save(o, figures, group);
