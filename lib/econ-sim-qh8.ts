@@ -110,7 +110,7 @@ export function simulatePersonal(profile: PQProfile, days = 90, variant: RateVar
   let seq = 0;
   const startRun = (slot: number, day: string): boolean => {
     const s = b.slots[slot];
-    const next = { questId: `q${slot}`, category: s.category, verification: s.verification, title: `Quest ${slot}`, goal: "goal", dailyAction: "action" };
+    const next = { questId: `q${slot}`, category: s.category, verification: s.verification, title: `Quest ${slot}`, goal: "goal", dailyAction: "action", startState: "start", expectedResult: "result" };
     if (canStart(runs, next, day)) return false;
     runs.push({ ...next, id: `r${++seq}`, startState: "", expectedResult: "", startDay: day, marks: [], status: "active" });
     return true;
@@ -134,7 +134,7 @@ export function simulatePersonal(profile: PQProfile, days = 90, variant: RateVar
             if ("failure" in settleRun(run, ledger, "x".repeat(100), day, `${day}T20:01:00.000Z`, check, rates)) refused++;
             // a second quest in a category that is still active, while a slot is free: refused
             const busy = runs.find((r) => r.status === "active");
-            if (busy && canStart(runs, { questId: "dup", category: busy.category, verification: "self", title: "x", goal: "x", dailyAction: "x" }, day) === "categoryActive") refused++;
+            if (busy && canStart(runs, { questId: "dup", category: busy.category, verification: "self", title: "x", goal: "x", dailyAction: "x", startState: "x", expectedResult: "x" }, day) === "categoryActive") refused++;
           }
         }
       }
@@ -142,7 +142,7 @@ export function simulatePersonal(profile: PQProfile, days = 90, variant: RateVar
     }
     if (b.tricks) {
       // a 4th quest: refused
-      if (canStart(runs, { questId: "extra", category: "discipline", verification: "self", title: "x", goal: "x", dailyAction: "x" }, day) === "maxActive") refused++;
+      if (canStart(runs, { questId: "extra", category: "discipline", verification: "self", title: "x", goal: "x", dailyAction: "x", startState: "x", expectedResult: "x" }, day) === "maxActive") refused++;
       // settling a run before its period is over: refused
       const live = runs.find((r) => r.status === "active");
       if (live && "failure" in settleRun(live, ledger, "x".repeat(100), day, `${day}T21:00:00.000Z`, check, rates)) refused++;

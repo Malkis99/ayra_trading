@@ -3,10 +3,12 @@
 import React, { useRef } from "react";
 import { cn } from "@/components/ui/cn";
 
-export type HubTab = "today" | "week" | "history" | "creators";
-export const HUB_TABS: HubTab[] = ["today", "week", "history", "creators"];
+export type HubTab = "today" | "week" | "history" | "path";
+export const HUB_TABS: HubTab[] = ["today", "week", "history", "path"];
 
 export function parseHubTab(value: string | null | undefined): HubTab {
+  // «Creators (soon)» gave its place to «My path» (QH-8.2); its old links open My path, which keeps the «soon» note
+  if (value === "creators") return "path";
   return HUB_TABS.includes(value as HubTab) ? (value as HubTab) : "today";
 }
 

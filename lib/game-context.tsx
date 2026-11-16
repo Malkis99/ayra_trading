@@ -35,6 +35,10 @@ import {
   setTradingDays as setTradingDaysLogic,
   setWeekChallenge as setWeekChallengeLogic,
   recordWeekBossResult as recordWeekBossResultLogic,
+  createPersonalQuest as createPersonalQuestLogic,
+  abandonPersonalQuest as abandonPersonalQuestLogic,
+  restartPersonalQuest as restartPersonalQuestLogic,
+  type PersonalQuestFailure,
   type DayModeFailure,
   grantFirstAction as grantFirstActionLogic,
   type FirstActionKind,
@@ -53,6 +57,7 @@ import { GameStore, browserLock, revOf, type Change } from "@/lib/game-store";
 import { deviceRewardService, type RewardService } from "@/lib/reward-service";
 import type { DayMode, WeekChallenge } from "@/lib/quest-engine";
 import type { WeekSnapshot } from "@/lib/day-snapshots";
+import type { PQStartInput } from "@/lib/personal-quests";
 import { browserCommitLog } from "@/lib/storage/game-rev-counter";
 
 const STORAGE_KEY = "ayra_demo_v1";
@@ -183,6 +188,13 @@ interface GameContextType {
   acceptMission: (id: string) => boolean;
   /** QH-6.6: «Verify» of an accepted mission — the one claim of lib/game.ts, under the lock shared by all tabs. */
   verifyMission: (id: string, data: MissionData) => Promise<{ paid: boolean; xp: number; coins: number; leveledUp: boolean; newLevel?: number; failure?: VerifyFailure; saveFailed?: boolean }>;
+  /**
+   * Personal quests «My path» (QH-8.2): start, abandon, restart — under the lock shared by all tabs, on the freshest saved
+   * state. Nothing gives XP or Coins. `reason: "notSaved"` when the change could not be saved.
+   */
+  createPersonalQuest: (input: PQStartInput & { id: string }) => Promise<{ ok: boolean; runId?: string; reason?: PersonalQuestFailure | "notSaved" }>;
+  abandonPersonalQuest: (runId: string) => Promise<{ ok: boolean; reason?: PersonalQuestFailure | "notSaved" }>;
+  restartPersonalQuest: (runId: string, newId: string) => Promise<{ ok: boolean; runId?: string; reason?: PersonalQuestFailure | "notSaved" }>;
   /** Saves the edit-profile form: nickname (already accepted by the server for accounts), bio and optional details. */
   saveProfileEdits: (edits: { name: string; bio: string; details: ProfileDetails }) => void;
   /** Accounts: the cloud nickname is the source of truth; copies it into the local state without a chronicle entry. */
@@ -203,6 +215,8 @@ export interface QuestCompletion {
 
 const NOT_COMPLETED: QuestCompletion = { completed: false, xp: 0, leveledUp: false, newlyUnlocked: [] };
 const SAVE_FAILED: QuestCompletion = { ...NOT_COMPLETED, saveFailed: true };
+/** A personal quest change that could not be saved (QH-8.2). */
+const NOT_SAVED: { ok: boolean; runId?: string; reason?: PersonalQuestFailure | "notSaved" } = { ok: false, reason: "notSaved" };
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
 
@@ -613,6 +627,32 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     [update]
   );
 
+  // Personal quests (QH-8.2): one tab at a time on fresh data, so two tabs cannot pass the limits together; no rewards
+  const createPersonalQuest = useCallback(
+    (input: PQStartInput & { id: string }) =>
+      applyLocked((s) => {
+        const res = createPersonalQuestLogic(s, input, new Date());
+        return { state: res.state, result: { ok: res.ok, runId: res.runId, reason: res.reason as PersonalQuestFailure | "notSaved" | undefined } };
+      }, NOT_SAVED),
+    [applyLocked]
+  );
+  const abandonPersonalQuest = useCallback(
+    (runId: string) =>
+      applyLocked((s) => {
+        const res = abandonPersonalQuestLogic(s, runId, new Date());
+        return { state: res.state, result: { ok: res.ok, reason: res.reason as PersonalQuestFailure | "notSaved" | undefined } };
+      }, NOT_SAVED),
+    [applyLocked]
+  );
+  const restartPersonalQuest = useCallback(
+    (runId: string, newId: string) =>
+      applyLocked((s) => {
+        const res = restartPersonalQuestLogic(s, runId, newId, new Date());
+        return { state: res.state, result: { ok: res.ok, runId: res.runId, reason: res.reason as PersonalQuestFailure | "notSaved" | undefined } };
+      }, NOT_SAVED),
+    [applyLocked]
+  );
+
   // One-time reward for the first action of a kind on this account (the journal decides it is the first)
   const grantFirstAction = useCallback((kind: FirstActionKind) => {
     return applySync((s) => {
@@ -886,6 +926,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         recordJournalTrades: recordJournalTradesCb,
         acceptMission: acceptMissionCb,
         verifyMission: verifyMissionCb,
+        createPersonalQuest,
+        abandonPersonalQuest,
+        restartPersonalQuest,
         saveProfileEdits,
         syncCloudNickname,
       }}

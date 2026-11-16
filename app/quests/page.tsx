@@ -28,7 +28,7 @@ import { ActivityMap, HistoryStatsBlock } from "@/components/quests/HistoryOverv
 import { DayPanel } from "@/components/quests/DayPanel";
 import { historyDefaultDay, historyMap, historyStats } from "@/lib/history-view";
 import { HistoryTab } from "@/components/quests/HistoryTab";
-import { CreatorsRules, CreatorsSoon } from "@/components/quests/CreatorsTab";
+import { PathMain, PathRail } from "@/components/quests/PersonalPath";
 import { HUB_TABS, HubColumns, HubTabs, parseHubTab, type HubTab } from "@/components/quests/HubLayout";
 import { questTitle } from "@/components/quests/quest-text";
 
@@ -240,8 +240,6 @@ export default function QuestsPage() {
         <span className={`${badge} text-vi`} aria-label={formatString(h.todayCountAria, { done: coreDone, total: core.length })}>
           {formatString(h.todayCount, { done: coreDone, total: core.length })}
         </span>
-      ) : id === "creators" ? (
-        <span className={`${badge} border border-line text-mu`}>{h.soon}</span>
       ) : undefined,
   }));
 
@@ -325,7 +323,7 @@ export default function QuestsPage() {
         </>
       ),
     },
-    creators: { main: <CreatorsSoon />, rail: <CreatorsRules /> },
+    path: { main: <PathMain />, rail: <PathRail /> },
   };
 
   return (
