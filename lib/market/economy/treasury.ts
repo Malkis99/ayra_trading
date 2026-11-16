@@ -21,12 +21,12 @@ export class TreasuryThrottle extends Error {
   constructor(readonly until: number) { super("Treasury temporarily unavailable"); }
 }
 
-async function readPage(series: FiscalSeries, until: string, page: number, signal: AbortSignal, request: typeof fetch) {
+async function readPage(series: FiscalSeries, from: string, until: string, page: number, signal: AbortSignal, request: typeof fetch) {
   const config = settings[series];
   const { pageSize } = config;
   const url = new URL(config.path, base);
   const extra = "extraFilter" in config ? config.extraFilter : "";
-  url.search = new URLSearchParams({ fields: config.fields, filter: `record_date:gte:${config.from},record_date:lte:${until}${extra}`,
+  url.search = new URLSearchParams({ fields: config.fields, filter: `record_date:gte:${from},record_date:lte:${until}${extra}`,
     sort: config.order, "page[size]": String(pageSize), "page[number]": String(page) }).toString();
   const response = await request(url, { cache: "no-store", redirect: "error", signal });
   if (response.status === 429 || response.status === 503) {
@@ -127,19 +127,20 @@ export function normalizeTreasury(series: FiscalSeries, rows: Row[]): FiscalPoin
   return points;
 }
 
-export async function loadTreasury(series: FiscalSeries, until: string, request = fetch) {
-  const signal = AbortSignal.timeout(40_000);
-  const first = await readPage(series, until, 1, signal, request);
+export async function loadTreasury(series: FiscalSeries, until: string, request = fetch, recentOnly = false) {
+  const signal = AbortSignal.timeout(recentOnly ? 12_000 : 40_000);
+  const from = recentOnly ? new Date(Date.parse(until) - 90 * 86_400_000).toISOString().slice(0, 10) : settings[series].from;
+  const first = await readPage(series, from, until, 1, signal, request);
   const rows = first.rows;
   // A short upper bound on simultaneous requests limits pressure on the public API.
   for (let page = 2; page <= first.pages; page += 2) {
     const batch = await Promise.all(Array.from({ length: Math.min(2, first.pages - page + 1) },
-      (_, index) => readPage(series, until, page + index, signal, request)));
+      (_, index) => readPage(series, from, until, page + index, signal, request)));
     for (const next of batch) {
       if (next.total !== first.total || next.pages !== first.pages) throw new Error("Treasury pagination changed");
       rows.push(...next.rows);
     }
   }
-  if (rows.some(row => dateOf(row) < settings[series].from || dateOf(row) > until)) throw new Error("Treasury date outside requested range");
+  if (rows.some(row => dateOf(row) < from || dateOf(row) > until)) throw new Error("Treasury date outside requested range");
   return normalizeTreasury(series, rows);
 }

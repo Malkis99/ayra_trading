@@ -18,15 +18,16 @@ test("marks an old observation or an old cached response as stale", () => {
 
 test("coalesces simultaneous loads and cools down a failed dataset", async () => {
   const load = vi.mocked(loadTreasury);
-  load.mockImplementation(async series => {
+  load.mockImplementation(async (series, _until, _request, recent) => {
+    if (series === "interest" && recent) return [];
     if (series === "interest") throw new Error("temporarily unavailable");
     return [];
   });
   const [one, two] = await Promise.all([fiscalData(), fiscalData()]);
   expect(one).toEqual(two);
-  expect(one.interest.status).toBe("error");
+  expect(one.interest).toMatchObject({ status: "empty", partial: true });
   expect(one.debt.status).toBe("empty");
-  expect(load).toHaveBeenCalledTimes(3);
+  expect(load).toHaveBeenCalledTimes(4);
   await fiscalData();
-  expect(load.mock.calls.filter(([series]) => series === "interest")).toHaveLength(1);
+  expect(load.mock.calls.filter(([series, , , recent]) => series === "interest" && !recent)).toHaveLength(1);
 });

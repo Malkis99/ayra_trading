@@ -5,7 +5,7 @@ export const fiscalSources = {
 };
 export type FiscalSeries = keyof typeof fiscalSources;
 export type FiscalPoint = { date: string; values: (string | null)[]; fiscalYear?: number; ytd?: string[] };
-export type FiscalData = Record<FiscalSeries, { status: "ready" | "stale" | "empty" | "error"; checkedAt?: string; points: FiscalPoint[] }>;
+export type FiscalData = Record<FiscalSeries, { status: "ready" | "stale" | "empty" | "error"; checkedAt?: string; partial?: boolean; points: FiscalPoint[] }>;
 
 // All amounts crossing the HTTP boundary are integer cents encoded as strings.
 export function cents(value: unknown): bigint {

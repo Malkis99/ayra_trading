@@ -102,6 +102,7 @@ export function MarketPublicFinances({ lang }: { lang: "ru" | "en" }) {
           return <section key={group} className="min-w-0 space-y-3 rounded-md border border-line bg-s1 p-3" data-testid={`fiscal-${group}`}>
             <h3 className="font-semibold text-tx">{t.groups[group]}</h3>
             {row?.status === "stale" && <p role="status" className="text-xs text-vi">{t.stale}</p>}
+            {row?.partial && <p className="text-xs text-mu">{t.partial}</p>}
             {latest ? <>
               <dl className="grid grid-cols-2 gap-2">
                 {latest.values.map((amount, index) => <div key={labels[index]}>

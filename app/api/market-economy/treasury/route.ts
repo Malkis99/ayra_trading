@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { fiscalData } from "@/lib/market/economy/treasury-cache";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 45;
+export const maxDuration = 60;
 
 export async function GET() {
   const data = await fiscalData();
