@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { economyCodes, economyColumns, projectEconomy, type EconomyCalendarRow } from "./project-calendar";
+import { inflationCodes, projectInflation } from "./project-inflation";
 
-type Data = ReturnType<typeof projectEconomy>;
+type Data = ReturnType<typeof projectEconomy> & { inflation: ReturnType<typeof projectInflation> };
 type State = { status: "loading" | "unavailable" | "error" | "ready"; data?: Data };
 let cache: Data | undefined;
 let pending: Promise<Data> | undefined;
@@ -13,12 +14,13 @@ async function read(client: NonNullable<ReturnType<typeof createSupabaseBrowserC
   const now = Date.now();
   const { data, error } = await client.from("market_events").select(economyColumns)
     .eq("country", "us").eq("kind", "release").eq("status", "released").eq("hidden", false)
-    .in("code", economyCodes).not("actual", "is", null)
+    .in("code", [...economyCodes, ...inflationCodes]).not("actual", "is", null)
     .lte("starts_at", new Date(now).toISOString())
     .gte("starts_at", new Date(now - 90 * 86_400_000).toISOString())
     .order("starts_at", { ascending: false }).limit(100);
   if (error) throw error;
-  return projectEconomy((data ?? []) as unknown as EconomyCalendarRow[], now);
+  const rows = (data ?? []) as unknown as EconomyCalendarRow[];
+  return { ...projectEconomy(rows, now), inflation: projectInflation(rows, now) };
 }
 
 export function useEconomyObservations() {

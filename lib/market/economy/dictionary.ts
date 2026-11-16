@@ -12,6 +12,8 @@ export const economyText = {
     stages: { advance: "Первая оценка", second: "Вторая оценка", third: "Третья оценка", regular: "" },
     education: "Как читать показатель", what: "Что это такое?", why: "Почему это важно?", up: "Что может означать рост?", down: "Что может означать снижение?",
     markets: "Какие рынки могут реагировать?", disclaimer: "Не является финансовой рекомендацией.",
+    unemployment: "Безработица · % рабочей силы, с сезонной корректировкой",
+    unemploymentContext: "Доля рабочей силы, которая не имеет работы и активно её ищет.",
     indicators: {
       us_gdp: { name: "Реальный ВВП", frequency: "Ежеквартально", unit: "% за квартал в годовом выражении",
         definition: "Изменение объёма товаров и услуг с поправкой на инфляцию и сезонность.", why: "Помогает оценить темп роста и его вклад в ожидания по прибыли и ставкам.",
@@ -43,6 +45,8 @@ export const economyText = {
     stages: { advance: "Advance estimate", second: "Second estimate", third: "Third estimate", regular: "" },
     education: "How to read this indicator", what: "What is it?", why: "Why does it matter?", up: "What could an increase mean?", down: "What could a decline mean?",
     markets: "Which markets may react?", disclaimer: "This is not financial advice.",
+    unemployment: "Unemployment rate · % of labor force, seasonally adjusted",
+    unemploymentContext: "The share of the labor force that is without work and actively looking for a job.",
     indicators: {
       us_gdp: { name: "Real GDP", frequency: "Quarterly", unit: "% quarterly, annualized",
         definition: "The inflation- and seasonally adjusted change in output of goods and services.", why: "It puts the pace of growth and expectations for earnings and rates in context.",
@@ -60,5 +64,22 @@ export const economyText = {
         down: "A decline can suggest fewer layoffs. Several weeks provide better context.",
         markets: "USD, S&P 500 and gold can react when claims materially change growth or rate expectations." },
     },
+  },
+};
+
+export const inflationText = {
+  ru: {
+    metrics: ["Общий CPI · м/м", "Общий CPI · г/г", "Базовый CPI · м/м", "Базовый CPI · г/г"],
+    monthly: "Изменение за месяц, с сезонной корректировкой",
+    annual: "Изменение за год, без сезонной корректировки",
+    context: "CPI отражает изменение потребительских цен. Базовый CPI исключает продовольствие и энергию. Сравнивайте темпы внутри одной серии.",
+    higher: "Инфляция ускорилась", lower: "Инфляция замедлилась", same: "Темп не изменился",
+  },
+  en: {
+    metrics: ["Headline CPI · m/m", "Headline CPI · y/y", "Core CPI · m/m", "Core CPI · y/y"],
+    monthly: "Monthly change, seasonally adjusted",
+    annual: "Annual change, not seasonally adjusted",
+    context: "CPI tracks consumer prices. Core CPI excludes food and energy. Compare changes within the same series.",
+    higher: "Inflation accelerated", lower: "Inflation slowed", same: "Rate unchanged",
   },
 };

@@ -8,6 +8,7 @@ import { economyCodes, economyHistory, periodIndex, ranges, type HistoryRange, t
 import { useEconomyObservations } from "@/lib/market/economy/use-economy-observations";
 import { MarketPublicFinances } from "./MarketPublicFinances";
 import { MarketMonetary } from "./MarketMonetary";
+import { MarketInflation } from "./MarketInflation";
 
 type Labels = typeof economyText.en;
 
@@ -79,8 +80,13 @@ export function MarketEconomy() {
           </button>)}
         </div>
       </div>
-      <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
-        {economyCodes.map(code => {
+      {[economyCodes.slice(0, 1), economyCodes.slice(1)].map((codes, index) => (
+      <div key={t.categories[index]} className="space-y-4">
+      {index === 1 && <MarketInflation lang={lang} data={data?.inflation} loading={status === "loading"} />}
+      <section className="space-y-3" aria-label={t.categories[index]}>
+        <h3 className="font-serif text-lg font-semibold text-tx">{t.categories[index]}</h3>
+        <div className="grid gap-3 lg:grid-cols-2">
+        {codes.map(code => {
           const labels = t.indicators[code];
           const rows = data?.[code] ?? [];
           const latest = rows[0];
@@ -98,6 +104,11 @@ export function MarketEconomy() {
                   <div><dt className="text-xs text-mu">{t.actual}</dt><dd className="text-2xl font-semibold tabular-nums text-tx">{format(latest.actual)}</dd></div>
                   {latest.previous !== null && <div><dt className="text-xs text-mu">{t.previous}</dt><dd className="text-2xl font-semibold tabular-nums text-tx">{format(latest.previous)}</dd></div>}
                 </dl>
+                {latest.unemployment !== undefined && <div className="border-t border-line pt-2 text-xs text-mu">
+                  <p>{t.unemployment}</p>
+                  <p className="my-1 text-lg font-semibold tabular-nums text-tx">{number.format(latest.unemployment)}%</p>
+                  <p>{t.unemploymentContext}</p>
+                </div>}
                 <p className="text-xs text-mu">{labels.unit}</p>
                 <div className="space-y-1 text-xs text-mu">
                   <div>{t.period} · <span className="text-tx">{latest.period}</span></div>
@@ -118,18 +129,16 @@ export function MarketEconomy() {
             </article>
           );
         })}
+        </div>
+      </section>
       </div>
+      ))}
+      <section className="space-y-2 rounded-lg border border-line bg-s1 p-4" aria-label={t.categories[3]}>
+        <h3 className="font-serif text-lg font-semibold text-tx">{t.categories[3]}</h3>
+        <p className="text-xs text-mu">{t.empty}</p>
+      </section>
       <MarketPublicFinances lang={lang} />
       <MarketMonetary lang={lang} />
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        {t.categories.map((category, i) => (
-          i !== 4 && i !== 5 && i !== 7 && <div key={category} className="rounded-md border border-line bg-s1 p-3">
-            <h4 className="text-sm font-semibold text-tx">{category}</h4>
-            <p className="mt-1 text-xs text-mu">{t.coverage[i]}</p>
-            {i > 1 && <p className="mt-2 text-xs text-mu">{t.empty}</p>}
-          </div>
-        ))}
-      </div>
     </section>
   );
 }
