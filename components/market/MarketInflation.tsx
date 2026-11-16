@@ -1,5 +1,6 @@
 import { economyText, inflationText } from "@/lib/market/economy/dictionary";
 import { inflationCodes, type projectInflation } from "@/lib/market/economy/project-inflation";
+import { MarketBeaPce } from "./MarketBeaPce";
 
 export function MarketInflation({ lang, data, loading }: {
   lang: "ru" | "en"; data?: ReturnType<typeof projectInflation>; loading: boolean;
@@ -39,5 +40,6 @@ export function MarketInflation({ lang, data, loading }: {
         </article>;
       })}
     </div>
+    <MarketBeaPce lang={lang} />
   </section>;
 }
