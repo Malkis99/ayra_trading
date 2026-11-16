@@ -300,7 +300,7 @@ export default function JournalPage() {
             else if (alert.level === "close") text = dict.journal.propRules.toasts.totalDrawdownClose.replace("{pct}", String(roundedPct));
             else if (alert.level === "reached") text = dict.journal.propRules.toasts.totalDrawdownReached;
           }
-          if (text) showToast(text);
+          if (text) showToast(text, undefined, undefined, "risk");
         }
       }
     }

@@ -54,6 +54,8 @@ export const en: Dictionary = {
   },
   common: {
     copied: "Copied to clipboard",
+    toastClose: "Dismiss warning",
+    riskToastLabel: "Risk warning",
   },
   nav: {
     home: "Home",

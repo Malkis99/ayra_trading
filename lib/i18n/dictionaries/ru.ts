@@ -52,6 +52,8 @@ export const ru = {
   },
   common: {
     copied: "Скопировано в буфер обмена",
+    toastClose: "Скрыть предупреждение",
+    riskToastLabel: "Предупреждение о риске",
   },
   nav: {
     home: "Главная",
