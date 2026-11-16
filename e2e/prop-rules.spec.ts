@@ -1,41 +1,51 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type BrowserContext } from "@playwright/test";
 import { pickOption, openTradeSection, openJournalTab } from "./helpers/forms";
 
+// Controlled time and data (TEST-FIX):
+// - the browser clock is fixed and the browser time zone is given: the wizard takes the day-reset zone from the browser,
+//   and a trade's time is "now";
+// - the state is written before the app starts (a page that unloads writes its own state back over a later write);
+// - the first-trade reward was already received: its toast takes the one toast slot right after a save and would hide
+//   the daily-limit warning (a known app issue, described in the TEST-FIX PR).
+const FIXED_NOW = "2026-11-18T10:00:00Z"; // a Wednesday, mid-month
+
+const game = {
+  name: "PropTrader",
+  level: 1,
+  xp: 0,
+  coins: 0,
+  createdAt: "2026-10-05",
+  completedQuestsToday: {},
+  lastQuestDate: "2026-10-05",
+  firstActions: { trade: "2026-10-05T10:00:00.000Z" },
+  onboarding: { status: "done", step: 5, subStep: 0, answers: {} },
+  profile: {
+    appearance: { skinTone: "skin_fair", hairstyle: "hair_buzz", hairColor: "hair_black", outfit: "outfit_obsidian" },
+    minorMode: false,
+    timezone: "UTC",
+  },
+};
+
+async function seed(context: BrowserContext, journal: Record<string, unknown>) {
+  await context.addInitScript(
+    ({ game, journal }) => {
+      if (sessionStorage.getItem("ayra_seeded")) return;
+      sessionStorage.setItem("ayra_seeded", "1");
+      localStorage.clear();
+      localStorage.setItem("ayra_demo_v1", JSON.stringify(game));
+      localStorage.setItem("ayra_journal_v1", JSON.stringify(journal));
+      localStorage.setItem("ayra_lang", "ru");
+    },
+    { game, journal }
+  );
+}
+
 test.describe("T6d Prop Rules Tracker E2E Flow", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await page.evaluate(() => localStorage.clear());
-    await page.evaluate(() => {
-      const state = {
-        name: "PropTrader",
-        level: 1,
-        xp: 0,
-        coins: 0,
-        createdAt: "2026-10-05",
-        completedQuestsToday: {},
-        lastQuestDate: "2026-10-05",
-        onboarding: { status: "done", step: 5, subStep: 0, answers: {} },
-        profile: {
-          appearance: {
-            skinTone: "skin_fair",
-            hairstyle: "hair_buzz",
-            hairColor: "hair_black",
-            outfit: "outfit_obsidian",
-          },
-          minorMode: false,
-          timezone: "UTC",
-        },
-      };
-      localStorage.setItem("ayra_demo_v1", JSON.stringify(state));
-      localStorage.setItem(
-        "ayra_journal_v1",
-        JSON.stringify({
-          schemaVersion: 4,
-          accounts: [],
-          trades: [],
-        })
-      );
-    });
+  test.use({ timezoneId: "UTC" });
+
+  test.beforeEach(async ({ context, page }) => {
+    await page.clock.install({ time: new Date(FIXED_NOW) });
+    await seed(context, { schemaVersion: 4, accounts: [], trades: [] });
     await page.goto("/journal");
   });
 
