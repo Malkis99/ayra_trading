@@ -8,6 +8,7 @@ export const monetaryText = {
     documents: "FOMC statements", policyHistory: "Target range changes",
     effrTerms: "The Effective Federal Funds Rate is subject to the Terms of Use posted at newyorkfed.org. The New York Fed is not responsible for publication of the Effective Federal Funds Rate by AYRA Trading, does not endorse any particular republication, and has no liability for your use.",
     terms: "New York Fed Terms of Use",
+    effrStale: "EFFR data may be outdated",
     education: {
       policy: "The FOMC sets a target range. The effective rate measures actual overnight borrowing. Raising the range can tighten financial conditions, lowering it can ease them, and holding it may still change market expectations if the statement surprises.",
       yields: "Par yields are annual rates estimated from Treasury market prices. A negative spread means the longer maturity yields less than the shorter maturity. This inversion can reflect expectations for lower future rates, among other factors.",
@@ -27,6 +28,7 @@ export const monetaryText = {
     documents: "Решения FOMC", policyHistory: "Изменения целевого диапазона",
     effrTerms: "На эффективную ставку федеральных фондов распространяются условия использования newyorkfed.org. Федеральный резервный банк Нью-Йорка не отвечает за публикацию этой ставки на AYRA Trading, не одобряет конкретные случаи её повторной публикации и не несёт ответственности за её использование.",
     terms: "Условия использования New York Fed",
+    effrStale: "Данные EFFR могут быть устаревшими",
     education: {
       policy: "FOMC задаёт целевой диапазон. Эффективная ставка отражает фактические однодневные сделки. Повышение диапазона может ужесточить финансовые условия, снижение — смягчить. Даже при сохранении ставки формулировки решения могут изменить ожидания рынка.",
       yields: "Доходности по кривой Treasury — годовые ставки, рассчитанные по рыночным ценам казначейских бумаг. Отрицательный спред означает, что длинная доходность ниже короткой. Такая инверсия может отражать ожидания снижения ставок, среди других факторов.",

@@ -95,7 +95,8 @@ function MonetaryCard({ series, lang }: { series: MonetarySeries; lang: Language
         <div><dt className="text-xs text-mu">{t.target}</dt><dd className="text-2xl font-semibold tabular-nums">{format(tip.values[0]!)}–{format(tip.values[1]!)}</dd>
           <dd className="text-xs text-mu">{t.effectiveSince} · <time>{tip.date}</time></dd></div>
         <div><dt className="text-xs text-mu">{t.effective}</dt><dd className="text-lg font-semibold tabular-nums">{latest?.effectiveRate ? format(latest.effectiveRate.values[0]!) : words.empty}</dd>
-          {latest?.effectiveRate && <dd className="text-xs text-mu">{t.observed} · <time>{latest.effectiveRate.date}</time> · <a className="text-vi" href="https://www.newyorkfed.org/markets/reference-rates/effr">New York Fed</a></dd>}</div>
+          {latest?.effectiveRate && <dd className="text-xs text-mu">{t.observed} · <time dateTime={latest.effectiveRate.date}>{latest.effectiveRate.date}</time> · <a className="text-vi" href="https://www.newyorkfed.org/markets/reference-rates/effr">New York Fed</a></dd>}
+          {latest?.effectiveRate && latest.effectiveRateStale && <dd className="mt-1 text-xs text-vi">{t.effrStale}</dd>}</div>
       </dl>
       <a href="https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm" className="text-xs text-vi">{t.documents} ↗</a>
       {latest?.effectiveRate && <details className="text-xs text-mu">

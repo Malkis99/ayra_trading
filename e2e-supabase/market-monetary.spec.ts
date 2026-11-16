@@ -49,6 +49,7 @@ for (const [width, lang] of [[390, "ru"], [1440, "en"]] as const) {
       resume();
       await policy.getByRole("button", { name: /Повторить|Retry/ }).click();
       await expect(policy.getByText(lang === "ru" ? "3,88%" : "3.88%", { exact: true })).toBeVisible();
+      await expect(policy.getByText(/Данные EFFR могут быть устаревшими|EFFR data may be outdated/)).toBeHidden();
       await dollar.getByRole("button", { name: /Загрузить историю|Load history/ }).click();
       await expect(dollar.locator("svg")).toBeVisible();
       expect(requests.filter(request => request.endsWith(":history"))).toEqual(["dollar:history"]);
@@ -64,6 +65,13 @@ for (const [width, lang] of [[390, "ru"], [1440, "en"]] as const) {
           await page.screenshot({ path: process.env.AYRA_MONETARY_SCREENSHOT_DIR + "/monetary-usd-390.png" });
         }
       }
+      await page.route("**/api/market-economy/monetary?series=policy&range=latest", route =>
+        route.fulfill({ json: { ...data.policy, effectiveRateStale: true } }));
+      await page.reload();
+      await expect(policy.getByText(lang === "ru" ? "Данные EFFR могут быть устаревшими" : "EFFR data may be outdated")).toBeVisible();
+      await expect(policy.locator("time[datetime='2026-11-13']")).toBeVisible();
+      await expect(policy.getByText(lang === "ru" ? "3,75%–4%" : "3.75%–4%", { exact: true })).toBeVisible();
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
     } finally {
       resume();
       await page.context().close();

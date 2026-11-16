@@ -12,6 +12,7 @@ export type MonetarySnapshot = {
   status: "ready" | "stale" | "unavailable" | "error";
   points: MonetaryPoint[];
   effectiveRate?: MonetaryPoint;
+  effectiveRateStale?: boolean;
   releasedOn?: string;
   dollarChanges?: (number | null)[];
 };

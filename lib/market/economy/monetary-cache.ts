@@ -2,11 +2,23 @@ import { unstable_cache } from "next/cache";
 import { dayMs, monetarySources, type MonetarySeries, type MonetarySnapshot } from "./monetary-data";
 import { loadMonetary, MonetaryFailure } from "./monetary";
 
-type Data = Omit<MonetarySnapshot, "status">;
+type Data = Omit<MonetarySnapshot, "status" | "effectiveRateStale">;
 type Entry = { data: Data; checkedAt: number };
 const inflight = new Map<string, Promise<Entry>>();
 const pausedUntil = new Map<MonetarySeries, number>();
 const lastGood = new Map<string, Entry>();
+const newYorkDate = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+});
+
+function withEffectiveRateFreshness(data: Data, now: number) {
+  if (!data.effectiveRate) return data;
+  // Prior business day's rate, published around 09:00 ET. Allow a holiday weekend.
+  const parts = newYorkDate.formatToParts(now);
+  const [year, month, day] = ["year", "month", "day"].map(type => Number(parts.find(part => part.type === type)?.value));
+  const today = Date.UTC(year, month - 1, day);
+  return { ...data, effectiveRateStale: today - Date.parse(data.effectiveRate.date) > 4 * dayMs };
+}
 
 function refresh(series: MonetarySeries, history: boolean) {
   const key = series + ":" + history;
@@ -38,13 +50,14 @@ export async function monetarySnapshot(series: MonetarySeries, history: boolean)
   try {
     const entry = await readers[key]();
     lastGood.set(key, entry);
+    const now = Date.now();
     const freshnessDate = entry.data.points.at(-1)?.date;
-    const stale = Date.now() - entry.checkedAt > dayMs || (series !== "policy" && freshnessDate
-      && Date.now() - Date.parse(freshnessDate) > (series === "dollar" ? 12 : 7) * dayMs);
-    return { ...entry.data, status: stale ? "stale" : "ready" };
+    const stale = now - entry.checkedAt > dayMs || (series !== "policy" && freshnessDate
+      && now - Date.parse(freshnessDate) > (series === "dollar" ? 12 : 7) * dayMs);
+    return { ...withEffectiveRateFreshness(entry.data, now), status: stale ? "stale" : "ready" };
   } catch (error) {
     const prior = lastGood.get(key);
-    if (prior) return { ...prior.data, status: "stale" };
+    if (prior) return { ...withEffectiveRateFreshness(prior.data, Date.now()), status: "stale" };
     return { status: error instanceof MonetaryFailure && error.message === "empty" ? "unavailable" : "error", points: [] };
   }
 }
