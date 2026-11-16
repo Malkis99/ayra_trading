@@ -99,10 +99,10 @@ export function MarketEconomy() {
                 <p className="text-xs text-mu">{labels.unit}</p>
                 <div className="space-y-1 text-xs text-mu">
                   <div>{t.period} · <span className="text-tx">{latest.period}</span></div>
-                  <div>{latest.confirmedAt ? t.release : t.scheduled} · <time dateTime={latest.scheduledAt} className="text-tx">{date.format(Date.parse(latest.scheduledAt))}</time></div>
-                  <div>{t.updated} · {latest.confirmedAt ? <time dateTime={latest.confirmedAt}>{date.format(Date.parse(latest.confirmedAt))}</time> : t.timeUnknown}</div>
+                  {([[t.scheduled, latest.scheduledAt], [t.release, latest.releasedAt], [t.updated, latest.sourceUpdatedAt], [t.retrieved, latest.retrievedAt]] as const).map(([label, timestamp]) =>
+                    <div key={label}>{label} · {timestamp ? <time dateTime={timestamp} className="text-tx">{date.format(Date.parse(timestamp))}</time> : t.timeUnknown}</div>)}
                 </div>
-                <a href={latest.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-vi">{t.source}<ArrowUpRight size={13} aria-hidden="true" /></a>
+                <a href={latest.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-vi">{latest.sourceKind === "release" ? t.source : t.archive}<ArrowUpRight size={13} aria-hidden="true" /></a>
               </> : <p className="text-sm text-mu">{status === "loading" ? t.loading : t.empty}</p>}
               <History rows={rows} range={range} t={t} format={format} />
               <details className="border-t border-line pt-3 text-sm text-mu">

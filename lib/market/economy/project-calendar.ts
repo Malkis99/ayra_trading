@@ -29,6 +29,23 @@ const definitions = {
     period: /^\d{4}-\d{2}-\d{2}$/, value: /^(\d+(?:\.\d+)?)K$/, stages: ["regular"] },
 };
 
+const officialArchives: Record<EconomyCode, string> = {
+  us_gdp: "https://www.bea.gov/news/archive",
+  us_nfp: "https://www.bls.gov/bls/news-release/empsit.htm",
+  us_jobless_claims: "https://oui.doleta.gov/unemploy/archive.asp",
+};
+
+// These links and release times were checked in the dated bulletins.
+// Calendar dates and URL fields cannot establish a new entry in this list.
+const verifiedReleases = {
+  us_gdp: { id: "bea:us_gdp:2026-10-29", period: "2026-Q3", stage: "advance", releasedAt: "2026-10-29T12:30:00Z",
+    url: "https://www.bea.gov/news/2026/gdp-advance-estimate-3rd-quarter-2026" },
+  us_nfp: { id: "bls:us_nfp:2026-11-06", period: "2026-10", stage: "regular", releasedAt: "2026-11-06T13:30:00Z",
+    url: "https://www.bls.gov/news.release/archives/empsit_11062026.htm" },
+  us_jobless_claims: { id: "dol:us_jobless_claims:2026-11-12", period: "2026-11-07", stage: "regular", releasedAt: "2026-11-12T13:30:00Z",
+    url: "https://oui.doleta.gov/press/2026/111226.pdf" },
+} satisfies Record<EconomyCode, { id: string; period: string; stage: string; releasedAt: string; url: string }>;
+
 export type Observation = {
   id: string;
   code: EconomyCode;
@@ -37,8 +54,11 @@ export type Observation = {
   actual: number;
   previous: number | null;
   scheduledAt: string;
-  confirmedAt: string | null;
+  releasedAt: string | null;
+  sourceUpdatedAt: string | null;
+  retrievedAt: string | null;
   sourceUrl: string;
+  sourceKind: "release" | "archive";
 };
 
 function formatNumber(raw: string | null, pattern: RegExp): number | null {
@@ -68,13 +88,14 @@ export function projectEconomy(rows: EconomyCalendarRow[], now: number): Record<
       if (code !== "us_nfp" && Date.parse(meta.source_updated ?? "") !== start) continue;
       const actual = formatNumber(row.actual, definition.value);
       if (actual === null) continue;
-      const day = new Date(start).toISOString().slice(0, 10).split("-");
-      const sourceUrl = code === "us_nfp" ? `https://www.bls.gov/news.release/archives/empsit_${day[1]}${day[2]}${day[0]}.htm`
-        : code === "us_gdp" ? "https://www.bea.gov/data/gdp/gross-domestic-product"
-        : "https://oui.doleta.gov/unemploy/archive.asp";
-      const item = { id: row.id, code, period, stage, actual,
+      const checked = verifiedReleases[code];
+      const release = checked.id === row.id && checked.period === period && checked.stage === stage ? checked : null;
+      const item: Observation = { id: row.id, code, period, stage, actual,
         previous: formatNumber(row.previous, code === "us_nfp" ? /^([+−-]?\d+)K$/ : definition.value),
-        scheduledAt: row.starts_at, confirmedAt: code === "us_nfp" ? null : row.starts_at, sourceUrl };
+        scheduledAt: row.starts_at, releasedAt: release?.releasedAt ?? null,
+        // BEA and DOL use source_updated as release-version evidence. Receipt is not recorded.
+        sourceUpdatedAt: null, retrievedAt: null,
+        sourceUrl: release?.url ?? officialArchives[code], sourceKind: release ? "release" : "archive" };
       const key = period + ":" + stage;
       observations.set(key, [...(observations.get(key) ?? []), item]);
     }
