@@ -32,18 +32,27 @@ test.describe("NEW USER ACCEPTANCE — the first day ends", () => {
     const risk = page.getByRole("button", { name: /Контроль риска/ });
     await expect(risk).toContainText("+40 XP · +10 Coins");
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/d-05-home-new-390.png`, fullPage: true });
+    // QH-6.6: a mission not accepted yet leads to Quests, where it is accepted
     await risk.click();
+    await page.waitForURL((u) => u.pathname === "/quests");
+    await page.getByTestId("quest-card-q_bias").getByTestId("quest-accept").click();
+    await expect(page.getByTestId("quest-card-q_bias").getByTestId("quest-status")).toHaveText("В процессе");
+    // «Go to the Journal» opens the direction block
+    await page.getByTestId("quest-card-q_bias").getByTestId("quest-journal-link").click();
     await page.waitForURL((u) => u.pathname === "/journal" && u.searchParams.get("tab") === "plan");
-    await expect(page.locator("#plan-limits")).toBeVisible();
+    await expect(page.locator("#plan-bias")).toBeVisible();
 
     // the first mission through the Journal
-    await page.goto("/journal?tab=plan");
     await page.locator("#plan-bias").getByRole("button", { name: /Добавить/ }).click();
     await page.locator("#plan-bias input").first().fill("EURUSD");
     await page.locator("#plan-bias").getByRole("button", { name: /Бычий/ }).click();
     await page.locator("#plan-levels").getByRole("button", { name: /Добавить/ }).click();
     await page.locator('#plan-levels input[type="number"]').first().fill("1.0832");
     await page.clock.runFor(2000);
+    // saved: the quest is ready; «Verify» pays it
+    await expect(page.getByTestId("quest-ready-bar")).toBeVisible();
+    expect((await game(page)).completedQuestsToday.q_bias).toBeUndefined();
+    await page.getByTestId("quest-ready-verify").click();
     await expect.poll(async () => (await game(page)).completedQuestsToday.q_bias, { timeout: 15000 }).toBe(true);
     const paid = await game(page);
     log("day 1 paid", { xp: paid.xp, coins: paid.coins, history: paid.history.map((h) => `${h.questId}:${h.xp}/${h.coins}`), ledger: paid.missionLedger });

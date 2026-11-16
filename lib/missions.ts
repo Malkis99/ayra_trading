@@ -232,6 +232,84 @@ export function candidateSources(id: MissionId, data: MissionData, day: string):
 /** A day has three core missions (one mode); the checks never confirm more, whatever list they are given. */
 export const MAX_CORE_MISSIONS_PER_DAY = 3;
 
+/** Why a mission is not confirmed yet — what the journal still needs (QH-6.6: shown after «Verify»). */
+export type MissionReason =
+  | "planMissing"
+  | "planNotToday"
+  | "directionMissing"
+  | "levelMissing"
+  | "limitsMissing"
+  | "limitsInvalid"
+  | "riskItemUnchecked"
+  | "reviewMissing"
+  | "tradeReviewMissing"
+  | "noteMissing"
+  | "noteShort"
+  | "noteCopy"
+  | "noteImported"
+  | "backtestMissing"
+  | "backtestIncomplete"
+  | "backtestCopy"
+  | "dayStateMissing"
+  | "tomorrowPlanMissing";
+
+const NOTE_OF: Partial<Record<MissionId, { template: Note["templateKey"]; min: number }>> = {
+  m_observation: { template: "idea", min: MISSION_TEXT_MIN.observation },
+  m_lesson: { template: "lesson", min: MISSION_TEXT_MIN.lesson },
+  m_mistake: { template: "weekly_mistake", min: MISSION_TEXT_MIN.mistake },
+};
+
+/**
+ * What a mission still needs, from the same rules as candidateSources (null when the journal already confirms it).
+ * Only an explanation: it confirms nothing and pays nothing.
+ */
+export function explainMission(id: MissionId, data: MissionData, day: string): { reason: MissionReason; min?: number } | null {
+  if (candidateSources(id, data, day).length > 0) return null;
+  const tz = data.timezone;
+  const plan = planOn(data.plans, day);
+  const todayNotes = (template: Note["templateKey"]) => live(data.notes).filter((n) => n.templateKey === template && dayOf(n.createdAt, tz) === day);
+  switch (id) {
+    case "q_bias":
+      if (!plan) return { reason: "planMissing" };
+      if (!hasBias(plan)) return { reason: "directionMissing" };
+      if (!hasLevel(plan)) return { reason: "levelMissing" };
+      return { reason: "planNotToday" };
+    case "q_riskcheck": {
+      if (!plan) return { reason: "planMissing" };
+      const l = plan.limits;
+      if (!l || [l.maxRiskPerTrade, l.maxDailyLoss, l.maxTrades].every((v) => v == null)) return { reason: "limitsMissing" };
+      if (!hasValidLimits(plan)) return { reason: "limitsInvalid" };
+      if (!riskChecked(plan)) return { reason: "riskItemUnchecked" };
+      return { reason: "planNotToday" };
+    }
+    case "q_reflect":
+      return { reason: "reviewMissing", min: MISSION_TEXT_MIN.review };
+    case "m_trade_review":
+      return { reason: "tradeReviewMissing" };
+    case "m_observation":
+    case "m_lesson":
+    case "m_mistake": {
+      const { template, min } = NOTE_OF[id]!;
+      const all = todayNotes(template);
+      const own = all.filter((n) => !n.importBatchId);
+      if (own.length === 0) return { reason: all.length > 0 ? "noteImported" : "noteMissing", min };
+      if (own.every((n) => len(ownText(n.body)) < min)) return { reason: "noteShort", min };
+      return { reason: "noteCopy", min };
+    }
+    case "m_backtest": {
+      const own = todayNotes("backtest").filter((n) => !n.importBatchId);
+      if (own.length === 0) return { reason: "backtestMissing" };
+      if (own.every((n) => !isCompleteBacktest(n, day))) return { reason: "backtestIncomplete" };
+      return { reason: "backtestCopy" };
+    }
+    case "m_day_state":
+      return { reason: "dayStateMissing" };
+    case "m_plan_tomorrow":
+      return { reason: "tomorrowPlanMissing" };
+  }
+  return null;
+}
+
 /** Which source each mission of the day used. Kept for the day; a claim is never moved or reused by another mission. */
 export interface MissionLedger {
   day: string;

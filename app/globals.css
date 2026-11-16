@@ -181,6 +181,15 @@ html[data-market-fullscreen] main { z-index: 95; }
 .mission-row .m-foot > .m-action > * { width: 100%; }
 .mission-row[data-done="true"] .m-foot,
 .mission-row[data-done="true"] .m-meta { display: none; }
+/* QH-6.6: two actions of an accepted quest (go to the Journal, verify) stack in the action column */
+.mission-row .quest-actions { display: flex; flex-direction: column; gap: 0.5rem; }
+.mission-row .quest-actions > * { width: 100%; }
+/* a quest completed by «Verify» just now: one soft glow and the reward gained (no effect with reduced motion) */
+@keyframes quest-done-glow { 0% { box-shadow: 0 0 0 0 rgb(var(--c-vi) / 0.55); } 45% { box-shadow: 0 0 0 6px rgb(var(--c-vi) / 0.18); } 100% { box-shadow: 0 0 0 0 rgb(var(--c-vi) / 0); } }
+@keyframes quest-gain-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.mission-row.quest-just-done { animation: quest-done-glow 900ms ease-out 1; }
+.quest-gain { animation: quest-gain-in 450ms ease-out 1; }
+@media (prefers-reduced-motion: reduce) { .mission-row.quest-just-done, .quest-gain { animation: none; } }
 @container (min-width: 480px) {
   .mission-row { grid-template-areas: "num body menu" ". foot foot"; column-gap: 1rem; padding: 1rem 1.25rem; }
   .mission-row .m-menu { align-self: start; margin: -0.25rem -0.375rem 0 0; }

@@ -157,6 +157,12 @@ test.describe("NEW USER ACCEPTANCE", () => {
     const g0 = await gameOf(page, userId);
     log("before first plan", summary(g0));
 
+    // QH-6.6: the three trading quests are accepted first (accepting gives nothing)
+    await page.goto("/quests");
+    for (const id of ["q_bias", "q_riskcheck", "q_reflect"]) await page.getByTestId(`quest-card-${id}`).getByTestId("quest-accept").click();
+    await expect(page.getByTestId("quest-card-q_reflect").getByTestId("quest-status")).toHaveText("В процессе");
+    expect((await gameOf(page, userId)).coins).toBe(g0.coins);
+
     // the day plan: an empty direction row → instrument + direction, a level with a price
     await page.goto("/journal?tab=plan");
     await page.waitForTimeout(1500);
@@ -173,6 +179,10 @@ test.describe("NEW USER ACCEPTANCE", () => {
     expect(g.completedQuestsToday?.q_bias).toBeUndefined(); // no level yet
     await page.locator("#plan-levels").getByRole("button", { name: /Добавить/ }).click();
     await page.locator('#plan-levels input[type="number"]').first().fill("1.0832");
+    // saved: ready to verify; the save itself pays nothing
+    await expect(page.getByTestId("quest-ready-bar")).toContainText("«Подготовка»");
+    expect((await gameOf(page, userId)).completedQuestsToday?.q_bias).toBeUndefined();
+    await page.getByTestId("quest-ready-verify").click();
     await expect.poll(async () => (await gameOf(page, userId)).completedQuestsToday?.q_bias, { timeout: 15000 }).toBe(true);
     const g1 = await gameOf(page, userId);
     log("after Preparation", summary(g1));
@@ -197,6 +207,7 @@ test.describe("NEW USER ACCEPTANCE", () => {
     await page.locator('#plan-limits input[type="number"]').last().fill("3");
     await page.waitForTimeout(800);
     await page.locator("#plan-checklist").getByText("Проверил лимиты риска").click();
+    await page.getByTestId("quest-ready-verify").click();
     await expect.poll(async () => (await gameOf(page, userId)).completedQuestsToday?.q_riskcheck, { timeout: 15000 }).toBe(true);
     // day review: a «Session review» note of 80+ own characters
     await page.goto("/journal?tab=notes&new=session_review");
@@ -205,6 +216,7 @@ test.describe("NEW USER ACCEPTANCE", () => {
     await shot(page, "b-20-note-session-review-390");
     await modal.locator("textarea").fill("Итог сессии: два входа по плану, один пропуск без сожалений; риск держал в пределах лимита дня.");
     await modal.getByRole("button", { name: "Сохранить", exact: true }).click();
+    await page.getByTestId("quest-ready-verify").click();
     await expect.poll(async () => (await gameOf(page, userId)).completedQuestsToday?.q_reflect, { timeout: 15000 }).toBe(true);
     const g3 = await gameOf(page, userId);
     log("after three missions", summary(g3));
@@ -214,6 +226,8 @@ test.describe("NEW USER ACCEPTANCE", () => {
     await page.getByTestId("mode-study").click();
     await page.getByTestId("mode-activate").click();
     await page.waitForTimeout(800);
+    // the three done slots stay after the mode change: the day has no free slot, so «Lesson» is not even offered
+    await expect(page.getByTestId("quest-card-m_lesson")).toHaveCount(0);
     await page.goto("/journal?tab=notes&new=lesson");
     await page.getByTestId("note-modal").locator("textarea").fill("Урок: я жду закрытия свечи над уровнем, прежде чем входить в сделку по плану.");
     await page.getByTestId("note-modal").getByRole("button", { name: "Сохранить", exact: true }).click();

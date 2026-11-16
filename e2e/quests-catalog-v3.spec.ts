@@ -88,7 +88,10 @@ test.describe("Quest catalog 3 (QH-6.3)", () => {
       await page.goto("/quests");
       await expect(missions(page).first()).toBeVisible();
       if ((await game(page)).questDay?.mode !== mode) await activateMode(page, mode);
-      await page.getByTestId(`quest-card-${id}`).getByTestId("quest-journal-link").click();
+      const card = page.getByTestId(`quest-card-${id}`);
+      // QH-6.6: a quest is accepted first; then «Go to the Journal» opens its place
+      if (await card.getByTestId("quest-accept").isVisible()) await card.getByTestId("quest-accept").click();
+      await card.getByTestId("quest-journal-link").click();
       await page.waitForURL(/\/journal/);
     };
 
@@ -141,15 +144,24 @@ test.describe("Quest catalog 3 (QH-6.3)", () => {
       updatedAt: `${yesterday}T20:00:01.000Z`,
     };
     await seedGame(context, baseGame({ lastQuestDate: yesterday }), { ayra_journal_v1: journal({ plans: [early] }) });
+    // QH-6.6: the quest is accepted on Quests
+    await page.goto("/quests");
+    await page.getByTestId("quest-card-q_bias").getByTestId("quest-accept").click();
+    await expect(page.getByTestId("quest-card-q_bias").getByTestId("quest-status")).toHaveText("В процессе");
     await page.goto("/journal?tab=plan");
     await expect(page.getByTestId("prep-confirm")).toBeVisible();
-    // an unrelated edit of yesterday's plan does not close Preparation
+    // an unrelated edit of yesterday's plan does not make Preparation ready
     await page.locator("#plan-bias input").nth(1).fill("Пробой азиатского максимума");
     await page.waitForTimeout(900);
+    await expect(page.getByTestId("quest-ready-bar")).toHaveCount(0);
     expect((await game(page)).completedQuestsToday.q_bias).toBeUndefined();
     const before = await game(page);
     await page.getByTestId("prep-confirm-btn").click();
     await expect(page.getByTestId("prep-confirmed")).toBeVisible();
+    // the confirmation alone pays nothing: the quest is ready, «Verify» pays it
+    await expect(page.getByTestId("quest-ready-bar")).toBeVisible();
+    expect((await game(page)).completedQuestsToday.q_bias).toBeUndefined();
+    await page.getByTestId("quest-ready-verify").click();
     await expect.poll(async () => (await game(page)).completedQuestsToday.q_bias).toBe(true);
     const after = await game(page);
     // the existing rate of the trading mission (40 XP + 10 Coins), nothing more
@@ -158,16 +170,21 @@ test.describe("Quest catalog 3 (QH-6.3)", () => {
     expect(((await journalSaved(page)).plans || [])[0].prepConfirmedAt).toBeTruthy();
   });
 
-  test("QH-6.4: a lesson saved in the Journal pays «Lesson» once — on the Journal page, without opening Quests", async ({ context, page }) => {
+  test("QH-6.6: an accepted lesson saved in the Journal is verified from the Journal page and paid once", async ({ context, page }) => {
     const studyDay = { day: today, mode: "study", catalogVersion: 3, core: ["m_observation", "m_backtest", "m_lesson"], bonus: ["q_read_pages", "q_logic_puzzle"], studyFirst: "m_observation" };
-    await seedGame(context, baseGame({ lastQuestDate: today, questDay: studyDay, journalFirstTradeDay: null, firstActions: { note: "2026-10-01T00:00:00.000Z" } }), { ayra_journal_v1: journal() });
+    await seedGame(context, baseGame({ lastQuestDate: today, questDay: studyDay, journalFirstTradeDay: null, questAccepted: { day: today, at: { m_lesson: new Date().toISOString() } }, firstActions: { note: "2026-10-01T00:00:00.000Z" } }), { ayra_journal_v1: journal() });
     await page.goto("/journal?tab=notes&new=lesson");
     const modal = page.getByTestId("note-modal");
     await expect(modal).toBeVisible();
     await modal.locator("textarea").fill("Урок: я жду закрытия свечи над уровнем, прежде чем входить в сделку. Проверю это на десяти сделках.");
     const coins0 = (await game(page)).coins;
     await modal.getByRole("button", { name: "Сохранить", exact: true }).click();
+    // the save pays nothing by itself: the quest is ready to verify, right here in the Journal
+    await expect(page.getByTestId("quest-ready-bar")).toContainText("Готово к проверке: «Урок»");
+    expect((await game(page)).completedQuestsToday.m_lesson).toBeUndefined();
+    await page.getByTestId("quest-ready-verify").click();
     await expect.poll(async () => (await game(page)).completedQuestsToday.m_lesson).toBe(true);
+    await expect(page.getByTestId("quest-ready-bar")).toHaveCount(0);
     const g = await game(page);
     expect(g.coins - coins0).toBe(10);
     const h = g.history.find((x) => x.questId === "m_lesson")!;
@@ -183,15 +200,19 @@ test.describe("Quest catalog 3 (QH-6.3)", () => {
     expect(again.history.filter((x) => x.questId === "m_lesson")).toHaveLength(1);
   });
 
-  test("QH-6.4: two tabs open when the journal confirms a mission — it is paid once", async ({ context }) => {
+  test("QH-6.6: two tabs verify the same accepted quest — it is paid once", async ({ context }) => {
     const lesson = { id: "note_l1", templateKey: "lesson", title: "", body: "Урок: я жду закрытия свечи над уровнем, прежде чем входить в сделку по плану.", tags: [], pinned: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), archivedAt: null };
     const studyDay = { day: today, mode: "study", catalogVersion: 3, core: ["m_observation", "m_backtest", "m_lesson"], bonus: ["q_read_pages", "q_logic_puzzle"], studyFirst: "m_observation" };
-    await seedGame(context, baseGame({ lastQuestDate: today, questDay: studyDay, journalFirstTradeDay: null, firstActions: { note: "2026-10-01T00:00:00.000Z" } }), { ayra_journal_v1: journal({ notes: [lesson] }) });
+    await seedGame(context, baseGame({ lastQuestDate: today, questDay: studyDay, journalFirstTradeDay: null, questAccepted: { day: today, at: { m_lesson: new Date().toISOString() } }, firstActions: { note: "2026-10-01T00:00:00.000Z" } }), { ayra_journal_v1: journal({ notes: [lesson] }) });
     const a = await context.newPage();
     const b = await context.newPage();
-    // the seed is written by the first tab; the second one opens right after it, both with the journal bridge running
+    // the seed is written by the first tab; the second one opens right after it
     await a.goto("/quests");
     await b.goto("/journal");
+    await expect(a.getByTestId("quest-card-m_lesson").getByTestId("quest-status")).toHaveText("Готово к проверке");
+    await expect(b.getByTestId("quest-ready-bar")).toBeVisible();
+    // both tabs press «Verify» at once
+    await Promise.all([a.getByTestId("quest-card-m_lesson").getByTestId("quest-verify").click(), b.getByTestId("quest-ready-verify").click()]);
     await expect.poll(async () => (await game(a)).completedQuestsToday.m_lesson).toBe(true);
     await a.reload();
     await b.reload();
@@ -205,10 +226,13 @@ test.describe("Quest catalog 3 (QH-6.3)", () => {
     const imported = { id: "imp1", templateKey: "lesson", title: "", body: "Импортированный урок: длинный текст, похожий на настоящий вывод из учёбы.", tags: [], pinned: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), archivedAt: null, importBatchId: "b1", importedAt: new Date().toISOString() };
     const old = { id: "old1", templateKey: "lesson", title: "", body: "Вчерашний урок: жду закрытия свечи над уровнем, прежде чем входить в сделку.", tags: [], pinned: false, createdAt: `${yesterday}T12:00:00.000Z`, updatedAt: `${yesterday}T12:00:00.000Z`, archivedAt: null };
     const studyDay = { day: today, mode: "study", catalogVersion: 3, core: ["m_observation", "m_backtest", "m_lesson"], bonus: ["q_read_pages", "q_logic_puzzle"], studyFirst: "m_observation" };
-    await seedGame(context, baseGame({ lastQuestDate: today, questDay: studyDay, journalFirstTradeDay: null, firstActions: { note: "2026-10-01T00:00:00.000Z" } }), { ayra_journal_v1: journal({ notes: [imported, old] }) });
+    await seedGame(context, baseGame({ lastQuestDate: today, questDay: studyDay, journalFirstTradeDay: null, questAccepted: { day: today, at: { m_lesson: new Date().toISOString() } }, firstActions: { note: "2026-10-01T00:00:00.000Z" } }), { ayra_journal_v1: journal({ notes: [imported, old] }) });
     await page.goto("/quests");
-    await expect(page.getByTestId("quest-card-m_lesson")).toBeVisible();
-    await page.waitForTimeout(1500);
+    const lessonCard = page.getByTestId("quest-card-m_lesson");
+    await expect(lessonCard.getByTestId("quest-status")).toHaveText("В процессе"); // not ready: nothing of today counts
+    await lessonCard.getByTestId("quest-verify").click();
+    await expect(lessonCard.getByTestId("quest-verify-failure")).toContainText("Импортированные заметки не засчитываются");
+    await page.waitForTimeout(500);
     const g = await game(page);
     expect(g.completedQuestsToday.m_lesson).toBeUndefined();
     expect(g.coins).toBe(0);

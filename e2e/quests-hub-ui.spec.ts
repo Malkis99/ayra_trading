@@ -60,8 +60,18 @@ test.describe("Quest Hub interface (QH-6.5)", () => {
     await expect(risk.getByTestId("quest-badge-journal")).toHaveText("Журнал");
     await expect(risk.getByTestId("quest-source")).toHaveText("план дня · лимиты и чек-лист");
     await expect(risk.getByTestId("quest-reward")).toHaveText("+40 XP · +10 Coins");
-    await expect(risk.getByTestId("quest-journal-link")).toHaveAccessibleName("Задать лимиты: Контроль риска");
     await expect(risk).toHaveAttribute("data-done", "false");
+    // QH-6.6: an available quest is accepted first; then «Go to the Journal» and «Verify»
+    await expect(risk.getByTestId("quest-journal-link")).toHaveCount(0);
+    await expect(risk.getByTestId("quest-accept")).toHaveAccessibleName("Принять задание: Контроль риска");
+    await risk.getByTestId("quest-accept").click();
+    await expect(risk.getByTestId("quest-status")).toHaveText("В процессе");
+    await expect(risk.getByTestId("quest-journal-link")).toHaveAccessibleName("Перейти в Журнал: Контроль риска");
+    await expect(risk.getByTestId("quest-verify")).toHaveAccessibleName("Проверить выполнение: Контроль риска");
+    // «Verify» without the record: nothing paid, the exact thing to add
+    await risk.getByTestId("quest-verify").click();
+    await expect(risk.getByTestId("quest-verify-failure")).toContainText("В плане не заданы лимиты риска");
+    expect((await readGame(page)).coins).toBe(10);
     await expect(page.getByTestId("quest-card-q_reflect").getByRole("heading", { name: "Итог дня" })).toBeVisible();
 
     // the day plan's steps name their mission instead of repeating its reward
@@ -87,7 +97,13 @@ test.describe("Quest Hub interface (QH-6.5)", () => {
 
   test("the same names on Week, History, Home and Profile", async ({ context, page }) => {
     await seedGame(context, paidGame(), { ayra_journal_v1: journal({ plans: [plan] }) });
-    await page.goto(`/quests?tab=week&day=${yesterday}`);
+    // yesterday may be in last week (on a Monday): the week is given too
+    const monday = (() => {
+      const d = new Date(`${yesterday}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+      return d.toISOString().slice(0, 10);
+    })();
+    await page.goto(`/quests?tab=week&week=${monday}&day=${yesterday}`);
     await expect(page.getByTestId(`day-quest-m_lesson`)).toContainText("Урок");
     await page.goto(`/quests?tab=history&day=${yesterday}`);
     await expect(page.getByTestId("day-panel")).toContainText("Урок");

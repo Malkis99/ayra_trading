@@ -10,6 +10,7 @@ import { GAME_CONFIG } from "@/lib/game-config";
 import { modeSetPreview, selfReportXpOn } from "@/lib/game";
 import { APP_CLOSED_QUESTS, CATALOG3_MISSIONS, isJournalConfirmed, questById, type QuestTemplate } from "@/lib/quests";
 import { journalHref, planHref } from "@/lib/quests-view";
+import type { QuestState } from "@/lib/game";
 import { endOfDayRitual, morningProtocol, noTradesOn, reasonFor, type DayMode, type JournalSnapshot, type MissionStep } from "@/lib/quest-engine";
 import { Button, buttonClasses } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
@@ -33,6 +34,14 @@ interface Props {
   syncing?: boolean;
   /** Missions the journal already confirms that wait for the sync to be paid. */
   waitingSync?: ReadonlySet<string>;
+  /** QH-6.6: the quest state of each catalog-3 mission of the active set (available, accepted, ready, completed). */
+  questStates?: Record<string, QuestState>;
+  /** QH-6.6: why the last «Verify» of a mission did not confirm it (translated). */
+  verifyFailures?: Record<string, string>;
+  /** QH-6.6: the mission completed by a «Verify» just now. */
+  justCompleted?: string;
+  onAccept?: (q: QuestTemplate) => void;
+  onVerify?: (q: QuestTemplate) => void;
   onActivate: (m: DayMode) => void;
   onComplete: (q: QuestTemplate) => void;
   onPass: (q: QuestTemplate) => void;
@@ -45,7 +54,7 @@ const byIds = (ids: string[]) => ids.map((id) => questById(id)).filter((q): q is
  * Today (docs/quest-hub-plan.md, 4.1): the three missions of the day are rows and the one focus; the next step is marked
  * inside its row. Below them, quieter: the day plan, extra challenges and everyday habits (self-reports) apart.
  */
-export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId, snapshot, syncing, waitingSync, onActivate, onComplete, onPass, onReplace }: Props) {
+export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId, snapshot, syncing, waitingSync, questStates, verifyFailures, justCompleted, onAccept, onVerify, onActivate, onComplete, onPass, onReplace }: Props) {
   const { dict, lang } = useApp();
   const { gameState, gameDay } = useGame();
   const p = dict.questsPage.q2.page;
@@ -113,6 +122,11 @@ export function TodayView({ core, bonus, replacedFrom, busyId, mode, nextQuestId
         journalHref={isJournalConfirmed(q.id) ? journalHref(q.id, key) : undefined}
         journalCta={journalCta(q.id, key)}
         waitingSync={isActiveView && !!waitingSync?.has(q.id)}
+        questState={isActiveView && variant === "mission" ? questStates?.[q.id] : undefined}
+        verifyFailure={verifyFailures?.[q.id]}
+        justCompleted={justCompleted === q.id}
+        onAccept={() => onAccept?.(q)}
+        onVerify={() => onVerify?.(q)}
         busy={busyId === q.id}
         replaceUsed={gameState.replacementsUsedToday}
         replaceMax={GAME_CONFIG.QUEST_REPLACEMENTS_PER_DAY}

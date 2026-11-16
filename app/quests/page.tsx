@@ -11,7 +11,9 @@ import { mondayOfKey } from "@/lib/day-key";
 import { formatString } from "@/lib/i18n";
 import { GAME_CONFIG } from "@/lib/game-config";
 import { questById, type QuestTemplate } from "@/lib/quests";
-import { pendingMissionClaims } from "@/lib/game";
+import { pendingMissionClaims, questStates as questStatesOf, type VerifyFailure } from "@/lib/game";
+import type { MissionData } from "@/lib/missions";
+import { missionSourceLabel } from "@/components/quests/quest-text";
 import { nextStep, todayEarned, todaysQuests, weekDays, weekQuestCount } from "@/lib/quests-view";
 import { QuestsHeader } from "@/components/quests/QuestsHeader";
 import { TodayView } from "@/components/quests/TodayView";
@@ -31,7 +33,7 @@ import { questTitle } from "@/components/quests/quest-text";
 /** Quest Hub (docs/quest-hub-plan.md): the profile strip, four top-level tabs that switch the page, two columns. */
 export default function QuestsPage() {
   const { dict, lang, showToast } = useApp();
-  const { gameState, gameDay, rewards, passQuest, replaceQuest, setDayMode, fixWeekChallenge, recordWeekBossResult } = useGame();
+  const { gameState, gameDay, rewards, passQuest, replaceQuest, setDayMode, fixWeekChallenge, recordWeekBossResult, acceptMission, verifyMission } = useGame();
   const { trades, plans, weekPlans, noTrades, notes, ready: journalReady, cloudSettled, getAllRecords } = useJournal();
   const searchParams = useSearchParams();
   const activeTab = parseHubTab(searchParams.get("tab"));
@@ -92,6 +94,48 @@ export default function QuestsPage() {
   // QH-6.5: while a cloud journal loads its copy, missions are not paid yet (lib/game.ts claims only after it). The page
   // says so, and marks the missions the journal already confirms. Only shown — the payment is MissionClaimSync's.
   const syncing = journalReady && !cloudSettled;
+  // QH-6.6: the quest state of each mission (accepted in the game, ready from the saved journal); nothing here pays
+  const missionData = useCallback((): MissionData => {
+    const all = getAllRecords();
+    return { plans: all.plans || [], notes: all.notes || [], trades: all.trades || [], timezone: gameState.profile?.timezone };
+  }, [getAllRecords, gameState.profile?.timezone]);
+  const questStates = useMemo(
+    // states from the first frame (accepted / available / completed come from the game); «ready» only once the journal is read
+    () => questStatesOf(gameState, journalReady ? missionData() : { plans: [], notes: [], trades: [], timezone: gameState.profile?.timezone }, new Date()),
+    // the journal lists change after every save
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [journalReady, gameState, missionData, plans, notes, trades]
+  );
+  const [verifyFailures, setVerifyFailures] = useState<Record<string, string>>({});
+  const [justCompleted, setJustCompleted] = useState<string | undefined>(undefined);
+  const failureText = (id: string, f: VerifyFailure) => {
+    const r = t.q2.quest.reasons as Record<string, string>;
+    return formatString(r[f.reason] || r.notAvailable, { min: f.min ?? "", source: missionSourceLabel(dict, id) || "" });
+  };
+  const accept = (q: QuestTemplate) => {
+    setVerifyFailures((x) => ({ ...x, [q.id]: "" }));
+    if (!acceptMission(q.id)) showToast(t.q2.quest.notSaved);
+  };
+  const verify = (q: QuestTemplate) =>
+    runOnce(q.id, async () => {
+      if (!cloudSettled) {
+        setVerifyFailures((x) => ({ ...x, [q.id]: t.q2.quest.reasons.syncing }));
+        return;
+      }
+      const res = await verifyMission(q.id, missionData());
+      if (res.saveFailed) {
+        showToast(t.q2.quest.notSaved);
+        return;
+      }
+      if (res.paid) {
+        setVerifyFailures((x) => ({ ...x, [q.id]: "" }));
+        setJustCompleted(q.id);
+        if (res.leveledUp) showToast(formatString(dict.chronicleEvents.levelUp, { level: res.newLevel ?? gameState.level }));
+        return;
+      }
+      if (res.failure) setVerifyFailures((x) => ({ ...x, [q.id]: failureText(q.id, res.failure!) }));
+    });
+
   const waitingSync = useMemo(() => {
     if (!syncing) return new Set<string>();
     const all = getAllRecords();
@@ -211,6 +255,11 @@ export default function QuestsPage() {
           snapshot={snapshot}
           syncing={syncing}
           waitingSync={waitingSync}
+          questStates={questStates}
+          verifyFailures={verifyFailures}
+          justCompleted={justCompleted}
+          onAccept={accept}
+          onVerify={verify}
           onActivate={changeMode}
           onComplete={complete}
           onPass={pass}

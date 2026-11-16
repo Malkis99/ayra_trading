@@ -3,10 +3,12 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 import {
   GameState,
+  type VerifyFailure,
   INITIAL_GAME_STATE,
   checkAndApplyDateResets,
   recordJournalTrades,
-  claimMissions,
+  acceptMission,
+  verifyMission,
   completeSelfReportQuest,
   claimDailyReward as claimDailyRewardLogic,
   changePlan as changePlanLogic,
@@ -177,7 +179,10 @@ interface GameContextType {
   /** The journal reports the game day of its earliest live trade (null: none) once it is read (catalog 3 study choice). */
   recordJournalTrades: (firstTradeDay: string | null) => void;
   /** Pays the missions the saved journal confirms (QH-6.4), under the lock shared by all tabs, on fresh data. */
-  claimMissions: (data: MissionData) => Promise<{ claimed: string[]; xp: number; coins: number; leveledUp: boolean; newLevel?: number }>;
+  /** QH-6.6: accepts a mission of today's set (gives nothing); false when it cannot be accepted or not saved. */
+  acceptMission: (id: string) => boolean;
+  /** QH-6.6: «Verify» of an accepted mission — the one claim of lib/game.ts, under the lock shared by all tabs. */
+  verifyMission: (id: string, data: MissionData) => Promise<{ paid: boolean; xp: number; coins: number; leveledUp: boolean; newLevel?: number; failure?: VerifyFailure; saveFailed?: boolean }>;
   /** Saves the edit-profile form: nickname (already accepted by the server for accounts), bio and optional details. */
   saveProfileEdits: (edits: { name: string; bio: string; details: ProfileDetails }) => void;
   /** Accounts: the cloud nickname is the source of truth; copies it into the local state without a chronicle entry. */
@@ -522,13 +527,22 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     update((prev) => recordJournalTrades(prev, firstTradeDay, new Date()));
   }, [update]);
 
-  // The missions the saved journal confirms (QH-6.4): the same rules on the freshest saved state, one tab at a time
-  const claimMissionsCb = useCallback(
-    (data: MissionData) =>
+  // QH-6.6: accepting a mission gives nothing; it only marks the mission as taken for today
+  const acceptMissionCb = useCallback(
+    (id: string) => applySync((s) => {
+      const res = acceptMission(s, id, new Date());
+      return { state: res.state, result: res.ok };
+    }, false),
+    [applySync]
+  );
+
+  // QH-6.6: «Verify» — the same claim as every mission payment, on the freshest saved state, one tab at a time
+  const verifyMissionCb = useCallback(
+    (id: string, data: MissionData) =>
       applyLocked((s) => {
-        const res = claimMissions(s, data, new Date());
-        return { state: res.state, result: { claimed: res.claimed as string[], xp: res.xp, coins: res.coins, leveledUp: res.leveledUp, newLevel: res.newLevel } };
-      }, { claimed: [] as string[], xp: 0, coins: 0, leveledUp: false, newLevel: undefined as number | undefined }),
+        const res = verifyMission(s, id, data, new Date());
+        return { state: res.state, result: { paid: res.paid, xp: res.xp, coins: res.coins, leveledUp: res.leveledUp, newLevel: res.newLevel, failure: res.failure, saveFailed: false } };
+      }, { paid: false, xp: 0, coins: 0, leveledUp: false, newLevel: undefined as number | undefined, failure: undefined as VerifyFailure | undefined, saveFailed: true }),
     [applyLocked]
   );
 
@@ -870,7 +884,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         updateMinorMode,
         updateTimezone,
         recordJournalTrades: recordJournalTradesCb,
-        claimMissions: claimMissionsCb,
+        acceptMission: acceptMissionCb,
+        verifyMission: verifyMissionCb,
         saveProfileEdits,
         syncCloudNickname,
       }}

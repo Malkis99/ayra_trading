@@ -14,7 +14,7 @@ import {
   type DaySet,
   type WeekChallenge,
 } from "./quest-engine";
-import { MISSION_IDS, candidateSources, checkMissions, isMissionId, type MissionCheck, type MissionData, type MissionId, type MissionLedger } from "./missions";
+import { MAX_CORE_MISSIONS_PER_DAY, MISSION_IDS, candidateSources, checkMissions, explainMission, isMissionId, type MissionCheck, type MissionData, type MissionId, type MissionLedger, type MissionReason } from "./missions";
 import {
   addDaySnapshot,
   addWeekSnapshot,
@@ -166,6 +166,11 @@ export interface GameState {
    * is paid once, never more than three a day. Kept for the day it names; another day starts empty.
    */
   missionLedger?: MissionLedger;
+  /**
+   * The missions the person accepted on the game day it names (QH-6.6), with the time of acceptance. Only an accepted
+   * mission can be verified and paid; accepting gives nothing. Another day starts empty.
+   */
+  questAccepted?: { day: string; at: Partial<Record<MissionId, string>> };
   /** The week challenge, chosen once per week (Q2; no rewards yet). */
   questWeek?: WeekChallenge;
   /** Closed game days as they were (QH-3, lib/day-snapshots.ts): written once at the day change, read-only, newest first. */
@@ -973,13 +978,9 @@ export function evaluatePlanQuestClosure(
   };
   const missionDone = (id: "q_bias" | "q_riskcheck" | "q_reflect") => candidateSources(id, missionData, todayStr).length > 0;
 
-  // catalog 3 (QH-6.4): the day's missions are paid only through the claim (its set, its ledger, three a day at most)
+  // catalog 3: the day's missions are paid only when the person verifies an accepted mission (QH-6.6, claimMissions
+  // with its set, its ledger and three a day at most); saving the plan pays none of them by itself
   const catalog3 = newState.questDay?.day === todayStr && (newState.questDay.catalogVersion ?? 0) >= 3;
-  if (catalog3) {
-    const claim = claimMissions(newState, missionData, currentDate);
-    newState = claim.state;
-    closedQuests.push(...claim.claimed);
-  }
 
   // 1. q_daily_bias (or q_bias)
   const hasBiasWithInst =
@@ -1578,13 +1579,16 @@ const MISSION_CATEGORY: Record<MissionId, string> = {
 export function pendingMissionClaims(
   state: GameState,
   data: MissionData,
-  currentDate: Date = new Date()
+  currentDate: Date = new Date(),
+  only?: readonly MissionId[]
 ): { state: GameState; day: string; fresh: MissionCheck[]; ledger: MissionLedger } | null {
   const s = checkAndApplyDateResets(state, currentDate);
   const today = gameDayKey(s, currentDate);
   const qd = s.questDay;
   if (!qd || qd.day !== today || (qd.catalogVersion ?? 0) < 3 || s.isRestDay || qd.mode === "rest" || isClockBehind(s, currentDate)) return null;
-  const ids = shownSet(s, today).core.filter(isMissionId);
+  // QH-6.6: only missions the person accepted today (and, for «Verify», only the one asked)
+  const accepted = acceptedMissions(s, today);
+  const ids = shownSet(s, today).core.filter(isMissionId).filter((id) => accepted.has(id) && (!only || only.includes(id)));
   if (ids.length === 0) return null;
   const claims: Partial<Record<MissionId, string>> = { ...(s.missionLedger?.day === today ? s.missionLedger.claims : {}) };
   for (const id of MISSION_IDS) if (s.completedQuestsToday[id] && !claims[id]) claims[id] = `paid:${id}`;
@@ -1594,17 +1598,18 @@ export function pendingMissionClaims(
 
 /**
  * Pays the missions the saved journal confirms (QH-6.4; owner decision В14: 40 XP + 10 Coins each, the daily coin cap
- * applies). Called after a journal save (lib/game-context.tsx, under the lock shared by all tabs) and by the day plan's
- * closure. A mission is paid once a day, one record pays one mission, at most three a day whatever the mode changes;
+ * applies). Only for missions the person accepted (QH-6.6) — called by «Verify» (verifyMission, under the lock shared by
+ * all tabs); a journal save pays nothing by itself. A mission is paid once a day, one record pays one mission, at most three a day whatever the mode changes;
  * only records made today count, so old records, imported notes and other days are never paid. The confirmation time
  * and the reward go to the history (and so to the day snapshot); the record that confirmed it stays in the ledger.
  */
 export function claimMissions(
   state: GameState,
   data: MissionData,
-  currentDate: Date = new Date()
+  currentDate: Date = new Date(),
+  only?: readonly MissionId[]
 ): { state: GameState; claimed: MissionId[]; xp: number; coins: number; leveledUp: boolean; newLevel?: number; newlyUnlocked: string[] } {
-  const pending = pendingMissionClaims(state, data, currentDate);
+  const pending = pendingMissionClaims(state, data, currentDate, only);
   if (!pending || pending.fresh.length === 0) {
     return { state: pending ? pending.state : checkAndApplyDateResets(state, currentDate), claimed: [], xp: 0, coins: 0, leveledUp: false, newlyUnlocked: [] };
   }
@@ -1634,6 +1639,84 @@ export function claimMissions(
   let xp = next.xp - xp0;
   for (let lv = level0; lv < next.level; lv++) xp += xpForNextLevel(lv);
   return { state: next, claimed, xp, coins: next.coins - coins0, leveledUp, newLevel, newlyUnlocked };
+}
+
+/**
+ * The state of each mission of today's set (QH-6.6), from the saved game and the saved journal (nothing is stored):
+ * completed — confirmed and paid (kept whatever the acceptance: a mission paid before QH-6.6 stays done);
+ * ready — accepted, and the journal confirms it now (a «Verify» would pay it);
+ * accepted — accepted, the journal does not confirm it yet; available — not accepted.
+ */
+export type QuestState = "available" | "accepted" | "ready" | "completed";
+
+export function questStates(state: GameState, data: MissionData, currentDate: Date = new Date()): Record<string, QuestState> {
+  const s = checkAndApplyDateResets(state, currentDate);
+  const today = gameDayKey(s, currentDate);
+  const out: Record<string, QuestState> = {};
+  const qd = s.questDay;
+  if (!qd || qd.day !== today || (qd.catalogVersion ?? 0) < 3) return out;
+  const accepted = acceptedMissions(s, today);
+  const ready = new Set((pendingMissionClaims(s, data, currentDate)?.fresh || []).map((c) => c.id));
+  for (const id of shownSet(s, today).core.filter(isMissionId)) {
+    out[id] = s.completedQuestsToday[id] ? "completed" : ready.has(id) ? "ready" : accepted.has(id) ? "accepted" : "available";
+  }
+  return out;
+}
+
+export type VerifyFailure = { reason: MissionReason | "notAccepted" | "dayFull" | "sourceUsed" | "notAvailable"; min?: number };
+
+/**
+ * «Verify» of one mission (QH-6.6): the same claimMissions, for this mission only — no second way to pay. Paid: the
+ * mission, its record, the time and the reward are saved (40 XP + 10 Coins). Not paid: why, and what the journal needs.
+ * A second «Verify» of a paid mission pays nothing.
+ */
+export function verifyMission(
+  state: GameState,
+  id: string,
+  data: MissionData,
+  currentDate: Date = new Date()
+): { state: GameState; paid: boolean; xp: number; coins: number; leveledUp: boolean; newLevel?: number; failure?: VerifyFailure } {
+  const s = checkAndApplyDateResets(state, currentDate);
+  const today = gameDayKey(s, currentDate);
+  if (!isMissionId(id)) return { state: s, paid: false, xp: 0, coins: 0, leveledUp: false, failure: { reason: "notAvailable" } };
+  if (s.completedQuestsToday[id]) return { state: s, paid: false, xp: 0, coins: 0, leveledUp: false };
+  if (!acceptedMissions(s, today).has(id)) return { state: s, paid: false, xp: 0, coins: 0, leveledUp: false, failure: { reason: "notAccepted" } };
+  const r = claimMissions(s, data, currentDate, [id]);
+  if (r.claimed.includes(id)) return { state: r.state, paid: true, xp: r.xp, coins: r.coins, leveledUp: r.leveledUp, newLevel: r.newLevel };
+  const paidToday = MISSION_IDS.filter((m) => s.completedQuestsToday[m]).length;
+  if (paidToday >= MAX_CORE_MISSIONS_PER_DAY) return { state: r.state, paid: false, xp: 0, coins: 0, leveledUp: false, failure: { reason: "dayFull" } };
+  const why = explainMission(id, { ...data, timezone: s.profile?.timezone }, today);
+  if (why) return { state: r.state, paid: false, xp: 0, coins: 0, leveledUp: false, failure: why };
+  // the journal has a record for it, but that record already paid another mission today
+  return { state: r.state, paid: false, xp: 0, coins: 0, leveledUp: false, failure: { reason: "sourceUsed" } };
+}
+
+/** The missions accepted on the game day (QH-6.6). */
+export function acceptedMissions(state: Pick<GameState, "questAccepted">, dayKey: string): Set<MissionId> {
+  const a = state.questAccepted;
+  return new Set(a && a.day === dayKey ? (Object.keys(a.at) as MissionId[]) : []);
+}
+
+export type AcceptFailure = "notMission" | "notInSet" | "rest" | "done" | "notCatalog3" | "clockBehind";
+
+/**
+ * Accepts a mission of today's active set (QH-6.6): only a verifiable mission of a catalog-3 day, not on a rest day, not
+ * one already paid. Gives nothing — no XP, no Coins, no history — and changes nothing else. Accepting again keeps the first
+ * time. A mission of another mode cannot be accepted (its slot is not shown).
+ */
+export function acceptMission(state: GameState, id: string, currentDate: Date = new Date()): { state: GameState; ok: boolean; reason?: AcceptFailure } {
+  const s = checkAndApplyDateResets(state, currentDate);
+  const today = gameDayKey(s, currentDate);
+  const qd = s.questDay;
+  if (!isMissionId(id)) return { state: s, ok: false, reason: "notMission" };
+  if (!qd || qd.day !== today || (qd.catalogVersion ?? 0) < 3) return { state: s, ok: false, reason: "notCatalog3" };
+  if (s.isRestDay || qd.mode === "rest") return { state: s, ok: false, reason: "rest" };
+  if (isClockBehind(s, currentDate)) return { state: s, ok: false, reason: "clockBehind" };
+  if (!shownSet(s, today).core.includes(id)) return { state: s, ok: false, reason: "notInSet" };
+  if (s.completedQuestsToday[id]) return { state: s, ok: false, reason: "done" };
+  const at = s.questAccepted?.day === today ? s.questAccepted.at : {};
+  if (at[id]) return { state: s, ok: true };
+  return { state: { ...s, questAccepted: { day: today, at: { ...at, [id]: currentDate.toISOString() } } }, ok: true };
 }
 
 /**

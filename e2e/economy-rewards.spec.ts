@@ -119,7 +119,8 @@ test.describe("Rewards: only new actions, once per account", () => {
     // a quest the journal checks has no «Complete» button: it leads to the journal instead
     for (const card of await page.locator('[data-testid^="quest-card-"]').filter({ has: page.getByTestId("quest-badge-journal") }).all()) {
       await expect(card.getByTestId("quest-complete")).toHaveCount(0);
-      await expect(card.getByTestId("quest-journal-link")).toBeVisible();
+      // QH-6.6: a catalog-3 mission is accepted first, then leads to the journal; nothing ticks it
+      await expect(card.locator('[data-testid="quest-journal-link"], [data-testid="quest-accept"]').first()).toBeVisible();
     }
   });
 
