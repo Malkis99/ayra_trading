@@ -59,6 +59,7 @@ export type Observation = {
   retrievedAt: string | null;
   sourceUrl: string;
   sourceKind: "release" | "archive";
+  unemployment?: number;
 };
 
 function formatNumber(raw: string | null, pattern: RegExp): number | null {
@@ -96,6 +97,11 @@ export function projectEconomy(rows: EconomyCalendarRow[], now: number): Record<
         // BEA and DOL use source_updated as release-version evidence. Receipt is not recorded.
         sourceUpdatedAt: null, retrievedAt: null,
         sourceUrl: release?.url ?? officialArchives[code], sourceKind: release ? "release" : "archive" };
+      if (code === "us_nfp") {
+        // The existing BLS batch attaches LNS14000000 only for the same monthly period.
+        const rate = row.actual?.match(/^[+−-]?\d+K · (\d+(?:\.\d+)?)%$/);
+        if (rate && Number(rate[1]) <= 100) item.unemployment = Number(rate[1]);
+      }
       const key = period + ":" + stage;
       observations.set(key, [...(observations.get(key) ?? []), item]);
     }
