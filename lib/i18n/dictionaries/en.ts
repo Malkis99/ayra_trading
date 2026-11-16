@@ -2675,7 +2675,7 @@ export const en: Dictionary = {
         hint: "Tap a day to open it",
         range: "{from}–{to}",
         dayAria: "{date}: {status}",
-        summaryActive: "Active days",
+        summaryActive: "Days with quests",
         summaryActiveValue: "{n} of {total}",
         summaryFull: "Full days",
         summaryFullValue: "{n} of {total}",
@@ -3008,7 +3008,7 @@ export const en: Dictionary = {
           noImpulse: "No early-entry, overtrading or revenge tags",
           withinLimit: "No more trades than the plan's limit",
           tradesReviewed: "Every trade of the week is reviewed",
-          activeDays: "At least 3 different days with a plan, a review, a lesson or an analysis note",
+          activeDays: "Preparation days — at least 3 different days with a plan, a review, a lesson or an analysis note",
           weekSummary: "A week summary in the week plan (40+ characters, saved before the week ends)",
         },
         overall: {

@@ -553,11 +553,15 @@ export function prepActiveDay(snap: JournalSnapshot, day: string): boolean {
   return PREP_SOURCES.some((id) => candidateSources(id, data, day).length > 0);
 }
 
-/** The week's summary in the journal's week plan: own text of at least 40 characters (as a day review), saved within the week. */
+/**
+ * The week's summary in the journal's week plan: own text of at least 40 characters (as a day review), saved within the
+ * week. The save time must be known: without a valid one it is not confirmed (no new trophy from an unknown date).
+ * Results already recorded for earlier weeks are never recomputed (withBossResult), so their trophies stay.
+ */
 export function prepWeekSummary(snap: JournalSnapshot, weekStart: string): boolean {
   const w = alive(snap.weekPlans).find((x) => x.weekStartDate === weekStart);
   if (!w || ownText(w.summary).trim().length < MISSION_TEXT_MIN.review) return false;
-  if (!w.updatedAt || Number.isNaN(Date.parse(w.updatedAt))) return true; // a save without a time (older data): the text is what counts
+  if (!w.updatedAt || Number.isNaN(Date.parse(w.updatedAt))) return false;
   const saved = dayKeyInZone(new Date(w.updatedAt), snap.timezone);
   return saved >= weekStart && saved <= addDaysToKey(weekStart, 6);
 }

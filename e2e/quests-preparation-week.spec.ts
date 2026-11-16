@@ -57,6 +57,9 @@ test.describe("Preparation week (QH-7.1)", () => {
     await page.goto("/quests?tab=week");
     const boss = page.getByTestId("weekly-boss");
     await expect(boss.getByTestId("boss-condition-activeDays")).toContainText("2 из 3");
+    // two different counters, two different names: days with completed quests (left) and preparation days (the card)
+    await expect(boss.getByTestId("boss-condition-activeDays")).toContainText("Дней подготовки");
+    await expect(page.getByTestId("week-summary")).toContainText("Дней с заданиями");
     await expect(boss.getByTestId(`challenge-day-${MONDAY}`)).toHaveAttribute("data-state", "met");
     await expect(boss.getByTestId("challenge-day-2026-11-17")).toHaveAttribute("data-state", "noTrades");
     await expect(boss.getByTestId("challenge-day-2026-11-18")).toHaveAttribute("data-state", "met");
@@ -122,7 +125,8 @@ test.describe("Preparation week (QH-7.1)", () => {
     const boss = page.getByTestId("weekly-boss");
     await expect(boss).toContainText("Preparation Week");
     await expect(boss.getByTestId("boss-overall")).toHaveText("In progress");
-    await expect(boss.getByTestId("boss-condition-activeDays")).toContainText("At least 3 different days");
+    await expect(boss.getByTestId("boss-condition-activeDays")).toContainText("Preparation days — at least 3 different days");
+    await expect(page.getByTestId("week-summary")).toContainText("Days with quests");
     await expect(boss.getByTestId("boss-victory-rule")).toContainText("Several records on one day are one active day");
   });
 

@@ -2673,7 +2673,7 @@ export const ru = {
         hint: "Нажмите на день, чтобы открыть его",
         range: "{from}–{to}",
         dayAria: "{date}: {status}",
-        summaryActive: "Активных дней",
+        summaryActive: "Дней с заданиями",
         summaryActiveValue: "{n} из {total}",
         summaryFull: "Полных дней",
         summaryFullValue: "{n} из {total}",
@@ -3006,7 +3006,7 @@ export const ru = {
           noImpulse: "Нет меток раннего входа, овертрейдинга и мести рынку",
           withinLimit: "Сделок не больше лимита плана",
           tradesReviewed: "Все сделки недели разобраны",
-          activeDays: "Не меньше 3 разных дней с планом, разбором, уроком или аналитической заметкой",
+          activeDays: "Дней подготовки — не меньше 3 разных дней с планом, разбором, уроком или аналитической заметкой",
           weekSummary: "Итог недели в плане недели (от 40 символов, сохранён до конца недели)",
         },
         overall: {

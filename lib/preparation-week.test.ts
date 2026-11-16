@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { bossConditions, bossState, chooseWeekPath, closedBossResult, currentBoss, prepActiveDay, prepWeekSummary, type JournalSnapshot } from "./quest-engine";
-import { INITIAL_GAME_STATE, checkAndApplyDateResets, recordWeekBossResult, setDayMode, setWeekChallenge, type GameState } from "./game";
+import { INITIAL_GAME_STATE, checkAndApplyDateResets, migrateState, recordWeekBossResult, setDayMode, setWeekChallenge, type GameState } from "./game";
 import { challengeDays } from "./week-trophies";
 
 // QH-7.1 «Preparation week» (owner decision В-17): 3 different game days with confirmed journal work + a saved week
@@ -51,8 +51,33 @@ describe("the week summary", () => {
     expect(prepWeekSummary(snap({ weekPlans: [{ ...summary(), deletedAt: "2026-11-18T00:00:00.000Z" }] }), WEEK)).toBe(false);
     // written only after the week ended (Monday of the next week) — not the week's summary
     expect(prepWeekSummary(snap({ weekPlans: [summary(undefined, "2026-11-23T08:00:00.000Z")] }), WEEK)).toBe(false);
-    // older data without a save time: the text counts
-    expect(prepWeekSummary(snap({ weekPlans: [{ ...summary(), updatedAt: undefined }] }), WEEK)).toBe(true);
+  });
+
+  // review of #190: a summary counts only with a confirmed save time inside the week
+  it("a missing save time does not confirm the summary", () => {
+    expect(prepWeekSummary(snap({ weekPlans: [{ ...summary(), updatedAt: undefined }] }), WEEK)).toBe(false);
+    expect(prepWeekSummary(snap({ weekPlans: [{ ...summary(), updatedAt: "" }] }), WEEK)).toBe(false);
+  });
+
+  it("a broken timestamp does not confirm the summary", () => {
+    for (const bad of ["not a date", "2026-13-45T99:00:00Z", "yesterday"]) {
+      expect(prepWeekSummary(snap({ weekPlans: [{ ...summary(), updatedAt: bad }] }), WEEK)).toBe(false);
+    }
+  });
+
+  it("saved before Sunday ends (account zone) counts; saved on Monday does not — UTC and Tbilisi", () => {
+    expect(prepWeekSummary(snap({ weekPlans: [summary(undefined, "2026-11-22T23:59:00.000Z")] }), WEEK)).toBe(true);
+    expect(prepWeekSummary(snap({ weekPlans: [summary(undefined, "2026-11-23T00:01:00.000Z")] }), WEEK)).toBe(false);
+    // Tbilisi: Sunday 23:59 = 19:59 UTC; Monday 00:01 = Sunday 20:01 UTC
+    expect(prepWeekSummary(snap({ timezone: "Asia/Tbilisi", weekPlans: [summary(undefined, "2026-11-22T19:59:00.000Z")] }), WEEK)).toBe(true);
+    expect(prepWeekSummary(snap({ timezone: "Asia/Tbilisi", weekPlans: [summary(undefined, "2026-11-22T20:01:00.000Z")] }), WEEK)).toBe(false);
+  });
+
+  it("a closed week whose summary has no confirmed time is «not met» — no new trophy", () => {
+    const s = snap({ notes: [WEEK, "2026-11-18", "2026-11-21"].map((d) => note("lesson", `${d}T10:00:00.000Z`)) as never, weekPlans: [{ ...summary(), updatedAt: undefined }] });
+    const r = closedBossResult("preparationWeek", s, WEEK);
+    expect(r.state).toBe("notMet");
+    expect(r.conditions.find((c) => c.key === "weekSummary")).toMatchObject({ state: "notMet" });
   });
 });
 
@@ -105,6 +130,25 @@ describe("choosing the week's path", () => {
   it("a saved path is never replaced: a saved trading challenge stays in a week without trades, and the other way", () => {
     expect(currentBoss({ week: WEEK, boss: "respectStop" }, snap(), "2026-11-18")).toBe("respectStop");
     expect(currentBoss({ week: WEEK, boss: "preparationWeek" }, snap({ trades: [trade("t1", `${WEEK}T09:00:00.000Z`)] as never }), "2026-11-18")).toBe("preparationWeek");
+  });
+});
+
+describe("earlier confirmed wins are kept (review of #190)", () => {
+  it("a week already recorded as won keeps its result and trophy: nothing is recomputed, on load or by a new check", () => {
+    const started = checkAndApplyDateResets({ ...INITIAL_GAME_STATE, createdAt: "2026-10-01", profile: { ...INITIAL_GAME_STATE.profile, timezone: "UTC" } } as GameState, new Date(`${WEEK}T06:00:00Z`));
+    let s = setWeekChallenge(started, { week: WEEK, boss: "preparationWeek" });
+    s = checkAndApplyDateResets(s, new Date("2026-11-23T07:00:00Z"));
+    const won = { state: "met" as const, conditions: [{ key: "activeDays", source: "auto" as const, state: "met" as const, done: 3, total: 3 }, { key: "weekSummary", source: "auto" as const, state: "met" as const, done: 1, total: 1 }], at: "2026-11-23T07:05:00.000Z" };
+    s = recordWeekBossResult(s, WEEK, won, new Date("2026-11-23T07:05:00Z"));
+    // the journal today has a summary without a save time (stricter rule): a new check gives «not met», but the result stays
+    const strict = closedBossResult("preparationWeek", snap({ weekPlans: [{ ...summary(), updatedAt: undefined }] }), WEEK);
+    expect(strict.state).toBe("notMet");
+    const after = recordWeekBossResult(s, WEEK, { ...strict, at: "2026-11-23T08:00:00.000Z" }, new Date("2026-11-23T08:00:00Z"));
+    expect(after.questWeeks![0].bossResult).toEqual(won);
+    expect(after.weekTrophies!.map((t) => [t.week, t.boss, t.at])).toEqual([[WEEK, "preparationWeek", won.at]]);
+    const reloaded = migrateState(JSON.parse(JSON.stringify(after)));
+    expect(reloaded.questWeeks![0].bossResult).toEqual(won);
+    expect(reloaded.weekTrophies).toHaveLength(1);
   });
 });
 
