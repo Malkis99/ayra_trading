@@ -10,6 +10,7 @@ import { MarketChart } from "@/components/market/MarketChart";
 import { MarketWatchlist } from "@/components/market/MarketWatchlist";
 import { MarketCalendar, MarketNews } from "@/components/market/MarketCalendarNews";
 import { TodayImportant } from "@/components/market/TodayImportant";
+import { MarketEconomy } from "@/components/market/MarketEconomy";
 import { INSTRUMENTS, type InstrumentId } from "@/lib/market/instruments";
 import { useMarketCloudSync } from "@/lib/market/cloud-sync-engine";
 
@@ -99,6 +100,8 @@ export default function MarketPage() {
           <MarketCalendar />
         ) : tab === "news" ? (
           <MarketNews />
+        ) : tab === "economy" ? (
+          <MarketEconomy />
         ) : tab === "watchlist" ? (
           <MarketWatchlist onOpenChart={openChart} />
         ) : (
