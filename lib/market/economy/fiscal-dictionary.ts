@@ -6,7 +6,7 @@ export const fiscalText = {
       budget: ["Доходы", "Расходы", "Баланс бюджета"], interest: ["Валовые процентные расходы"] },
     observed: "Дата наблюдения", monthEnding: "Месяц по", checked: "Получено AYRA", change: "Изменение общего долга",
     fytd: "С начала финансового года · FY", stale: "Данные давно не обновлялись",
-    monthlySample: "Последнее доступное наблюдение каждого месяца.", partial: "Доступны только недавние наблюдения. Полная история временно недоступна.",
+    monthlySample: "Последнее доступное наблюдение каждого месяца.", partial: "История загружена не полностью.", loadHistory: "Загрузить историю", recent: "Последние 90 дней",
     notes: {
       debt: "Остаток долга. Исходная единица — USD. Изменение рассчитано между крайними показанными датами.",
       budget: "Кассовые потоки за месяц. Отрицательный баланс — дефицит, положительный — профицит. Исходная единица API — USD.",
@@ -26,7 +26,7 @@ export const fiscalText = {
       budget: ["Receipts", "Outlays", "Budget balance"], interest: ["Gross interest expense"] },
     observed: "Observation date", monthEnding: "Month ending", checked: "Retrieved by AYRA", change: "Change in total debt",
     fytd: "Fiscal year to date · FY", stale: "Data may be out of date",
-    monthlySample: "Last available observation in each month.", partial: "Only recent observations are available. Full history is temporarily unavailable.",
+    monthlySample: "Last available observation in each month.", partial: "History is incomplete.", loadHistory: "Load history", recent: "Last 90 days",
     notes: {
       debt: "Outstanding balance. Source unit is USD. Change uses the first and last available dates in the selected range.",
       budget: "Monthly cash flows. A negative balance is a deficit, a positive balance is a surplus. API source unit is USD.",
