@@ -100,7 +100,8 @@ export default function QuestsPage() {
     return { plans: all.plans || [], notes: all.notes || [], trades: all.trades || [], timezone: gameState.profile?.timezone };
   }, [getAllRecords, gameState.profile?.timezone]);
   const questStates = useMemo(
-    () => (journalReady ? questStatesOf(gameState, missionData(), new Date()) : {}),
+    // states from the first frame (accepted / available / completed come from the game); «ready» only once the journal is read
+    () => questStatesOf(gameState, journalReady ? missionData() : { plans: [], notes: [], trades: [], timezone: gameState.profile?.timezone }, new Date()),
     // the journal lists change after every save
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [journalReady, gameState, missionData, plans, notes, trades]

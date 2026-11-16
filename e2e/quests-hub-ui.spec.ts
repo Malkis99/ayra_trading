@@ -97,7 +97,13 @@ test.describe("Quest Hub interface (QH-6.5)", () => {
 
   test("the same names on Week, History, Home and Profile", async ({ context, page }) => {
     await seedGame(context, paidGame(), { ayra_journal_v1: journal({ plans: [plan] }) });
-    await page.goto(`/quests?tab=week&day=${yesterday}`);
+    // yesterday may be in last week (on a Monday): the week is given too
+    const monday = (() => {
+      const d = new Date(`${yesterday}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+      return d.toISOString().slice(0, 10);
+    })();
+    await page.goto(`/quests?tab=week&week=${monday}&day=${yesterday}`);
     await expect(page.getByTestId(`day-quest-m_lesson`)).toContainText("Урок");
     await page.goto(`/quests?tab=history&day=${yesterday}`);
     await expect(page.getByTestId("day-panel")).toContainText("Урок");
