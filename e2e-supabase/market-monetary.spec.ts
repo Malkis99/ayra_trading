@@ -59,6 +59,10 @@ for (const [width, lang] of [[390, "ru"], [1440, "en"]] as const) {
         const section = page.getByRole("region", { name: /Монетарная политика и рынки|Monetary policy & markets/ });
         await section.evaluate(element => element.scrollIntoView({ block: "start" }));
         await page.screenshot({ path: process.env.AYRA_MONETARY_SCREENSHOT_DIR + "/monetary-" + width + ".png" });
+        if (width === 390) {
+          await dollar.evaluate(element => element.scrollIntoView({ block: "center" }));
+          await page.screenshot({ path: process.env.AYRA_MONETARY_SCREENSHOT_DIR + "/monetary-usd-390.png" });
+        }
       }
     } finally {
       resume();

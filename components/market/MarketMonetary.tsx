@@ -22,7 +22,7 @@ function HistoryChart({ points, column, lang, gap, format }: {
   points: MonetaryPoint[]; column: number; lang: Language; gap: number; format: (value: number) => string;
 }) {
   const t = economyText[lang];
-  const values = points.flatMap(point => point.values[column] == null ? [] : [{ date: point.date, value: point.values[column]! }]);
+  const values = points.flatMap((point, index) => point.values[column] == null ? [] : [{ date: point.date, value: point.values[column]!, index }]);
   if (values.length < 2) return <p className="text-xs text-mu">{t.historyEmpty}</p>;
   const times = values.map(point => Date.parse(point.date));
   const min = Math.min(...values.map(point => point.value));
@@ -30,7 +30,8 @@ function HistoryChart({ points, column, lang, gap, format }: {
   const path = values.map((point, i) => {
     const x = 5 + (times[i] - times[0]) / (times[times.length - 1] - times[0]) * 390;
     const y = max === min ? 45 : 80 - (point.value - min) / (max - min) * 70;
-    return (i > 0 && times[i] - times[i - 1] <= gap ? "L" : "M") + x.toFixed(2) + "," + y.toFixed(2);
+    return (i > 0 && point.index === values[i - 1].index + 1 && times[i] - times[i - 1] <= gap ? "L" : "M")
+      + x.toFixed(2) + "," + y.toFixed(2);
   }).join(" ");
   return <div className="rounded-md bg-s1 p-2">
     <div className="flex justify-between text-xs text-mu"><span>{format(min)}</span><span>{format(max)}</span></div>
