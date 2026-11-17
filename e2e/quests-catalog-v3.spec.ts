@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { activateMode, baseGame, readGame, seedGame, utcDay } from "./helpers/quests";
+import { activateMode, baseGame, readGame, seedGame, totalXp, utcDay } from "./helpers/quests";
 
 // QH-6.3 (docs/quest-hub-qh6-spec.md, 8): catalog 3 — every active mode has its three verifiable missions (journal checks,
 // «Go» to the journal, never «Mark»); self-reports are only extras; the study mission is chosen once for the day; a plan
@@ -209,17 +209,50 @@ test.describe("Quest catalog 3 (QH-6.3)", () => {
     // the seed is written by the first tab; the second one opens right after it
     await a.goto("/quests");
     await b.goto("/journal");
-    await expect(a.getByTestId("quest-card-m_lesson").getByTestId("quest-status")).toHaveText("Готово к проверке");
-    await expect(b.getByTestId("quest-ready-bar")).toBeVisible();
-    // both tabs press «Verify» at once
-    await Promise.all([a.getByTestId("quest-card-m_lesson").getByTestId("quest-verify").click(), b.getByTestId("quest-ready-verify").click()]);
-    await expect.poll(async () => (await game(a)).completedQuestsToday.m_lesson).toBe(true);
-    await a.reload();
-    await b.reload();
-    await a.waitForTimeout(1000);
-    const g = await game(b);
-    expect(g.history.filter((x) => x.questId === "m_lesson")).toHaveLength(1);
-    expect(g.coins).toBe(10);
+    const card = a.getByTestId("quest-card-m_lesson");
+    const bar = b.getByTestId("quest-ready-bar");
+    const verifyA = card.getByTestId("quest-verify");
+    const verifyB = bar.getByTestId("quest-ready-verify");
+    await expect(card.getByTestId("quest-status")).toHaveText("Готово к проверке");
+    await expect(verifyA).toBeEnabled();
+    await expect(verifyB).toBeEnabled();
+    const before = await game(a);
+
+    // Hold the real browser lock until both UI handlers have queued their claims.
+    const lockName = "ayra-game:guest";
+    const finish = "e2e:release-game-lock";
+    await a.evaluate(({ lockName, finish }) => new Promise<void>((resolve, reject) => {
+      void navigator.locks.request(lockName, () => new Promise<void>(unlock => {
+        window.addEventListener(finish, () => unlock(), { once: true });
+        resolve();
+      })).catch(reject);
+    }), { lockName, finish });
+    const lockCount = () => a.evaluate(async name => {
+      const { pending, held } = await navigator.locks.query();
+      return {
+        pending: pending?.filter(lock => lock.name === name).length ?? 0,
+        held: held?.filter(lock => lock.name === name).length ?? 0,
+      };
+    }, lockName);
+    try {
+      // Keyboard activation exercises both real buttons without competing pointer hit tests.
+      await Promise.all([verifyA.press("Enter"), verifyB.press("Enter")]);
+      await expect.poll(lockCount).toEqual({ pending: 2, held: 1 });
+    } finally {
+      await a.evaluate(event => window.dispatchEvent(new Event(event)), finish);
+    }
+    await expect.poll(lockCount).toEqual({ pending: 0, held: 0 });
+    await expect(card).toHaveAttribute("data-done", "true");
+    await expect(bar).toHaveCount(0);
+    for (const tab of [a, b]) {
+      const saved = await game(tab);
+      expect(saved.completedQuestsToday.m_lesson).toBe(true);
+      expect(saved.history.filter(entry => entry.questId === "m_lesson")).toEqual([
+        expect.objectContaining({ xp: 40, coins: 10, completedAt: today }),
+      ]);
+      expect(totalXp(saved) - totalXp(before)).toBe(40);
+      expect(saved.coins - before.coins).toBe(10);
+    }
   });
 
   test("QH-6.4: imported or yesterday's notes pay nothing", async ({ context, page }) => {

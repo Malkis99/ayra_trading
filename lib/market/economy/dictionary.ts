@@ -83,3 +83,24 @@ export const inflationText = {
     higher: "Inflation accelerated", lower: "Inflation slowed", same: "Rate unchanged",
   },
 };
+
+export const beaPceText = {
+  ru: {
+    title: "Инфляция PCE",
+    metrics: ["PCE · м/м", "PCE · г/г", "Базовый PCE · м/м", "Базовый PCE · г/г"],
+    intro: "Индекс цен потребительских расходов. Базовый PCE исключает продовольствие и энергию. Показаны опубликованные изменения с сезонной корректировкой.",
+    vintage: "Значения из датированного выпуска BEA", load: "Загрузить историю PCE",
+    partial: "Некоторые выпуски недоступны", stale: "Данные PCE могут быть устаревшими",
+    debtGdp: "Долг у держателей вне федерального правительства / ВВП",
+    debtGdpUnavailable: "Для расчёта нужны четыре последовательных квартала номинального ВВП и подтверждённый остаток долга на конец квартала.",
+  },
+  en: {
+    title: "PCE inflation",
+    metrics: ["PCE · m/m", "PCE · y/y", "Core PCE · m/m", "Core PCE · y/y"],
+    intro: "Personal consumption expenditures price index. Core PCE excludes food and energy. The published changes are seasonally adjusted.",
+    vintage: "Values in the dated BEA release", load: "Load PCE history",
+    partial: "Some releases are unavailable", stale: "PCE data may be outdated",
+    debtGdp: "Debt held by the public / GDP",
+    debtGdpUnavailable: "The calculation requires four consecutive quarters of nominal GDP and verified quarter-end debt.",
+  },
+};

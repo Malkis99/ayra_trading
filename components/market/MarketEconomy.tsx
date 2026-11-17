@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ArrowUpRight, Landmark } from "lucide-react";
 import { useApp } from "@/lib/context";
-import { economyText } from "@/lib/market/economy/dictionary";
+import { beaPceText, economyText } from "@/lib/market/economy/dictionary";
 import { economyCodes, economyHistory, periodIndex, ranges, type HistoryRange, type Observation } from "@/lib/market/economy/project-calendar";
 import { useEconomyObservations } from "@/lib/market/economy/use-economy-observations";
 import { MarketPublicFinances } from "./MarketPublicFinances";
@@ -130,6 +130,10 @@ export function MarketEconomy() {
           );
         })}
         </div>
+        {index === 0 && <div className="rounded-lg border border-line bg-s1 p-3 text-xs text-mu">
+          <p className="font-semibold text-tx">{beaPceText[lang].debtGdp} · {t.empty}</p>
+          <p className="mt-1">{beaPceText[lang].debtGdpUnavailable}</p>
+        </div>}
       </section>
       </div>
       ))}

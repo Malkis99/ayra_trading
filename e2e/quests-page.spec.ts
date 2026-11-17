@@ -61,17 +61,25 @@ test.describe("Quests page (Q1)", () => {
   });
 
   test("«Replace» shows another quest; the third replacement says the limit is reached", async ({ context, page }) => {
-    // which quests can stand in depends on the day (the day set and the replacement are picked by date): on some days
-    // nothing is left to replace with and the app rightly says so. The clock is fixed on a day with replacements.
-    const day = "2026-11-16";
-    await page.clock.install({ time: new Date(`${day}T10:00:00.000Z`) });
-    await seedGame(context, baseGame({ lastQuestDate: day }));
+    await seedGame(context, baseGame({
+      lastQuestDate: today,
+      questDay: {
+        day: today,
+        mode: "trading",
+        catalogVersion: 3,
+        core: ["q_bias", "q_riskcheck", "q_reflect"],
+        bonus: ["q_workout", "q_logic_puzzle"],
+      },
+    }));
     await page.goto("/quests");
-    const before = await firstSelfQuest(page);
-    await before.card.getByRole("button", { name: /Ещё действия/ }).click();
-    await before.card.getByRole("button", { name: /Заменить \(0 из 2\)/ }).click();
+    const replace = async (id: string, used: number) => {
+      const card = page.getByTestId(`quest-card-${id}`);
+      await card.getByRole("button", { name: /Ещё действия/ }).click();
+      await card.getByRole("button", { name: `Заменить (${used} из 2)` }).click();
+    };
+    await replace("q_workout", 0);
     await expect(page.getByText(/Задание заменено:/)).toBeVisible();
-    await expect(page.getByTestId(`quest-card-${before.id}`)).toHaveCount(0);
+    await expect(page.getByTestId("quest-card-q_workout")).toHaveCount(0);
     await expect(page.getByText(/Вместо «/).first()).toBeVisible();
     await expect.poll(async () => (await readGame(page)).replacementsUsedToday).toBe(1);
 
@@ -80,12 +88,10 @@ test.describe("Quests page (Q1)", () => {
     await page.reload();
     await expect(page.getByTestId(`quest-card-${replaced}`)).toBeVisible();
 
-    for (let i = 0; i < 2; i++) {
-      const q = await firstSelfQuest(page);
-      await q.card.getByRole("button", { name: /Ещё действия/ }).click();
-      await q.card.getByRole("button", { name: /Заменить/ }).click();
-      await page.waitForTimeout(300);
-    }
+    await replace("q_logic_puzzle", 1);
+    await expect(page.getByTestId("quest-card-q_logic_puzzle")).toHaveCount(0);
+    await expect.poll(async () => (await readGame(page)).replacementsUsedToday).toBe(2);
+    await replace(replaced, 2);
     await expect(page.getByText("Замен сегодня больше нет (2 из 2)")).toBeVisible();
     expect((await readGame(page)).replacementsUsedToday).toBe(2);
   });
