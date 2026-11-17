@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { addDaysToKey } from "./day-key";
-import type { MissionData } from "./missions";
+import { checkMissions, type MissionData } from "./missions";
 import type { Note, Trade, TradingPlan } from "./journal/types";
-import { appMarks, journalRecordCheck, journeyOf } from "./personal-quest-days";
-import { chapterOf, type PQRun } from "./personal-quests";
+import { allocateAppMarks, appMarks, journalRecordCheck, journeyOf, journeysOf } from "./personal-quest-days";
+import { chapterOf, endDayOf, settleRun, type PQRun } from "./personal-quests";
 
 // QH-8.3: data-confirmed days come from the saved Journal by the Quest Hub checks — never from a stored key.
 
@@ -130,5 +130,112 @@ describe("chapters by the calendar", () => {
     expect([1, 7, 8, 14, 15, 21, 22, 30].map((n) => chapterOf(n).id)).toEqual([
       "awareness", "awareness", "resistance", "resistance", "strengthening", "strengthening", "consolidation", "consolidation",
     ]);
+  });
+});
+
+describe("В-24: one Journal record confirms at most one personal quest", () => {
+  // discipline and trading both accept a day plan (q_bias); trading also a session review (q_reflect)
+  const disc = run({ id: "pq_disc", questId: "pqq_disc", category: "discipline", startDay: d(0), createdAt: at(d(0), "08:00") });
+  const trad = run({ id: "pq_trad", questId: "pqq_trad", category: "trading", startDay: d(0), createdAt: at(d(0), "09:00") });
+  const REVIEW = "Итог сессии: держался плана, вошёл только по сетапу, стоп не двигал; вывод — ждать подтверждения на младшем ТФ.";
+  const confirmedOn = (a: ReturnType<typeof allocateAppMarks>, id: string) => (a.marks.get(id) ?? []).map((m) => m.day);
+
+  it("one day plan and two quests: only one is confirmed (the earlier one keeps it); the other says the record is taken", () => {
+    const a = allocateAppMarks([disc, trad], data({ plans: [plan(d(0))] }), d(0));
+    expect(confirmedOn(a, "pq_disc")).toEqual([d(0)]);
+    expect(confirmedOn(a, "pq_trad")).toEqual([]);
+    expect(a.takenBy.get("pq_trad")!.get(d(0))).toBe("pq_disc");
+    const j = journeysOf([disc, trad], d(0), data({ plans: [plan(d(0))] }));
+    expect(j.get("pq_disc")!.confirmed + j.get("pq_trad")!.confirmed).toBe(1);
+    expect(j.get("pq_trad")!.takenBy.get(d(0))).toBe("pq_disc");
+  });
+
+  it("two independent records of a day: both quests are confirmed — whichever quest has priority", () => {
+    const j = data({ plans: [plan(d(0))], notes: [note("rev", "session_review", REVIEW, d(0))] });
+    for (const runs of [[disc, trad], [trad, disc]]) {
+      const a = allocateAppMarks(runs, j, d(0));
+      expect(confirmedOn(a, "pq_disc")).toEqual([d(0)]);
+      expect(confirmedOn(a, "pq_trad")).toEqual([d(0)]);
+      expect(a.marks.get("pq_disc")![0].sourceKey).not.toBe(a.marks.get("pq_trad")![0].sourceKey);
+    }
+    // even when the trading quest started first: it takes the review so that the plan can confirm discipline
+    const early = { ...trad, createdAt: at(d(0), "07:00") };
+    const a = allocateAppMarks([disc, early], j, d(0));
+    expect(a.marks.get("pq_trad")![0].sourceKey).toBe("note:rev");
+    expect(a.marks.get("pq_disc")![0].sourceKey).toBe(`plan:${d(0)}:prep`);
+  });
+
+  it("the order of cards or calls never changes the result", () => {
+    const j = data({ plans: [0, 1, 2, 3].map((i) => plan(d(i))), notes: [note("rev", "session_review", REVIEW, d(2))] });
+    const third = run({ id: "pq_psy", category: "psychology", startDay: d(1), createdAt: at(d(1), "08:00") });
+    const base = allocateAppMarks([disc, trad, third], j, d(3));
+    for (const order of [[trad, third, disc], [third, disc, trad], [trad, disc, third]]) {
+      const a = allocateAppMarks(order, j, d(3));
+      expect(Object.fromEntries(a.marks)).toEqual(Object.fromEntries(base.marks));
+    }
+  });
+
+  it("a record may count for a Quest Hub mission of the day and one personal quest", () => {
+    const j = data({ plans: [plan(d(0))] });
+    expect(checkMissions(["q_bias"], j, d(0)).checks[0].done).toBe(true);
+    expect(allocateAppMarks([disc], j, d(0)).marks.get("pq_disc")!.map((m) => m.sourceKey)).toEqual([`plan:${d(0)}:prep`]);
+  });
+
+  it("a deleted or emptied record takes its confirmation away, and the next quest may take a remaining one", () => {
+    const j = data({ plans: [plan(d(0))], notes: [note("rev", "session_review", REVIEW, d(0))] });
+    expect(confirmedOn(allocateAppMarks([disc, trad], j, d(0)), "pq_disc")).toEqual([d(0)]);
+    const deleted = data({ plans: [plan(d(0), { deletedAt: at(d(0), "15:00") })], notes: j.notes });
+    const a = allocateAppMarks([disc, trad], deleted, d(0));
+    expect(confirmedOn(a, "pq_disc")).toEqual([]);
+    expect(confirmedOn(a, "pq_trad")).toEqual([d(0)]); // the review still counts for trading
+    const emptied = data({ plans: [plan(d(0), { bias: [] })] });
+    expect(confirmedOn(allocateAppMarks([disc, trad], emptied, d(0)), "pq_disc")).toEqual([]);
+  });
+
+  it("time zones: a plan saved at 21:30 UTC is the next day's in Tbilisi — and still goes to one quest only", () => {
+    const p1 = plan(d(1), { createdAt: at(d(0), "21:30"), firstSavedAt: at(d(0), "21:30") });
+    const tb = allocateAppMarks([disc, trad], data({ plans: [p1], timezone: "Asia/Tbilisi" }), d(2), "Asia/Tbilisi");
+    expect(confirmedOn(tb, "pq_disc")).toEqual([d(1)]);
+    expect(confirmedOn(tb, "pq_trad")).toEqual([]);
+    // in UTC the same plan was made the day before its date: there it is «Plan for tomorrow» of that day (a discipline
+    // check trading does not accept) — still one quest, one day
+    const utc = allocateAppMarks([disc, trad], data({ plans: [p1] }), d(2));
+    expect(utc.marks.get("pq_disc")!.map((m) => [m.day, m.check])).toEqual([[d(0), "m_plan_tomorrow"]]);
+    expect(confirmedOn(utc, "pq_trad")).toEqual([]);
+  });
+
+  it("an abandoned run never keeps a record a running quest needs (the day of a restart included)", () => {
+    const old = { ...trad, id: "pq_old", status: "abandoned" as const, abandonedAt: at(d(0), "12:00"), startDay: addDaysToKey(d(0), -5), createdAt: at(addDaysToKey(d(0), -5), "08:00") };
+    const fresh = { ...trad, id: "pq_new", restartOf: "pq_old", startDay: d(0), createdAt: at(d(0), "12:01") };
+    const a = allocateAppMarks([old, fresh], data({ plans: [plan(d(0))] }), d(0));
+    expect(confirmedOn(a, "pq_new")).toEqual([d(0)]);
+    expect(confirmedOn(a, "pq_old")).toEqual([]);
+  });
+
+  it("no double counting in the future settlement: two quests over 30 days get as many days as there are records", () => {
+    // 30 day plans, and session reviews on 10 of the days
+    const days = Array.from({ length: 30 }, (_, i) => d(i));
+    const j = data({
+      plans: days.map((day) => plan(day)),
+      notes: days.slice(0, 10).map((day, i) => note(`rev${i}`, "session_review", `${REVIEW} День ${i + 1}.`, day)),
+    });
+    const after = addDaysToKey(endDayOf(disc), 1);
+    const a = allocateAppMarks([disc, trad], j, after);
+    const check = journalRecordCheck(j);
+    const REPORT = "Итог тридцати дней: что изменилось, что получилось, где сорвался и что делаю дальше — честно и по делу.";
+    const settled = [disc, trad].map((r) => settleRun({ ...r, marks: a.marks.get(r.id)! }, [], REPORT, after, "t", check));
+    const total = settled.reduce((n, x) => n + ("entry" in x ? x.entry.days : 0), 0);
+    expect(total).toBe(40); // 30 plans + 10 reviews: each record once
+    const keys = [...a.marks.get("pq_disc")!, ...a.marks.get("pq_trad")!].map((m) => m.sourceKey);
+    expect(new Set(keys).size).toBe(keys.length);
+    // the same distribution on a reload (a fresh call) and in another tab (another order)
+    expect(Object.fromEntries(allocateAppMarks([trad, disc], j, after).marks)).toEqual(Object.fromEntries(a.marks));
+  });
+
+  it("self-reported quests use no Journal records and are not affected", () => {
+    const self = run({ id: "pq_self", category: "discipline", verification: "self", marks: [{ day: d(0), savedOn: d(0), at: "", source: "self" }] });
+    const j = journeysOf([disc, self], d(0), data({ plans: [plan(d(0))] }));
+    expect(j.get("pq_disc")!.confirmed).toBe(1);
+    expect(j.get("pq_self")!.confirmed).toBe(1);
   });
 });

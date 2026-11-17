@@ -11,6 +11,7 @@ import { PQ_CHAPTERS, PQ_NOTE_FIELDS, PQ_NOTE_MAX, PQ_PERIOD_DAYS, categoryOf, c
 import type { PQDayState, PQDayView, PQJourney } from "@/lib/personal-quest-days";
 import { buttonClasses } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
+import { historyTitle } from "./quest-text";
 import { formatDayKey } from "./WeekTab";
 import { errorText } from "./PersonalQuestParts";
 
@@ -139,9 +140,8 @@ export function ChapterBlock({ run, today, compact }: { run: PQRun; today: strin
 /** Today's action: «Mark as done» for a self-report; the Journal's confirmation (or what it waits for) for AYRA data. */
 export function TodayAction({ run, journey, today, onMarked }: { run: PQRun; journey: PQJourney; today: string; onMarked?: () => void }) {
   const { dict, showToast } = useApp();
-  const { markPersonalQuestDay } = useGame();
+  const { gameState, markPersonalQuestDay } = useGame();
   const j = dict.personalQuests.path.journey.today;
-  const titles = dict.questTemplates as Record<string, { title: string }>;
   const busy = useRef(false);
   const [saving, setSaving] = useState(false);
   const day = journey.days.find((d) => d.day === today);
@@ -161,6 +161,7 @@ export function TodayAction({ run, journey, today, onMarked }: { run: PQRun; jou
       setSaving(false);
     }
   };
+  const checks = (categoryOf(run.category)?.appChecks ?? []).map((id) => historyTitle(dict, id, "")).filter(Boolean).join(", ");
   let body: React.ReactNode;
   if (run.status === "abandoned") body = <p className="text-sm text-mu">{j.closed}</p>;
   else if (phase === "awaitingReport") body = <p className="text-sm text-mu">{j.periodOver}</p>;
@@ -188,16 +189,18 @@ export function TodayAction({ run, journey, today, onMarked }: { run: PQRun; jou
     body = (
       <p className="inline-flex items-center gap-2 text-sm font-semibold text-tx" data-testid="pq-today-done">
         <Check size={16} aria-hidden="true" className="text-vi" />
-        {formatString(j.appDone, { check: titles[day.mark?.check ?? ""]?.title ?? "" })}
+        {formatString(j.appDone, { check: historyTitle(dict, day.mark?.check ?? "", "") })}
       </p>
     );
   } else {
-    const checks = (categoryOf(run.category)?.appChecks ?? []).map((id) => titles[id]?.title).filter(Boolean).join(", ");
+    // a fitting record of today already counts for another personal quest (В-24): say so, and which one
+    const holder = journey.takenBy.get(today);
+    const holderTitle = holder ? (gameState.personalRuns ?? []).find((r) => r.id === holder)?.title ?? "" : "";
     body = (
-      <div className="space-y-2" data-testid="pq-today-waiting">
+      <div className="space-y-2" data-testid="pq-today-waiting" data-taken-by={holder ?? ""}>
         <p className="inline-flex items-center gap-2 text-sm text-tx">
-          <CircleDashed size={15} aria-hidden="true" className="text-mu" />
-          {formatString(j.appWaiting, { checks })}
+          <CircleDashed size={15} aria-hidden="true" className="shrink-0 text-mu" />
+          {holder ? formatString(j.appTaken, { title: holderTitle }) : formatString(j.appWaiting, { checks })}
         </p>
         <Link href="/journal" className={buttonClasses("secondary", "md", "w-fit")} data-testid="pq-open-journal">
           <BookOpen size={15} aria-hidden="true" />
@@ -210,7 +213,7 @@ export function TodayAction({ run, journey, today, onMarked }: { run: PQRun; jou
     <div data-testid="pq-today" data-state={day?.state ?? "none"}>
       {body}
       {run.status !== "abandoned" && phase === "active" && (
-        <p className="mt-1.5 text-[11px] text-mu">{run.verification === "self" ? j.selfHint : j.appHint}</p>
+        <p className="mt-1.5 text-[11px] text-mu">{run.verification === "self" ? j.selfHint : formatString(j.appHint, { checks })}</p>
       )}
     </div>
   );
@@ -350,7 +353,6 @@ export function MarkHistory({ journey }: { journey: PQJourney }) {
   const { gameState } = useGame();
   const tz = gameState.profile?.timezone || undefined;
   const h = dict.personalQuests.path.journey.history;
-  const titles = dict.questTemplates as Record<string, { title: string }>;
   const time = (iso: string) => (iso && !Number.isNaN(Date.parse(iso)) ? new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "en-US", { hour: "2-digit", minute: "2-digit", timeZone: tz }).format(new Date(iso)) : "");
   const marks = [...journey.marks].sort((a, b) => b.day.localeCompare(a.day));
   const nOf = (k: string) => journey.days.find((x: PQDayView) => x.day === k)?.n ?? 0;
@@ -365,7 +367,7 @@ export function MarkHistory({ journey }: { journey: PQJourney }) {
             <li key={m.day} className="flex flex-wrap items-center justify-between gap-2 py-1.5 text-sm" data-testid="pq-mark-item" data-day={m.day} data-source={m.source}>
               <span className="text-tx">{formatString(dict.personalQuests.path.journey.diary.dayTitle, { n: nOf(m.day), date: formatDayKey(m.day, lang, { day: "numeric", month: "short" }) })}</span>
               <span className="text-xs text-mu">
-                {m.source === "self" ? h.self : formatString(h.app, { check: titles[m.check ?? ""]?.title ?? "" })}
+                {m.source === "self" ? h.self : formatString(h.app, { check: historyTitle(dict, m.check ?? "", "") })}
                 {time(m.at) ? ` · ${formatString(h.at, { time: time(m.at) })}` : ""}
               </span>
             </li>

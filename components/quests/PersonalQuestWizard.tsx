@@ -22,6 +22,7 @@ import {
 import { Modal } from "@/components/ui/Modal";
 import { buttonClasses } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
+import { historyTitle } from "./quest-text";
 import { formatDayKey } from "./WeekTab";
 import { CategoryIcon, RewardTable, VerificationLabel, newPqId } from "./PersonalQuestParts";
 
@@ -228,6 +229,11 @@ export function PersonalQuestWizard({ runs, onClose, onCreated }: { runs: PQRun[
                       {verification === v && <Check size={14} aria-hidden="true" className="text-vi" />}
                     </span>
                     <span className="mt-0.5 block text-xs text-mu">{allowed ? w.verification[v] : w.notAllowed}</span>
+                    {allowed && v === "app" && (
+                      <span className="mt-1 block text-[11px] text-tx" data-testid="pq-ver-app-checks">
+                        {formatString(w.appChecks, { checks: cat.appChecks.map((id) => historyTitle(dict, id, "")).filter(Boolean).join(", ") })}
+                      </span>
+                    )}
                   </button>
                 );
               })}

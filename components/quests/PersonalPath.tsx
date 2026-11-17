@@ -8,7 +8,7 @@ import { formatString } from "@/lib/i18n";
 import { dayKeyInZone } from "@/lib/day-key";
 import type { MissionData } from "@/lib/missions";
 import { PQ_MAX_ACTIVE, PQ_PERIOD_DAYS, PQ_RANK_XP, activeRuns, dayNumber, daysLeft, endDayOf, phaseOf, type PQRun } from "@/lib/personal-quests";
-import { journeyOf, type PQJourney } from "@/lib/personal-quest-days";
+import { journeysOf, type PQJourney } from "@/lib/personal-quest-days";
 import { Modal } from "@/components/ui/Modal";
 import { buttonClasses } from "@/components/ui/Button";
 import { formatDayKey } from "./WeekTab";
@@ -33,7 +33,8 @@ export function PathMain({ journal }: { journal: MissionData | null }) {
   const runs = useMemo(() => gameState.personalRuns ?? [], [gameState.personalRuns]);
   const active = activeRuns(runs, gameDay);
   const past = runs.filter((r) => !active.includes(r));
-  const journeys = useMemo(() => new Map(runs.map((r) => [r.id, journeyOf(r, gameDay, journal, tz)])), [runs, gameDay, journal, tz]);
+  // the Journal's records are shared out once among all runs (В-24: one record confirms at most one personal quest)
+  const journeys = useMemo(() => journeysOf(runs, gameDay, journal, tz), [runs, gameDay, journal, tz]);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [openRunId, setOpenRunId] = useState<string | null>(null);
   const openRun = runs.find((r) => r.id === openRunId) ?? null;

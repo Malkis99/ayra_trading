@@ -219,6 +219,51 @@ test.describe("My path — the daily journey (QH-8.3)", () => {
     await expect(card(page, "pq_i2").getByTestId("pq-mark")).toBeVisible();
   });
 
+  test("В-24: one day plan, two quests — only the earlier quest is confirmed; the same in any card order, after a reload and in a second tab", async ({ browser }) => {
+    const planToday = { date: TODAY, bias: [{ instrument: "EURUSD", direction: "bullish" }], levels: [{ instrument: "EURUSD", price: 1.0832, label: "POI" }], events: [], checklist: [], createdAt: atOn(TODAY, "07:00"), firstSavedAt: atOn(TODAY, "07:00"), updatedAt: atOn(TODAY, "07:00") };
+    const disc = seededRun({ id: "pq_disc", category: "discipline", verification: "app", title: "План до сессии", startDay: addDays(TODAY, -2), createdAt: atOn(addDays(TODAY, -2), "08:00") });
+    const trad = seededRun({ id: "pq_trad", category: "trading", verification: "app", title: "Разбор каждого дня", startDay: addDays(TODAY, -1), createdAt: atOn(addDays(TODAY, -1), "08:00") });
+    for (const runs of [[disc, trad], [trad, disc]]) {
+      const ctx = await browser.newContext();
+      await seed(ctx, runs, { ayra_journal_v1: journal({ plans: [planToday] }) });
+      const a = await ctx.newPage();
+      await open(a);
+      const check = async (page: Page) => {
+        await expect(card(page, "pq_disc").getByTestId("pq-today-done")).toContainText("Подтверждено записью Журнала");
+        const waiting = card(page, "pq_trad").getByTestId("pq-today-waiting");
+        await expect(waiting).toHaveAttribute("data-taken-by", "pq_disc");
+        await expect(waiting).toContainText("уже засчитана квесту «План до сессии»");
+        await expect(card(page, "pq_trad").getByTestId("pq-card-done")).toHaveText("0 из 30");
+      };
+      await check(a);
+      await a.reload();
+      await check(a);
+      const b = await ctx.newPage();
+      await open(b);
+      await check(b);
+      await ctx.close();
+    }
+  });
+
+  test("В-24: two independent records of a day confirm two quests; the hint says AYRA checks the record, not the wording", async ({ context, page }) => {
+    const planToday = { date: TODAY, bias: [{ instrument: "EURUSD", direction: "bullish" }], levels: [{ instrument: "EURUSD", price: 1.0832, label: "POI" }], events: [], checklist: [], createdAt: atOn(TODAY, "07:00"), firstSavedAt: atOn(TODAY, "07:00"), updatedAt: atOn(TODAY, "07:00") };
+    const review = { id: "n_rev", templateKey: "session_review", title: "", body: "Итог сессии: держался плана, вошёл только по сетапу, стоп не двигал; вывод — ждать подтверждения на младшем ТФ.", tags: [], pinned: false, createdAt: atOn(TODAY, "18:00"), updatedAt: atOn(TODAY, "18:00"), archivedAt: null };
+    await seed(
+      context,
+      [
+        // trading started first, yet the plan goes to discipline and the review to trading: both are confirmed
+        seededRun({ id: "pq_trad", category: "trading", verification: "app", title: "Разбор каждого дня", startDay: addDays(TODAY, -3) }),
+        seededRun({ id: "pq_disc", category: "discipline", verification: "app", title: "План до сессии", startDay: addDays(TODAY, -1) }),
+      ],
+      { ayra_journal_v1: journal({ plans: [planToday], notes: [review] }) }
+    );
+    await open(page);
+    await expect(card(page, "pq_disc").getByTestId("pq-today-done")).toBeVisible();
+    await expect(card(page, "pq_trad").getByTestId("pq-today-done")).toContainText("Итог дня");
+    // rule 9: AYRA confirms a specific Journal activity, not the free wording of the action
+    await expect(card(page, "pq_trad").getByTestId("pq-today")).toContainText("а не формулировку вашего действия");
+  });
+
   for (const [width, lang] of [[390, "ru"], [1440, "en"]] as const) {
     test(`${width}px ${lang.toUpperCase()}: the cards and the path (calendar, chapters, diary) fit; screenshots`, async ({ context, page }) => {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
