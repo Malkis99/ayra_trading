@@ -1,8 +1,9 @@
 /**
  * QH-8.1 Personal Quests / «My path» — the model only (docs/quest-hub-qh8-spec.md).
  *
- * QH-8.2 wires only creating, keeping and abandoning runs (GameState.personalRuns). Nothing gives XP or Coins: daily
- * marks (QH-8.3), settling and achievements (QH-8.4) and rewards (QH-8.5) are not called by the game. The rates below
+ * QH-8.2 wires creating, keeping and abandoning runs (GameState.personalRuns); QH-8.3 the daily journey: self-report
+ * marks, the quest diary and the chapters (data-confirmed days are read from the Journal, lib/personal-quest-days.ts).
+ * Nothing gives XP or Coins: settling and achievements (QH-8.4) and rewards (QH-8.5) are not called by the game. The rates below
  * are the owner's approved variant C (В-19); the game shows them as a future reward and pays them only from QH-8.5 on.
  *
  * A personal quest is a 30-day run of one measurable daily action. Daily marks give nothing; after the period ends and
@@ -96,8 +97,32 @@ export interface PQMark {
    * (PQRecordCheck) finds that record saved and passing the category's Quest Hub check on that day.
    */
   sourceKey?: string;
+  /** app: the Quest Hub check the record passed (a mission id). */
+  check?: string;
   note?: string;
 }
+
+/**
+ * The quest diary (QH-8.3): a short reflection on one day of the run — separate from the trading Journal. It never
+ * confirms a day: a note about yesterday is kept and shown as such (В-21), and it gives nothing.
+ */
+export interface PQNote {
+  /** The game day it is about. */
+  day: string;
+  /** The game day it was last saved on (later than `day`: a note about an earlier day). */
+  savedOn: string;
+  /** First and last save (ISO). */
+  createdAt: string;
+  at: string;
+  done: string;
+  worked: string;
+  hard: string;
+  learned: string;
+}
+export const PQ_NOTE_FIELDS = ["done", "worked", "hard", "learned"] as const;
+export type PQNoteField = (typeof PQ_NOTE_FIELDS)[number];
+/** The longest text of one diary field (a UX limit). */
+export const PQ_NOTE_MAX = 500;
 
 export type PQStatus = "active" | "awaitingReport" | "completed" | "abandoned";
 
@@ -122,6 +147,8 @@ export interface PQRun {
   /** First game day of the period; the period is 30 game days. */
   startDay: string;
   marks: PQMark[];
+  /** The quest diary, one entry per day (QH-8.3); kept when the run is abandoned or restarted. */
+  notes?: PQNote[];
   status: PQStatus;
   report?: { at: string; text: string };
 }
@@ -216,6 +243,64 @@ export function daysLeft(run: Pick<PQRun, "startDay">, today: string): number {
   return Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000) + 1;
 }
 
+/* ------------------------------------------------------------------ chapters (QH-8.3) */
+
+export type PQChapterId = "awareness" | "resistance" | "strengthening" | "consolidation";
+/** Four chapters of the 30 days by the calendar (a missed day never moves them). The story of the run — no rewards. */
+export const PQ_CHAPTERS: ReadonlyArray<{ id: PQChapterId; from: number; to: number }> = [
+  { id: "awareness", from: 1, to: 7 },
+  { id: "resistance", from: 8, to: 14 },
+  { id: "strengthening", from: 15, to: 21 },
+  { id: "consolidation", from: 22, to: 30 },
+];
+export const chapterOf = (dayN: number) => PQ_CHAPTERS.find((c) => dayN >= c.from && dayN <= c.to) ?? PQ_CHAPTERS[PQ_CHAPTERS.length - 1];
+
+/* ------------------------------------------------------------------ the daily journey (QH-8.3) */
+
+export type MarkFailure = "notFound" | "notActive" | "notSelf";
+
+/**
+ * A self-report for today: only an active run confirmed by self-report, only for `today` (the account's game day), once
+ * a day — the same mark again (a double click, a second tab) changes nothing. Gives nothing.
+ */
+export function markSelfDay(runs: readonly PQRun[], runId: string, today: string, at: string): { runs: PQRun[]; duplicate: boolean } | { failure: MarkFailure } {
+  const run = runs.find((r) => r.id === runId);
+  if (!run) return { failure: "notFound" };
+  if (phaseOf(run, today) !== "active" || today < run.startDay) return { failure: "notActive" };
+  if (run.verification !== "self") return { failure: "notSelf" };
+  if (run.marks.some((m) => m.day === today && m.savedOn === today && m.source === "self")) return { runs: [...runs], duplicate: true };
+  const mark: PQMark = { day: today, at, savedOn: today, source: "self" };
+  return { runs: runs.map((r) => (r.id === runId ? { ...r, marks: [...r.marks, mark] } : r)), duplicate: false };
+}
+
+export type NoteFailure = "notFound" | "notOpen" | "dayNotAllowed" | "empty" | "tooLong";
+
+/**
+ * Saves the diary entry of a day: today, or yesterday (kept as a note about an earlier day — it never confirms it).
+ * Only a run still open (active or awaiting its report), only days of its period. Saving again replaces the entry.
+ */
+export function saveDayNote(
+  runs: readonly PQRun[],
+  runId: string,
+  input: { day: string } & Partial<Record<PQNoteField, string>>,
+  today: string,
+  at: string
+): { runs: PQRun[] } | { failure: NoteFailure } {
+  const run = runs.find((r) => r.id === runId);
+  if (!run) return { failure: "notFound" };
+  const phase = phaseOf(run, today);
+  if (phase !== "active" && phase !== "awaitingReport") return { failure: "notOpen" };
+  const yesterday = addDaysToKey(today, -1);
+  if ((input.day !== today && input.day !== yesterday) || input.day < run.startDay || input.day > endDayOf(run)) return { failure: "dayNotAllowed" };
+  const texts = Object.fromEntries(PQ_NOTE_FIELDS.map((f) => [f, typeof input[f] === "string" ? input[f]!.trim() : ""])) as Record<PQNoteField, string>;
+  if (PQ_NOTE_FIELDS.every((f) => !texts[f])) return { failure: "empty" };
+  if (PQ_NOTE_FIELDS.some((f) => texts[f].length > PQ_NOTE_MAX)) return { failure: "tooLong" };
+  const had = (run.notes ?? []).find((n) => n.day === input.day);
+  const note: PQNote = { day: input.day, savedOn: today, createdAt: had?.createdAt ?? at, at, ...texts };
+  const notes = [...(run.notes ?? []).filter((n) => n.day !== input.day), note].sort((a, b) => a.day.localeCompare(b.day));
+  return { runs: runs.map((r) => (r.id === runId ? { ...r, notes } : r)) };
+}
+
 /* ------------------------------------------------------------------ keeping runs (QH-8.2) */
 
 /**
@@ -303,7 +388,10 @@ export function readPersonalRuns(raw: unknown): PQRun[] {
     const marks = Array.isArray(x.marks)
       ? x.marks.filter((m): m is PQMark => !!m && typeof m === "object" && typeof m.day === "string" && typeof m.savedOn === "string" && (m.source === "app" || m.source === "self"))
       : [];
-    out.push({ ...(x as PQRun), marks });
+    const notes = Array.isArray(x.notes)
+      ? x.notes.filter((n): n is PQNote => !!n && typeof n === "object" && typeof n.day === "string" && DAY_RE.test(n.day) && typeof n.savedOn === "string" && PQ_NOTE_FIELDS.every((f) => typeof n[f] === "string"))
+      : undefined;
+    out.push({ ...(x as PQRun), marks, ...(notes ? { notes } : {}) });
   }
   return out;
 }

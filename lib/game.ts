@@ -16,7 +16,7 @@ import {
   type WeekChallenge,
 } from "./quest-engine";
 import { readWeekTrophies, trophiesFromWeeks, trophyFor, withWeekTrophy, type WeekTrophy } from "./week-trophies";
-import { abandonRun, createRun, readPersonalRuns, restartRun, type AbandonFailure, type PQRun, type PQStartInput, type RestartFailure, type StartFailure } from "./personal-quests";
+import { abandonRun, createRun, markSelfDay, readPersonalRuns, restartRun, saveDayNote, type AbandonFailure, type MarkFailure, type NoteFailure, type PQNoteField, type PQRun, type PQStartInput, type RestartFailure, type StartFailure } from "./personal-quests";
 import { MAX_CORE_MISSIONS_PER_DAY, MISSION_IDS, candidateSources, checkMissions, explainMission, isMissionId, type MissionCheck, type MissionData, type MissionId, type MissionLedger, type MissionReason } from "./missions";
 import {
   addDaySnapshot,
@@ -1778,7 +1778,7 @@ export function recordWeekBossResult(state: GameState, week: string, result: Non
 
 /* ------------------------------------------------------------------ personal quests «My path» (QH-8.2) */
 
-export type PersonalQuestFailure = StartFailure | AbandonFailure | RestartFailure | "badId";
+export type PersonalQuestFailure = StartFailure | AbandonFailure | RestartFailure | MarkFailure | NoteFailure | "badId" | "clockBehind";
 
 /**
  * Starts a personal quest on the account's game day (never another day). Only the run list changes: no XP, no Coins, no
@@ -1805,6 +1805,32 @@ export function restartPersonalQuest(state: GameState, runId: string, newId: str
   const res = restartRun(s.personalRuns ?? [], runId, newId, gameDayKey(s, currentDate), currentDate.toISOString());
   if ("failure" in res) return { state: s, ok: false, reason: res.failure };
   return { state: res.duplicate ? s : { ...s, personalRuns: res.runs }, ok: true, runId: res.run.id };
+}
+
+/**
+ * QH-8.3: «Mark done» of a self-reported quest — today's game day only, once (a second click or tab adds nothing). Not
+ * while the device clock is behind the time already seen (no marks from a clock moved back). Gives nothing.
+ */
+export function markPersonalQuestDay(state: GameState, runId: string, currentDate: Date = new Date()): { state: GameState; ok: boolean; reason?: PersonalQuestFailure } {
+  const s = checkAndApplyDateResets(state, currentDate);
+  if (isClockBehind(s, currentDate)) return { state: s, ok: false, reason: "clockBehind" };
+  const res = markSelfDay(s.personalRuns ?? [], runId, gameDayKey(s, currentDate), currentDate.toISOString());
+  if ("failure" in res) return { state: s, ok: false, reason: res.failure };
+  return { state: res.duplicate ? s : { ...s, personalRuns: res.runs }, ok: true };
+}
+
+/** QH-8.3: the quest diary entry of today or yesterday (a note about yesterday never confirms it). Gives nothing. */
+export function savePersonalQuestNote(
+  state: GameState,
+  runId: string,
+  input: { day: string } & Partial<Record<PQNoteField, string>>,
+  currentDate: Date = new Date()
+): { state: GameState; ok: boolean; reason?: PersonalQuestFailure } {
+  const s = checkAndApplyDateResets(state, currentDate);
+  if (isClockBehind(s, currentDate)) return { state: s, ok: false, reason: "clockBehind" };
+  const res = saveDayNote(s.personalRuns ?? [], runId, input, gameDayKey(s, currentDate), currentDate.toISOString());
+  if ("failure" in res) return { state: s, ok: false, reason: res.failure };
+  return { state: { ...s, personalRuns: res.runs }, ok: true };
 }
 
 /** Saves the week challenge once per week (it does not change in the middle of a week). */

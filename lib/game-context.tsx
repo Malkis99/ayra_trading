@@ -38,6 +38,8 @@ import {
   createPersonalQuest as createPersonalQuestLogic,
   abandonPersonalQuest as abandonPersonalQuestLogic,
   restartPersonalQuest as restartPersonalQuestLogic,
+  markPersonalQuestDay as markPersonalQuestDayLogic,
+  savePersonalQuestNote as savePersonalQuestNoteLogic,
   type PersonalQuestFailure,
   type DayModeFailure,
   grantFirstAction as grantFirstActionLogic,
@@ -57,7 +59,7 @@ import { GameStore, browserLock, revOf, type Change } from "@/lib/game-store";
 import { deviceRewardService, type RewardService } from "@/lib/reward-service";
 import type { DayMode, WeekChallenge } from "@/lib/quest-engine";
 import type { WeekSnapshot } from "@/lib/day-snapshots";
-import type { PQStartInput } from "@/lib/personal-quests";
+import type { PQNoteField, PQStartInput } from "@/lib/personal-quests";
 import { browserCommitLog } from "@/lib/storage/game-rev-counter";
 
 const STORAGE_KEY = "ayra_demo_v1";
@@ -195,6 +197,9 @@ interface GameContextType {
   createPersonalQuest: (input: PQStartInput & { id: string }) => Promise<{ ok: boolean; runId?: string; reason?: PersonalQuestFailure | "notSaved" }>;
   abandonPersonalQuest: (runId: string) => Promise<{ ok: boolean; reason?: PersonalQuestFailure | "notSaved" }>;
   restartPersonalQuest: (runId: string, newId: string) => Promise<{ ok: boolean; runId?: string; reason?: PersonalQuestFailure | "notSaved" }>;
+  /** QH-8.3: today's self-report of a personal quest (once a day) and the quest diary — no rewards. */
+  markPersonalQuestDay: (runId: string) => Promise<{ ok: boolean; reason?: PersonalQuestFailure | "notSaved" }>;
+  savePersonalQuestNote: (runId: string, input: { day: string } & Partial<Record<PQNoteField, string>>) => Promise<{ ok: boolean; reason?: PersonalQuestFailure | "notSaved" }>;
   /** Saves the edit-profile form: nickname (already accepted by the server for accounts), bio and optional details. */
   saveProfileEdits: (edits: { name: string; bio: string; details: ProfileDetails }) => void;
   /** Accounts: the cloud nickname is the source of truth; copies it into the local state without a chronicle entry. */
@@ -653,6 +658,23 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     [applyLocked]
   );
 
+  const markPersonalQuestDay = useCallback(
+    (runId: string) =>
+      applyLocked((s) => {
+        const res = markPersonalQuestDayLogic(s, runId, new Date());
+        return { state: res.state, result: { ok: res.ok, reason: res.reason as PersonalQuestFailure | "notSaved" | undefined } };
+      }, NOT_SAVED),
+    [applyLocked]
+  );
+  const savePersonalQuestNote = useCallback(
+    (runId: string, input: { day: string } & Partial<Record<PQNoteField, string>>) =>
+      applyLocked((s) => {
+        const res = savePersonalQuestNoteLogic(s, runId, input, new Date());
+        return { state: res.state, result: { ok: res.ok, reason: res.reason as PersonalQuestFailure | "notSaved" | undefined } };
+      }, NOT_SAVED),
+    [applyLocked]
+  );
+
   // One-time reward for the first action of a kind on this account (the journal decides it is the first)
   const grantFirstAction = useCallback((kind: FirstActionKind) => {
     return applySync((s) => {
@@ -929,6 +951,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         createPersonalQuest,
         abandonPersonalQuest,
         restartPersonalQuest,
+        markPersonalQuestDay,
+        savePersonalQuestNote,
         saveProfileEdits,
         syncCloudNickname,
       }}
