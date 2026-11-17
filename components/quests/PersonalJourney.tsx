@@ -138,7 +138,7 @@ export function ChapterBlock({ run, today, compact }: { run: PQRun; today: strin
 }
 
 /** Today's action: «Mark as done» for a self-report; the Journal's confirmation (or what it waits for) for AYRA data. */
-export function TodayAction({ run, journey, today, onMarked }: { run: PQRun; journey: PQJourney; today: string; onMarked?: () => void }) {
+export function TodayAction({ run, journey, today, onMarked, onComplete }: { run: PQRun; journey: PQJourney; today: string; onMarked?: () => void; onComplete?: () => void }) {
   const { dict, showToast } = useApp();
   const { gameState, markPersonalQuestDay } = useGame();
   const j = dict.personalQuests.path.journey.today;
@@ -163,8 +163,21 @@ export function TodayAction({ run, journey, today, onMarked }: { run: PQRun; jou
   };
   const checks = (categoryOf(run.category)?.appChecks ?? []).map((id) => historyTitle(dict, id, "")).filter(Boolean).join(", ");
   let body: React.ReactNode;
+  const c = dict.personalQuests.path.complete;
   if (run.status === "abandoned") body = <p className="text-sm text-mu">{j.closed}</p>;
-  else if (phase === "awaitingReport") body = <p className="text-sm text-mu">{j.periodOver}</p>;
+  else if (run.status === "completed") body = <p className="inline-flex items-center gap-2 text-sm font-semibold text-tx" data-testid="pq-today-completed"><Check size={16} aria-hidden="true" className="text-vi" />{c.done}</p>;
+  else if (phase === "awaitingReport")
+    body = (
+      <div className="space-y-2" data-testid="pq-awaiting">
+        <p className="text-sm font-semibold text-tx">{c.awaiting}</p>
+        {onComplete && (
+          <button type="button" className={buttonClasses("primary")} onClick={onComplete} aria-label={formatString(c.openAria, { title: run.title })} data-testid="pq-complete-open">
+            <Check size={16} aria-hidden="true" />
+            {c.open}
+          </button>
+        )}
+      </div>
+    );
   else if (run.verification === "self") {
     body =
       day?.state === "confirmed" ? (

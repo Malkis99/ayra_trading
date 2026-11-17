@@ -40,6 +40,7 @@ import {
   restartPersonalQuest as restartPersonalQuestLogic,
   markPersonalQuestDay as markPersonalQuestDayLogic,
   savePersonalQuestNote as savePersonalQuestNoteLogic,
+  completePersonalQuest as completePersonalQuestLogic,
   type PersonalQuestFailure,
   type DayModeFailure,
   grantFirstAction as grantFirstActionLogic,
@@ -59,7 +60,7 @@ import { GameStore, browserLock, revOf, type Change } from "@/lib/game-store";
 import { deviceRewardService, type RewardService } from "@/lib/reward-service";
 import type { DayMode, WeekChallenge } from "@/lib/quest-engine";
 import type { WeekSnapshot } from "@/lib/day-snapshots";
-import type { PQNoteField, PQStartInput } from "@/lib/personal-quests";
+import type { PQNoteField, PQResult, PQStartInput } from "@/lib/personal-quests";
 import { browserCommitLog } from "@/lib/storage/game-rev-counter";
 
 const STORAGE_KEY = "ayra_demo_v1";
@@ -200,6 +201,8 @@ interface GameContextType {
   /** QH-8.3: today's self-report of a personal quest (once a day) and the quest diary — no rewards. */
   markPersonalQuestDay: (runId: string) => Promise<{ ok: boolean; reason?: PersonalQuestFailure | "notSaved" }>;
   savePersonalQuestNote: (runId: string, input: { day: string } & Partial<Record<PQNoteField, string>>) => Promise<{ ok: boolean; reason?: PersonalQuestFailure | "notSaved" }>;
+  /** QH-8.4: completes a personal quest with the final report (once; the Journal checked on fresh data) — no XP, no Coins. */
+  completePersonalQuest: (runId: string, report: string, data: MissionData | null) => Promise<{ ok: boolean; result?: PQResult; upgraded?: boolean; duplicate?: boolean; reason?: PersonalQuestFailure | "notSaved" }>;
   /** Saves the edit-profile form: nickname (already accepted by the server for accounts), bio and optional details. */
   saveProfileEdits: (edits: { name: string; bio: string; details: ProfileDetails }) => void;
   /** Accounts: the cloud nickname is the source of truth; copies it into the local state without a chronicle entry. */
@@ -675,6 +678,18 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     [applyLocked]
   );
 
+  const completePersonalQuest = useCallback(
+    (runId: string, report: string, data: MissionData | null) =>
+      applyLocked(
+        (s) => {
+          const res = completePersonalQuestLogic(s, runId, report, data, new Date());
+          return { state: res.state, result: { ok: res.ok, result: res.result, upgraded: res.upgraded, duplicate: res.duplicate, reason: res.reason as PersonalQuestFailure | "notSaved" | undefined } };
+        },
+        NOT_SAVED as { ok: boolean; result?: PQResult; upgraded?: boolean; duplicate?: boolean; reason?: PersonalQuestFailure | "notSaved" }
+      ),
+    [applyLocked]
+  );
+
   // One-time reward for the first action of a kind on this account (the journal decides it is the first)
   const grantFirstAction = useCallback((kind: FirstActionKind) => {
     return applySync((s) => {
@@ -953,6 +968,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         restartPersonalQuest,
         markPersonalQuestDay,
         savePersonalQuestNote,
+        completePersonalQuest,
         saveProfileEdits,
         syncCloudNickname,
       }}

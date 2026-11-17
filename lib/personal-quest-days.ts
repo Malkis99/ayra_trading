@@ -12,6 +12,9 @@
  * given a record by one shared, deterministic distribution (allocateAppMarks) over all runs that were running that day.
  * A record may still also count for a Quest Hub mission (QH-6.6 keeps its own ledger).
  *
+ * A completed run (QH-8.4) is never counted again: its saved result keeps the marks it was completed with, and their
+ * records stay reserved for it — later changes in the Journal change neither its result nor what other quests get.
+ *
  * Self-reported days are the marks saved in the run (markSelfDay): today only, once a day. Nothing here gives anything.
  */
 
@@ -73,9 +76,17 @@ export interface PQAllocation {
  * and is computed again on every read, so a record deleted or changed takes its confirmation away everywhere at once.
  */
 export function allocateAppMarks(runs: readonly PQRun[], data: MissionData, today: string, timezone?: string, sources: Sources = candidateSources): PQAllocation {
-  const appRuns = runs.filter((r) => r.verification === "app").slice().sort(runPriority);
-  const marks = new Map<string, PQMark[]>(appRuns.map((r) => [r.id, []]));
-  const takenBy = new Map<string, Map<string, string>>(appRuns.map((r) => [r.id, new Map()]));
+  const all = runs.filter((r) => r.verification === "app");
+  const marks = new Map<string, PQMark[]>(all.map((r) => [r.id, []]));
+  const takenBy = new Map<string, Map<string, string>>(all.map((r) => [r.id, new Map()]));
+  const used = new Set<string>();
+  // completed runs keep the marks they were completed with; their records are taken
+  for (const r of all) {
+    if (r.status !== "completed" || !r.result) continue;
+    marks.set(r.id, r.result.marks);
+    for (const m of r.result.marks) if (m.sourceKey) used.add(m.sourceKey);
+  }
+  const appRuns = all.filter((r) => !(r.status === "completed" && r.result)).sort(runPriority);
   if (appRuns.length === 0) return { marks, takenBy };
   const lastOf = new Map(appRuns.map((r) => {
     const stop = stoppedOnOf(r, timezone);
@@ -84,7 +95,6 @@ export function allocateAppMarks(runs: readonly PQRun[], data: MissionData, toda
   }));
   const first = appRuns.reduce((m, r) => (r.startDay < m ? r.startDay : m), appRuns[0].startDay);
   const last = Array.from(lastOf.values()).reduce((m, d) => (d > m ? d : m), first);
-  const used = new Set<string>();
   for (let day = first; day <= last; day = addDaysToKey(day, 1)) {
     const live = appRuns.filter((r) => r.startDay <= day && day <= lastOf.get(r.id)!);
     if (live.length === 0) continue;
@@ -178,11 +188,15 @@ export function journeyOf(
 ): PQJourney {
   const stoppedOn = stoppedOnOf(run, timezone);
   const until = stoppedOn && stoppedOn < today ? stoppedOn : today;
-  const pending = run.verification === "app" && !data;
+  const pending = run.verification === "app" && !data && !(run.status === "completed" && run.result);
   let marks: PQMark[];
   let confirmed = 0;
   let takenBy = new Map<string, string>();
-  if (run.verification === "app") {
+  if (run.status === "completed" && run.result) {
+    // the saved result, never counted again (QH-8.4)
+    marks = run.result.marks;
+    confirmed = run.result.days;
+  } else if (run.verification === "app") {
     const a = data ? allocation ?? allocateAppMarks([run], data, today, timezone, sources) : null;
     marks = a?.marks.get(run.id) ?? [];
     takenBy = a?.takenBy.get(run.id) ?? takenBy;

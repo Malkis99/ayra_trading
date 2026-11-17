@@ -16,7 +16,8 @@ import {
   type WeekChallenge,
 } from "./quest-engine";
 import { readWeekTrophies, trophiesFromWeeks, trophyFor, withWeekTrophy, type WeekTrophy } from "./week-trophies";
-import { abandonRun, createRun, markSelfDay, readPersonalRuns, restartRun, saveDayNote, type AbandonFailure, type MarkFailure, type NoteFailure, type PQNoteField, type PQRun, type PQStartInput, type RestartFailure, type StartFailure } from "./personal-quests";
+import { abandonRun, completeRun, createRun, markSelfDay, readAchievements, readLedger, readPersonalRuns, restartRun, saveDayNote, withAchievement, type AbandonFailure, type CompleteFailure, type MarkFailure, type NoteFailure, type PQAchievements, type PQLedgerEntry, type PQNoteField, type PQResult, type PQRun, type PQStartInput, type RestartFailure, type StartFailure } from "./personal-quests";
+import { allocateAppMarks, journalRecordCheck } from "./personal-quest-days";
 import { MAX_CORE_MISSIONS_PER_DAY, MISSION_IDS, candidateSources, checkMissions, explainMission, isMissionId, type MissionCheck, type MissionData, type MissionId, type MissionLedger, type MissionReason } from "./missions";
 import {
   addDaySnapshot,
@@ -191,6 +192,10 @@ export interface GameState {
    * and (from QH-8.4) completed. Never pruned: it is the history. Kept on this device until Q4; gives nothing yet.
    */
   personalRuns?: PQRun[];
+  /** Completed personal quests (QH-8.4), one entry per run, never changed: the rank and days, at 0 XP (no rewards yet). */
+  personalLedger?: PQLedgerEntry[];
+  /** The best rank of each category achievement (QH-8.4): raised by a better run, never lowered or duplicated. */
+  personalAchievements?: PQAchievements;
   /** Grows with every saved change: the freshest copy wins between tabs (lib/game-store.ts). */
   rev?: number;
 }
@@ -473,6 +478,8 @@ export function migrateState(rawState: any): GameState {
     weekTrophies: trophiesFromWeeks(readWeekTrophies(rawState.weekTrophies), readWeekSnapshots(rawState.questWeeks)),
     // personal quests (QH-8.2): an old save has none; damaged entries are dropped, never guessed
     personalRuns: readPersonalRuns(rawState.personalRuns),
+    personalLedger: readLedger(rawState.personalLedger),
+    personalAchievements: readAchievements(rawState.personalAchievements),
     // the history starts when this version first runs on the device (earlier coins are in the balance only)
     coinLogSince: typeof rawState.coinLogSince === "string" ? rawState.coinLogSince : new Date().toISOString(),
   };
@@ -1778,7 +1785,7 @@ export function recordWeekBossResult(state: GameState, week: string, result: Non
 
 /* ------------------------------------------------------------------ personal quests «My path» (QH-8.2) */
 
-export type PersonalQuestFailure = StartFailure | AbandonFailure | RestartFailure | MarkFailure | NoteFailure | "badId" | "clockBehind";
+export type PersonalQuestFailure = StartFailure | AbandonFailure | RestartFailure | MarkFailure | NoteFailure | CompleteFailure | "badId" | "clockBehind" | "journalPending";
 
 /**
  * Starts a personal quest on the account's game day (never another day). Only the run list changes: no XP, no Coins, no
@@ -1831,6 +1838,47 @@ export function savePersonalQuestNote(
   const res = saveDayNote(s.personalRuns ?? [], runId, input, gameDayKey(s, currentDate), currentDate.toISOString());
   if ("failure" in res) return { state: s, ok: false, reason: res.failure };
   return { state: { ...s, personalRuns: res.runs }, ok: true };
+}
+
+/**
+ * QH-8.4: completes a personal quest from day 31 with the final report — once (a second click, tab or reload returns the
+ * saved result). A data-confirmed run is counted from the Journal by the shared distribution (В-24) over all runs, the
+ * records checked again; it waits while the Journal (or its cloud copy) is not read (`data` null). The result, the
+ * report and a ledger entry at 0 XP are saved, and the category achievement keeps its best rank. No XP, no Coins, no
+ * level, no history or coin log change.
+ */
+export function completePersonalQuest(
+  state: GameState,
+  runId: string,
+  report: string,
+  data: MissionData | null,
+  currentDate: Date = new Date()
+): { state: GameState; ok: boolean; result?: PQResult; upgraded?: boolean; duplicate?: boolean; reason?: PersonalQuestFailure } {
+  const s = checkAndApplyDateResets(state, currentDate);
+  if (isClockBehind(s, currentDate)) return { state: s, ok: false, reason: "clockBehind" };
+  const runs = s.personalRuns ?? [];
+  const run = runs.find((r) => r.id === runId);
+  if (!run) return { state: s, ok: false, reason: "notFound" };
+  const today = gameDayKey(s, currentDate);
+  const tz = s.profile?.timezone;
+  let marks = run.marks;
+  let check = journalRecordCheck({ plans: [], notes: [], trades: [], timezone: tz });
+  if (run.verification === "app" && run.status !== "completed") {
+    if (!data) return { state: s, ok: false, reason: "journalPending" };
+    marks = allocateAppMarks(runs, data, today, tz).marks.get(run.id) ?? [];
+    check = journalRecordCheck(data);
+  }
+  const res = completeRun(runs, s.personalLedger ?? [], runId, report, marks, check, today, currentDate.toISOString());
+  if ("failure" in res) return { state: s, ok: false, reason: res.failure };
+  if (res.duplicate) return { state: s, ok: true, result: res.result, duplicate: true, upgraded: false };
+  const ach = withAchievement(s.personalAchievements ?? {}, res.entry);
+  return {
+    state: { ...s, personalRuns: res.runs, personalLedger: [...(s.personalLedger ?? []), res.entry], personalAchievements: ach.next },
+    ok: true,
+    result: res.result,
+    upgraded: ach.upgraded,
+    duplicate: false,
+  };
 }
 
 /** Saves the week challenge once per week (it does not change in the middle of a week). */
