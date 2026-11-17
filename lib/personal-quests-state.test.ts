@@ -125,8 +125,8 @@ describe("abandoning and restarting", () => {
   });
 });
 
-describe("no rewards yet (QH-8.3 – QH-8.5)", () => {
-  it("only the model and the simulation use marks, settling, achievements and the payout", () => {
+describe("no rewards yet (QH-8.5)", () => {
+  it("the game never pays the variant C rates: settling stays in the model, the payout table only in the display", () => {
     const roots = ["lib", "components", "app"].map((d) => path.join(__dirname, "..", d));
     const offenders: string[] = [];
     const walk = (dir: string) => {
@@ -135,8 +135,9 @@ describe("no rewards yet (QH-8.3 – QH-8.5)", () => {
         if (f.isDirectory()) walk(p);
         else if (/\.(ts|tsx)$/.test(f.name) && !/\.test\.tsx?$/.test(f.name) && !/personal-quests\.ts$|econ-sim-qh8\.ts$/.test(f.name)) {
           const src = fs.readFileSync(p, "utf8");
-          const journey = /personal-quest-days\.ts$/.test(f.name);
-          if (/\b(settleRun|withAchievement|NO_RECORDS|PQLedgerEntry)\b/.test(src) || (!journey && /\bconfirmedDays\b/.test(src)) || /econ-sim-qh8/.test(src)) offenders.push(p);
+          // settling runs only inside the model (completeRun, at zero rates); the game state never sees the rates
+          if (/\bsettleRun\b/.test(src) || /econ-sim-qh8/.test(src)) offenders.push(p);
+          if (/^game(-context)?\.tsx?$/.test(f.name) && /\bPQ_RANK_XP\b/.test(src)) offenders.push(p);
         }
       }
     };

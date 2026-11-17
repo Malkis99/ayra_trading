@@ -15,6 +15,7 @@ import { formatDayKey } from "./WeekTab";
 import { PersonalQuestWizard } from "./PersonalQuestWizard";
 import { CATEGORY_ICONS, CategoryIcon, RewardTable, VerificationLabel, errorText, newPqId } from "./PersonalQuestParts";
 import { ChapterBlock, DayGrid, Diary, MarkHistory, ProgressRing, TodayAction } from "./PersonalJourney";
+import { CategoryAchievements, CompletionDialog, RankChip, ResultBlock } from "./PersonalCompletion";
 
 // «My path» (QH-8.2, QH-8.3): personal 30-day quests — start, the daily journey (marks, Journal confirmations, chapters,
 // diary), abandon, restart. Nothing here gives XP or Coins: rewards are shown as future ones (variant C, QH-8.5).
@@ -38,6 +39,9 @@ export function PathMain({ journal }: { journal: MissionData | null }) {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [openRunId, setOpenRunId] = useState<string | null>(null);
   const openRun = runs.find((r) => r.id === openRunId) ?? null;
+  // QH-8.4: the completion dialog of a run awaiting its final report
+  const [completingId, setCompletingId] = useState<string | null>(null);
+  const completing = runs.find((r) => r.id === completingId) ?? null;
   const full = active.length >= PQ_MAX_ACTIVE;
 
   return (
@@ -79,7 +83,7 @@ export function PathMain({ journal }: { journal: MissionData | null }) {
         <ul className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3" data-testid="pq-active">
           {active.map((r) => (
             <li key={r.id} className="min-w-0">
-              <RunCard run={r} journey={journeys.get(r.id)!} today={gameDay} onOpen={() => setOpenRunId(r.id)} />
+              <RunCard run={r} journey={journeys.get(r.id)!} today={gameDay} onOpen={() => setOpenRunId(r.id)} onComplete={() => setCompletingId(r.id)} />
             </li>
           ))}
         </ul>
@@ -97,7 +101,19 @@ export function PathMain({ journal }: { journal: MissionData | null }) {
           }}
         />
       )}
-      {openRun && <RunJourney run={openRun} journey={journeys.get(openRun.id)!} today={gameDay} onClose={() => setOpenRunId(null)} />}
+      {openRun && (
+        <RunJourney
+          run={openRun}
+          journey={journeys.get(openRun.id)!}
+          today={gameDay}
+          onClose={() => setOpenRunId(null)}
+          onComplete={() => {
+            setOpenRunId(null);
+            setCompletingId(openRun.id);
+          }}
+        />
+      )}
+      {completing && <CompletionDialog run={completing} journey={journeys.get(completing.id)!} journal={journal} onClose={() => setCompletingId(null)} />}
     </div>
   );
 }
@@ -145,7 +161,7 @@ function JourneyStats({ run, journey, today }: { run: PQRun; journey: PQJourney;
 }
 
 /** One active run: progress, chapter, today's action, how it is confirmed, what it may give at the end. */
-function RunCard({ run, journey, today, onOpen }: { run: PQRun; journey: PQJourney; today: string; onOpen: () => void }) {
+function RunCard({ run, journey, today, onOpen, onComplete }: { run: PQRun; journey: PQJourney; today: string; onOpen: () => void; onComplete: () => void }) {
   const { dict } = useApp();
   const p = dict.personalQuests;
   const c = p.path.card;
@@ -172,7 +188,7 @@ function RunCard({ run, journey, today, onOpen }: { run: PQRun; journey: PQJourn
       </dl>
 
       <div className="mt-3 rounded-xl border border-line bg-s2/40 p-3">
-        <TodayAction run={run} journey={journey} today={today} />
+        <TodayAction run={run} journey={journey} today={today} onComplete={onComplete} />
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -196,7 +212,7 @@ function RunCard({ run, journey, today, onOpen }: { run: PQRun; journey: PQJourn
 }
 
 /** The whole path of a run: today, the 30 days, chapters, diary, marks, the quest itself — and abandoning (confirmed). */
-function RunJourney({ run, journey, today, onClose }: { run: PQRun; journey: PQJourney; today: string; onClose: () => void }) {
+function RunJourney({ run, journey, today, onClose, onComplete }: { run: PQRun; journey: PQJourney; today: string; onClose: () => void; onComplete: () => void }) {
   const { dict, lang, showToast } = useApp();
   const { abandonPersonalQuest } = useGame();
   const p = dict.personalQuests;
@@ -254,6 +270,7 @@ function RunJourney({ run, journey, today, onClose }: { run: PQRun; journey: PQJ
         }
       >
         <div className="space-y-4">
+          {run.status === "completed" && run.result && <ResultBlock run={run} result={run.result} />}
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
             <section className="rounded-xl border border-line bg-s2/40 p-3">
               <JourneyStats run={run} journey={journey} today={today} />
@@ -262,7 +279,7 @@ function RunJourney({ run, journey, today, onClose }: { run: PQRun; journey: PQJ
             <section className="rounded-xl border border-line bg-s2/40 p-3" aria-label={j.today.title}>
               <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-mu">{j.today.title}</h3>
               <p className="mt-1 break-words text-sm text-tx">{run.dailyAction}</p>
-              <div className="mt-2"><TodayAction run={run} journey={journey} today={today} /></div>
+              <div className="mt-2"><TodayAction run={run} journey={journey} today={today} onComplete={onComplete} /></div>
             </section>
           </div>
 
@@ -271,7 +288,7 @@ function RunJourney({ run, journey, today, onClose }: { run: PQRun; journey: PQJ
             <DayGrid journey={journey} today={today} />
           </section>
 
-          {run.status !== "abandoned" && <ChapterBlock run={run} today={today} />}
+          {run.status === "active" && <ChapterBlock run={run} today={today} />}
 
           <div className="grid gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
             <Diary run={run} journey={journey} today={today} />
@@ -369,6 +386,7 @@ function RunHistory({ runs, allRuns, onOpen }: { runs: PQRun[]; allRuns: PQRun[]
                   {r.status === "completed" && <Check size={11} aria-hidden="true" />}
                   {r.status === "completed" ? h.completed : h.abandoned}
                 </span>
+                {r.status === "completed" && r.result && <RankChip rank={r.result.rank} />}
                 <VerificationLabel verification={r.verification} />
                 <button type="button" className={buttonClasses("ghost", "md")} onClick={() => onOpen(r.id)} aria-label={formatString(p.path.journey.openAria, { title: r.title })} data-testid="pq-history-open">
                   {p.path.journey.open}
@@ -406,6 +424,7 @@ export function PathRail() {
           ))}
         </ul>
       </section>
+      <CategoryAchievements />
       <section className="rounded-2xl border border-line bg-s1 p-4" data-testid="pq-rail-rewards">
         <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-mu">{r.rewardsTitle}</h3>
         <div className="mt-2"><RewardTable /></div>
