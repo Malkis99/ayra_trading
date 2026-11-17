@@ -2,7 +2,7 @@ import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { baseGame, readGame, seedGame } from "./helpers/quests";
 
 // QH-8.4 «My path» completion: from day 31 the final report (80+ characters), the rank by confirmed days, the category
-// achievement (best rank only), the saved result and report, the history. No XP, no Coins. The clock is fixed.
+// achievement (best rank only), the saved result and report, the history. QH-8.5: the XP once; never Coins. Fixed clock.
 
 const START = "2026-10-21";
 const addDays = (key: string, n: number) => new Date(Date.parse(`${key}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
@@ -44,7 +44,7 @@ async function complete(page: Page, id: string, report = REPORT) {
   return dlg;
 }
 
-test.describe("My path — completion and achievements (QH-8.4)", () => {
+test.describe("My path — completion and achievements (QH-8.4, XP from QH-8.5)", () => {
   test.use({ reducedMotion: "reduce" });
 
   test("day 30: no completion yet; day 31: waiting for the report, the form checks 80 characters, Gold, the achievement, nothing given", async ({ browser }) => {
@@ -83,13 +83,15 @@ test.describe("My path — completion and achievements (QH-8.4)", () => {
     await expect(result).toHaveAttribute("data-rank", "gold");
     await expect(result.getByTestId("pq-result-days")).toHaveText("30 из 30 подтверждённых дней");
     await expect(result.getByTestId("pq-result-achievement")).toContainText("Новое достижение: «Архитектор себя» — Золото");
-    await expect(result.getByTestId("pq-result-xp-preview")).toContainText("Опыт пока не начисляется");
+    // QH-8.5: the XP is given at completion, once (self-report Gold: 125)
+    await expect(result.getByTestId("pq-result-xp")).toHaveText("+125 XP начислено");
     await expect(result.getByTestId("pq-result-report")).toHaveText(REPORT);
 
     const g = await game(page);
-    expect([g.xp, g.coins, g.level, g.history]).toEqual([before.xp, before.coins, before.level, before.history]);
+    // 90 + 125 = 215 XP at level 5 (280 to level 6); Coins and the mission history stay
+    expect([g.xp, g.coins, g.level, g.history]).toEqual([215, before.coins, before.level, before.history]);
     expect(g.personalRuns![0]).toMatchObject({ status: "completed", result: { rank: "gold", days: 30 }, report: { text: REPORT } });
-    expect(g.personalLedger).toEqual([expect.objectContaining({ runId: "pq_g", rank: "gold", xp: 0 })]);
+    expect(g.personalLedger).toEqual([expect.objectContaining({ runId: "pq_g", rank: "gold", xp: 125, paid: true })]);
     expect(g.personalAchievements!.habits).toMatchObject({ rank: "gold", runId: "pq_g" });
 
     // after a reload: in the history with its rank, the saved result and report; the achievement in the rail and profile

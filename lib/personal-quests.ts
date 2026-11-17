@@ -4,8 +4,8 @@
  * QH-8.2 wires creating, keeping and abandoning runs (GameState.personalRuns); QH-8.3 the daily journey: self-report
  * marks, the quest diary and the chapters (data-confirmed days are read from the Journal, lib/personal-quest-days.ts).
  * QH-8.4: completing a run on day 31+ with the final report — the rank, the category achievement, the saved result.
- * Nothing gives XP or Coins: the result is kept with 0 XP; rewards (QH-8.5) are not paid by the game. The rates below
- * are the owner's approved variant C (В-19); the game shows them as a future reward and pays them only from QH-8.5 on.
+ * QH-8.5: that completion pays its XP once, by the owner's approved variant C (В-19) — never Coins, never for daily
+ * marks, chapters or notes. Runs completed before QH-8.5 keep their unpaid entry and are never paid after the fact.
  *
  * A personal quest is a 30-day run of one measurable daily action. Daily marks give nothing; after the period ends and
  * the final report is written, the run gets a completion rank by its confirmed days, and — only then, once per run — a
@@ -173,8 +173,8 @@ export interface PQResult {
 
 /** The longest final report (a UX limit). */
 export const PQ_REPORT_MAX = 2000;
-/** No XP is paid before QH-8.5: completion is settled at zero rates (the variant C rates are only shown as a preview). */
-export const NO_PAYOUT: PQRates = { app: { bronze: 0, silver: 0, gold: 0 }, self: { bronze: 0, silver: 0, gold: 0 } };
+/** The XP a result pays (variant C): by its rank and its way of confirmation; no rank — nothing. */
+export const rankXp = (rank: PQRank | null, verification: PQVerification, rates: PQRates = PQ_RANK_XP): number => (rank ? rates[verification][rank] : 0);
 
 export const endDayOf = (run: Pick<PQRun, "startDay">) => addDaysToKey(run.startDay, PQ_PERIOD_DAYS - 1);
 
@@ -413,7 +413,11 @@ export function readAchievements(raw: unknown): PQAchievements {
   return out;
 }
 
-/** The completion ledger from a saved game state: one entry per run id (the first kept). */
+/**
+ * The completion ledger from a saved game state: one entry per run id (the first kept). A paid entry (QH-8.5) keeps
+ * the XP its rank and way of confirmation pay — the stored number itself is never trusted; an entry without the mark
+ * (QH-8.4, before rewards) stays unpaid at 0 XP.
+ */
 export function readLedger(raw: unknown): PQLedgerEntry[] {
   if (!Array.isArray(raw)) return [];
   const out: PQLedgerEntry[] = [];
@@ -421,7 +425,10 @@ export function readLedger(raw: unknown): PQLedgerEntry[] {
     if (!e || typeof e !== "object") continue;
     const x = e as Partial<PQLedgerEntry>;
     if (typeof x.runId !== "string" || out.some((o) => o.runId === x.runId) || !categoryOf(String(x.category))) continue;
-    out.push({ runId: x.runId, questId: String(x.questId ?? ""), category: x.category as PQCategoryId, rank: PQ_RANKS.includes(x.rank as PQRank) ? (x.rank as PQRank) : null, days: Number(x.days) || 0, xp: 0, day: String(x.day ?? ""), at: String(x.at ?? ""), verification: x.verification === "self" ? "self" : "app" });
+    const rank = PQ_RANKS.includes(x.rank as PQRank) ? (x.rank as PQRank) : null;
+    const verification: PQVerification = x.verification === "self" ? "self" : "app";
+    const paid = x.paid === true;
+    out.push({ runId: x.runId, questId: String(x.questId ?? ""), category: x.category as PQCategoryId, rank, days: Number(x.days) || 0, xp: paid ? rankXp(rank, verification) : 0, day: String(x.day ?? ""), at: String(x.at ?? ""), verification, ...(paid ? { paid: true } : {}) });
   }
   return out;
 }
@@ -469,6 +476,11 @@ export interface PQLedgerEntry {
   day: string;
   at: string;
   verification: PQVerification;
+  /**
+   * QH-8.5: true when this completion paid its XP (`xp` is what was paid). Entries of QH-8.4 have none: they were
+   * completed without a reward and stay unpaid — no XP is ever paid for them afterwards.
+   */
+  paid?: boolean;
 }
 
 export type SettleFailure = "periodNotOver" | "reportMissing" | "reportShort" | "abandoned" | "alreadySettled";
@@ -516,7 +528,8 @@ export function completeRun(
   marks: PQMark[],
   check: PQRecordCheck,
   today: string,
-  at: string
+  at: string,
+  rates: PQRates = PQ_RANK_XP
 ): { runs: PQRun[]; entry: PQLedgerEntry; result: PQResult; duplicate: boolean } | { failure: CompleteFailure } {
   const run = runs.find((r) => r.id === runId);
   if (!run) return { failure: "notFound" };
@@ -527,8 +540,9 @@ export function completeRun(
   const text = cleanField(report);
   if (text.length > PQ_REPORT_MAX) return { failure: "reportLong" };
   const own = run.verification === "self" ? marks.filter((m) => m.source === "self") : marks;
-  const res = settleRun({ ...run, marks: own }, ledger, text, today, at, check, NO_PAYOUT);
+  const res = settleRun({ ...run, marks: own }, ledger, text, today, at, check, rates);
   if ("failure" in res) return res;
+  const entry: PQLedgerEntry = { ...res.entry, paid: true };
   // keep exactly the marks that counted (one a day, inside the period, passing the check)
   const counted: PQMark[] = [];
   const end = endDayOf(run);
@@ -540,7 +554,7 @@ export function completeRun(
   }
   const result: PQResult = { rank: res.entry.rank, days: res.entry.days, day: today, at, verification: run.verification, marks: counted };
   const next = runs.map((r) => (r.id === runId ? { ...r, status: "completed" as const, report: { at, text }, result } : r));
-  return { runs: next, entry: res.entry, result, duplicate: false };
+  return { runs: next, entry, result, duplicate: false };
 }
 
 /* ------------------------------------------------------------------ category achievements */

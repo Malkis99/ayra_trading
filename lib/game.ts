@@ -16,7 +16,7 @@ import {
   type WeekChallenge,
 } from "./quest-engine";
 import { readWeekTrophies, trophiesFromWeeks, trophyFor, withWeekTrophy, type WeekTrophy } from "./week-trophies";
-import { abandonRun, completeRun, createRun, markSelfDay, readAchievements, readLedger, readPersonalRuns, restartRun, saveDayNote, withAchievement, type AbandonFailure, type CompleteFailure, type MarkFailure, type NoteFailure, type PQAchievements, type PQLedgerEntry, type PQNoteField, type PQResult, type PQRun, type PQStartInput, type RestartFailure, type StartFailure } from "./personal-quests";
+import { abandonRun, completeRun, createRun, markSelfDay, readAchievements, readLedger, readPersonalRuns, restartRun, saveDayNote, withAchievement, type AbandonFailure, type CompleteFailure, type MarkFailure, type NoteFailure, type PQAchievements, type PQCategoryId, type PQLedgerEntry, type PQRank, type PQNoteField, type PQResult, type PQRun, type PQStartInput, type RestartFailure, type StartFailure } from "./personal-quests";
 import { allocateAppMarks, journalRecordCheck } from "./personal-quest-days";
 import { MAX_CORE_MISSIONS_PER_DAY, MISSION_IDS, candidateSources, checkMissions, explainMission, isMissionId, type MissionCheck, type MissionData, type MissionId, type MissionLedger, type MissionReason } from "./missions";
 import {
@@ -73,7 +73,9 @@ export type ChronicleEventType =
   /** One-time reward for the first action of a kind on this account (docs/economy-coins-plan.md). */
   | { type: "firstAction"; kind: FirstActionKind; coins: number; xp: number }
   /** A won week challenge (QH-7): a trophy, no XP or Coins. */
-  | { type: "weekTrophy"; boss: BossId; week: string };
+  | { type: "weekTrophy"; boss: BossId; week: string }
+  /** A completed personal path (QH-8.5): its category, rank, confirmed days and the XP actually paid (once per run). */
+  | { type: "personalPath"; runId: string; category: PQCategoryId; rank: PQRank | null; days: number; xp: number };
 
 export type FirstActionKind = keyof typeof GAME_CONFIG.FIRST_ACTION_REWARDS;
 
@@ -1841,11 +1843,13 @@ export function savePersonalQuestNote(
 }
 
 /**
- * QH-8.4: completes a personal quest from day 31 with the final report — once (a second click, tab or reload returns the
+ * QH-8.4 / QH-8.5: completes a personal quest from day 31 with the final report — once (a second click, tab or reload returns the
  * saved result). A data-confirmed run is counted from the Journal by the shared distribution (В-24) over all runs, the
  * records checked again; it waits while the Journal (or its cloud copy) is not read (`data` null). The result, the
- * report and a ledger entry at 0 XP are saved, and the category achievement keeps its best rank. No XP, no Coins, no
- * level, no history or coin log change.
+ * report, the paid ledger entry, the XP and level, the category achievement (best rank) and one chronicle entry are all
+ * saved in this one change (QH-8.5): it is applied under the lock shared by all tabs and only reported as given once it
+ * is saved. The XP is variant C by rank and way of confirmation; no Coins, no daily stats, no mission history. A run
+ * completed before QH-8.5 is never paid afterwards: completing it again returns its saved unpaid result.
  */
 export function completePersonalQuest(
   state: GameState,
@@ -1853,7 +1857,18 @@ export function completePersonalQuest(
   report: string,
   data: MissionData | null,
   currentDate: Date = new Date()
-): { state: GameState; ok: boolean; result?: PQResult; upgraded?: boolean; duplicate?: boolean; reason?: PersonalQuestFailure } {
+): {
+  state: GameState;
+  ok: boolean;
+  result?: PQResult;
+  upgraded?: boolean;
+  duplicate?: boolean;
+  /** XP paid by this completion (0 for a repeat or no rank). */
+  xp?: number;
+  leveledUp?: boolean;
+  newLevel?: number;
+  reason?: PersonalQuestFailure;
+} {
   const s = checkAndApplyDateResets(state, currentDate);
   if (isClockBehind(s, currentDate)) return { state: s, ok: false, reason: "clockBehind" };
   const runs = s.personalRuns ?? [];
@@ -1870,14 +1885,27 @@ export function completePersonalQuest(
   }
   const res = completeRun(runs, s.personalLedger ?? [], runId, report, marks, check, today, currentDate.toISOString());
   if ("failure" in res) return { state: s, ok: false, reason: res.failure };
-  if (res.duplicate) return { state: s, ok: true, result: res.result, duplicate: true, upgraded: false };
+  if (res.duplicate) return { state: s, ok: true, result: res.result, duplicate: true, upgraded: false, xp: 0, leveledUp: false };
   const ach = withAchievement(s.personalAchievements ?? {}, res.entry);
+  // the XP of this run, once; level-ups as everywhere else
+  const xp = res.entry.xp;
+  let newXp = s.xp + xp;
+  let level = s.level;
+  let chronicle = addChronicleEvent(s.chronicle, { type: "personalPath", runId, category: res.entry.category, rank: res.entry.rank, days: res.entry.days, xp });
+  while (newXp >= xpForNextLevel(level)) {
+    newXp -= xpForNextLevel(level);
+    level++;
+    chronicle = addChronicleEvent(chronicle, { type: "levelUp", level });
+  }
   return {
-    state: { ...s, personalRuns: res.runs, personalLedger: [...(s.personalLedger ?? []), res.entry], personalAchievements: ach.next },
+    state: { ...s, xp: newXp, level, chronicle, personalRuns: res.runs, personalLedger: [...(s.personalLedger ?? []), res.entry], personalAchievements: ach.next },
     ok: true,
     result: res.result,
     upgraded: ach.upgraded,
     duplicate: false,
+    xp,
+    leveledUp: level > s.level,
+    newLevel: level > s.level ? level : undefined,
   };
 }
 

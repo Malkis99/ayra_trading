@@ -98,14 +98,17 @@ describe("once only, and no XP or Coins", () => {
     expect(completePersonalQuest(reloaded, "pq_once", REPORT, null, at(DAY31, "12:00"))).toMatchObject({ duplicate: true });
   });
 
-  it("XP, Coins, level, history and the coin log stay as they were; the ledger entry is at 0 XP", () => {
+  it("QH-8.5: the completion pays its XP once (self Gold 125); Coins, mission history, daily stats and the coin log stay", () => {
     const s0 = state([selfRun("pq_x", 30)]);
     const res = completePersonalQuest(s0, "pq_x", REPORT, null, at(DAY31));
-    // the same as the day change alone does (day 31 starts at this first action of the day)
-    expect(economy(res.state)).toEqual(economy(checkAndApplyDateResets(s0, at(DAY31))));
-    expect(res.state.xp).toBe(140);
+    // the same as the day change alone does (day 31 starts at this first action of the day), apart from the XP
+    const base = checkAndApplyDateResets(s0, at(DAY31));
+    expect({ ...economy(res.state), xp: 0, level: 0 }).toEqual({ ...economy(base), xp: 0, level: 0 });
+    // 140 + 125 = 265 XP at level 4: level 5 needs 80 + 40·4 = 240, so level 5 with 25
+    expect([res.state.level, res.state.xp]).toEqual([5, 25]);
+    expect(res).toMatchObject({ xp: 125, leveledUp: true, newLevel: 5 });
     expect(res.state.coins).toBe(75);
-    expect(res.state.personalLedger![0]).toMatchObject({ runId: "pq_x", rank: "gold", xp: 0 });
+    expect(res.state.personalLedger![0]).toMatchObject({ runId: "pq_x", rank: "gold", xp: 125, paid: true });
   });
 });
 

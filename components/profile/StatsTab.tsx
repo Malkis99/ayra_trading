@@ -79,6 +79,14 @@ export function StatsTab() {
             xp: entry.xp,
           });
           break;
+        case "personalPath": {
+          // QH-8.5: a completed personal path, with the XP it actually paid
+          const category = dict.personalQuests.categories[entry.category]?.name ?? entry.category;
+          text = entry.rank
+            ? formatString(dict.chronicleEvents.personalPath, { category, rank: dict.personalQuests.ranks[entry.rank], days: entry.days, xp: entry.xp })
+            : formatString(dict.chronicleEvents.personalPathNoRank, { category, days: entry.days });
+          break;
+        }
         case "weekTrophy":
           text = formatString(dict.chronicleEvents.weekTrophy, { name: dict.questsPage.q2.boss.names[entry.boss] ?? entry.boss });
           break;

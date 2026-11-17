@@ -191,7 +191,8 @@ test.describe("My path (QH-8.2)", () => {
     await expect(d.getByTestId("pq-detail-goal")).toHaveText("Цель квеста");
     await expect(d.getByTestId("pq-detail-startState")).toHaveText("Как сейчас");
     await expect(d.getByTestId("pq-detail-expectedResult")).toHaveText("Что изменится");
-    await expect(d.getByTestId("pq-progress-soon")).toContainText("награды не выдаются");
+    // QH-8.5: XP is given once, at completion — never for daily marks
+    await expect(d.getByTestId("pq-progress-soon")).toContainText("XP начисляется один раз — после 30 дней и итогового отчёта");
     // cancel keeps the run
     await d.getByTestId("pq-abandon").click();
     await expect(page.getByTestId("pq-abandon-confirm")).toContainText("Прекратить квест?");
