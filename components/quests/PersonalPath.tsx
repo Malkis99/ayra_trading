@@ -1,133 +1,46 @@
 "use client";
 
-import React, { useRef, useState } from "react";
-import { Brain, Check, Clock, Dumbbell, GraduationCap, HardDrive, LineChart, Plus, Repeat, RotateCcw, ShieldCheck, Sparkles, type LucideIcon } from "lucide-react";
+import React, { useMemo, useRef, useState } from "react";
+import { Check, Clock, HardDrive, Plus, RotateCcw, Sparkles } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { formatString } from "@/lib/i18n";
 import { dayKeyInZone } from "@/lib/day-key";
-import {
-  PQ_MAX_ACTIVE,
-  PQ_PERIOD_DAYS,
-  PQ_RANKS,
-  PQ_RANK_DAYS,
-  PQ_RANK_XP,
-  activeRuns,
-  dayNumber,
-  daysLeft,
-  endDayOf,
-  phaseOf,
-  type PQCategoryId,
-  type PQRank,
-  type PQRun,
-  type PQVerification,
-} from "@/lib/personal-quests";
+import type { MissionData } from "@/lib/missions";
+import { PQ_MAX_ACTIVE, PQ_PERIOD_DAYS, PQ_RANK_XP, activeRuns, dayNumber, daysLeft, endDayOf, phaseOf, type PQRun } from "@/lib/personal-quests";
+import { journeyOf, type PQJourney } from "@/lib/personal-quest-days";
 import { Modal } from "@/components/ui/Modal";
 import { buttonClasses } from "@/components/ui/Button";
-import { cn } from "@/components/ui/cn";
 import { formatDayKey } from "./WeekTab";
 import { PersonalQuestWizard } from "./PersonalQuestWizard";
+import { CATEGORY_ICONS, CategoryIcon, RewardTable, VerificationLabel, errorText, newPqId } from "./PersonalQuestParts";
+import { ChapterBlock, DayGrid, Diary, MarkHistory, ProgressRing, TodayAction } from "./PersonalJourney";
 
-// QH-8.2 «My path»: personal 30-day quests — start, view, abandon, restart. Nothing here gives XP or Coins: the rewards
-// are shown as a future reward (variant C), daily marks and the final report come in QH-8.3 / QH-8.4.
-
-export const CATEGORY_ICONS: Record<PQCategoryId, LucideIcon> = {
-  discipline: ShieldCheck,
-  physical: Dumbbell,
-  learning: GraduationCap,
-  psychology: Brain,
-  trading: LineChart,
-  habits: Repeat,
-};
-
-/** A new id for a run or a quest (stable once made: the same request is never saved twice). */
-export function newPqId(prefix: "pq" | "pqq"): string {
-  const c = typeof globalThis !== "undefined" ? (globalThis as { crypto?: Crypto }).crypto : undefined;
-  const raw = c?.randomUUID ? c.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
-  return `${prefix}_${raw.replace(/[^A-Za-z0-9_-]/g, "")}`;
-}
-
-/** The category sign: a violet tile with its icon. */
-export function CategoryIcon({ category, size = "md" }: { category: PQCategoryId; size?: "sm" | "md" }) {
-  const Icon = CATEGORY_ICONS[category];
-  return (
-    <span className={cn("grid shrink-0 place-items-center rounded-xl border border-vi/30 bg-vi/10 text-vi", size === "md" ? "h-11 w-11" : "h-8 w-8")} aria-hidden="true">
-      <Icon size={size === "md" ? 20 : 16} />
-    </span>
-  );
-}
-
-/** The verification label: a self-report always says so in words, never only by colour. */
-export function VerificationLabel({ verification }: { verification: PQVerification }) {
-  const { dict } = useApp();
-  return (
-    <span
-      data-testid="pq-verification"
-      data-verification={verification}
-      className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold", verification === "app" ? "border-success/40 bg-success/10 text-success" : "border-line bg-s2 text-mu")}
-    >
-      {dict.personalQuests.verification[verification]}
-    </span>
-  );
-}
-
-/** Rewards by rank (variant C): one column for a verification, or both. Shown as a future reward — nothing is given here. */
-export function RewardTable({ verification, testId = "pq-rewards" }: { verification?: PQVerification; testId?: string }) {
-  const { dict } = useApp();
-  const p = dict.personalQuests;
-  const cols: PQVerification[] = verification ? [verification] : ["app", "self"];
-  const ranks = [...PQ_RANKS].reverse();
-  const range = (r: PQRank) => (r === "gold" ? `${PQ_RANK_DAYS.gold}–${PQ_PERIOD_DAYS}` : r === "silver" ? `${PQ_RANK_DAYS.silver}–${PQ_RANK_DAYS.gold - 1}` : `${PQ_RANK_DAYS.bronze}–${PQ_RANK_DAYS.silver - 1}`);
-  return (
-    <table className="w-full text-sm" data-testid={testId}>
-      {!verification && (
-        <thead>
-          <tr className="text-left text-[11px] text-mu">
-            <th scope="col" className="pb-1 font-semibold" />
-            <th scope="col" className="pb-1 text-right font-semibold">{p.path.rail.rewardsApp}</th>
-            <th scope="col" className="pb-1 text-right font-semibold">{p.path.rail.rewardsSelf}</th>
-          </tr>
-        </thead>
-      )}
-      <tbody className="divide-y divide-line/60">
-        {ranks.map((r) => (
-          <tr key={r} data-rank={r}>
-            <th scope="row" className="py-1.5 text-left font-medium text-tx">
-              {formatString(p.path.rankRow, { rank: p.ranks[r], days: range(r) })}
-            </th>
-            {cols.map((v) => (
-              <td key={v} className={cn("py-1.5 text-right font-semibold", r === "gold" ? "text-go" : "text-tx")} data-testid={`pq-xp-${r}-${v}`}>
-                {formatString(p.path.rankXp, { xp: PQ_RANK_XP[v][r] })}
-              </td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function errorText(dict: ReturnType<typeof useApp>["dict"], reason?: string): string {
-  const e = dict.personalQuests.path.errors as Record<string, string>;
-  return (reason && e[reason]) || e.notSaved;
-}
+// «My path» (QH-8.2, QH-8.3): personal 30-day quests — start, the daily journey (marks, Journal confirmations, chapters,
+// diary), abandon, restart. Nothing here gives XP or Coins: rewards are shown as future ones (variant C, QH-8.5).
 
 /* ------------------------------------------------------------------ the main column */
 
-export function PathMain() {
+/**
+ * `journal`: the saved Journal as the mission checks read it, or null while it is not read or its cloud copy is still
+ * loading — then data-confirmed days wait for the check instead of being decided from missing data.
+ */
+export function PathMain({ journal }: { journal: MissionData | null }) {
   const { dict, showToast } = useApp();
   const { gameState, gameDay } = useGame();
   const p = dict.personalQuests.path;
-  const runs = gameState.personalRuns ?? [];
+  const tz = gameState.profile?.timezone;
+  const runs = useMemo(() => gameState.personalRuns ?? [], [gameState.personalRuns]);
   const active = activeRuns(runs, gameDay);
   const past = runs.filter((r) => !active.includes(r));
+  const journeys = useMemo(() => new Map(runs.map((r) => [r.id, journeyOf(r, gameDay, journal, tz)])), [runs, gameDay, journal, tz]);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [openRunId, setOpenRunId] = useState<string | null>(null);
-  const openRun = active.find((r) => r.id === openRunId) ?? null;
+  const openRun = runs.find((r) => r.id === openRunId) ?? null;
   const full = active.length >= PQ_MAX_ACTIVE;
 
   return (
-    <div className="space-y-4" data-testid="pq-main">
+    <div className="space-y-4" data-testid="pq-main" data-journal={journal ? "ready" : "pending"}>
       <section className="rounded-2xl border border-line bg-s1 bg-[radial-gradient(80%_140%_at_100%_0%,rgb(var(--c-pri)/0.2),transparent_60%)] p-4 sm:p-5" aria-labelledby="pq-title">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 max-w-[620px]">
@@ -165,13 +78,13 @@ export function PathMain() {
         <ul className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3" data-testid="pq-active">
           {active.map((r) => (
             <li key={r.id} className="min-w-0">
-              <RunCard run={r} today={gameDay} onOpen={() => setOpenRunId(r.id)} />
+              <RunCard run={r} journey={journeys.get(r.id)!} today={gameDay} onOpen={() => setOpenRunId(r.id)} />
             </li>
           ))}
         </ul>
       )}
 
-      <RunHistory runs={past} allRuns={runs} />
+      <RunHistory runs={past} allRuns={runs} onOpen={setOpenRunId} />
 
       {wizardOpen && (
         <PersonalQuestWizard
@@ -183,19 +96,59 @@ export function PathMain() {
           }}
         />
       )}
-      {openRun && <RunDetails run={openRun} today={gameDay} onClose={() => setOpenRunId(null)} />}
+      {openRun && <RunJourney run={openRun} journey={journeys.get(openRun.id)!} today={gameDay} onClose={() => setOpenRunId(null)} />}
     </div>
   );
 }
 
-/** One active run: what it is, which day, how it is confirmed, what it may give at the end. */
-function RunCard({ run, today, onOpen }: { run: PQRun; today: string; onOpen: () => void }) {
+/** Completion and the calendar side by side — never one for the other. */
+function JourneyStats({ run, journey, today }: { run: PQRun; journey: PQJourney; today: string }) {
   const { dict } = useApp();
-  const p = dict.personalQuests;
-  const c = p.path.card;
+  const c = dict.personalQuests.path.card;
+  const j = dict.personalQuests.path.journey;
   const n = dayNumber(run, today);
   const left = daysLeft(run, today);
   const over = phaseOf(run, today) === "awaitingReport";
+  const stopped = run.status === "abandoned";
+  return (
+    <div className="flex items-center gap-3">
+      <ProgressRing done={journey.confirmed} />
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mu">{j.progressLabel}</span>
+          <span className="text-sm font-semibold text-tx" data-testid="pq-card-done" data-done={journey.confirmed}>
+            {formatString(j.progressValue, { n: journey.confirmed })}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mu">{j.calendarLabel}</span>
+          <span className="font-serif text-sm font-bold text-tx" data-testid="pq-card-day" data-day={n}>
+            {formatString(c.day, { n })}
+          </span>
+        </div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-s2" aria-hidden="true">
+          <div className="h-full rounded-full bg-mu/50 motion-safe:transition-[width] motion-safe:duration-500" style={{ width: `${(n / PQ_PERIOD_DAYS) * 100}%` }} />
+        </div>
+        <div className="flex flex-wrap justify-between gap-x-2 text-[11px] text-mu">
+          {!stopped && (
+            <span className="inline-flex items-center gap-1" data-testid="pq-card-left" data-left={left}>
+              <Clock size={11} aria-hidden="true" />
+              {over ? c.periodOver : left === 1 ? c.lastDay : formatString(c.left, { n: left })}
+            </span>
+          )}
+          <span data-testid="pq-card-missed" data-missed={journey.missed}>{formatString(j.missed, { n: journey.missed })}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** One active run: progress, chapter, today's action, how it is confirmed, what it may give at the end. */
+function RunCard({ run, journey, today, onOpen }: { run: PQRun; journey: PQJourney; today: string; onOpen: () => void }) {
+  const { dict } = useApp();
+  const p = dict.personalQuests;
+  const c = p.path.card;
+  const j = p.path.journey;
   const AchIcon = CATEGORY_ICONS[run.category];
   return (
     <article className="flex h-full flex-col rounded-2xl border border-line bg-s1 p-4 transition-colors hover:border-vi/50" data-testid="pq-card" data-run={run.id} data-category={run.category}>
@@ -204,28 +157,22 @@ function RunCard({ run, today, onOpen }: { run: PQRun; today: string; onOpen: ()
         <div className="min-w-0 flex-1">
           <div className="text-xs font-semibold text-mu">{p.categories[run.category].name}</div>
           <h3 className="break-words font-serif text-lg font-bold leading-snug text-tx" data-testid="pq-card-title">{run.title}</h3>
+          <ChapterBlock run={run} today={today} compact />
         </div>
       </div>
 
-      <div className="mt-3 flex items-baseline justify-between gap-2">
-        <span className="font-serif text-base font-bold text-tx" data-testid="pq-card-day" data-day={n}>
-          {formatString(c.day, { n })}
-        </span>
-        <span className="inline-flex items-center gap-1 text-xs text-mu" data-testid="pq-card-left" data-left={left}>
-          <Clock size={12} aria-hidden="true" />
-          {over ? c.periodOver : left === 1 ? c.lastDay : formatString(c.left, { n: left })}
-        </span>
-      </div>
-      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-s2" aria-hidden="true">
-        <div className="h-full rounded-full bg-vi/70 motion-safe:transition-[width] motion-safe:duration-500" style={{ width: `${(n / PQ_PERIOD_DAYS) * 100}%` }} />
+      <div className="mt-3">
+        <JourneyStats run={run} journey={journey} today={today} />
       </div>
 
-      <dl className="mt-3 space-y-2 text-sm">
-        <div>
-          <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mu">{c.action}</dt>
-          <dd className="break-words text-tx" data-testid="pq-card-action">{run.dailyAction}</dd>
-        </div>
+      <dl className="mt-3 text-sm">
+        <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mu">{c.action}</dt>
+        <dd className="break-words text-tx" data-testid="pq-card-action">{run.dailyAction}</dd>
       </dl>
+
+      <div className="mt-3 rounded-xl border border-line bg-s2/40 p-3">
+        <TodayAction run={run} journey={journey} today={today} />
+      </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-1.5">
         <VerificationLabel verification={run.verification} />
@@ -239,23 +186,26 @@ function RunCard({ run, today, onOpen }: { run: PQRun; today: string; onOpen: ()
         <span className="text-xs text-mu" data-testid="pq-card-reward">
           {formatString(c.reward, { xp: PQ_RANK_XP[run.verification].gold })}
         </span>
-        <button type="button" className={buttonClasses("secondary", "md")} onClick={onOpen} aria-label={formatString(c.detailsAria, { title: run.title })} data-testid="pq-card-open">
-          {c.details}
+        <button type="button" className={buttonClasses("secondary", "md")} onClick={onOpen} aria-label={formatString(j.openAria, { title: run.title })} data-testid="pq-card-open">
+          {j.open}
         </button>
       </div>
     </article>
   );
 }
 
-/** The details of an active run, and abandoning it (with a confirmation). */
-function RunDetails({ run, today, onClose }: { run: PQRun; today: string; onClose: () => void }) {
+/** The whole path of a run: today, the 30 days, chapters, diary, marks, the quest itself — and abandoning (confirmed). */
+function RunJourney({ run, journey, today, onClose }: { run: PQRun; journey: PQJourney; today: string; onClose: () => void }) {
   const { dict, lang, showToast } = useApp();
   const { abandonPersonalQuest } = useGame();
   const p = dict.personalQuests;
   const d = p.path.details;
+  const j = p.path.journey;
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState("");
   const busy = useRef(false);
+  const phase = phaseOf(run, today);
+  const open = phase === "active" || phase === "awaitingReport";
   const fmt = (k: string) => formatDayKey(k, lang, { day: "numeric", month: "long" });
   const abandon = async () => {
     if (busy.current) return;
@@ -284,39 +234,64 @@ function RunDetails({ run, today, onClose }: { run: PQRun; today: string; onClos
         isOpen
         onClose={onClose}
         title={run.title}
-        subtitle={`${p.categories[run.category].name} · ${formatString(p.path.card.day, { n: dayNumber(run, today) })}`}
+        subtitle={`${p.categories[run.category].name} · ${run.status === "abandoned" ? p.path.history.abandoned : formatString(p.path.card.day, { n: dayNumber(run, today) })}`}
         closeLabel={d.close}
-        size="lg"
-        sheetOnMobile
+        size="xl"
+        fullOnMobile
         data-testid="pq-details"
         footer={
           <>
-            <button type="button" className={buttonClasses("danger")} onClick={() => setConfirming(true)} data-testid="pq-abandon">
-              {d.abandon}
-            </button>
+            {open && (
+              <button type="button" className={buttonClasses("danger")} onClick={() => setConfirming(true)} data-testid="pq-abandon">
+                {d.abandon}
+              </button>
+            )}
             <button type="button" className={buttonClasses("secondary")} onClick={onClose}>
               {d.close}
             </button>
           </>
         }
       >
-        <dl className="space-y-3 text-sm">
-          {rows.map(([key, label, value]) => (
-            <div key={key}>
-              <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mu">{label}</dt>
-              <dd className="mt-0.5 break-words text-tx" data-testid={`pq-detail-${key}`}>{value}</dd>
-            </div>
-          ))}
-          <div>
-            <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mu">{d.verification}</dt>
-            <dd className="mt-1"><VerificationLabel verification={run.verification} /></dd>
+        <div className="space-y-4">
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <section className="rounded-xl border border-line bg-s2/40 p-3">
+              <JourneyStats run={run} journey={journey} today={today} />
+              <div className="mt-2"><VerificationLabel verification={run.verification} /></div>
+            </section>
+            <section className="rounded-xl border border-line bg-s2/40 p-3" aria-label={j.today.title}>
+              <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-mu">{j.today.title}</h3>
+              <p className="mt-1 break-words text-sm text-tx">{run.dailyAction}</p>
+              <div className="mt-2"><TodayAction run={run} journey={journey} today={today} /></div>
+            </section>
           </div>
-        </dl>
-        <div className="mt-4 rounded-xl border border-line bg-s2/50 p-3">
-          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-mu">{d.rewards}</h3>
-          <div className="mt-1.5"><RewardTable verification={run.verification} testId="pq-detail-rewards" /></div>
+
+          <section aria-labelledby={`pq-days-${run.id}`}>
+            <h3 id={`pq-days-${run.id}`} className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-mu">{j.calendarTitle}</h3>
+            <DayGrid journey={journey} today={today} />
+          </section>
+
+          {run.status !== "abandoned" && <ChapterBlock run={run} today={today} />}
+
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+            <Diary run={run} journey={journey} today={today} />
+            <MarkHistory journey={journey} />
+          </div>
+
+          <section className="rounded-xl border border-line bg-s2/40 p-3">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-mu">{j.info}</h3>
+            <dl className="mt-2 grid gap-3 text-sm sm:grid-cols-2">
+              {rows.map(([key, label, value]) => (
+                <div key={key}>
+                  <dt className="text-[11px] font-semibold uppercase tracking-[0.08em] text-mu">{label}</dt>
+                  <dd className="mt-0.5 break-words text-tx" data-testid={`pq-detail-${key}`}>{value}</dd>
+                </div>
+              ))}
+            </dl>
+            <h4 className="mt-4 text-xs font-semibold uppercase tracking-[0.12em] text-mu">{d.rewards}</h4>
+            <div className="mt-1.5"><RewardTable verification={run.verification} testId="pq-detail-rewards" /></div>
+            <p className="mt-3 text-xs text-mu" data-testid="pq-progress-soon">{d.progressSoon}</p>
+          </section>
         </div>
-        <p className="mt-3 text-xs text-mu" data-testid="pq-progress-soon">{d.progressSoon}</p>
       </Modal>
       <Modal
         isOpen={confirming}
@@ -343,8 +318,8 @@ function RunDetails({ run, today, onClose }: { run: PQRun; today: string; onClos
   );
 }
 
-/** Abandoned (and later completed) runs. An abandoned quest can start again at once as a new run (В-22). */
-function RunHistory({ runs, allRuns }: { runs: PQRun[]; allRuns: PQRun[] }) {
+/** Abandoned (and later completed) runs: their path stays readable; an abandoned quest can start again at once (В-22). */
+function RunHistory({ runs, allRuns, onOpen }: { runs: PQRun[]; allRuns: PQRun[]; onOpen: (id: string) => void }) {
   const { dict, lang, showToast } = useApp();
   const { gameState, gameDay, restartPersonalQuest } = useGame();
   const p = dict.personalQuests;
@@ -394,6 +369,9 @@ function RunHistory({ runs, allRuns }: { runs: PQRun[]; allRuns: PQRun[] }) {
                   {r.status === "completed" ? h.completed : h.abandoned}
                 </span>
                 <VerificationLabel verification={r.verification} />
+                <button type="button" className={buttonClasses("ghost", "md")} onClick={() => onOpen(r.id)} aria-label={formatString(p.path.journey.openAria, { title: r.title })} data-testid="pq-history-open">
+                  {p.path.journey.open}
+                </button>
                 {r.status === "abandoned" && !running && newest && (
                   <button type="button" className={buttonClasses("secondary", "md")} onClick={() => restart(r)} aria-label={formatString(h.restartAria, { title: r.title })} data-testid="pq-restart">
                     <RotateCcw size={14} aria-hidden="true" />

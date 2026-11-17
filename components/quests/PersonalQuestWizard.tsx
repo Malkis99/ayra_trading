@@ -23,7 +23,7 @@ import { Modal } from "@/components/ui/Modal";
 import { buttonClasses } from "@/components/ui/Button";
 import { cn } from "@/components/ui/cn";
 import { formatDayKey } from "./WeekTab";
-import { CategoryIcon, RewardTable, VerificationLabel, newPqId } from "./PersonalPath";
+import { CategoryIcon, RewardTable, VerificationLabel, newPqId } from "./PersonalQuestParts";
 
 // QH-8.2: the five steps of a new personal quest. The start day is the account's game day (never chosen); the run is
 // saved once under the lock shared by all tabs, with ids made once per wizard (a double click saves one run).

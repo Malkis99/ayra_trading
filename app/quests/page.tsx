@@ -108,6 +108,13 @@ export default function QuestsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [journalReady, gameState, missionData, plans, notes, trades]
   );
+  // My path (QH-8.3): data-confirmed days are read from the Journal only once it is read and its cloud copy is in
+  const pathJournal = useMemo(
+    () => (journalReady && cloudSettled ? missionData() : null),
+    // the journal lists change after every save
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [journalReady, cloudSettled, missionData, plans, notes, trades]
+  );
   const [verifyFailures, setVerifyFailures] = useState<Record<string, string>>({});
   const [justCompleted, setJustCompleted] = useState<string | undefined>(undefined);
   const failureText = (id: string, f: VerifyFailure) => {
@@ -323,7 +330,7 @@ export default function QuestsPage() {
         </>
       ),
     },
-    path: { main: <PathMain />, rail: <PathRail /> },
+    path: { main: <PathMain journal={pathJournal} />, rail: <PathRail /> },
   };
 
   return (

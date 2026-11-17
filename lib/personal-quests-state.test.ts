@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { INITIAL_GAME_STATE, abandonPersonalQuest, checkAndApplyDateResets, createPersonalQuest, migrateState, restartPersonalQuest, type GameState } from "./game";
+import { INITIAL_GAME_STATE, abandonPersonalQuest, checkAndApplyDateResets, createPersonalQuest, markPersonalQuestDay, migrateState, restartPersonalQuest, savePersonalQuestNote, type GameState } from "./game";
 import { endDayOf } from "./personal-quests";
 import * as fs from "fs";
 import * as path from "path";
@@ -135,11 +135,85 @@ describe("no rewards yet (QH-8.3 – QH-8.5)", () => {
         if (f.isDirectory()) walk(p);
         else if (/\.(ts|tsx)$/.test(f.name) && !/\.test\.tsx?$/.test(f.name) && !/personal-quests\.ts$|econ-sim-qh8\.ts$/.test(f.name)) {
           const src = fs.readFileSync(p, "utf8");
-          if (/\b(settleRun|confirmedDays|withAchievement|NO_RECORDS)\b/.test(src) || /econ-sim-qh8/.test(src)) offenders.push(p);
+          const journey = /personal-quest-days\.ts$/.test(f.name);
+          if (/\b(settleRun|withAchievement|NO_RECORDS|PQLedgerEntry)\b/.test(src) || (!journey && /\bconfirmedDays\b/.test(src)) || /econ-sim-qh8/.test(src)) offenders.push(p);
         }
       }
     };
     roots.forEach(walk);
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("the daily journey (QH-8.3)", () => {
+  const selfQuest = () => input({ category: "habits", verification: "self" });
+
+  it("«Mark done»: today's game day only, once — a second click or tab adds nothing; gives nothing", () => {
+    const i = selfQuest();
+    let s = createPersonalQuest(state(), i, NOON).state;
+    const before = economy(s);
+    const first = markPersonalQuestDay(s, i.id, at("2026-11-16T18:00:00Z"));
+    expect(first.ok).toBe(true);
+    s = first.state;
+    const again = markPersonalQuestDay(s, i.id, at("2026-11-16T18:00:01Z"));
+    expect(again.ok).toBe(true);
+    expect(again.state.personalRuns![0].marks).toHaveLength(1);
+    expect(s.personalRuns![0].marks[0]).toMatchObject({ day: "2026-11-16", savedOn: "2026-11-16", source: "self", at: "2026-11-16T18:00:00.000Z" });
+    expect(economy(again.state)).toEqual(before);
+  });
+
+  it("across midnight in Tbilisi the next mark is for the next game day", () => {
+    const i = selfQuest();
+    let s = createPersonalQuest(state(), i, NOON).state;
+    s = markPersonalQuestDay(s, i.id, at("2026-11-16T19:00:00Z")).state; // 23:00 in Tbilisi, the 16th
+    s = markPersonalQuestDay(s, i.id, at("2026-11-16T20:30:00Z")).state; // 00:30 in Tbilisi, the 17th
+    expect(s.personalRuns![0].marks.map((m) => m.day)).toEqual(["2026-11-16", "2026-11-17"]);
+  });
+
+  it("a clock moved back cannot mark; a data-confirmed quest cannot be marked by hand", () => {
+    const i = selfQuest();
+    const s = createPersonalQuest(state({ lastSeenAt: Date.parse("2026-11-16T20:00:00Z") }), i, at("2026-11-16T20:00:00Z")).state;
+    expect(markPersonalQuestDay(s, i.id, at("2026-11-16T08:00:00Z")).reason).toBe("clockBehind");
+    const app = input();
+    const s2 = createPersonalQuest(state(), app, NOON).state;
+    expect(markPersonalQuestDay(s2, app.id, NOON).reason).toBe("notSelf");
+  });
+
+  it("the diary: today or yesterday (yesterday kept as a later note), never earlier; replaced on a second save; gives nothing", () => {
+    const i = selfQuest();
+    let s = createPersonalQuest(state(), i, NOON).state;
+    const before = economy(s);
+    s = savePersonalQuestNote(s, i.id, { day: "2026-11-16", done: "Убрал телефон в 22:30" }, NOON).state;
+    s = savePersonalQuestNote(s, i.id, { day: "2026-11-16", done: "Убрал телефон в 22:00", learned: "Вечер спокойнее" }, at("2026-11-16T09:00:00Z")).state;
+    const late = savePersonalQuestNote(s, i.id, { day: "2026-11-16", hard: "Хотелось проверить ленту" }, at("2026-11-17T08:00:00Z"));
+    expect(late.ok).toBe(true);
+    const notes = late.state.personalRuns![0].notes!;
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ day: "2026-11-16", savedOn: "2026-11-17", hard: "Хотелось проверить ленту", createdAt: "2026-11-16T08:00:00.000Z" });
+    // a note never confirms a day
+    expect(late.state.personalRuns![0].marks).toHaveLength(0);
+    expect(savePersonalQuestNote(late.state, i.id, { day: "2026-11-15", done: "x" }, at("2026-11-17T08:00:00Z")).reason).toBe("dayNotAllowed");
+    expect(savePersonalQuestNote(late.state, i.id, { day: "2026-11-17" }, at("2026-11-17T08:00:00Z")).reason).toBe("empty");
+    expect(savePersonalQuestNote(late.state, i.id, { day: "2026-11-17", done: "x".repeat(501) }, at("2026-11-17T08:00:00Z")).reason).toBe("tooLong");
+    expect(economy(late.state)).toEqual(before);
+  });
+
+  it("marks and notes stay when the run is abandoned and restarted; the new run starts empty", () => {
+    const i = selfQuest();
+    let s = createPersonalQuest(state(), i, NOON).state;
+    s = markPersonalQuestDay(s, i.id, NOON).state;
+    s = savePersonalQuestNote(s, i.id, { day: "2026-11-16", done: "Сделал" }, NOON).state;
+    s = abandonPersonalQuest(s, i.id, at("2026-11-17T08:00:00Z")).state;
+    expect(savePersonalQuestNote(s, i.id, { day: "2026-11-17", done: "x" }, at("2026-11-17T08:00:00Z")).reason).toBe("notOpen");
+    s = restartPersonalQuest(s, i.id, "pq_restart_daily", at("2026-11-17T09:00:00Z")).state;
+    const [fresh, old] = s.personalRuns!;
+    expect(fresh.marks).toEqual([]);
+    expect(fresh.notes).toBeUndefined();
+    expect(old.marks).toHaveLength(1);
+    expect(old.notes).toHaveLength(1);
+    // and they survive a reload (migration)
+    const m = migrateState(JSON.parse(JSON.stringify(s)));
+    expect(m.personalRuns![1].notes![0].done).toBe("Сделал");
+    expect(m.personalRuns![1].marks).toHaveLength(1);
   });
 });
