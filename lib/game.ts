@@ -16,6 +16,7 @@ import {
   type WeekChallenge,
 } from "./quest-engine";
 import { readWeekTrophies, trophiesFromWeeks, trophyFor, withWeekTrophy, type WeekTrophy } from "./week-trophies";
+import { abandonRun, createRun, readPersonalRuns, restartRun, type AbandonFailure, type PQRun, type PQStartInput, type RestartFailure, type StartFailure } from "./personal-quests";
 import { MAX_CORE_MISSIONS_PER_DAY, MISSION_IDS, candidateSources, checkMissions, explainMission, isMissionId, type MissionCheck, type MissionData, type MissionId, type MissionLedger, type MissionReason } from "./missions";
 import {
   addDaySnapshot,
@@ -185,6 +186,11 @@ export interface GameState {
   weekTrophies?: WeekTrophy[];
   /** Trading days, 0 = Monday … 6 = Sunday (empty or missing: every day). A change applies to the next generated day. */
   tradingDays?: number[];
+  /**
+   * Personal quests «My path» (QH-8.2, lib/personal-quests.ts): every run ever started, newest first — active, abandoned
+   * and (from QH-8.4) completed. Never pruned: it is the history. Kept on this device until Q4; gives nothing yet.
+   */
+  personalRuns?: PQRun[];
   /** Grows with every saved change: the freshest copy wins between tabs (lib/game-store.ts). */
   rev?: number;
 }
@@ -465,6 +471,8 @@ export function migrateState(rawState: any): GameState {
     questWeeks: readWeekSnapshots(rawState.questWeeks),
     // trophies (QH-7): saved ones, plus a trophy for every win already written in a kept week snapshot (never recomputed)
     weekTrophies: trophiesFromWeeks(readWeekTrophies(rawState.weekTrophies), readWeekSnapshots(rawState.questWeeks)),
+    // personal quests (QH-8.2): an old save has none; damaged entries are dropped, never guessed
+    personalRuns: readPersonalRuns(rawState.personalRuns),
     // the history starts when this version first runs on the device (earlier coins are in the balance only)
     coinLogSince: typeof rawState.coinLogSince === "string" ? rawState.coinLogSince : new Date().toISOString(),
   };
@@ -1766,6 +1774,37 @@ export function recordWeekBossResult(state: GameState, week: string, result: Non
   const trophies = boss ? withWeekTrophy(s.weekTrophies, trophyFor(week, boss, result)) : null;
   if (!trophies || !boss) return { ...s, questWeeks: next };
   return { ...s, questWeeks: next, weekTrophies: trophies, chronicle: addChronicleEvent(s.chronicle, { type: "weekTrophy", boss, week }) };
+}
+
+/* ------------------------------------------------------------------ personal quests «My path» (QH-8.2) */
+
+export type PersonalQuestFailure = StartFailure | AbandonFailure | RestartFailure | "badId";
+
+/**
+ * Starts a personal quest on the account's game day (never another day). Only the run list changes: no XP, no Coins, no
+ * history, no chronicle. The same `input.id` again returns the saved run (no double creation).
+ */
+export function createPersonalQuest(state: GameState, input: PQStartInput & { id: string }, currentDate: Date = new Date()): { state: GameState; ok: boolean; runId?: string; reason?: PersonalQuestFailure } {
+  const s = checkAndApplyDateResets(state, currentDate);
+  const res = createRun(s.personalRuns ?? [], input, gameDayKey(s, currentDate), currentDate.toISOString());
+  if ("failure" in res) return { state: s, ok: false, reason: res.failure };
+  return { state: res.duplicate ? s : { ...s, personalRuns: res.runs }, ok: true, runId: res.run.id };
+}
+
+/** Abandons a personal quest: kept in the history, its slot is free at once. Gives and takes nothing. */
+export function abandonPersonalQuest(state: GameState, runId: string, currentDate: Date = new Date()): { state: GameState; ok: boolean; reason?: PersonalQuestFailure } {
+  const s = checkAndApplyDateResets(state, currentDate);
+  const res = abandonRun(s.personalRuns ?? [], runId, gameDayKey(s, currentDate), currentDate.toISOString());
+  if ("failure" in res) return { state: s, ok: false, reason: res.failure };
+  return { state: { ...s, personalRuns: res.runs }, ok: true };
+}
+
+/** Starts an abandoned quest again (В-22): a new run with `newId`, its own 30 days from today, no progress. */
+export function restartPersonalQuest(state: GameState, runId: string, newId: string, currentDate: Date = new Date()): { state: GameState; ok: boolean; runId?: string; reason?: PersonalQuestFailure } {
+  const s = checkAndApplyDateResets(state, currentDate);
+  const res = restartRun(s.personalRuns ?? [], runId, newId, gameDayKey(s, currentDate), currentDate.toISOString());
+  if ("failure" in res) return { state: s, ok: false, reason: res.failure };
+  return { state: res.duplicate ? s : { ...s, personalRuns: res.runs }, ok: true, runId: res.run.id };
 }
 
 /** Saves the week challenge once per week (it does not change in the middle of a week). */
