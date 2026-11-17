@@ -202,7 +202,7 @@ interface GameContextType {
   markPersonalQuestDay: (runId: string) => Promise<{ ok: boolean; reason?: PersonalQuestFailure | "notSaved" }>;
   savePersonalQuestNote: (runId: string, input: { day: string } & Partial<Record<PQNoteField, string>>) => Promise<{ ok: boolean; reason?: PersonalQuestFailure | "notSaved" }>;
   /** QH-8.4: completes a personal quest with the final report (once; the Journal checked on fresh data) — no XP, no Coins. */
-  completePersonalQuest: (runId: string, report: string, data: MissionData | null) => Promise<{ ok: boolean; result?: PQResult; upgraded?: boolean; duplicate?: boolean; reason?: PersonalQuestFailure | "notSaved" }>;
+  completePersonalQuest: (runId: string, report: string, data: MissionData | null) => Promise<PersonalCompletion>;
   /** Saves the edit-profile form: nickname (already accepted by the server for accounts), bio and optional details. */
   saveProfileEdits: (edits: { name: string; bio: string; details: ProfileDetails }) => void;
   /** Accounts: the cloud nickname is the source of truth; copies it into the local state without a chronicle entry. */
@@ -223,6 +223,18 @@ export interface QuestCompletion {
 
 const NOT_COMPLETED: QuestCompletion = { completed: false, xp: 0, leveledUp: false, newlyUnlocked: [] };
 const SAVE_FAILED: QuestCompletion = { ...NOT_COMPLETED, saveFailed: true };
+/** What completing a personal quest returns (QH-8.4/8.5): only a saved change reports XP. */
+export interface PersonalCompletion {
+  ok: boolean;
+  result?: PQResult;
+  upgraded?: boolean;
+  duplicate?: boolean;
+  xp?: number;
+  leveledUp?: boolean;
+  newLevel?: number;
+  reason?: PersonalQuestFailure | "notSaved";
+}
+
 /** A personal quest change that could not be saved (QH-8.2). */
 const NOT_SAVED: { ok: boolean; runId?: string; reason?: PersonalQuestFailure | "notSaved" } = { ok: false, reason: "notSaved" };
 
@@ -683,9 +695,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       applyLocked(
         (s) => {
           const res = completePersonalQuestLogic(s, runId, report, data, new Date());
-          return { state: res.state, result: { ok: res.ok, result: res.result, upgraded: res.upgraded, duplicate: res.duplicate, reason: res.reason as PersonalQuestFailure | "notSaved" | undefined } };
+          const out: PersonalCompletion = { ok: res.ok, result: res.result, upgraded: res.upgraded, duplicate: res.duplicate, xp: res.xp, leveledUp: res.leveledUp, newLevel: res.newLevel, reason: res.reason };
+          return { state: res.state, result: out };
         },
-        NOT_SAVED as { ok: boolean; result?: PQResult; upgraded?: boolean; duplicate?: boolean; reason?: PersonalQuestFailure | "notSaved" }
+        // not saved: nothing is reported as given
+        NOT_SAVED as PersonalCompletion
       ),
     [applyLocked]
   );

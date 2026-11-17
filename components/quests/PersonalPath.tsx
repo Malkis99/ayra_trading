@@ -387,6 +387,7 @@ function RunHistory({ runs, allRuns, onOpen }: { runs: PQRun[]; allRuns: PQRun[]
                   {r.status === "completed" ? h.completed : h.abandoned}
                 </span>
                 {r.status === "completed" && r.result && <RankChip rank={r.result.rank} />}
+                {r.status === "completed" && <PaidChip runId={r.id} />}
                 <VerificationLabel verification={r.verification} />
                 <button type="button" className={buttonClasses("ghost", "md")} onClick={() => onOpen(r.id)} aria-label={formatString(p.path.journey.openAria, { title: r.title })} data-testid="pq-history-open">
                   {p.path.journey.open}
@@ -403,6 +404,24 @@ function RunHistory({ runs, allRuns, onOpen }: { runs: PQRun[]; allRuns: PQRun[]
         </ul>
       )}
     </section>
+  );
+}
+
+/** QH-8.5: what a completed run paid — «+N XP», or that it was completed before rewards started (never paid later). */
+function PaidChip({ runId }: { runId: string }) {
+  const { dict } = useApp();
+  const { gameState } = useGame();
+  const c = dict.personalQuests.path.complete;
+  const entry = (gameState.personalLedger ?? []).find((e) => e.runId === runId);
+  if (!entry) return null;
+  return entry.paid ? (
+    <span className="rounded-full border border-vi/40 bg-vi/10 px-2 py-0.5 text-[11px] font-semibold text-tx" data-testid="pq-history-xp" data-xp={entry.xp}>
+      {entry.xp > 0 ? formatString(c.paidXp, { xp: entry.xp }) : c.paidNone}
+    </span>
+  ) : (
+    <span className="rounded-full border border-line bg-s2 px-2 py-0.5 text-[11px] text-mu" data-testid="pq-history-unpaid">
+      {c.unpaid}
+    </span>
   );
 }
 

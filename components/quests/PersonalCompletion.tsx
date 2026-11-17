@@ -6,7 +6,7 @@ import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { formatString } from "@/lib/i18n";
 import type { MissionData } from "@/lib/missions";
-import { PQ_CATEGORIES, PQ_RANK_XP, PQ_REPORT_MAX, PQ_REPORT_MIN, cleanField, rankFor, type PQRank, type PQResult, type PQRun } from "@/lib/personal-quests";
+import { PQ_CATEGORIES, PQ_REPORT_MAX, PQ_REPORT_MIN, cleanField, rankFor, rankXp, type PQRank, type PQResult, type PQRun } from "@/lib/personal-quests";
 import type { PQJourney } from "@/lib/personal-quest-days";
 import { Modal } from "@/components/ui/Modal";
 import { buttonClasses } from "@/components/ui/Button";
@@ -14,8 +14,8 @@ import { cn } from "@/components/ui/cn";
 import { formatDayKey } from "./WeekTab";
 import { CATEGORY_ICONS, RewardTable, VerificationLabel, errorText } from "./PersonalQuestParts";
 
-// QH-8.4: completing a 30-day path — the final report, the rank, the category achievement, the saved result. Nothing
-// here gives XP or Coins: the variant C rates are shown only as a preview.
+// QH-8.4 / QH-8.5: completing a 30-day path — the final report, the rank, the category achievement, the saved result and
+// the XP it pays once (variant C). XP is shown as given only after the change is saved; never Coins.
 
 /** Rank colours: gold only for Gold (gold is for achievements); silver and bronze in their own calm tones. */
 export const RANK_TONE: Record<PQRank, string> = {
@@ -39,7 +39,7 @@ export function RankChip({ rank }: { rank: PQRank | null }) {
   );
 }
 
-/** The final report form, then the result: days, rank, achievement, the XP preview (never given here). */
+/** The final report form, then the result: days, rank, achievement, the XP given (once, after it is saved). */
 export function CompletionDialog({ run, journey, journal, onClose }: { run: PQRun; journey: PQJourney; journal: MissionData | null; onClose: () => void }) {
   const { dict, showToast } = useApp();
   const { gameState, completePersonalQuest } = useGame();
@@ -48,7 +48,7 @@ export function CompletionDialog({ run, journey, journal, onClose }: { run: PQRu
   const [text, setText] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [done, setDone] = useState<{ result: PQResult; note?: "new" | "up" | "kept"; best?: PQRank } | null>(null);
+  const [done, setDone] = useState<{ result: PQResult; note?: "new" | "up" | "kept"; best?: PQRank; xp: number; newLevel?: number } | null>(null);
   const busy = useRef(false);
   const own = cleanField(text).length;
   const left = Math.max(0, PQ_REPORT_MIN - own);
@@ -67,8 +67,9 @@ export function CompletionDialog({ run, journey, journal, onClose }: { run: PQRu
       if (res.ok && res.result) {
         const r = res.result.rank;
         const note = !r ? undefined : res.upgraded ? (before ? "up" : "new") : "kept";
-        setDone({ result: res.result, note, best: res.upgraded || !before ? r ?? undefined : before });
-        showToast(c.done);
+        // only a saved completion gets here: what it paid, and a new level if it brought one
+        setDone({ result: res.result, note, best: res.upgraded || !before ? r ?? undefined : before, xp: res.xp ?? 0, newLevel: res.leveledUp ? res.newLevel : undefined });
+        showToast(res.leveledUp && res.newLevel ? formatString(dict.chronicleEvents.levelUp, { level: res.newLevel }) : res.xp ? `${c.done} ${formatString(c.paidXp, { xp: res.xp })}` : c.done);
       } else setError(errorText(dict, res.reason));
     } finally {
       busy.current = false;
@@ -78,7 +79,7 @@ export function CompletionDialog({ run, journey, journal, onClose }: { run: PQRu
   return (
     <Modal isOpen onClose={onClose} title={done ? c.resultTitle : c.title} subtitle={`${p.categories[run.category].name} · ${run.title}`} closeLabel={c.close} size="lg" fullOnMobile data-testid="pq-complete">
       {done ? (
-        <ResultBlock run={{ ...run, result: done.result, report: { at: done.result.at, text: cleanField(text) } }} result={done.result} achievementNote={done.note} bestRank={done.best} reveal />
+        <ResultBlock run={{ ...run, result: done.result, report: { at: done.result.at, text: cleanField(text) } }} result={done.result} achievementNote={done.note} bestRank={done.best} paid={{ xp: done.xp, newLevel: done.newLevel }} reveal />
       ) : (
         <form onSubmit={submit} className="space-y-4" data-testid="pq-complete-form">
           <p className="text-sm text-tx">{c.intro}</p>
@@ -89,6 +90,9 @@ export function CompletionDialog({ run, journey, journal, onClose }: { run: PQRu
             <p className="mt-0.5 text-xs text-mu">{c.summaryHint}</p>
             <p className="mt-2 text-sm text-tx" data-testid="pq-complete-expected" data-rank={expected ?? "none"}>
               {expected ? formatString(c.expected, { rank: p.ranks[expected] }) : c.expectedNone}
+            </p>
+            <p className="mt-1 text-xs text-mu" data-testid="pq-complete-willpay">
+              {expected ? formatString(c.willPay, { rank: p.ranks[expected], xp: rankXp(expected, run.verification) }) : c.willPayNone}
             </p>
             <div className="mt-2"><RewardTable verification={run.verification} testId="pq-complete-rewards" /></div>
           </section>
@@ -138,8 +142,27 @@ export function CompletionDialog({ run, journey, journal, onClose }: { run: PQRu
 }
 
 /** A completed path: days, rank, achievement and the saved final report. */
-export function ResultBlock({ run, result, achievementNote, bestRank, reveal }: { run: PQRun; result: PQResult; achievementNote?: "new" | "up" | "kept"; bestRank?: PQRank; reveal?: boolean }) {
+export function ResultBlock({
+  run,
+  result,
+  achievementNote,
+  bestRank,
+  paid,
+  reveal,
+}: {
+  run: PQRun;
+  result: PQResult;
+  achievementNote?: "new" | "up" | "kept";
+  bestRank?: PQRank;
+  /** Just completed: the XP this completion paid and a new level; otherwise read from the saved ledger. */
+  paid?: { xp: number; newLevel?: number };
+  reveal?: boolean;
+}) {
   const { dict, lang } = useApp();
+  const { gameState } = useGame();
+  // the saved ledger says whether this completion paid XP (runs completed before QH-8.5 did not)
+  const entry = (gameState.personalLedger ?? []).find((e) => e.runId === run.id);
+  const paidXp = paid ? paid.xp : entry?.paid ? entry.xp : null;
   const p = dict.personalQuests;
   const c = p.path.complete;
   const name = p.achievements[run.category].name;
@@ -172,10 +195,15 @@ export function ResultBlock({ run, result, achievementNote, bestRank, reveal }: 
       )}
       <div className="flex flex-wrap items-center gap-2">
         <VerificationLabel verification={result.verification} />
-        {result.rank && (
-          <span className="text-xs text-mu" data-testid="pq-result-xp-preview">
-            {formatString(c.futureXp, { xp: PQ_RANK_XP[result.verification][result.rank] })}
+        {paidXp === null ? (
+          <span className="text-xs text-mu" data-testid="pq-result-unpaid">{c.unpaid}</span>
+        ) : (
+          <span className={cn("text-sm font-semibold", paidXp > 0 ? "text-tx" : "text-mu")} data-testid="pq-result-xp" data-xp={paidXp}>
+            {paidXp > 0 ? formatString(c.paidXp, { xp: paidXp }) : c.paidNone}
           </span>
+        )}
+        {paid?.newLevel && (
+          <span className="text-sm font-semibold text-vi" data-testid="pq-result-levelup">{formatString(c.levelUp, { level: paid.newLevel })}</span>
         )}
       </div>
       {run.report && (
