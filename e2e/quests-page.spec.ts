@@ -61,7 +61,11 @@ test.describe("Quests page (Q1)", () => {
   });
 
   test("«Replace» shows another quest; the third replacement says the limit is reached", async ({ context, page }) => {
-    await seedGame(context, baseGame({ lastQuestDate: today }));
+    // which quests can stand in depends on the day (the day set and the replacement are picked by date): on some days
+    // nothing is left to replace with and the app rightly says so. The clock is fixed on a day with replacements.
+    const day = "2026-11-16";
+    await page.clock.install({ time: new Date(`${day}T10:00:00.000Z`) });
+    await seedGame(context, baseGame({ lastQuestDate: day }));
     await page.goto("/quests");
     const before = await firstSelfQuest(page);
     await before.card.getByRole("button", { name: /Ещё действия/ }).click();
