@@ -35,7 +35,7 @@ for i in 1 2 3 4 5 6; do
   SEED+="INSERT INTO public.user_features (user_id, game_sync) VALUES ('$(u $i)', TRUE) ON CONFLICT (user_id) DO UPDATE SET game_sync = TRUE;"
 done
 q "$SEED" >/dev/null
-q "GRANT SELECT ON public.journal_notes TO service_role;
+q "GRANT SELECT ON public.journal_notes, public.journal_day_plans TO service_role;
    CREATE FUNCTION public.test_ev(p_user uuid, p_id text) RETURNS jsonb LANGUAGE sql STABLE AS \$\$
      SELECT jsonb_build_array(jsonb_build_object('table','journal_notes','id',id,'version',client_updated_at,'fp',md5(data::text)))
      FROM public.journal_notes WHERE user_id = p_user AND id = p_id \$\$;
@@ -156,8 +156,10 @@ for k in $(seq 1 10); do
   else echo "SELECT (public.game_day_open('$(u 4)', 'trading', '{q_meditate,q_stretching}') - 'opened') ->> 'core';"; fi
 done | parallel
 days=$(q "SELECT count(*) FROM public.game_days WHERE user_id = '$(u 4)'")
-answers=$(cat "$TMP"/out/*.out | sort -u | wc -l | tr -d ' ')
-[ "$days" = 1 ] && [ "$answers" = 1 ] && [ "$(other_errors '^$')" = 0 ] \
+# only the result lines (the barrier prints an empty line and "t")
+answers=$(cat "$TMP"/out/*.out | grep '^\[' | sort -u | wc -l | tr -d ' ')
+opened=$(cat "$TMP"/out/*.out | grep -c '^\[' || true)
+[ "$days" = 1 ] && [ "$answers" = 1 ] && [ "$opened" = 10 ] && [ "$(other_errors '^$')" = 0 ] \
   && ok "H1: 10 devices open the day at once → one day row, every device gets the same set" \
   || bad "H1: days=$days answers=$answers outs=$(cat "$TMP"/out/*.out | sort -u) errs=$(cat "$TMP"/out/*.err)"
 CORE=$(q "SELECT array_to_string(core, ' ') FROM public.game_days WHERE user_id = '$(u 4)'")
@@ -178,7 +180,7 @@ for k in 1 2 3; do
   echo "SELECT jsonb_array_length(public.game_day_replace('$(u 4)', '$B2', 'q_alt_b$k') -> 'replacements');"
 done | parallel
 reps=$(q "SELECT jsonb_array_length(replacements) FROM public.game_days WHERE user_id = '$(u 4)'")
-okn=$(cat "$TMP"/out/*.out | grep -c . || true)
+okn=$(cat "$TMP"/out/*.out | grep -cE '^[0-9]+$' || true)
 [ "$reps" -le 2 ] && [ "$okn" = "$reps" ] && [ "$(other_errors 'game_replacement_limit|game_not_offered|game_not_replaceable')" = 0 ] \
   && ok "H3: 6 replacements at once → $reps applied (limit 2), the rest refused" \
   || bad "H3: reps=$reps ok=$okn errs=$(cat "$TMP"/out/*.err)"
