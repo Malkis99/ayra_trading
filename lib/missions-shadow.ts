@@ -61,9 +61,37 @@ export interface ShadowEvidence {
   fp: string;
 }
 
-/** What the server cannot confirm without its own game day (Q4.3). Always all five today. */
+/** What the server cannot confirm without its own game day (Q4.3: the day is kept by migration 0015 for accounts on the
+ * server economy; until an account has an open server day, all five stay unconfirmed). */
 export const UNVERIFIED_WITHOUT_DAY_STATE = ["daySet", "accepted", "dayClaims", "paidToday", "dayStarted"] as const;
 export type Unverified = (typeof UNVERIFIED_WITHOUT_DAY_STATE)[number];
+
+/** The account's own server day as game_my_day() returns it (0015; read with the person's session). */
+export interface ServerDayView {
+  current_day: string | null;
+  day: {
+    game_day: string;
+    status: "open" | "closed";
+    mode: string;
+    core: string[];
+    accepted: Record<string, string>;
+    carried?: Record<string, string>;
+  } | null;
+  /** Missions paid on the current day (from the ledger). */
+  paid: string[];
+  /** Source keys already used by missions on the current day (table:id:part). */
+  claims: string[];
+}
+
+/** What the server day says about one mission (only when the account has an open server day for the server's day). */
+export interface ServerDayCheck {
+  assigned: boolean;
+  accepted: boolean;
+  paid: boolean;
+  dayFull: boolean;
+  /** The record the server would use already paid another mission today. */
+  sourceUsed: boolean;
+}
 
 /** Problems the server finds on its own (beyond the app's rules). */
 export type ServerFlag =
@@ -73,7 +101,13 @@ export type ServerFlag =
   | "stampAfterServerWrite" // the record says it was made later than the server received it (a record «from the future»)
   | "duplicateSource" // the app used one record for two missions in this request
   | "newerSchema" // a record written by a newer app version was left out
-  | "badRecord"; // a cloud row the server could not read was left out
+  | "badRecord" // a cloud row the server could not read was left out
+  | "notAssigned" // the server day does not offer it now (another mode, or rest)
+  | "notAccepted" // the server day has no acceptance for it
+  | "alreadyPaid" // the server ledger already paid it today
+  | "dayFull" // three missions already paid today on the server
+  | "sourceUsed" // the record already paid another mission today on the server
+  | "dayNotOpen"; // the account has a server day, but not for the server's day yet
 
 export type Comparison =
   | "agree_done" // both: confirmed
@@ -91,6 +125,8 @@ export interface ShadowMissionResult {
     sources: string[];
     reason?: MissionReason;
     evidence?: ShadowEvidence;
+    /** The server day's answer (absent while the account has no open server day for this day). */
+    day?: ServerDayCheck;
     flags: ServerFlag[];
   };
   comparison: Comparison;
@@ -220,6 +256,17 @@ export interface ShadowInput {
   schemaVersion: number;
   /** Clock skew the 0004 trigger allows (5 min). */
   skewMs: number;
+  /** The account's server day (0015), or null/absent when there is none (local accounts, 0015 not applied). */
+  serverDay?: ServerDayView | null;
+}
+
+/** The source key the 0014 award writes for a record of a mission (table:id:part, game_mission_sources). */
+export function claimKeyOf(source: string): string | null {
+  const parts = source.split(":");
+  if (parts[0] === "note" && parts.length === 2) return `journal_notes:${parts[1]}:`;
+  if (parts[0] === "trade" && parts.length === 3) return `journal_trades:${parts[1]}:${parts[2]}`;
+  if (parts[0] === "plan" && parts.length === 3) return `journal_day_plans:${parts[1]}:${parts[2]}`;
+  return null;
 }
 
 /** Cloud rows → the app's MissionData (deleted rows included, as the app reads them; tombstones from `deleted_at`). */
@@ -263,10 +310,15 @@ function compare(clientDone: boolean, serverConfirmed: boolean, clientSource: st
 /** The shadow check of every mission in the request. Same input → same answer (two tabs, repeats). */
 export function shadowValidate(input: ShadowInput): ShadowResult {
   const { zone, fallback } = serverZone(input.timezone);
-  const day = serverGameDay(input.now, zone);
+  // the game day never goes back: the server day's cursor wins over an earlier date in the zone (0015 game_day_now)
+  const zoneDay = serverGameDay(input.now, zone);
+  const cursor = input.serverDay?.current_day ?? null;
+  const day = cursor && cursor > zoneDay ? cursor : zoneDay;
+  const sd = input.serverDay?.day && input.serverDay.day.game_day === day && input.serverDay.day.status === "open" ? input.serverDay : null;
+  const hasServerDay = !!input.serverDay?.day;
   const skipped = { newerSchema: 0, badRecord: 0 };
   const { data, index } = toMissionData(input.journal, zone, input.schemaVersion, skipped);
-  const unverified = [...UNVERIFIED_WITHOUT_DAY_STATE];
+  const unverified: Unverified[] = sd ? [] : [...UNVERIFIED_WITHOUT_DAY_STATE];
 
   // a record the app used for two missions of this request
   const bySource = new Map<string, number>();
@@ -298,6 +350,27 @@ export function shadowValidate(input: ShadowInput): ShadowResult {
     }
     if (skipped.newerSchema) flags.push("newerSchema");
     if (skipped.badRecord) flags.push("badRecord");
+    // the server day (0015): was it offered and accepted, is it paid, is the day full, is the record taken
+    let dayCheck: ServerDayCheck | undefined;
+    if (sd) {
+      const d = sd.day!;
+      const paid = sd.paid.includes(m.id);
+      const pickKey = (m.source && claimKeyOf(m.source)) || (sources[0] && claimKeyOf(sources[0])) || null;
+      dayCheck = {
+        assigned: d.mode !== "rest" && d.core.includes(m.id),
+        accepted: Object.prototype.hasOwnProperty.call(d.accepted || {}, m.id),
+        paid,
+        dayFull: sd.paid.length >= 3,
+        sourceUsed: !paid && !!pickKey && sd.claims.includes(pickKey),
+      };
+      if (!dayCheck.assigned) flags.push("notAssigned");
+      if (!dayCheck.accepted && !paid) flags.push("notAccepted");
+      if (paid) flags.push("alreadyPaid");
+      if (dayCheck.dayFull && !paid) flags.push("dayFull");
+      if (dayCheck.sourceUsed) flags.push("sourceUsed");
+    } else if (hasServerDay) {
+      flags.push("dayNotOpen");
+    }
     const confirmed = sources.length > 0;
     // the evidence a Q4.3 award would name: the app's record when the server confirms it, else the server's first one
     const pick = m.source && sources.includes(m.source) ? m.source : sources[0];
@@ -310,7 +383,7 @@ export function shadowValidate(input: ShadowInput): ShadowResult {
     return {
       id: m.id,
       client: { day: m.day, done: m.done, ...(m.source ? { source: m.source } : {}), ...(m.reason ? { reason: m.reason } : {}) },
-      server: { confirmed, sources, ...(reason ? { reason } : {}), ...(evidence ? { evidence } : {}), flags },
+      server: { confirmed, sources, ...(reason ? { reason } : {}), ...(evidence ? { evidence } : {}), ...(dayCheck ? { day: dayCheck } : {}), flags },
       comparison: compare(m.done, confirmed, m.source, sources),
       payout: "not_authorized",
       unverified,

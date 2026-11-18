@@ -187,6 +187,42 @@ test.describe("Q4.2 shadow mission check (fake Supabase)", () => {
     expect(r.body.results[0]).toMatchObject({ comparison: "client_only", server: { confirmed: false } });
   });
 
+  test("Q4.3: with a server day the check answers about the day too (assigned, accepted, paid) — and still pays nothing", async ({ page, request }) => {
+    const { email, userId, day } = await setUp(page, request);
+    const card = await readyLesson(page);
+    const body = { missions: [{ id: "m_lesson", day, done: true, source: "note:note_shadow_lesson" }] };
+    // no server day: the day stays unconfirmed
+    const none = await ask(page, body);
+    expect(none.body.unverified).toHaveLength(5);
+    expect(none.body.results[0].server.day).toBeUndefined();
+    const serverDay = none.body.serverDay as string;
+    // the server day offers the study missions but has no acceptance for the lesson
+    const myDay = (accepted: Record<string, string>, paid: string[] = []) =>
+      request.post(`${FAKE_SUPABASE}/__test/my-day?email=${encodeURIComponent(email)}`, {
+        data: { current_day: serverDay, day: { game_day: serverDay, status: "open", mode: "study", core: ["m_observation", "m_backtest", "m_lesson"], accepted }, paid, claims: [] },
+      });
+    await myDay({});
+    const notAccepted = await ask(page, body);
+    expect(notAccepted.body.unverified).toEqual([]);
+    expect(notAccepted.body.results[0].server.day).toEqual({ assigned: true, accepted: false, paid: false, dayFull: false, sourceUsed: false });
+    expect(notAccepted.body.results[0].server.flags).toContain("notAccepted");
+    expect(notAccepted.body.authorizedForPayout).toBe(false);
+    // accepted on the server, and the app pays as before; the server's answer changes nothing
+    await myDay({ m_lesson: new Date().toISOString() });
+    const before = await game(page, userId);
+    await card.getByTestId("quest-verify").click();
+    await expect(card).toHaveAttribute("data-done", "true");
+    await expect.poll(async () => (await shadows(page)).length, { timeout: 15_000 }).toBe(1);
+    const [s] = await shadows(page);
+    expect(s.result!.results[0]).toMatchObject({ comparison: "agree_done", payout: "not_authorized" });
+    expect((s.result!.results[0].server as unknown as { day: { assigned: boolean; accepted: boolean } }).day).toMatchObject({ assigned: true, accepted: true });
+    const paid = await game(page, userId);
+    expect(paid.coins - before.coins).toBe(10);
+    await page.waitForTimeout(1000);
+    expect(economy(await game(page, userId))).toEqual(economy(paid));
+    await request.post(`${FAKE_SUPABASE}/__test/my-day?email=${encodeURIComponent(email)}`, { data: {} });
+  });
+
   test("isolation and refusals: another account's record, no session, another site, a forged amount", async ({ page, request, browser }) => {
     const { day } = await setUp(page, request);
     await readyLesson(page);

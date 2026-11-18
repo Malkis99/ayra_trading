@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { handleMissionShadow, type ShadowDeps, type ShadowJournalReader } from "./mission-shadow-handler";
 import { createRateLimiter } from "./rate-limit";
 import { supabaseJournalReader } from "./supabase-journal-reader";
-import type { CloudRow, ShadowTable } from "../missions-shadow";
+import type { CloudRow, ServerDayView, ShadowTable } from "../missions-shadow";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 const ORIGIN = "https://ayra.test";
@@ -19,7 +19,7 @@ const lesson = (id: string, over: Record<string, unknown> = {}): CloudRow => {
 };
 
 /** A cloud journal of several users; the reader sees one user's rows only (as RLS does). */
-function cloud(store: Store, user: string, opts: { sync?: boolean; tz?: string | null; failing?: boolean; onRead?: (n: number) => void } = {}): ShadowJournalReader {
+function cloud(store: Store, user: string, opts: { sync?: boolean; tz?: string | null; failing?: boolean; onRead?: (n: number) => void; day?: ServerDayView | null } = {}): ShadowJournalReader {
   let reads = 0;
   const mine = (table: ShadowTable) => [...store.values()].filter((x) => x.user === user && x.table === table).map((x) => x.row);
   const guard = () => {
@@ -43,6 +43,9 @@ function cloud(store: Store, user: string, opts: { sync?: boolean; tz?: string |
     async rowsById(table, ids) {
       guard();
       return mine(table).filter((r) => ids.includes(r.id));
+    },
+    async myDay() {
+      return opts.day ?? null;
     },
   };
 }

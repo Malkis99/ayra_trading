@@ -38,6 +38,7 @@ export function createFakeSupabase() {
   const cloudFlags = new Map(); // user id -> boolean
   const journalRows = new Map(); // `${userId}:${table}:${id}` -> { user_id, table, id, data, updated_at }
   let journalReadFailuresLeft = 0; // next N journal reads fail with 500 (the cloud journal is unavailable)
+  const myDays = new Map(); // user id -> game_my_day() payload (0015 server day)
   let journalWriteFailuresLeft = 0; // next N journal writes fail with 500 (server trouble)
   // Migration 0009 stand-in: the shared calendar events (everyone reads rows that are not hidden; tests fill them)
   let marketEvents = [];
@@ -222,6 +223,15 @@ export function createFakeSupabase() {
     if (path === "/__test/journal-write-delay") {
       journalWriteDelayMs = Number(url.searchParams.get("ms") || 0);
       return send(200, { journalWriteDelayMs });
+    }
+    // 0015 stand-in: the account's server day as game_my_day() returns it (POST body; empty body = no server day)
+    if (path === "/__test/my-day" && req.method === "POST") {
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      if (!user) return send(404, { error: "no user" });
+      const body = await readBody(req);
+      if (body && Object.keys(body).length) myDays.set(user.id, body);
+      else myDays.delete(user.id);
+      return send(200, { ok: true });
     }
     if (path === "/__test/fail-journal-reads") {
       journalReadFailuresLeft = Number(url.searchParams.get("count") || 0);
@@ -683,6 +693,11 @@ export function createFakeSupabase() {
       const lower = String(body.nick || "").toLowerCase();
       const taken = takenNicknames.has(lower) || [...profiles.values()].some((p) => p.nickname && p.nickname.toLowerCase() === lower);
       return send(200, !taken);
+    }
+    // 0015 game_my_day(): the caller's own server day (tests set it with /__test/my-day; none = null, as without 0015)
+    if (path === "/rest/v1/rpc/game_my_day") {
+      const user = userFromAuthHeader(req);
+      return send(200, user ? myDays.get(user.id) ?? null : null);
     }
     if (path.startsWith("/rest/v1/rpc/")) return send(200, null);
 
