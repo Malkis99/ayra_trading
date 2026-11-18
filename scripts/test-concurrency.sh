@@ -22,7 +22,7 @@ psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase/tests/stub/supabase_stub.sql 
 for f in 0001_init 0002_profile_defaults 0003_nickname_cooldown 0004_journal_sync 0014_game_economy 0015_game_days 0016_game_day_api; do
   psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f "supabase/migrations/$f.sql" >/dev/null 2>"$TMP/migr.err" || { echo "FAIL migration $f"; cat "$TMP/migr.err"; exit 2; }
 done
-ok "migrations 0001–0004 + 0014 + 0015 on PostgreSQL $(q 'SHOW server_version')"
+ok "migrations 0001–0004 + 0014 + 0015 + 0016 on PostgreSQL $(q 'SHOW server_version')"
 
 # Users U1…U6, five notes and a day plan each; all activated, the flag on, missions switched on by the owner
 u() { printf '00000000-0000-0000-0000-0000000c0c0%s' "$1"; }
@@ -175,15 +175,26 @@ times=$(q "SELECT count(*) FROM jsonb_object_keys((SELECT accepted FROM public.g
   && ok "H2: the same mission accepted by 10 sessions at once → one acceptance, 9 repeats keep its time" \
   || bad "H2: false=$(count_out false) true=$(count_out true) keys=$times errs=$(cat "$TMP"/out/*.err)"
 
-# H3. Six replacements of the two extras at once: never more than the limit (2), never a replaced extra twice
-for k in 1 2 3; do
-  echo "SELECT jsonb_array_length(public.game_day_replace('$(u 4)', '$B1', 'q_alt_a$k') -> 'replacements');"
-  echo "SELECT jsonb_array_length(public.game_day_replace('$(u 4)', '$B2', 'q_alt_b$k') -> 'replacements');"
-done | parallel
+# H3. Six replacements of the two extras at once, all with quests the catalog allows (0016: the trading pool, no more
+# XP): exactly the limit (2) is applied whatever the order, the rest refused; a replaced or shown quest never twice
+FREE=""
+for c in q_walk q_meditate q_sleep_prep q_stretching q_read_pages q_lang_10m; do
+  [ "$c" = "$B1" ] || [ "$c" = "$B2" ] || FREE="$FREE $c"
+done
+set -- $FREE
+T1=$1; T2=$2; T3=$3; T4=$4
+{
+  echo "SELECT jsonb_array_length(public.game_day_replace('$(u 4)', '$B1', '$T1') -> 'replacements');"
+  echo "SELECT jsonb_array_length(public.game_day_replace('$(u 4)', '$B1', '$T2') -> 'replacements');"
+  echo "SELECT jsonb_array_length(public.game_day_replace('$(u 4)', '$B1', '$T3') -> 'replacements');"
+  echo "SELECT jsonb_array_length(public.game_day_replace('$(u 4)', '$B2', '$T4') -> 'replacements');"
+  echo "SELECT jsonb_array_length(public.game_day_replace('$(u 4)', '$B2', '$T2') -> 'replacements');"
+  echo "SELECT jsonb_array_length(public.game_day_replace('$(u 4)', '$B2', '$T1') -> 'replacements');"
+} | parallel
 reps=$(q "SELECT jsonb_array_length(replacements) FROM public.game_days WHERE user_id = '$(u 4)'")
 okn=$(cat "$TMP"/out/*.out | grep -cE '^[0-9]+$' || true)
-[ "$reps" -le 2 ] && [ "$okn" = "$reps" ] && [ "$(other_errors 'game_replacement_limit|game_not_offered|game_not_replaceable')" = 0 ] \
-  && ok "H3: 6 replacements at once → $reps applied (limit 2), the rest refused" \
+[ -n "$T4" ] && [ "$reps" = 2 ] && [ "$okn" = 2 ] && [ "$(other_errors 'game_replacement_limit|game_not_offered|game_not_replaceable')" = 0 ] \
+  && ok "H3: 6 allowed replacements at once → exactly 2 applied (the limit), the rest refused" \
   || bad "H3: reps=$reps ok=$okn errs=$(cat "$TMP"/out/*.err)"
 
 # H4. Mode changes racing awards: whatever wins, every paid mission keeps a slot, nothing above three, nothing unaccepted
