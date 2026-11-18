@@ -198,8 +198,11 @@ q "CREATE FUNCTION public.test_ev_any(p_user uuid, p_mission text, p_note text) 
        (SELECT jsonb_build_array(jsonb_build_object('table','journal_day_plans','id',id,'version',client_updated_at,'fp',md5(data::text))) FROM public.journal_day_plans WHERE user_id = p_user ORDER BY id DESC LIMIT 1)
      ELSE public.test_ev(p_user, p_note) END \$\$;
    GRANT EXECUTE ON FUNCTION public.test_ev_any(uuid, text, text) TO service_role;" >/dev/null
+# one mission is paid before the race (the setup is checked): whatever the mode changes do, it must keep its slot
+PRE=$(psql -X -q -At -d "$DB" -c "SET ROLE service_role;" -c "SELECT public.game_apply_reward('$(u 4)', 'mission', '$M1', public.test_ev_any('$(u 4)', '$M1', 'h1')) ->> 'xp';" 2>&1)
+[ "$PRE" = 40 ] || bad "H4 setup: the first award must pay 40, got: $PRE"
 {
-  i=0; for m in $M1 $M2 $M3 q_bias q_riskcheck; do i=$((i + 1)); echo "SELECT public.game_apply_reward('$(u 4)', 'mission', '$m', public.test_ev_any('$(u 4)', '$m', 'h$i')) ->> 'xp';"; done
+  i=1; for m in $M2 $M3 q_bias q_riskcheck m_day_state; do i=$((i + 1)); echo "SELECT public.game_apply_reward('$(u 4)', 'mission', '$m', public.test_ev_any('$(u 4)', '$m', 'h$i')) ->> 'xp';"; done
   echo "SELECT public.game_day_set_mode('$(u 4)', 'trading') ->> 'mode';"
   echo "SELECT public.game_day_set_mode('$(u 4)', 'recovery') ->> 'mode';"
   echo "SELECT public.game_day_set_mode('$(u 4)', 'rest') ->> 'mode';"
@@ -208,8 +211,8 @@ q "CREATE FUNCTION public.test_ev_any(p_user uuid, p_mission text, p_note text) 
 paid=$(q "SELECT count(*) FROM public.game_ledger WHERE user_id = '$(u 4)'")
 lost=$(q "SELECT count(*) FROM public.game_ledger l JOIN public.game_days d ON d.user_id = l.user_id AND d.game_day = l.game_day
           WHERE l.user_id = '$(u 4)' AND NOT ((l.result ->> 'item') = ANY(d.core) AND d.accepted ? (l.result ->> 'item'))")
-[ "$paid" -le 3 ] && [ "$lost" = 0 ] && [ "$(other_errors 'game_mission_not_assigned|game_mission_not_accepted|game_source_used')" = 0 ] \
-  && ok "H4: 5 awards racing 4 mode changes → $paid paid, every one accepted and still in the day's slots" \
+[ "$paid" -ge 1 ] && [ "$paid" -le 3 ] && [ "$lost" = 0 ] && [ "$(other_errors 'game_mission_not_assigned|game_mission_not_accepted|game_source_used|game_day_rest')" = 0 ] \
+  && ok "H4: 1 paid + 5 awards racing 4 mode changes → $paid paid in total, every one accepted and still in the day's slots" \
   || bad "H4: paid=$paid lost=$lost errs=$(cat "$TMP"/out/*.err)"
 
 # H5. One lock per account: a day change waits while an award of the same account is in progress (two devices)
