@@ -369,3 +369,41 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   !await reserveNfp() ? ok("M: five initial slots with no extra reservation") : fail("M: more than five initial slots");
   await db.close();
 }
+
+// N. 0014: server economy schema (Q4.1) — applied twice; RLS, service-only awards, append-only ledger, idempotency,
+//    evidence re-check (TOCTOU), source claims, day caps, one-way account state, rebuild; nothing switched on;
+//    rollback removes only the economy objects
+{
+  const db = await fresh();
+  for (const f of ["0001_init", "0002_profile_defaults", "0003_nickname_cooldown", "0004_journal_sync"]) await db.exec(read(`supabase/migrations/${f}.sql`));
+  await db.exec(read("supabase/migrations/0014_game_economy.sql"));
+  await db.exec(read("supabase/migrations/0014_game_economy.sql")); ok("N: 0014 applied twice");
+  try { await db.exec(read("supabase/tests/game_economy.sql")); ok("N: tests/game_economy.sql passed"); }
+  catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`N: test script: ${e.message}`); }
+  const left = (await db.query(`SELECT (SELECT count(*) FROM public.game_ledger)::int + (SELECT count(*) FROM public.game_accounts)::int
+    + (SELECT count(*) FROM public.game_profile)::int AS n`)).rows[0].n;
+  left === 0 ? ok("N: test rolled back (no rows left)") : fail("N: rows left after test");
+  // nothing is switched on by the migration: the flag is off for everyone, no account leaves «local»
+  const flags = (await db.query(`SELECT column_default FROM information_schema.columns WHERE table_name='user_features' AND column_name='game_sync'`)).rows[0];
+  flags && /false/i.test(flags.column_default) ? ok("N: game_sync defaults to off") : fail(`N: game_sync default ${JSON.stringify(flags)}`);
+  // the rules match the device values (variant C, 40 + 10 a mission, 100 Coins a day)
+  const rules = Object.fromEntries((await db.query(`SELECT code, xp, coins FROM public.game_reward_rules`)).rows.map((r) => [r.code, [r.xp, r.coins]]));
+  const want = { mission: [40, 10], pq_bronze_app: [100, 0], pq_silver_app: [180, 0], pq_gold_app: [250, 0], pq_bronze_self: [50, 0], pq_silver_self: [90, 0], pq_gold_self: [125, 0], daily_reward_7: [0, 50] };
+  const bad = Object.entries(want).filter(([k, v]) => JSON.stringify(rules[k]) !== JSON.stringify(v));
+  const cap = (await db.query(`SELECT coins_per_day, late_window_minutes FROM public.game_limits`)).rows[0];
+  bad.length === 0 && cap.coins_per_day === 100 && cap.late_window_minutes === 0 ? ok("N: rules and limits match the app") : fail(`N: rules ${JSON.stringify(bad)} ${JSON.stringify(cap)}`);
+  // the level formula matches lib/game.ts (xpForNextLevel = 80 + 40·level)
+  const lv = (await db.query(`SELECT public.game_level_for_xp(0) a, public.game_level_for_xp(119) b, public.game_level_for_xp(120) c, public.game_level_for_xp(280) d, public.game_level_for_xp(279) e`)).rows[0];
+  lv.a === 1 && lv.b === 1 && lv.c === 2 && lv.d === 3 && lv.e === 2 ? ok("N: level formula") : fail(`N: level formula ${JSON.stringify(lv)}`);
+  // the owner's rule change survives a re-run
+  await db.exec(`SET ROLE game_economy_owner; UPDATE public.game_reward_rules SET xp = 41 WHERE code = 'mission'; RESET ROLE;`);
+  await db.exec(read("supabase/migrations/0014_game_economy.sql"));
+  const kept = (await db.query(`SELECT xp FROM public.game_reward_rules WHERE code = 'mission'`)).rows[0].xp;
+  kept === 41 ? ok("N: re-run keeps the owner's rules") : fail(`N: re-run reset the rule to ${kept}`);
+  await db.exec(read("supabase/migrations/0014_game_economy.down.sql"));
+  const gone = (await db.query(`SELECT count(*)::int n FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'game_%'`)).rows[0].n;
+  const col = (await db.query(`SELECT count(*)::int n FROM information_schema.columns WHERE table_name='user_features' AND column_name='game_sync'`)).rows[0].n;
+  const j = (await db.query(read("supabase/checks/0004_status.sql"))).rows[0];
+  gone === 0 && col === 0 && j.journal_tables === 9 && j.cloud_sync_function ? ok("N: rollback removes the economy and keeps 0001–0004") : fail(`N: rollback tables ${gone} column ${col}`);
+  await db.close();
+}

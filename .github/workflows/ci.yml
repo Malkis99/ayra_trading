@@ -19,6 +19,28 @@ jobs:
       - run: node scripts/test-migrations.mjs
       - run: npm run build
 
+  # Server economy (migration 0014) under real concurrency: a throw-away PostgreSQL 16 in a service container (never
+  # Supabase or production). PGlite above has one connection; here many sessions run at the same moment.
+  db-concurrency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - run: psql --version
+      - run: bash scripts/test-concurrency.sh
+
   # Browser tests (slower): mock auth suite and the sign-in suite against a fake Supabase server.
   # No secrets are needed: both use local stand-ins.
   e2e:
