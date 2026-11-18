@@ -15,6 +15,8 @@ const env = {
   // registration and «Forgot password» are tested here even while production waits for SMTP (lib/auth/email-sending.ts)
   NEXT_PUBLIC_AYRA_E2E_EMAIL_OPEN: "1",
   NEXT_PUBLIC_MARKET_RELEASE_CHECKS: "1",
+  // Q4.2: the shadow mission check is tested here (production keeps it off until the owner turns it on)
+  NEXT_PUBLIC_AYRA_MISSION_SHADOW: "1",
 };
 delete env.AYRA_E2E_AUTH_MOCK;
 delete env.NEXT_PUBLIC_AYRA_E2E_AUTH_MOCK;

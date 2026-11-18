@@ -53,7 +53,8 @@ import { AvatarAppearance, validateAvatarAppearance } from "@/lib/avatar";
 import type { ProfileDetails } from "@/lib/profile";
 import { generateProgram } from "@/lib/awakening";
 import { AppStorage } from "@/lib/storage";
-import type { MissionData } from "./missions";
+import { isMissionId, type MissionData, type MissionId } from "./missions";
+import { missionShadowOn, sendMissionShadow } from "./missions-shadow-client";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
 import { dayKeyInZone } from "@/lib/day-key";
 import { GameStore, browserLock, revOf, type Change } from "@/lib/game-store";
@@ -572,11 +573,26 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   // QH-6.6: «Verify» — the same claim as every mission payment, on the freshest saved state, one tab at a time
   const verifyMissionCb = useCallback(
-    (id: string, data: MissionData) =>
-      applyLocked((s) => {
-        const res = verifyMission(s, id, data, new Date());
-        return { state: res.state, result: { paid: res.paid, xp: res.xp, coins: res.coins, leveledUp: res.leveledUp, newLevel: res.newLevel, failure: res.failure, saveFailed: false } };
-      }, { paid: false, xp: 0, coins: 0, leveledUp: false, newLevel: undefined as number | undefined, failure: undefined as VerifyFailure | undefined, saveFailed: true }),
+    async (id: string, data: MissionData) => {
+      const now = new Date();
+      const out = await applyLocked((s) => {
+        const res = verifyMission(s, id, data, now);
+        const day = gameDayKey(res.state, now);
+        const done = res.paid || res.state.completedQuestsToday[id] === true;
+        const source = done && res.state.missionLedger?.day === day ? res.state.missionLedger.claims[id as MissionId] : undefined;
+        return { state: res.state, result: { paid: res.paid, xp: res.xp, coins: res.coins, leveledUp: res.leveledUp, newLevel: res.newLevel, failure: res.failure, saveFailed: false, shadow: { day, done, source } } };
+      }, { paid: false, xp: 0, coins: 0, leveledUp: false, newLevel: undefined as number | undefined, failure: undefined as VerifyFailure | undefined, saveFailed: true, shadow: null as { day: string; done: boolean; source?: string } | null });
+      // Q4.2 shadow mode: the server repeats the check on the cloud journal, after the app has decided and saved. Not
+      // awaited and never applied: nothing in the game changes from the server's answer.
+      if (missionShadowOn() && out.shadow && isMissionId(id)) {
+        const { shadow, ...rest } = out;
+        const source = shadow.source && !shadow.source.startsWith("paid:") ? shadow.source : undefined;
+        void sendMissionShadow([{ id, day: shadow.day, done: shadow.done, ...(source ? { source } : {}), ...(rest.failure ? { reason: rest.failure.reason } : {}) }]);
+        return rest;
+      }
+      const { shadow: _shadow, ...rest } = out;
+      return rest;
+    },
     [applyLocked]
   );
 
