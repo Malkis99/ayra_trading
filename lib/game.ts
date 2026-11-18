@@ -1688,7 +1688,14 @@ export function questStates(state: GameState, data: MissionData, currentDate: Da
   return out;
 }
 
-export type VerifyFailure = { reason: MissionReason | "notAccepted" | "dayFull" | "sourceUsed" | "notAvailable"; min?: number };
+/**
+ * Why «Verify» paid nothing. Q4.4 adds the server-economy reasons: rewards paused (the progress is being moved, or the
+ * server paused its rewards), server payouts not switched on yet, the server not reachable.
+ */
+export type VerifyFailure = {
+  reason: MissionReason | "notAccepted" | "dayFull" | "sourceUsed" | "notAvailable" | "rewardsPaused" | "serverPayoutsOff" | "serverUnavailable" | "notSeenByServer";
+  min?: number;
+};
 
 /**
  * «Verify» of one mission (QH-6.6): the same claimMissions, for this mission only — no second way to pay. Paid: the

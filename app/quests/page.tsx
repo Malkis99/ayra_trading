@@ -31,6 +31,7 @@ import { HistoryTab } from "@/components/quests/HistoryTab";
 import { PathMain, PathRail } from "@/components/quests/PersonalPath";
 import { HUB_TABS, HubColumns, HubTabs, parseHubTab, type HubTab } from "@/components/quests/HubLayout";
 import { questTitle } from "@/components/quests/quest-text";
+import { EconomyNotice } from "@/components/quests/EconomyNotice";
 
 /** Quest Hub (docs/quest-hub-plan.md): the profile strip, four top-level tabs that switch the page, two columns. */
 export default function QuestsPage() {
@@ -338,6 +339,8 @@ export default function QuestsPage() {
       <h1 className="sr-only">{t.q2.page.title}</h1>
 
       <QuestsHeader earned={earned} />
+
+      <EconomyNotice />
 
       <div ref={tabsRef} className="scroll-mt-4">
         <HubTabs value={activeTab} onChange={setTab} label={h.tabsLabel} items={tabItems} />

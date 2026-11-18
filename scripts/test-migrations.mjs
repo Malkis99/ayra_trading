@@ -441,3 +441,40 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`O: 0014 tests after rollback: ${e.message}`); }
   await db.close();
 }
+
+// P. 0016: the server game day API (Q4.4) on top of 0014 + 0015 — applied twice; rows written before 0016 have no first
+//    trace (unknown); API tests; rollback restores the 0015 day functions (and their tests pass) and keeps the Journal rows
+{
+  const db = await fresh();
+  for (const f of ["0001_init", "0002_profile_defaults", "0003_nickname_cooldown", "0004_journal_sync", "0014_game_economy", "0015_game_days"]) await db.exec(read(`supabase/migrations/${f}.sql`));
+  await db.exec(`INSERT INTO auth.users (id, email) VALUES ('00000000-0000-0000-0000-0000000a9199', 'old@x');
+    INSERT INTO public.journal_notes (user_id, id, data) VALUES ('00000000-0000-0000-0000-0000000a9199', 'old1',
+      '{"id":"old1","templateKey":"lesson","body":"Old.","createdAt":"2026-11-01T10:00:00Z","updatedAt":"2026-11-01T10:00:00Z"}');`);
+  await db.exec(read("supabase/migrations/0016_game_day_api.sql"));
+  await db.exec(read("supabase/migrations/0016_game_day_api.sql")); ok("P: 0016 applied twice");
+  const old = (await db.query(`SELECT first_seen_at FROM public.journal_notes WHERE id = 'old1'`)).rows[0];
+  old && old.first_seen_at === null ? ok("P: rows from before 0016 have no first trace (unknown, never «made today»)") : fail(`P: old row ${JSON.stringify(old)}`);
+  await db.exec(`UPDATE public.journal_notes SET data = data || '{"updatedAt":"2026-11-02T10:00:00Z"}' WHERE id = 'old1'`);
+  const still = (await db.query(`SELECT first_seen_at FROM public.journal_notes WHERE id = 'old1'`)).rows[0];
+  still.first_seen_at === null ? ok("P: an update does not invent a first trace for an old row") : fail(`P: old row got ${still.first_seen_at}`);
+  await db.exec(`DELETE FROM auth.users WHERE id = '00000000-0000-0000-0000-0000000a9199'`);
+  try { await db.exec(read("supabase/tests/game_day_api.sql")); ok("P: tests/game_day_api.sql passed"); }
+  catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`P: test script: ${e.message}`); }
+  const left = (await db.query(`SELECT (SELECT count(*) FROM public.game_days)::int + (SELECT count(*) FROM public.game_accounts)::int AS n`)).rows[0].n;
+  left === 0 ? ok("P: test rolled back (no rows left)") : fail("P: rows left after test");
+  const kinds = (await db.query(`SELECT count(*)::int n FROM public.game_award_kinds WHERE enabled`)).rows[0].n;
+  kinds === 0 ? ok("P: nothing switched on (no award kind enabled)") : fail(`P: kinds ${kinds}`);
+  await db.exec(`INSERT INTO auth.users (id, email) VALUES ('00000000-0000-0000-0000-0000000a9198', 'keep@x');
+    INSERT INTO public.journal_notes (user_id, id, data) VALUES ('00000000-0000-0000-0000-0000000a9198', 'k1',
+      '{"id":"k1","templateKey":"lesson","body":"Keep.","createdAt":"2026-11-01T10:00:00Z","updatedAt":"2026-11-01T10:00:00Z"}');`);
+  await db.exec(read("supabase/migrations/0016_game_day_api.down.sql"));
+  const col = (await db.query(`SELECT count(*)::int n FROM information_schema.columns WHERE column_name = 'first_seen_at'`)).rows[0].n;
+  const kept = (await db.query(`SELECT count(*)::int n FROM public.journal_notes WHERE id = 'k1'`)).rows[0].n;
+  const open3 = (await db.query(`SELECT count(*)::int n FROM pg_proc WHERE proname = 'game_day_open' AND pronargs = 3`)).rows[0].n;
+  const gone = (await db.query(`SELECT count(*)::int n FROM pg_proc WHERE proname IN ('game_day_status','game_journal_for_check','game_set_trading_days')`)).rows[0].n;
+  col === 0 && kept === 1 && open3 === 1 && gone === 0 ? ok("P: rollback removes the API, keeps the Journal rows, restores the 0015 day") : fail(`P: rollback col ${col} kept ${kept} open3 ${open3} gone ${gone}`);
+  await db.exec(`DELETE FROM auth.users WHERE id = '00000000-0000-0000-0000-0000000a9198'`);
+  try { await db.exec(read("supabase/tests/game_days.sql")); ok("P: 0015 tests pass after the 0016 rollback"); }
+  catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`P: 0015 tests after rollback: ${e.message}`); }
+  await db.close();
+}

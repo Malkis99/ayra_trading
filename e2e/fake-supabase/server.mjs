@@ -39,6 +39,12 @@ export function createFakeSupabase() {
   const journalRows = new Map(); // `${userId}:${table}:${id}` -> { user_id, table, id, data, updated_at }
   let journalReadFailuresLeft = 0; // next N journal reads fail with 500 (the cloud journal is unavailable)
   const myDays = new Map(); // user id -> game_my_day() payload (0015 server day)
+  // 0014–0016 stand-in for the day API routes: off = «migrations not applied» (as on the real Supabase today)
+  let economyInstalled = false;
+  const economies = new Map(); // user id -> { state, game_sync, opening_mode, day }
+  const economyCalls = []; // { fn, user, args } — what the routes asked (never a time or a day)
+  const SERVICE_KEY = "fake-service-key";
+  const FAKE_MODE_MISSIONS = { trading: ["q_bias", "q_riskcheck", "q_reflect"], study: ["m_observation", "m_backtest", "m_lesson"], recovery: ["m_day_state", "m_mistake", "m_plan_tomorrow"] };
   let journalWriteFailuresLeft = 0; // next N journal writes fail with 500 (server trouble)
   // Migration 0009 stand-in: the shared calendar events (everyone reads rows that are not hidden; tests fill them)
   let marketEvents = [];
@@ -216,13 +222,31 @@ export function createFakeSupabase() {
       if (!user || !table) return send(404, { error: "no user/table" });
       const data = await readBody(req);
       journalClock = Math.max(journalClock + 1, Date.now());
-      journalRows.set(`${user.id}:${table}:${data.id}`, { user_id: user.id, table, id: data.id, data, updated_at: new Date(journalClock).toISOString() });
+      const putKey = `${user.id}:${table}:${data.id}`;
+      // 0016 stand-in: the first server trace never changes
+      journalRows.set(putKey, { user_id: user.id, table, id: data.id, data, updated_at: new Date(journalClock).toISOString(), first_seen_at: journalRows.get(putKey)?.first_seen_at || new Date(journalClock).toISOString() });
       if (table === "journal_attachments") trackDeletion(user.id, data);
       return send(200, { ok: true });
     }
     if (path === "/__test/journal-write-delay") {
       journalWriteDelayMs = Number(url.searchParams.get("ms") || 0);
       return send(200, { journalWriteDelayMs });
+    }
+    // 0014–0016 stand-in controls: installed or not; an account's state, flag and opening mode; what the routes asked
+    if (path === "/__test/economy-installed") {
+      economyInstalled = url.searchParams.get("on") === "1";
+      return send(200, { economyInstalled });
+    }
+    if (path === "/__test/economy") {
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      if (!user) return send(404, { error: "no user" });
+      const old = economies.get(user.id) || {};
+      economies.set(user.id, { ...old, state: url.searchParams.get("state") || old.state || "local", game_sync: url.searchParams.get("sync") === "1", opening_mode: url.searchParams.get("mode") || old.opening_mode });
+      return send(200, { ok: true, userId: user.id });
+    }
+    if (path === "/__test/economy-calls") {
+      if (url.searchParams.get("reset")) economyCalls.length = 0;
+      return send(200, [...economyCalls]);
     }
     // 0015 stand-in: the account's server day as game_my_day() returns it (POST body; empty body = no server day)
     if (path === "/__test/my-day" && req.method === "POST") {
@@ -593,7 +617,7 @@ export function createFakeSupabase() {
           const changedAt = Date.parse(r.data.updatedAt || r.data.createdAt);
           if (old && changedAt < Date.parse(old.data.updatedAt || old.data.createdAt)) continue; // last-write-wins: not returned
           journalClock = Math.max(journalClock + 1, Date.now());
-          journalRows.set(key, { user_id: user.id, table, id: r.id, data: r.data, updated_at: new Date(journalClock).toISOString() });
+          journalRows.set(key, { user_id: user.id, table, id: r.id, data: r.data, updated_at: new Date(journalClock).toISOString(), first_seen_at: old?.first_seen_at || new Date(journalClock).toISOString() });
           if (table === "journal_attachments") trackDeletion(user.id, r.data);
           written.push({ id: r.id });
         }
@@ -695,6 +719,73 @@ export function createFakeSupabase() {
       return send(200, !taken);
     }
     // 0015 game_my_day(): the caller's own server day (tests set it with /__test/my-day; none = null, as without 0015)
+    // ---- 0014–0016 stand-in for the server day API routes (service key only). Not installed unless a test says so
+    // (/__test/economy-installed): then every game_* function answers like a missing function, as on the real Supabase.
+    if (path.startsWith("/rest/v1/rpc/game_") && path !== "/rest/v1/rpc/game_my_day") {
+      const fn = path.slice("/rest/v1/rpc/".length);
+      if ((req.headers.authorization || "") !== `Bearer ${SERVICE_KEY}`) return send(401, { code: "42501", message: "permission denied for function " + fn });
+      if (!economyInstalled) return send(404, { code: "PGRST202", message: `Could not find the function public.${fn} in the schema cache` });
+      const body = await readBody(req);
+      const econ = economies.get(body.p_user) || { state: "local", game_sync: false };
+      economyCalls.push({ fn, user: body.p_user, args: Object.keys(body).filter((k) => k !== "p_user") });
+      const refuse = (message) => send(400, { code: "P0001", message });
+      const today = new Date().toISOString().slice(0, 10);
+      const statusOf = () => {
+        if (econ.state !== "cloud_active") return { state: econ.state, game_sync: econ.game_sync, day: null };
+        if (!econ.day) return { state: econ.state, game_sync: econ.game_sync, game_day: today, day: null, opening_mode: econ.opening_mode || "trading", trading_days: econ.trading_days || [0, 1, 2, 3, 4, 5, 6] };
+        return { state: econ.state, game_sync: econ.game_sync, game_day: econ.day.game_day, day: econ.day, replacements_left: 2 - econ.day.replacements.length, day_full: econ.day.paid.length >= 3,
+          missions: econ.day.core.map((m) => ({ id: m, assigned: econ.day.mode !== "rest", accepted: m in econ.day.accepted, paid: econ.day.paid.includes(m), passed: econ.day.passed.includes(m) })) };
+      };
+      const day = () => econ.day;
+      if (fn === "game_day_status") return send(200, statusOf());
+      if (econ.state !== "cloud_active") return refuse("game_account_not_active");
+      if (fn === "game_day_today") return send(200, today);
+      if (fn === "game_day_open") {
+        if (!econ.day) {
+          const mode = econ.opening_mode || "trading";
+          econ.day = { game_day: today, status: "open", mode, mode_before_rest: null, study_first: "m_observation", core: [...FAKE_MODE_MISSIONS[mode]], carried: {}, accepted: {}, passed: [], bonus: body.p_bonus || [], replacements: [], paid: [] };
+          economies.set(body.p_user, econ);
+        }
+        return send(200, { ...econ.day, opened: true });
+      }
+      if (!day()) return refuse("game_day_not_open");
+      if (fn === "game_day_accept") {
+        if (day().mode === "rest") return refuse("game_day_rest");
+        if (!day().core.includes(body.p_mission)) return refuse("game_mission_not_assigned");
+        if (!(body.p_mission in day().accepted)) day().accepted[body.p_mission] = new Date().toISOString();
+        return send(200, { mission: body.p_mission, accepted_at: day().accepted[body.p_mission] });
+      }
+      if (fn === "game_day_pass") {
+        if (!day().core.includes(body.p_mission)) return refuse("game_mission_not_assigned");
+        if (!day().passed.includes(body.p_mission)) day().passed.push(body.p_mission);
+        return send(200, day());
+      }
+      if (fn === "game_day_set_mode") {
+        const m = body.p_mode;
+        if (m === "rest") { day().mode_before_rest = day().mode; day().mode = "rest"; }
+        else { day().mode = m; day().mode_before_rest = null; day().core = [...FAKE_MODE_MISSIONS[m]]; if (body.p_bonus) day().bonus = body.p_bonus; }
+        return send(200, day());
+      }
+      if (fn === "game_day_replace") {
+        if (day().replacements.length >= 2) return refuse("game_replacement_limit");
+        if (!day().bonus.includes(body.p_from)) return refuse("game_not_offered");
+        day().bonus = day().bonus.map((b) => (b === body.p_from ? body.p_to : b));
+        day().replacements.push({ from: body.p_from, to: body.p_to, at: new Date().toISOString() });
+        return send(200, day());
+      }
+      if (fn === "game_set_trading_days") { econ.trading_days_next = body.p_days; return send(200, { next: body.p_days }); }
+      if (fn === "game_journal_for_check") {
+        const rows = (table) => [...journalRows.values()].filter((r) => r.user_id === body.p_user && r.table === table).map((r) => ({
+          id: r.id, data: r.data, updated_at: r.updated_at, client_updated_at: r.data.updatedAt || r.data.createdAt, deleted_at: r.data.deletedAt || null,
+          first_seen_at: r.first_seen_at || null, fp: crypto.createHash("md5").update(JSON.stringify(r.data)).digest("hex") }));
+        const notes = rows("journal_notes");
+        const trades = rows("journal_trades");
+        return send(200, { notes, trades, plans: rows("journal_day_plans"), rows: notes.length + trades.length });
+      }
+      // the mission award kind is disabled (0014, never switched on): the database refuses every award
+      if (fn === "game_apply_reward") return refuse("game_kind_disabled");
+      return send(404, { code: "PGRST202", message: `Could not find the function public.${fn}` });
+    }
     if (path === "/rest/v1/rpc/game_my_day") {
       const user = userFromAuthHeader(req);
       return send(200, user ? myDays.get(user.id) ?? null : null);

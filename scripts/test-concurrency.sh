@@ -19,10 +19,10 @@ q()   { psql -X -q -At -v ON_ERROR_STOP=1 -d "$DB" -c "$1"; }
 
 psql -X -q -d postgres -c "DROP DATABASE IF EXISTS $DB" -c "CREATE DATABASE $DB" >/dev/null || { echo "FAIL cannot create the test database"; exit 2; }
 psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase/tests/stub/supabase_stub.sql >/dev/null || { echo "FAIL stub"; exit 2; }
-for f in 0001_init 0002_profile_defaults 0003_nickname_cooldown 0004_journal_sync 0014_game_economy 0015_game_days; do
+for f in 0001_init 0002_profile_defaults 0003_nickname_cooldown 0004_journal_sync 0014_game_economy 0015_game_days 0016_game_day_api; do
   psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f "supabase/migrations/$f.sql" >/dev/null 2>"$TMP/migr.err" || { echo "FAIL migration $f"; cat "$TMP/migr.err"; exit 2; }
 done
-ok "migrations 0001–0004 + 0014 + 0015 on PostgreSQL $(q 'SHOW server_version')"
+ok "migrations 0001–0004 + 0014 + 0015 + 0016 on PostgreSQL $(q 'SHOW server_version')"
 
 # Users U1…U6, five notes and a day plan each; all activated, the flag on, missions switched on by the owner
 u() { printf '00000000-0000-0000-0000-0000000c0c0%s' "$1"; }
@@ -44,7 +44,8 @@ q "GRANT SELECT ON public.journal_notes, public.journal_day_plans TO service_rol
 for i in 1 2 3 5 6; do q "SET ROLE service_role; SELECT public.game_begin_migration('$(u $i)'); SELECT public.game_activate_cloud('$(u $i)');" >/dev/null; done
 # 0015: the server day is open (study: observation, backtest, lesson) and its missions accepted before any award
 for i in 1 2 3 5 6; do
-  q "SET ROLE service_role; SELECT public.game_day_open('$(u $i)', 'study', '{}');
+  # 0016: the day opens in the mode of the saved trading days (none saved: trading); the study set is taken by a change
+  q "SET ROLE service_role; SELECT public.game_day_open('$(u $i)', '{}'); SELECT public.game_day_set_mode('$(u $i)', 'study');
      SELECT public.game_day_accept('$(u $i)', 'm_lesson'); SELECT public.game_day_accept('$(u $i)', 'm_observation');
      SELECT public.game_day_accept('$(u $i)', 'm_backtest');" >/dev/null || bad "day setup for user $i"
 done
@@ -152,8 +153,8 @@ rows=$(q "SELECT count(*) FROM public.game_ledger WHERE user_id = '$(u 6)'")
 # H. The server day (0015) under concurrency — account U4 (activated in D1)
 # H1. Two devices (10 sessions) open the day at once, with different modes and extras: one day, one answer
 for k in $(seq 1 10); do
-  if [ $((k % 2)) = 0 ]; then echo "SELECT (public.game_day_open('$(u 4)', 'study', '{q_read_pages,q_walk}') - 'opened') ->> 'core';"
-  else echo "SELECT (public.game_day_open('$(u 4)', 'trading', '{q_meditate,q_stretching}') - 'opened') ->> 'core';"; fi
+  if [ $((k % 2)) = 0 ]; then echo "SELECT (public.game_day_open('$(u 4)', '{q_read_pages,q_walk}') - 'opened') ->> 'core';"
+  else echo "SELECT (public.game_day_open('$(u 4)', '{q_meditate,q_stretching}') - 'opened') ->> 'core';"; fi
 done | parallel
 days=$(q "SELECT count(*) FROM public.game_days WHERE user_id = '$(u 4)'")
 # only the result lines (the barrier prints an empty line and "t")
@@ -174,15 +175,26 @@ times=$(q "SELECT count(*) FROM jsonb_object_keys((SELECT accepted FROM public.g
   && ok "H2: the same mission accepted by 10 sessions at once → one acceptance, 9 repeats keep its time" \
   || bad "H2: false=$(count_out false) true=$(count_out true) keys=$times errs=$(cat "$TMP"/out/*.err)"
 
-# H3. Six replacements of the two extras at once: never more than the limit (2), never a replaced extra twice
-for k in 1 2 3; do
-  echo "SELECT jsonb_array_length(public.game_day_replace('$(u 4)', '$B1', 'q_alt_a$k') -> 'replacements');"
-  echo "SELECT jsonb_array_length(public.game_day_replace('$(u 4)', '$B2', 'q_alt_b$k') -> 'replacements');"
-done | parallel
+# H3. Six replacements of the two extras at once, all with quests the catalog allows (0016: the trading pool, no more
+# XP): exactly the limit (2) is applied whatever the order, the rest refused; a replaced or shown quest never twice
+FREE=""
+for c in q_walk q_meditate q_sleep_prep q_stretching q_read_pages q_lang_10m; do
+  [ "$c" = "$B1" ] || [ "$c" = "$B2" ] || FREE="$FREE $c"
+done
+set -- $FREE
+T1=$1; T2=$2; T3=$3; T4=$4
+{
+  echo "SELECT jsonb_array_length(public.game_day_replace('$(u 4)', '$B1', '$T1') -> 'replacements');"
+  echo "SELECT jsonb_array_length(public.game_day_replace('$(u 4)', '$B1', '$T2') -> 'replacements');"
+  echo "SELECT jsonb_array_length(public.game_day_replace('$(u 4)', '$B1', '$T3') -> 'replacements');"
+  echo "SELECT jsonb_array_length(public.game_day_replace('$(u 4)', '$B2', '$T4') -> 'replacements');"
+  echo "SELECT jsonb_array_length(public.game_day_replace('$(u 4)', '$B2', '$T2') -> 'replacements');"
+  echo "SELECT jsonb_array_length(public.game_day_replace('$(u 4)', '$B2', '$T1') -> 'replacements');"
+} | parallel
 reps=$(q "SELECT jsonb_array_length(replacements) FROM public.game_days WHERE user_id = '$(u 4)'")
 okn=$(cat "$TMP"/out/*.out | grep -cE '^[0-9]+$' || true)
-[ "$reps" -le 2 ] && [ "$okn" = "$reps" ] && [ "$(other_errors 'game_replacement_limit|game_not_offered|game_not_replaceable')" = 0 ] \
-  && ok "H3: 6 replacements at once → $reps applied (limit 2), the rest refused" \
+[ -n "$T4" ] && [ "$reps" = 2 ] && [ "$okn" = 2 ] && [ "$(other_errors 'game_replacement_limit|game_not_offered|game_not_replaceable')" = 0 ] \
+  && ok "H3: 6 allowed replacements at once → exactly 2 applied (the limit), the rest refused" \
   || bad "H3: reps=$reps ok=$okn errs=$(cat "$TMP"/out/*.err)"
 
 # H4. Mode changes racing awards: whatever wins, every paid mission keeps a slot, nothing above three, nothing unaccepted
@@ -228,6 +240,41 @@ waited=$(( (t1 - t0) / 1000000 ))
 [ "$waited" -ge 900 ] && [ "$H5_OUT" = study ] && [ ! -s "$TMP/h5a.err" ] \
   && ok "H5: the second device waited ${waited} ms for the first, then applied its change on the fresh day" \
   || bad "H5: waited=${waited}ms out=$H5_OUT err=$(cat "$TMP/h5a.err")"
+
+# J. 0016: the first server trace of a Journal row under concurrency, and the evidence chain of the mission check
+# J1. Two devices send a NEW note at once (10 upserts with different versions): one row, one first trace, never moved
+rm -rf "$TMP/out" && mkdir -p "$TMP/out"
+for k in $(seq 1 10); do
+  ( psql -X -q -At -d "$DB" -c "INSERT INTO public.journal_notes (user_id, id, data) VALUES ('$(u 5)', 'j_race',
+      '{\"id\":\"j_race\",\"templateKey\":\"lesson\",\"body\":\"race $k\",\"createdAt\":\"2026-11-01T10:00:00Z\",\"updatedAt\":\"2026-11-01T10:00:$(printf %02d $k)Z\"}')
+      ON CONFLICT (user_id, id) DO UPDATE SET data = EXCLUDED.data;" >"$TMP/out/$k.out" 2>"$TMP/out/$k.err" ) &
+done
+wait
+first=$(q "SELECT first_seen_at FROM public.journal_notes WHERE user_id = '$(u 5)' AND id = 'j_race'")
+rows=$(q "SELECT count(*) FROM public.journal_notes WHERE user_id = '$(u 5)' AND id = 'j_race'")
+rm -rf "$TMP/out" && mkdir -p "$TMP/out"
+for k in $(seq 11 15); do
+  ( psql -X -q -At -d "$DB" -c "UPDATE public.journal_notes SET data = data || '{\"updatedAt\":\"2026-11-02T10:00:$k\"}', first_seen_at = now() + interval '1 day'
+      WHERE user_id = '$(u 5)' AND id = 'j_race';" >"$TMP/out/$k.out" 2>"$TMP/out/$k.err" ) &
+done
+wait
+after=$(q "SELECT first_seen_at FROM public.journal_notes WHERE user_id = '$(u 5)' AND id = 'j_race'")
+[ "$rows" = 1 ] && [ -n "$first" ] && [ "$first" = "$after" ] && [ "$(other_errors '^$')" = 0 ] \
+  && ok "J1: 10 devices create one note at once → one row, one first trace; 5 concurrent updates (even naming it) never move it" \
+  || bad "J1: rows=$rows first=$first after=$after errs=$(cat "$TMP"/out/*.err)"
+
+# J2. The award accepts exactly the version and fingerprint the mission check reads (game_journal_for_check → game_apply_reward)
+q "INSERT INTO public.journal_notes (user_id, id, data) VALUES ('$(u 5)', 'j_obs',
+   '{\"id\":\"j_obs\",\"templateKey\":\"idea\",\"body\":\"Наблюдение J.\",\"createdAt\":\"2026-11-01T10:00:00Z\",\"updatedAt\":\"2026-11-01T10:00:00Z\"}');" >/dev/null
+J2_OUT=$(psql -X -q -At -d "$DB" -c "SET ROLE service_role;" -c "SELECT public.game_apply_reward('$(u 5)', 'mission', 'm_observation',
+  (SELECT jsonb_build_array(jsonb_build_object('table', 'journal_notes', 'id', n ->> 'id', 'version', n ->> 'client_updated_at', 'fp', n ->> 'fp'))
+     FROM jsonb_array_elements(public.game_journal_for_check('$(u 5)', public.game_day_today('$(u 5)')) -> 'notes') n WHERE n ->> 'id' = 'j_obs')) ->> 'xp';" 2>&1)
+J2_STALE=$(psql -X -q -At -d "$DB" -c "SET ROLE service_role;" -c "SELECT public.game_apply_reward('$(u 5)', 'mission', 'm_backtest',
+  (SELECT jsonb_build_array(jsonb_build_object('table', 'journal_notes', 'id', n ->> 'id', 'version', n ->> 'client_updated_at', 'fp', 'not-the-postgres-md5'))
+     FROM jsonb_array_elements(public.game_journal_for_check('$(u 5)', public.game_day_today('$(u 5)')) -> 'notes') n WHERE n ->> 'id' = 'j_race'));" 2>&1)
+[ "$J2_OUT" = 40 ] && echo "$J2_STALE" | grep -q game_evidence_changed \
+  && ok "J2: the check's Postgres version + md5 fingerprint are accepted by the award; any other fingerprint is refused" \
+  || bad "J2: out=$J2_OUT stale=$J2_STALE"
 
 # F. The login role of the API (like Supabase's authenticator) cannot become the owner or write
 export PGPASSWORD_SAVED="${PGPASSWORD:-}"

@@ -32,6 +32,7 @@ import {
   recordNoteSaved as recordNoteSavedLogic,
   recordScreenshotAdded,
   setDayMode as setDayModeLogic,
+  modeSetPreview,
   setTradingDays as setTradingDaysLogic,
   setWeekChallenge as setWeekChallengeLogic,
   recordWeekBossResult as recordWeekBossResultLogic,
@@ -59,7 +60,10 @@ import { spaceTabChannel } from "@/lib/auth/space-channel";
 import { dayKeyInZone } from "@/lib/day-key";
 import { GameStore, browserLock, revOf, type Change } from "@/lib/game-store";
 import { deviceRewardService, type RewardService } from "@/lib/reward-service";
-import type { DayMode, WeekChallenge } from "@/lib/quest-engine";
+import { generateDaySet, type DayMode, type WeekChallenge } from "@/lib/quest-engine";
+import { givesReward, readStickyMode, rememberMode, serverEconomyOn, type EconomyMode } from "./economy-mode";
+import { serverDay, type DayCall, type ServerDayStatus } from "./server-day-client";
+import { mirrorServerDay } from "./server-day-mirror";
 import type { WeekSnapshot } from "@/lib/day-snapshots";
 import type { PQNoteField, PQResult, PQStartInput } from "@/lib/personal-quests";
 import { browserCommitLog } from "@/lib/storage/game-rev-counter";
@@ -208,6 +212,22 @@ interface GameContextType {
   saveProfileEdits: (edits: { name: string; bio: string; details: ProfileDetails }) => void;
   /** Accounts: the cloud nickname is the source of truth; copies it into the local state without a chronicle entry. */
   syncCloudNickname: (nickname: string) => void;
+  /**
+   * Q4.4: who keeps the economy of this account (lib/economy-mode.ts) and the last notice to show. «local»: the device,
+   * as before. Otherwise the device gives no rewards; for «cloud_active» the game day comes from the server.
+   */
+  economy: EconomyView;
+  /** Q4.4: reads (and, for an account on the server economy, opens) the server's game day. */
+  refreshServerDay: () => Promise<void>;
+}
+
+export interface EconomyView {
+  mode: EconomyMode;
+  gameSync: boolean;
+  /** rewardsPaused | serverRefused | offline (null: nothing to say) */
+  notice: "rewardsPaused" | "serverRefused" | "offline" | null;
+  /** The server's code for «serverRefused». */
+  noticeReason?: string;
 }
 
 export interface QuestCompletion {
@@ -255,6 +275,38 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     isLoadedRef.current = isLoaded;
   }, [isLoaded]);
 
+  // Q4.4: who keeps the economy (the mode only moves forward; «local» = the device, as before)
+  const [economy, setEconomy] = useState<EconomyView>({ mode: "local", gameSync: false, notice: null });
+  // the space the state was last loaded from (guest, or an account after sign-in): the server day is asked again for it
+  const [loadedSpace, setLoadedSpace] = useState<string | null>(null);
+  const economyRef = React.useRef<EconomyView>(economy);
+  const setEconomyView = useCallback((v: Partial<EconomyView>) => {
+    economyRef.current = { ...economyRef.current, ...v };
+    setEconomy(economyRef.current);
+  }, []);
+  const rewardRefusedRef = React.useRef(false);
+  /**
+   * Outside «local» a change that gives a reward (XP, level, Coins, an achievement, a quest newly done, a paid personal
+   * quest) is refused as a whole: the state stays, the caller gets its «not given» answer, the notice explains why.
+   */
+  const guardRewards = useCallback(
+    <R,>(fn: (fresh: GameState) => Change<GameState, R>, failed: R) =>
+      (fresh: GameState): Change<GameState, R> => {
+        const c = fn(fresh);
+        if (economyRef.current.mode !== "local" && givesReward(fresh, c.state)) {
+          rewardRefusedRef.current = true;
+          return { state: fresh, result: failed };
+        }
+        return c;
+      },
+    []
+  );
+  const noteRefusal = useCallback(() => {
+    if (!rewardRefusedRef.current) return;
+    rewardRefusedRef.current = false;
+    setEconomyView({ notice: "rewardsPaused", noticeReason: undefined });
+  }, [setEconomyView]);
+
   // Space the in-memory state was loaded from. State is never written into any other space.
   const loadedSpaceRef = React.useRef<string | null>(null);
   const storeRef = React.useRef<GameStore<GameState> | null>(null);
@@ -274,11 +326,12 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     <R,>(fn: (fresh: GameState) => Change<GameState, R>, failed: R): R => {
       const store = storeRef.current;
       if (!store) return failed; // not loaded yet: nothing is saved, nothing is given
-      const out = store.applySync(gameStateRef.current, fn);
+      const out = store.applySync(gameStateRef.current, guardRewards(fn, failed));
       showState(out.state);
+      noteRefusal();
       return out.saved ? out.result : failed;
     },
-    [showState]
+    [showState, guardRewards, noteRefusal]
   );
 
   /** Changes that give rewards from the Quests page and screenshots: also under the lock shared by all tabs. */
@@ -286,11 +339,12 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     async <R,>(fn: (fresh: GameState) => Change<GameState, R>, failed: R): Promise<R> => {
       const store = storeRef.current;
       if (!store) return failed;
-      const out = await store.applyLocked(() => gameStateRef.current, fn);
+      const out = await store.applyLocked(() => gameStateRef.current, guardRewards(fn, failed));
       showState(out.state);
+      noteRefusal();
       return out.saved ? out.result : failed;
     },
-    [showState]
+    [showState, guardRewards, noteRefusal]
   );
 
   /** A change without a reward; returns false when it could not be saved. */
@@ -327,6 +381,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       const next = storeRef.current.applySync(loaded, (fresh) => ({ state: fresh === loaded ? { ...loaded } : fresh, result: null })).state;
       gameStateRef.current = next;
       setGameStateRaw(next);
+      // the economy mode this device knows for the space (never backwards: lib/economy-mode.ts)
+      economyRef.current = { mode: readStickyMode(), gameSync: false, notice: null };
+      setEconomy(economyRef.current);
+      setLoadedSpace(spaceId);
     } catch {
       gameStateRef.current = INITIAL_GAME_STATE;
       setGameStateRaw(INITIAL_GAME_STATE);
@@ -562,19 +620,110 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     update((prev) => recordJournalTrades(prev, firstTradeDay, new Date()));
   }, [update]);
 
-  // QH-6.6: accepting a mission gives nothing; it only marks the mission as taken for today
+  // Q4.4: the server's answer about the account — the mode (forward only) and, for «cloud_active», its game day
+  const applyServerStatus = useCallback(
+    (st: ServerDayStatus | null) => {
+      if (!st) return;
+      const mode = rememberMode(st.state);
+      setEconomyView({ mode, gameSync: !!st.game_sync });
+      if (mode !== "cloud_active" || !st.day) return;
+      const store = storeRef.current;
+      if (!store) return;
+      // the server's day is copied as it is (not a reward: never XP, Coins or levels; lib/server-day-mirror.ts)
+      const out = store.applySync(gameStateRef.current, (fresh) => ({ state: mirrorServerDay(fresh, st, new Date()), result: true }));
+      showState(out.state);
+    },
+    [setEconomyView, showState]
+  );
+  const noteServerRefusal = useCallback(
+    (r: DayCall) => {
+      if (r.ok) return;
+      if (r.error === "network") setEconomyView({ notice: "offline", noticeReason: undefined });
+      else setEconomyView({ notice: "serverRefused", noticeReason: r.error });
+    },
+    [setEconomyView]
+  );
+  const runCloud = useCallback(
+    async (call: Promise<DayCall>): Promise<DayCall> => {
+      const r = await call;
+      if (r.ok) {
+        applyServerStatus(r.status);
+        setEconomyView({ notice: null, noticeReason: undefined });
+      } else noteServerRefusal(r);
+      return r;
+    },
+    [applyServerStatus, noteServerRefusal, setEconomyView]
+  );
+  const onCloud = () => economyRef.current.mode === "cloud_active";
+
+  const refreshServerDay = useCallback(async () => {
+    if (!serverEconomyOn() || !AppStorage.getActiveSpaceId().startsWith("account:")) return;
+    const r = await serverDay.status();
+    if (!r.ok) {
+      // 404 = the feature is off; 503 = the server economy is not installed: the device keeps what it knows
+      if (r.error === "network") setEconomyView({ notice: "offline", noticeReason: undefined });
+      return;
+    }
+    const st = r.status;
+    applyServerStatus(st);
+    if (st && st.state === "cloud_active" && !st.day && st.game_day && st.opening_mode) {
+      // the server opens the day in the mode of the saved trading days; the app offers the extras of that mode
+      const extras = generateDaySet(gameStateRef.current, st.game_day, st.opening_mode).bonus.slice(0, 2);
+      await runCloud(serverDay.open(extras));
+    }
+  }, [applyServerStatus, runCloud, setEconomyView]);
+
+  useEffect(() => {
+    if (!isLoaded || !serverEconomyOn() || !loadedSpace?.startsWith("account:")) return;
+    void refreshServerDay();
+    const onFocus = () => {
+      if (document.visibilityState === "visible") void refreshServerDay();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [isLoaded, loadedSpace, refreshServerDay]);
+
+  // QH-6.6: accepting a mission gives nothing; it only marks the mission as taken for today (Q4.4: on the server day for
+  // an account on the server economy — the device shows the server's answer)
   const acceptMissionCb = useCallback(
-    (id: string) => applySync((s) => {
-      const res = acceptMission(s, id, new Date());
-      return { state: res.state, result: res.ok };
-    }, false),
-    [applySync]
+    (id: string) => {
+      if (onCloud()) {
+        void runCloud(serverDay.accept(id));
+        return true;
+      }
+      return applySync((s) => {
+        const res = acceptMission(s, id, new Date());
+        return { state: res.state, result: res.ok };
+      }, false);
+    },
+    [applySync, runCloud]
   );
 
   // QH-6.6: «Verify» — the same claim as every mission payment, on the freshest saved state, one tab at a time
   const verifyMissionCb = useCallback(
     async (id: string, data: MissionData) => {
       const now = new Date();
+      // Q4.4: outside «local» the device never pays; the server checks (and pays only once payouts are switched on)
+      const mode = economyRef.current.mode;
+      if (mode !== "local") {
+        const nothing = { paid: false, xp: 0, coins: 0, leveledUp: false, saveFailed: false };
+        if (mode !== "cloud_active" || !economyRef.current.gameSync) return { ...nothing, failure: { reason: "rewardsPaused" } as VerifyFailure };
+        const r = await serverDay.verify(id);
+        void refreshServerDay();
+        if (!r.ok) {
+          const map: Record<string, VerifyFailure["reason"]> = { mission_not_accepted: "notAccepted", day_cap: "dayFull", source_used: "sourceUsed", sync_paused: "rewardsPaused", mission_not_assigned: "notAvailable", day_not_open: "notAvailable", account_not_active: "rewardsPaused" };
+          return { ...nothing, failure: { reason: map[r.error] ?? "serverUnavailable" } as VerifyFailure };
+        }
+        const reason = typeof r.body.reason === "string" ? r.body.reason : "";
+        if (reason === "payout_disabled") return { ...nothing, failure: { reason: "serverPayoutsOff" } as VerifyFailure };
+        if (reason === "not_seen_by_server") return { ...nothing, failure: { reason: "notSeenByServer" } as VerifyFailure };
+        if (r.body.paid === true) return { ...nothing, paid: true }; // the server's XP arrives with its projection (Q4.5)
+        return { ...nothing, failure: { reason: (reason || "notAvailable") as VerifyFailure["reason"] } };
+      }
       const out = await applyLocked((s) => {
         const res = verifyMission(s, id, data, now);
         const day = gameDayKey(res.state, now);
@@ -584,7 +733,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       }, { paid: false, xp: 0, coins: 0, leveledUp: false, newLevel: undefined as number | undefined, failure: undefined as VerifyFailure | undefined, saveFailed: true, shadow: null as { day: string; done: boolean; source?: string } | null });
       // Q4.2 shadow mode: the server repeats the check on the cloud journal, after the app has decided and saved. Not
       // awaited and never applied: nothing in the game changes from the server's answer.
-      if (missionShadowOn() && out.shadow && isMissionId(id)) {
+      if (missionShadowOn() && economyRef.current.mode === "local" && out.shadow && isMissionId(id)) {
         const { shadow, ...rest } = out;
         const source = shadow.source && !shadow.source.startsWith("paid:") ? shadow.source : undefined;
         void sendMissionShadow([{ id, day: shadow.day, done: shadow.done, ...(source ? { source } : {}), ...(rest.failure ? { reason: rest.failure.reason } : {}) }]);
@@ -593,7 +742,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       const { shadow: _shadow, ...rest } = out;
       return rest;
     },
-    [applyLocked]
+    [applyLocked, refreshServerDay]
   );
 
   // A quest ticked by the person (Quests, Home). Quests the app checks itself close only by themselves; a
@@ -633,18 +782,32 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   // A mode change reads the day's rewards on fresh data under the shared lock: another tab's reward cannot slip past it
   const setDayMode = useCallback(
-    (mode: DayMode) =>
-      applyLocked(
+    async (mode: DayMode): Promise<{ ok: boolean; reason?: DayModeFailure | "notSaved" }> => {
+      if (onCloud()) {
+        // the server composes the slots; the app offers the extras of the new mode (the server checks them)
+        const extras = mode === "rest" ? undefined : modeSetPreview(gameStateRef.current, mode, new Date()).bonus.slice(0, 2);
+        const r = await runCloud(serverDay.mode(mode, extras));
+        return r.ok ? { ok: true } : { ok: false, reason: "notSaved" };
+      }
+      return applyLocked(
         (s) => {
           const res = setDayModeLogic(s, mode, new Date());
           return { state: res.ok ? res.state : s, result: { ok: res.ok, reason: res.reason as DayModeFailure | "notSaved" | undefined } };
         },
         { ok: false, reason: "notSaved" as const }
-      ),
-    [applyLocked]
+      );
+    },
+    [applyLocked, runCloud]
   );
 
-  const setTradingDays = useCallback((days: number[]) => update((prev) => setTradingDaysLogic(prev, days)), [update]);
+  const setTradingDays = useCallback(
+    (days: number[]) => {
+      // on the server economy the server keeps them too (from the next game day)
+      if (onCloud()) void runCloud(serverDay.tradingDays(days));
+      return update((prev) => setTradingDaysLogic(prev, days));
+    },
+    [update, runCloud]
+  );
 
   const fixWeekChallenge = useCallback(
     (challenge: WeekChallenge) => {
@@ -729,21 +892,40 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   }, [applySync]);
 
   const passQuest = useCallback((questId: string) => {
+    // a mission of the server day is put off on the server; an extra stays a device mark
+    if (onCloud() && isMissionId(questId)) {
+      void runCloud(serverDay.pass(questId));
+      return;
+    }
     update((prev) => passQuestLogic(prev, questId, new Date()));
-  }, [update]);
+  }, [update, runCloud]);
 
   const replaceQuest = useCallback(
-    (questId: string, shownQuestIds: string[]) =>
-      applyLocked((s) => {
+    async (questId: string, shownQuestIds: string[]): Promise<{ success: boolean; replacementId?: string; reason?: ReplaceQuestFailure | "notSaved" }> => {
+      if (onCloud()) {
+        // the app picks the replacement by its own rules (lib/quests.ts pickReplacement); the server checks it
+        const local = replaceQuestLogic(gameStateRef.current, questId, shownQuestIds, new Date());
+        if (!local.success || !local.replacementId) return { success: false, reason: local.reason };
+        const r = await runCloud(serverDay.replace(questId, local.replacementId));
+        if (r.ok) return { success: true, replacementId: local.replacementId };
+        return { success: false, reason: r.error === "replacement_limit" ? "limit" : r.error === "network" ? "notSaved" : "notReplaceable" };
+      }
+      return applyLocked((s) => {
         const res = replaceQuestLogic(s, questId, shownQuestIds, new Date());
         return { state: res.success ? res.state : s, result: { success: res.success, replacementId: res.replacementId, reason: res.reason as ReplaceQuestFailure | "notSaved" | undefined } };
-      }, { success: false, replacementId: undefined, reason: "notSaved" as const }),
-    [applyLocked]
+      }, { success: false, replacementId: undefined, reason: "notSaved" as const });
+    },
+    [applyLocked, runCloud]
   );
 
   const toggleRestDay = useCallback(() => {
+    if (onCloud()) {
+      const s = gameStateRef.current;
+      void setDayMode(s.isRestDay ? s.questDay?.modeBeforeRest ?? "trading" : "rest");
+      return;
+    }
     update((prev) => toggleRestDayLogic(prev, new Date()));
-  }, [update]);
+  }, [update, setDayMode]);
 
   const claimDailyReward = useCallback(() => {
     return applySync((s) => {
@@ -1001,6 +1183,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         completePersonalQuest,
         saveProfileEdits,
         syncCloudNickname,
+        economy,
+        refreshServerDay,
       }}
     >
       {children}

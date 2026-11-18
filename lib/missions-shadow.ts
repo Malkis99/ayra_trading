@@ -234,7 +234,7 @@ const iso = (v: unknown): number | null => (typeof v === "string" && !Number.isN
  * save / confirmation / review. The server compares it with its own write time: a record cannot have been made later than
  * the server first held this version of it.
  */
-function dayStamp(source: string, rec: Record<string, unknown>, zone: string, day: string): number | null {
+export function dayStamp(source: string, rec: Record<string, unknown>, zone: string, day: string): number | null {
   if (source.startsWith("note:")) return iso(rec.createdAt);
   if (source.startsWith("trade:")) return iso(rec.reviewedAt);
   if (source.endsWith(":review")) return iso((rec.review as Record<string, unknown> | undefined)?.completedAt);
@@ -270,7 +270,7 @@ export function claimKeyOf(source: string): string | null {
 }
 
 /** Cloud rows → the app's MissionData (deleted rows included, as the app reads them; tombstones from `deleted_at`). */
-function toMissionData(journal: CloudJournal, zone: string, schemaVersion: number, skipped: ShadowResult["skipped"]) {
+export function toMissionData(journal: CloudJournal, zone: string, schemaVersion: number, skipped: ShadowResult["skipped"]) {
   const index = new Map<string, CloudRow>();
   const read = <T>(table: ShadowTable, rows: CloudRow[]): T[] => {
     const out: T[] = [];
