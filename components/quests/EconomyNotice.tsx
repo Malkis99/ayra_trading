@@ -14,6 +14,7 @@ export function EconomyNotice() {
   const { economy } = useGame();
   const e = dict.questsPage.q2.quest.economy;
   const lines: Array<{ key: string; text: string; icon: "pause" | "cloud" | "offline" }> = [];
+  if (economy.mode === "migration_scheduled") lines.push({ key: "mode", text: e.scheduled, icon: "pause" });
   if (economy.mode === "migration_pending") lines.push({ key: "mode", text: e.pending, icon: "pause" });
   if (economy.mode === "cloud_active") lines.push({ key: "mode", text: economy.gameSync ? e.cloudOn : e.cloudPaused, icon: economy.gameSync ? "cloud" : "pause" });
   if (economy.notice === "rewardsPaused" && economy.mode !== "local") lines.push({ key: "notice", text: e.rewardsPaused, icon: "pause" });

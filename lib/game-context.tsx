@@ -61,7 +61,8 @@ import { dayKeyInZone } from "@/lib/day-key";
 import { GameStore, browserLock, revOf, type Change } from "@/lib/game-store";
 import { deviceRewardService, type RewardService } from "@/lib/reward-service";
 import { generateDaySet, type DayMode, type WeekChallenge } from "@/lib/quest-engine";
-import { givesReward, readStickyMode, rememberMode, serverEconomyOn, type EconomyMode } from "./economy-mode";
+import { ECONOMY_MODE_KEY, economyBasis, givesReward, laterMode, readStickyMode, rememberMode, resolveEconomyMode, serverEconomyOn, type EconomyBasis, type EconomyMode, type SessionEconomy } from "./economy-mode";
+import { useOptionalAuth } from "@/lib/auth/auth-context";
 import { serverDay, type DayCall, type ServerDayStatus } from "./server-day-client";
 import { mirrorServerDay } from "./server-day-mirror";
 import type { WeekSnapshot } from "@/lib/day-snapshots";
@@ -223,6 +224,8 @@ interface GameContextType {
 
 export interface EconomyView {
   mode: EconomyMode;
+  /** Q4.5-1: on what the mode rests (lib/economy-mode.ts economyBasis) — «unconfirmed» keeps the old behaviour. */
+  basis: EconomyBasis;
   gameSync: boolean;
   /** rewardsPaused | serverRefused | offline (null: nothing to say) */
   notice: "rewardsPaused" | "serverRefused" | "offline" | null;
@@ -276,7 +279,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   }, [isLoaded]);
 
   // Q4.4: who keeps the economy (the mode only moves forward; «local» = the device, as before)
-  const [economy, setEconomy] = useState<EconomyView>({ mode: "local", gameSync: false, notice: null });
+  const [economy, setEconomy] = useState<EconomyView>({ mode: "local", basis: "unconfirmed", gameSync: false, notice: null });
   // the space the state was last loaded from (guest, or an account after sign-in): the server day is asked again for it
   const [loadedSpace, setLoadedSpace] = useState<string | null>(null);
   const economyRef = React.useRef<EconomyView>(economy);
@@ -293,7 +296,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     <R,>(fn: (fresh: GameState) => Change<GameState, R>, failed: R) =>
       (fresh: GameState): Change<GameState, R> => {
         const c = fn(fresh);
-        if (economyRef.current.mode !== "local" && givesReward(fresh, c.state)) {
+        // the latest mode known right now: this tab's, or one another tab has just saved (F2: read at the moment of
+        // the change, not when the tab was opened)
+        const mode = laterMode(economyRef.current.mode, readStickyMode());
+        if (mode !== "local" && givesReward(fresh, c.state)) {
           rewardRefusedRef.current = true;
           return { state: fresh, result: failed };
         }
@@ -304,8 +310,26 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const noteRefusal = useCallback(() => {
     if (!rewardRefusedRef.current) return;
     rewardRefusedRef.current = false;
-    setEconomyView({ notice: "rewardsPaused", noticeReason: undefined });
+    setEconomyView({ mode: laterMode(economyRef.current.mode, readStickyMode()), basis: "marked", notice: "rewardsPaused", noticeReason: undefined });
   }, [setEconomyView]);
+
+  // Q4.5-1: the session's economy mark (app_metadata.ayra_economy, written only by the server)
+  const auth = useOptionalAuth();
+  const sessionEconomy = auth?.sessionEconomy ?? null;
+  const sessionEconomyRef = React.useRef<SessionEconomy | null>(sessionEconomy);
+  sessionEconomyRef.current = sessionEconomy;
+  /** Recomputes the mode of the loaded space from every source (never backwards) and keeps a mark on the device. */
+  const settleEconomy = useCallback(
+    (spaceId: string | null) => {
+      const session = sessionEconomyRef.current;
+      const mode = resolveEconomyMode({ known: laterMode(economyRef.current.mode, readStickyMode()), spaceId, session });
+      if (mode !== "local" && spaceId) rememberMode(mode, spaceId);
+      const matching = session && spaceId === `account:${session.userId}` ? session : null;
+      const basis = economyBasis(mode, matching, Date.now());
+      if (mode !== economyRef.current.mode || basis !== economyRef.current.basis) setEconomyView({ mode, basis });
+    },
+    [setEconomyView]
+  );
 
   // Space the in-memory state was loaded from. State is never written into any other space.
   const loadedSpaceRef = React.useRef<string | null>(null);
@@ -382,7 +406,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       gameStateRef.current = next;
       setGameStateRaw(next);
       // the economy mode this device knows for the space (never backwards: lib/economy-mode.ts)
-      economyRef.current = { mode: readStickyMode(), gameSync: false, notice: null };
+      {
+        const session = sessionEconomyRef.current;
+        const mode = resolveEconomyMode({ known: readStickyMode(), spaceId, session });
+        if (mode !== "local") rememberMode(mode, spaceId);
+        const matching = session && spaceId === `account:${session.userId}` ? session : null;
+        economyRef.current = { mode, basis: economyBasis(mode, matching, Date.now()), gameSync: false, notice: null };
+      }
       setEconomy(economyRef.current);
       setLoadedSpace(spaceId);
     } catch {
@@ -430,6 +460,21 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     });
     return () => unsubscribe();
   }, [reloadGameState]);
+
+  // Q4.5-1 (F2): another tab saved a mode for this space — it holds here at once
+  useEffect(() => {
+    const onMode = (e: StorageEvent) => {
+      if (!e.key || !e.key.endsWith(ECONOMY_MODE_KEY)) return;
+      if (AppStorage.getActiveSpaceId() !== loadedSpaceRef.current) return;
+      settleEconomy(loadedSpaceRef.current);
+    };
+    window.addEventListener("storage", onMode);
+    return () => window.removeEventListener("storage", onMode);
+  }, [settleEconomy]);
+  useEffect(() => {
+    if (!loadedSpaceRef.current) return;
+    settleEconomy(loadedSpaceRef.current);
+  }, [sessionEconomy, settleEconomy]);
 
   // Another tab saved the game: take its copy when it is newer (nothing is written back)
   useEffect(() => {
