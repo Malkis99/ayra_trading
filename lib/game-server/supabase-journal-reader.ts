@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { CloudRow, ShadowTable } from "@/lib/missions-shadow";
+import type { CloudRow, ServerDayView, ShadowTable } from "@/lib/missions-shadow";
 import type { ShadowJournalReader } from "./mission-shadow-handler";
 
 const COLUMNS = "id,data,updated_at,client_updated_at,deleted_at";
@@ -41,6 +41,17 @@ export function supabaseJournalReader(client: SupabaseClient, userId: string): S
       const { data, error } = await client.from(table).select(COLUMNS).eq("user_id", userId).in("id", ids);
       fail(error);
       return (data || []) as unknown as CloudRow[];
+    },
+    // 0015 game_my_day(): the caller's own day (auth.uid(), RLS). Not there (0015 not applied, local account): no day.
+    async myDay() {
+      try {
+        const { data, error } = await client.rpc("game_my_day");
+        if (error || !data || typeof data !== "object") return null;
+        const v = data as ServerDayView;
+        return { current_day: v.current_day ?? null, day: v.day ?? null, paid: Array.isArray(v.paid) ? v.paid : [], claims: Array.isArray(v.claims) ? v.claims : [] };
+      } catch {
+        return null;
+      }
     },
   };
 }

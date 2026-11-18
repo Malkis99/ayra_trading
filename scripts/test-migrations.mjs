@@ -407,3 +407,37 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   gone === 0 && col === 0 && j.journal_tables === 9 && j.cloud_sync_function ? ok("N: rollback removes the economy and keeps 0001–0004") : fail(`N: rollback tables ${gone} column ${col}`);
   await db.close();
 }
+
+// O. 0015: the server game day (Q4.3) on top of 0014 — applied twice; day tests; the mode table matches the app;
+//    rollback restores the 0014 award and keeps 0014; nothing switched on
+{
+  const db = await fresh();
+  for (const f of ["0001_init", "0002_profile_defaults", "0003_nickname_cooldown", "0004_journal_sync", "0014_game_economy"]) await db.exec(read(`supabase/migrations/${f}.sql`));
+  await db.exec(read("supabase/migrations/0015_game_days.sql"));
+  await db.exec(read("supabase/migrations/0015_game_days.sql")); ok("O: 0015 applied twice");
+  try { await db.exec(read("supabase/tests/game_days.sql")); ok("O: tests/game_days.sql passed"); }
+  catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`O: test script: ${e.message}`); }
+  const left = (await db.query(`SELECT (SELECT count(*) FROM public.game_days)::int + (SELECT count(*) FROM public.game_ledger)::int
+    + (SELECT count(*) FROM public.game_shadow_diagnostics)::int AS n`)).rows[0].n;
+  left === 0 ? ok("O: test rolled back (no rows left)") : fail("O: rows left after test");
+  const kinds = (await db.query(`SELECT count(*)::int n FROM public.game_award_kinds WHERE enabled`)).rows[0].n;
+  const active = (await db.query(`SELECT count(*)::int n FROM public.game_accounts`)).rows[0].n;
+  kinds === 0 && active === 0 ? ok("O: nothing switched on (no kind enabled, no account)") : fail(`O: kinds ${kinds} accounts ${active}`);
+  // the three missions of each mode, as lib/missions.ts missionsForMode gives them
+  const modes = Object.fromEntries((await db.query(`SELECT mode, array_agg(mission_id ORDER BY slot) m FROM public.game_mode_missions GROUP BY mode`)).rows.map((r) => [r.mode, r.m.join(",")]));
+  modes.trading === "q_bias,q_riskcheck,q_reflect" && modes.study === "$study_first,m_backtest,m_lesson" && modes.recovery === "m_day_state,m_mistake,m_plan_tomorrow"
+    ? ok("O: missions of each mode match the app") : fail(`O: modes ${JSON.stringify(modes)}`);
+  const lim = (await db.query(`SELECT replacements_per_day FROM public.game_limits`)).rows[0];
+  lim.replacements_per_day === 2 ? ok("O: two replacements a day, as the app") : fail(`O: replacements ${JSON.stringify(lim)}`);
+  await db.exec(read("supabase/migrations/0015_game_days.down.sql"));
+  const gone = (await db.query(`SELECT count(*)::int n FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('game_days','game_mode_missions','game_shadow_diagnostics')`)).rows[0].n;
+  const fnLeft = (await db.query(`SELECT count(*)::int n FROM pg_proc WHERE proname IN ('game_apply_reward_at','game_day_open','game_my_day','game_day_now')`)).rows[0].n;
+  const award = (await db.query(`SELECT prosrc FROM pg_proc WHERE proname = 'game_apply_reward'`)).rows;
+  const ledger = (await db.query(`SELECT count(*)::int n FROM information_schema.tables WHERE table_schema='public' AND table_name='game_ledger'`)).rows[0].n;
+  gone === 0 && fnLeft === 0 && award.length === 1 && /game_day_for\(p_user\)/.test(award[0].prosrc) && ledger === 1
+    ? ok("O: rollback removes the day and restores the 0014 award") : fail(`O: rollback tables ${gone} functions ${fnLeft} award ${award.length}`);
+  // after the rollback 0014's own tests still pass
+  try { await db.exec(read("supabase/tests/game_economy.sql")); ok("O: 0014 tests pass after the 0015 rollback"); }
+  catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`O: 0014 tests after rollback: ${e.message}`); }
+  await db.close();
+}

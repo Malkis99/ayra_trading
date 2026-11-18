@@ -37,6 +37,7 @@ async function handle(req: Request) {
       cloudSync: () => supabaseJournalReader(client!, userId!).cloudSync(),
       allRows: (t, max) => supabaseJournalReader(client!, userId!).allRows(t, max),
       rowsById: (t, ids) => supabaseJournalReader(client!, userId!).rowsById(t, ids),
+      myDay: () => supabaseJournalReader(client!, userId!).myDay(),
     },
     limiter,
     now: () => new Date(),

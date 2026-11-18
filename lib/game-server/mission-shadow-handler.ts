@@ -8,7 +8,7 @@
 import { JOURNAL_CLOUD_MAX_CLOCK_SKEW_MS } from "@/lib/journal/cloud/config";
 import { CURRENT_JOURNAL_SCHEMA_VERSION } from "@/lib/journal/repository";
 import { addDaysToKey } from "@/lib/day-key";
-import { evidenceOf, evidenceStable, parseShadowRequest, serverGameDay, serverZone, shadowValidate, type CloudRow, type ShadowTable } from "@/lib/missions-shadow";
+import { evidenceOf, evidenceStable, parseShadowRequest, serverGameDay, serverZone, shadowValidate, type CloudRow, type ServerDayView, type ShadowTable } from "@/lib/missions-shadow";
 import { SHADOW_FP_ALGO, recordFingerprint } from "./fingerprint";
 import type { RateLimiter } from "./rate-limit";
 
@@ -31,6 +31,8 @@ export interface ShadowJournalReader {
   allRows(table: ShadowTable, max: number): Promise<CloudRow[] | "tooMany">;
   /** The rows with these ids. */
   rowsById(table: ShadowTable, ids: string[]): Promise<CloudRow[]>;
+  /** The account's own server day (0015 game_my_day); null when there is none or 0015 is not applied. Never throws. */
+  myDay(): Promise<ServerDayView | null>;
 }
 
 export interface ShadowDeps {
@@ -88,7 +90,9 @@ export async function handleMissionShadow(req: Request, deps: ShadowDeps): Promi
     if (!(await deps.reader.cloudSync())) return reply(409, { error: "cloud_journal_off" });
     const timezone = await deps.reader.timezone();
     const now = deps.now();
-    const day = serverGameDay(now, serverZone(timezone).zone);
+    const serverDay = await deps.reader.myDay();
+    const zoneDay = serverGameDay(now, serverZone(timezone).zone);
+    const day = serverDay?.current_day && serverDay.current_day > zoneDay ? serverDay.current_day : zoneDay;
     const [notes, trades, plans] = await Promise.all([
       deps.reader.allRows("journal_notes", SHADOW_MAX_ROWS),
       deps.reader.allRows("journal_trades", SHADOW_MAX_ROWS),
@@ -105,6 +109,7 @@ export async function handleMissionShadow(req: Request, deps: ShadowDeps): Promi
       fpAlgo: SHADOW_FP_ALGO,
       schemaVersion: CURRENT_JOURNAL_SCHEMA_VERSION,
       skewMs: JOURNAL_CLOUD_MAX_CLOCK_SKEW_MS,
+      serverDay,
     });
 
     // re-read the evidence: a record changed or deleted during the check makes the answer stale
