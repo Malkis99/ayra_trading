@@ -37,6 +37,7 @@ export function createFakeSupabase() {
   // Migration 0004 stand-in: cloud_sync flag per user and the journal tables (same rules as the server)
   const cloudFlags = new Map(); // user id -> boolean
   const journalRows = new Map(); // `${userId}:${table}:${id}` -> { user_id, table, id, data, updated_at }
+  let journalReadFailuresLeft = 0; // next N journal reads fail with 500 (the cloud journal is unavailable)
   let journalWriteFailuresLeft = 0; // next N journal writes fail with 500 (server trouble)
   // Migration 0009 stand-in: the shared calendar events (everyone reads rows that are not hidden; tests fill them)
   let marketEvents = [];
@@ -221,6 +222,10 @@ export function createFakeSupabase() {
     if (path === "/__test/journal-write-delay") {
       journalWriteDelayMs = Number(url.searchParams.get("ms") || 0);
       return send(200, { journalWriteDelayMs });
+    }
+    if (path === "/__test/fail-journal-reads") {
+      journalReadFailuresLeft = Number(url.searchParams.get("count") || 0);
+      return send(200, { journalReadFailuresLeft });
     }
     if (path === "/__test/fail-journal-writes") {
       journalWriteFailuresLeft = Number(url.searchParams.get("count") || 0);
@@ -526,6 +531,10 @@ export function createFakeSupabase() {
       const user = userFromAuthHeader(req);
       if (!user) return send(401, { code: "PGRST301", message: "JWT required" });
       if (req.method === "GET") {
+        if (journalReadFailuresLeft > 0) {
+          journalReadFailuresLeft--;
+          return send(500, { code: "XX000", message: "fake transient failure" });
+        }
         const since = (url.searchParams.get("updated_at") || "").replace(/^gt\./, "");
         const offset = Number(url.searchParams.get("offset") || 0);
         const limit = Number(url.searchParams.get("limit") || 1000);
@@ -536,7 +545,8 @@ export function createFakeSupabase() {
           .filter((r) => r.user_id === user.id && r.table === table && (!since || r.updated_at > since) && (!ids || ids.has(r.id)))
           .sort((a, b) => a.updated_at.localeCompare(b.updated_at) || a.id.localeCompare(b.id))
           .slice(offset, offset + limit)
-          .map(({ id, data, updated_at }) => ({ id, data, updated_at }));
+          // columns the 0004 trigger fills from data (read by the Q4.2 shadow route; the app ignores them)
+          .map(({ id, data, updated_at }) => ({ id, data, updated_at, client_updated_at: data.updatedAt || data.createdAt || null, deleted_at: data.deletedAt || null }));
         return send(200, rows);
       }
       if (req.method === "POST") {
