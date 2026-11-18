@@ -3,8 +3,10 @@
  * docs/q4-5-1-client-economy-safety.md).
  *
  *   local               — the device (GameStore), exactly as before: XP and Coins are given on the device.
- *   migration_scheduled — the server announced a move (Q4.5-2): the account is marked, NO rewards on the device.
- *   migration_pending   — the progress is being moved to the server: NO rewards anywhere (device or server).
+ *   migration_scheduled — the server announced a move (Q4.5-2). Owner decision 2026-11-18: until the move really
+ *                         starts, the device economy works as before (XP, Coins, achievements); what is earned now is
+ *                         part of the device progress the move will collect (Q4.5-4).
+ *   migration_pending   — the progress is being moved to the server: NO new rewards anywhere (device or server).
  *   cloud_active        — the server keeps the game day and the rewards; the device economy never comes back. With
  *                         game_sync off the server pauses its rewards (and the device still gives none).
  *
@@ -63,8 +65,17 @@ export function rememberMode(reported: EconomyMode, spaceId: string = AppStorage
 
 export const laterMode = (a: EconomyMode, b: EconomyMode): EconomyMode => (ORDER[a] >= ORDER[b] ? a : b);
 
-/** The device gives rewards only in «local». */
-export const deviceRewardsAllowed = (mode: EconomyMode) => mode === "local";
+/** The device gives rewards in «local» and in «migration_scheduled» (owner decision 2026-11-18), never after the move started. */
+export const deviceRewardsAllowed = (mode: EconomyMode) => mode === "local" || mode === "migration_scheduled";
+
+/**
+ * The reward gate, decided at the moment of the change by the LATEST of every mode known then (this tab's memory and
+ * what another tab may have just saved): a change that gives a reward is refused once any of them says the move started.
+ */
+export function refusesReward(prev: GameState, next: GameState, ...known: EconomyMode[]): boolean {
+  const mode = known.reduce<EconomyMode>((a, b) => laterMode(a, b), "local");
+  return !deviceRewardsAllowed(mode) && givesReward(prev, next);
+}
 
 /* ------------------------------------------------------------------ the session's mark (Q4.5-1) */
 
@@ -97,7 +108,8 @@ export function sessionEconomyOf(
 
 /**
  * On what the device's answer rests (diagnostics and the notice; rewards depend on the mode alone):
- *   marked      — a mark from the device record, the session or the server: no device rewards;
+ *   marked      — a mark from the device record, the session or the server (rewards then follow the mode:
+ *                 «scheduled» still pays on the device, «pending» and «cloud» never);
  *   confirmed   — no mark, and the session was verified by the auth server while its token is still valid;
  *   unconfirmed — no mark, but nothing fresh says so (offline, an expired or never-verified token, the server not
  *                 asked). The old behaviour stays (device rewards); this is exactly the gap Q4.5-2 and Q4.5-4 close.

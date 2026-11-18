@@ -61,7 +61,7 @@ import { dayKeyInZone } from "@/lib/day-key";
 import { GameStore, browserLock, revOf, type Change } from "@/lib/game-store";
 import { deviceRewardService, type RewardService } from "@/lib/reward-service";
 import { generateDaySet, type DayMode, type WeekChallenge } from "@/lib/quest-engine";
-import { ECONOMY_MODE_KEY, economyBasis, givesReward, laterMode, readStickyMode, rememberMode, resolveEconomyMode, serverEconomyOn, type EconomyBasis, type EconomyMode, type SessionEconomy } from "./economy-mode";
+import { ECONOMY_MODE_KEY, deviceRewardsAllowed, economyBasis, laterMode, readStickyMode, refusesReward, rememberMode, resolveEconomyMode, serverEconomyOn, type EconomyBasis, type EconomyMode, type SessionEconomy } from "./economy-mode";
 import { useOptionalAuth } from "@/lib/auth/auth-context";
 import { serverDay, type DayCall, type ServerDayStatus } from "./server-day-client";
 import { mirrorServerDay } from "./server-day-mirror";
@@ -297,9 +297,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       (fresh: GameState): Change<GameState, R> => {
         const c = fn(fresh);
         // the latest mode known right now: this tab's, or one another tab has just saved (F2: read at the moment of
-        // the change, not when the tab was opened)
-        const mode = laterMode(economyRef.current.mode, readStickyMode());
-        if (mode !== "local" && givesReward(fresh, c.state)) {
+        // the change, not when the tab was opened) — a «scheduled» tab never pays once another tab saw «pending»
+        if (refusesReward(fresh, c.state, economyRef.current.mode, readStickyMode())) {
           rewardRefusedRef.current = true;
           return { state: fresh, result: failed };
         }
@@ -752,9 +751,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const verifyMissionCb = useCallback(
     async (id: string, data: MissionData) => {
       const now = new Date();
-      // Q4.4: outside «local» the device never pays; the server checks (and pays only once payouts are switched on)
-      const mode = economyRef.current.mode;
-      if (mode !== "local") {
+      // Q4.4: once the move started the device never pays; the server checks (and pays only once payouts are on).
+      // «migration_scheduled» still pays on the device (owner decision 2026-11-18). The latest known mode decides.
+      const mode = laterMode(economyRef.current.mode, readStickyMode());
+      if (!deviceRewardsAllowed(mode)) {
         const nothing = { paid: false, xp: 0, coins: 0, leveledUp: false, saveFailed: false };
         if (mode !== "cloud_active" || !economyRef.current.gameSync) return { ...nothing, failure: { reason: "rewardsPaused" } as VerifyFailure };
         const r = await serverDay.verify(id);
@@ -778,7 +778,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       }, { paid: false, xp: 0, coins: 0, leveledUp: false, newLevel: undefined as number | undefined, failure: undefined as VerifyFailure | undefined, saveFailed: true, shadow: null as { day: string; done: boolean; source?: string } | null });
       // Q4.2 shadow mode: the server repeats the check on the cloud journal, after the app has decided and saved. Not
       // awaited and never applied: nothing in the game changes from the server's answer.
-      if (missionShadowOn() && economyRef.current.mode === "local" && out.shadow && isMissionId(id)) {
+      if (missionShadowOn() && deviceRewardsAllowed(economyRef.current.mode) && out.shadow && isMissionId(id)) {
         const { shadow, ...rest } = out;
         const source = shadow.source && !shadow.source.startsWith("paid:") ? shadow.source : undefined;
         void sendMissionShadow([{ id, day: shadow.day, done: shadow.done, ...(source ? { source } : {}), ...(rest.failure ? { reason: rest.failure.reason } : {}) }]);

@@ -10,6 +10,7 @@ const FAKE_SUPABASE = "http://127.0.0.1:54329";
 // keep the device economy exactly as before.
 
 const LESSON = "Урок: я жду закрытия свечи над уровнем, прежде чем входить в сделку по плану.";
+const IDEA = "Наблюдение: после новостей цена дважды возвращалась к утреннему уровню и только потом шла по тренду.";
 const game = (page: Page, id: string) => page.evaluate((u) => JSON.parse(localStorage.getItem(`ayra:${u}:ayra_demo_v1`) || "{}"), id);
 const economy = (g: Record<string, unknown>) => ({ xp: g.xp, level: g.level, coins: g.coins, history: (g.history as unknown[] | undefined)?.length ?? 0 });
 const stickyMode = (page: Page, id: string) => page.evaluate((u) => localStorage.getItem(`ayra:${u}:ayra_economy_mode`), id);
@@ -33,7 +34,7 @@ async function newAccount(page: Page, request: APIRequestContext) {
 async function seedDay(page: Page, userId: string) {
   const at = new Date().toISOString();
   await page.evaluate(
-    ({ id, at, body }) => {
+    ({ id, at, body, idea }) => {
       localStorage.setItem(`ayra:${id}:ayra_sync_state`, JSON.stringify({ initialSyncAt: "2026-10-01T00:00:00.000Z", lastSyncAt: "2026-10-01T00:00:00.000Z" }));
       const gk = `ayra:${id}:ayra_demo_v1`;
       const g = JSON.parse(localStorage.getItem(gk) || "{}");
@@ -43,15 +44,19 @@ async function seedDay(page: Page, userId: string) {
       g.lastQuestDate = today;
       g.journalFirstTradeDay = null;
       g.questDay = { day: today, mode: "study", catalogVersion: 3, core: ["m_observation", "m_backtest", "m_lesson"], bonus: ["q_read_pages", "q_logic_puzzle"], studyFirst: "m_observation" };
-      g.questAccepted = { day: today, at: { m_lesson: at } };
+      g.questAccepted = { day: today, at: { m_lesson: at, m_observation: at } };
       g.completedQuestsToday = {};
       localStorage.setItem(gk, JSON.stringify(g));
       const jk = `ayra:${id}:ayra_journal_v1`;
       const j = JSON.parse(localStorage.getItem(jk) || "{}");
-      j.notes = [...(j.notes || []).filter((n: { id: string }) => n.id !== "n_mark_lesson"), { id: "n_mark_lesson", templateKey: "lesson", title: "", body, tags: [], pinned: false, createdAt: at, updatedAt: at, archivedAt: null }];
+      j.notes = [
+        ...(j.notes || []).filter((n: { id: string }) => n.id !== "n_mark_lesson" && n.id !== "n_mark_idea"),
+        { id: "n_mark_lesson", templateKey: "lesson", title: "", body, tags: [], pinned: false, createdAt: at, updatedAt: at, archivedAt: null },
+        { id: "n_mark_idea", templateKey: "idea", title: "", body: idea, tags: [], pinned: false, createdAt: at, updatedAt: at, archivedAt: null },
+      ];
       localStorage.setItem(jk, JSON.stringify(j));
     },
-    { id: userId, at, body: LESSON }
+    { id: userId, at, body: LESSON, idea: IDEA }
   );
 }
 
@@ -181,6 +186,36 @@ test.describe("Q4.5-1 the economy mark from the session (fake Supabase)", () => 
     await expect(card.getByTestId("quest-verify-failure")).toContainText("Начисления сейчас приостановлены");
     await page.waitForTimeout(600);
     expect(economy(await game(page, userId))).toEqual(economy(before));
+  });
+
+  test("migration_scheduled: rewards as usual and a notice of the coming move; once a tab learns pending, the next reward is refused and the earlier one stays", async ({ page, request, context }) => {
+    const { email, userId } = await newAccount(page, request);
+    await mark(request, email, "migration_scheduled");
+    await seedDay(page, userId);
+    // the notice says a move is coming — and does not say rewards stopped
+    const card = await lessonCard(page);
+    await expect(page.getByTestId("economy-line-mode")).toHaveText("Скоро прогресс будет перенесён в облако. До начала переноса XP и Coins начисляются как обычно и войдут в перенос.");
+    expect(await stickyMode(page, userId)).toBe("migration_scheduled");
+    const before = await game(page, userId);
+    await card.getByTestId("quest-verify").click();
+    await expect(card).toHaveAttribute("data-done", "true");
+    const paid = await game(page, userId);
+    expect(paid.coins - before.coins).toBe(10);
+    const earned = (paid.history as Array<{ questId: string; xp: number; coins: number; completedAt: string }>).filter((h) => h.questId === "m_lesson");
+    expect(earned).toHaveLength(1); // kept in the device progress the move will collect (Q4.5-4)
+    // another tab learns that the move started (a server answer saved as the device record — no session change here)
+    const second = await context.newPage();
+    await second.goto("/quests");
+    await expect(second.getByTestId("missions")).toBeVisible();
+    await second.evaluate((u) => localStorage.setItem(`ayra:${u}:ayra_economy_mode`, "migration_pending"), userId);
+    const obs = page.getByTestId("quest-card-m_observation");
+    await expect(obs).toHaveAttribute("data-quest", "ready");
+    await obs.getByTestId("quest-verify").click();
+    await expect(obs.getByTestId("quest-verify-failure")).toContainText("Начисления сейчас приостановлены");
+    await page.waitForTimeout(600);
+    const after = await game(page, userId);
+    expect(economy(after)).toEqual(economy(paid));
+    expect((after.history as Array<{ questId: string }>).filter((h) => h.questId === "m_lesson")).toHaveLength(1);
   });
 
   test("account change: the mark stays with its account; another account on the same device is not affected", async ({ page, request }) => {

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { AppStorage } from "./storage";
+import { INITIAL_GAME_STATE, type GameState } from "./game";
 import {
   ECONOMY_MODE_KEY,
   claimOf,
@@ -7,6 +8,7 @@ import {
   economyBasis,
   laterMode,
   readStickyMode,
+  refusesReward,
   rememberMode,
   resolveEconomyMode,
   sessionEconomyOf,
@@ -58,10 +60,10 @@ describe("Q4.5-1 the mode in force — the latest of every source", () => {
     expect(resolveEconomyMode({ known: "local", spaceId: "guest", session: session("cloud_active") })).toBe("local");
   });
 
-  it("the order: local < scheduled < pending < cloud; only local gives device rewards", () => {
+  it("the order: local < scheduled < pending < cloud; local and scheduled give device rewards (owner decision 2026-11-18)", () => {
     expect(laterMode("migration_scheduled", "migration_pending")).toBe("migration_pending");
     expect(laterMode("cloud_active", "migration_scheduled")).toBe("cloud_active");
-    expect((["local", "migration_scheduled", "migration_pending", "cloud_active"] as EconomyMode[]).map(deviceRewardsAllowed)).toEqual([true, false, false, false]);
+    expect((["local", "migration_scheduled", "migration_pending", "cloud_active"] as EconomyMode[]).map(deviceRewardsAllowed)).toEqual([true, true, false, false]);
   });
 });
 
@@ -95,3 +97,28 @@ describe("Q4.5-1 the device record follows the session", () => {
     expect(resolveEconomyMode({ known: readStickyMode(), spaceId: `account:${A}`, session: session(null) })).toBe("migration_pending");
   });
 });
+
+const state = (over: Partial<GameState> = {}): GameState => ({ ...INITIAL_GAME_STATE, lastQuestDate: "2026-11-20", completedQuestsToday: {}, ...over });
+
+describe("Q4.5-1 the reward gate at the moment of the change", () => {
+  const reward = [state(), state({ xp: 40, coins: 10, completedQuestsToday: { m_lesson: true } })] as const;
+  const noReward = [state(), state({ questAccepted: { day: "2026-11-20", at: { m_lesson: "x" } } })] as const;
+
+  it("scheduled: a reward is given as before; pending and cloud: refused", () => {
+    expect(refusesReward(...reward, "migration_scheduled")).toBe(false);
+    expect(refusesReward(...reward, "local")).toBe(false);
+    expect(refusesReward(...reward, "migration_pending")).toBe(true);
+    expect(refusesReward(...reward, "cloud_active")).toBe(true);
+  });
+
+  it("the race: this tab still says scheduled, another tab has just saved pending — the reward is refused", () => {
+    expect(refusesReward(...reward, "migration_scheduled", "migration_pending")).toBe(true);
+    expect(refusesReward(...reward, "migration_pending", "migration_scheduled")).toBe(true); // the order does not matter
+    expect(refusesReward(...reward, "local", "cloud_active")).toBe(true);
+  });
+
+  it("a change without a reward (an acceptance) is never refused, in any mode", () => {
+    for (const m of ["local", "migration_scheduled", "migration_pending", "cloud_active"] as EconomyMode[]) expect(refusesReward(...noReward, m)).toBe(false);
+  });
+});
+
