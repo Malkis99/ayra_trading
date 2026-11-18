@@ -17,6 +17,10 @@ const env = {
   NEXT_PUBLIC_MARKET_RELEASE_CHECKS: "1",
   // Q4.2: the shadow mission check is tested here (production keeps it off until the owner turns it on)
   NEXT_PUBLIC_AYRA_MISSION_SHADOW: "1",
+  // Q4.4: the server day API and the switch of the economy owner are tested here (production keeps them off); the
+  // fake server answers like the real Supabase without 0014–0016 unless a test installs its stand-in
+  NEXT_PUBLIC_AYRA_SERVER_ECONOMY: "1",
+  SUPABASE_SERVICE_ROLE_KEY: "fake-service-key",
 };
 delete env.AYRA_E2E_AUTH_MOCK;
 delete env.NEXT_PUBLIC_AYRA_E2E_AUTH_MOCK;
