@@ -147,6 +147,18 @@ F_OUT=$(PGPASSWORD=authenticator-test-only psql -X -q -At -h "$PGHOST" -U authen
   -c "SET ayra.game_writer = 'on'; INSERT INTO public.game_ledger (user_id, idempotency_key, kind, rule_code, game_day, xp, coins, rules_version, result) VALUES ('$(u 1)', 'mission:2099-01-01:forged', 'mission', 'mission', current_date, 40, 10, 'q4.1', '{}');" 2>&1)
 echo "$F_OUT" | grep -q "permission denied for table game_ledger" && ok "F2: service_role with a hand-set writer mark cannot insert into the ledger" || bad "F2: $F_OUT"
 
+# G. Deletion: an unrelated nested trigger cannot erase history; deleting the account removes it (cascade as the owner)
+G_OUT=$(psql -X -q -At -d "$DB" -c "CREATE TABLE public.purge_probe (id int);
+  CREATE FUNCTION public.purge_probe_fn() RETURNS trigger LANGUAGE plpgsql AS \$\$ BEGIN DELETE FROM public.game_ledger WHERE user_id = '$(u 3)'; RETURN NEW; END \$\$;
+  CREATE TRIGGER purge_probe_tr AFTER INSERT ON public.purge_probe FOR EACH ROW EXECUTE FUNCTION public.purge_probe_fn();" -c "INSERT INTO public.purge_probe VALUES (1);" 2>&1)
+rows=$(q "SELECT count(*) FROM public.game_ledger WHERE user_id = '$(u 3)'")
+echo "$G_OUT" | grep -q game_write_only_through_functions && [ "$rows" = 3 ]   && ok "G1: a nested trigger of another table cannot delete ledger rows (history intact: $rows rows)" || bad "G1: rows=$rows $G_OUT"
+q "DELETE FROM auth.users WHERE id = '$(u 3)'" >/dev/null 2>"$TMP/g2.err"
+left=$(q "SELECT (SELECT count(*) FROM public.game_ledger WHERE user_id = '$(u 3)') + (SELECT count(*) FROM public.game_profile WHERE user_id = '$(u 3)')
+  + (SELECT count(*) FROM public.game_source_claims WHERE user_id = '$(u 3)') + (SELECT count(*) FROM public.game_accounts WHERE user_id = '$(u 3)')")
+others=$(q "SELECT count(*) FROM public.game_ledger WHERE user_id = '$(u 1)'")
+[ "$left" = 0 ] && [ "$others" = 1 ] && [ ! -s "$TMP/g2.err" ]   && ok "G2: deleting the account removes its ledger, projection, claims and state; other accounts keep theirs"   || bad "G2: left=$left others=$others err=$(cat "$TMP/g2.err")"
+
 psql -X -q -d postgres -c "DROP DATABASE IF EXISTS $DB" >/dev/null
 rm -rf "$TMP"
 [ "$FAILED" = 0 ] && echo "ALL CONCURRENCY TESTS PASSED" || echo "SOME CONCURRENCY TESTS FAILED"
