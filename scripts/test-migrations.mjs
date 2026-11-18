@@ -396,7 +396,7 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   const lv = (await db.query(`SELECT public.game_level_for_xp(0) a, public.game_level_for_xp(119) b, public.game_level_for_xp(120) c, public.game_level_for_xp(280) d, public.game_level_for_xp(279) e`)).rows[0];
   lv.a === 1 && lv.b === 1 && lv.c === 2 && lv.d === 3 && lv.e === 2 ? ok("N: level formula") : fail(`N: level formula ${JSON.stringify(lv)}`);
   // the owner's rule change survives a re-run
-  await db.exec(`UPDATE public.game_reward_rules SET xp = 41 WHERE code = 'mission'`);
+  await db.exec(`SET ROLE game_economy_owner; UPDATE public.game_reward_rules SET xp = 41 WHERE code = 'mission'; RESET ROLE;`);
   await db.exec(read("supabase/migrations/0014_game_economy.sql"));
   const kept = (await db.query(`SELECT xp FROM public.game_reward_rules WHERE code = 'mission'`)).rows[0].xp;
   kept === 41 ? ok("N: re-run keeps the owner's rules") : fail(`N: re-run reset the rule to ${kept}`);

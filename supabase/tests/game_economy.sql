@@ -1,5 +1,5 @@
--- AYRA Trading — tests for 0014 (server economy schema, Q4.1). Run on a TEST database; everything is rolled back.
--- Every check raises an exception when it fails, so a clean run means all passed.
+-- AYRA Trading — tests for 0014 (server economy schema, Q4.1 + security review). Run on a TEST database; everything is
+-- rolled back. Every check raises an exception when it fails, so a clean run means all passed.
 BEGIN;
 
 -- Users: A (Tbilisi), B (UTC). Profiles come from the sign-up trigger (0001/0002).
@@ -10,13 +10,27 @@ ON CONFLICT (id) DO NOTHING;
 UPDATE public.profiles SET timezone = 'Asia/Tbilisi' WHERE id = '00000000-0000-0000-0000-00000000ec01';
 -- As in Supabase, the service role (the server route) may read the Journal to build the evidence it checked; the PGlite
 -- stub has no such default grants. Rolled back with the test.
-GRANT SELECT ON public.journal_notes TO service_role;
+GRANT SELECT ON public.journal_notes, public.journal_day_plans, public.journal_trades TO service_role;
 
--- Journal notes in the cloud: A has two, B has one (evidence for missions)
+-- Journal rows in the cloud (evidence for missions)
 INSERT INTO public.journal_notes (user_id, id, data) VALUES
-  ('00000000-0000-0000-0000-00000000ec01', 'n_a1', '{"id":"n_a1","templateKey":"lesson","body":"Урок: жду закрытия свечи над уровнем и только потом вхожу по плану.","createdAt":"2026-11-01T10:00:00Z","updatedAt":"2026-11-01T10:00:00Z"}'),
-  ('00000000-0000-0000-0000-00000000ec01', 'n_a2', '{"id":"n_a2","templateKey":"lesson","body":"Урок два: стоп за структурой, размер позиции от стопа.","createdAt":"2026-11-01T11:00:00Z","updatedAt":"2026-11-01T11:00:00Z"}'),
-  ('00000000-0000-0000-0000-00000000ec02', 'n_b1', '{"id":"n_b1","templateKey":"lesson","body":"Урок B.","createdAt":"2026-11-01T10:00:00Z","updatedAt":"2026-11-01T10:00:00Z"}');
+  ('00000000-0000-0000-0000-00000000ec01', 'n_a1', '{"id":"n_a1","templateKey":"lesson","body":"Урок: жду закрытия свечи над уровнем.","createdAt":"2026-11-01T10:00:00Z","updatedAt":"2026-11-01T10:00:00Z"}'),
+  ('00000000-0000-0000-0000-00000000ec01', 'n_a2', '{"id":"n_a2","templateKey":"lesson","body":"Урок два.","createdAt":"2026-11-01T11:00:00Z","updatedAt":"2026-11-01T11:00:00Z"}'),
+  ('00000000-0000-0000-0000-00000000ec02', 'n_b1', '{"id":"n_b1","templateKey":"lesson","body":"Урок B.","createdAt":"2026-11-01T10:00:00Z","updatedAt":"2026-11-01T10:00:00Z"}'),
+  ('00000000-0000-0000-0000-00000000ec02', 'n_b2', '{"id":"n_b2","templateKey":"lesson","body":"Урок B два.","createdAt":"2026-11-01T11:00:00Z","updatedAt":"2026-11-01T11:00:00Z"}');
+INSERT INTO public.journal_day_plans (user_id, id, data) VALUES
+  ('00000000-0000-0000-0000-00000000ec01', '2026-11-01', '{"date":"2026-11-01","bias":[],"levels":[],"createdAt":"2026-11-01T07:00:00Z","updatedAt":"2026-11-01T07:00:00Z"}'),
+  ('00000000-0000-0000-0000-00000000ec02', '2026-11-01', '{"date":"2026-11-01","bias":[],"levels":[],"createdAt":"2026-11-01T07:00:00Z","updatedAt":"2026-11-01T07:00:00Z"}');
+
+-- The evidence the route would pass for a row it read
+CREATE OR REPLACE FUNCTION pg_temp.ev(p_table TEXT, p_user UUID, p_id TEXT) RETURNS JSONB AS $$
+DECLARE v JSONB;
+BEGIN
+  EXECUTE format('SELECT jsonb_build_array(jsonb_build_object(''table'', %L, ''id'', id, ''version'', client_updated_at, ''fp'', md5(data::text))) FROM public.%I WHERE user_id = $1 AND id = $2', p_table, p_table)
+    INTO v USING p_user, p_id;
+  RETURN v;
+END $$ LANGUAGE plpgsql;
+GRANT EXECUTE ON FUNCTION pg_temp.ev(TEXT, UUID, TEXT) TO service_role;
 
 --------------------------------------------------------------------------------
 -- 1. Anonymous: sees nothing, writes nothing, calls nothing
@@ -32,7 +46,7 @@ BEGIN
   BEGIN PERFORM 1 FROM public.game_profile; EXCEPTION WHEN insufficient_privilege THEN v_blocked := TRUE; END;
   IF NOT v_blocked THEN RAISE EXCEPTION 'AN2: anon must not read projections'; END IF;
   v_blocked := FALSE;
-  BEGIN PERFORM public.game_apply_reward('00000000-0000-0000-0000-00000000ec01', 'mission:2026-11-20:q_bias', 'mission');
+  BEGIN PERFORM public.game_apply_reward('00000000-0000-0000-0000-00000000ec01', 'mission', 'm_lesson');
   EXCEPTION WHEN insufficient_privilege THEN v_blocked := TRUE; END;
   IF NOT v_blocked THEN RAISE EXCEPTION 'AN3: anon must not call the award'; END IF;
   v_blocked := FALSE;
@@ -42,7 +56,40 @@ END $$;
 RESET ROLE;
 
 --------------------------------------------------------------------------------
--- 2. Service: the state machine. «local» gets nothing; migration_pending gets nothing; cloud_active + flag gets awards
+-- 2. Fail-closed: as installed, nothing can be awarded; unimplemented kinds stay refused even when «enabled»
+--------------------------------------------------------------------------------
+SET LOCAL ROLE service_role;
+DO $$
+DECLARE v_err TEXT;
+BEGIN
+  BEGIN PERFORM public.game_apply_reward('00000000-0000-0000-0000-00000000ec01', 'mission', 'm_lesson'); v_err := 'none';
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
+  IF v_err <> 'game_kind_disabled' THEN RAISE EXCEPTION 'F1: mission is off as installed, got %', v_err; END IF;
+END $$;
+RESET ROLE;
+-- the owner (admin, SET ROLE) turns every kind on — the unimplemented ones must still be refused
+SET LOCAL ROLE game_economy_owner;
+UPDATE public.game_award_kinds SET enabled = TRUE;
+RESET ROLE;
+SET LOCAL ROLE service_role;
+DO $$
+DECLARE
+  k TEXT;
+  v_err TEXT;
+BEGIN
+  FOREACH k IN ARRAY ARRAY['personal_quest', 'self_report', 'daily_reward', 'first_action', 'journal_xp', 'achievement'] LOOP
+    BEGIN PERFORM public.game_apply_reward('00000000-0000-0000-0000-00000000ec01', k, 'anything'); v_err := 'none';
+    EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
+    IF v_err <> 'game_kind_not_implemented' THEN RAISE EXCEPTION 'F2: % must stay refused until its server validation exists, got %', k, v_err; END IF;
+  END LOOP;
+  BEGIN PERFORM public.game_apply_reward('00000000-0000-0000-0000-00000000ec01', 'xp_boost', 'x'); v_err := 'none';
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
+  IF v_err <> 'game_unknown_kind' THEN RAISE EXCEPTION 'F3: unknown kind, got %', v_err; END IF;
+END $$;
+RESET ROLE;
+
+--------------------------------------------------------------------------------
+-- 3. The state machine: «local» and «migration_pending» get nothing; flag off = paused; cloud_active is one way
 --------------------------------------------------------------------------------
 SET LOCAL ROLE service_role;
 DO $$
@@ -51,33 +98,31 @@ DECLARE
   c_b CONSTANT UUID := '00000000-0000-0000-0000-00000000ec02';
   v_err TEXT;
 BEGIN
-  -- no account row = local: refused
-  BEGIN PERFORM public.game_apply_reward(c_a, 'daily:2026-11-20', 'daily_reward_1'); v_err := 'none';
+  BEGIN PERFORM public.game_apply_reward(c_a, 'mission', 'm_lesson', pg_temp.ev('journal_notes', c_a, 'n_a1')); v_err := 'none';
   EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
   IF v_err <> 'game_account_not_active' THEN RAISE EXCEPTION 'S1: local account must get nothing, got %', v_err; END IF;
-
   IF public.game_begin_migration(c_a) <> 'migration_pending' THEN RAISE EXCEPTION 'S2: begin migration'; END IF;
-  BEGIN PERFORM public.game_apply_reward(c_a, 'daily:2026-11-20', 'daily_reward_1'); v_err := 'none';
+  BEGIN PERFORM public.game_apply_reward(c_a, 'mission', 'm_lesson', pg_temp.ev('journal_notes', c_a, 'n_a1')); v_err := 'none';
   EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
   IF v_err <> 'game_account_not_active' THEN RAISE EXCEPTION 'S3: pending account must get nothing, got %', v_err; END IF;
-
   IF public.game_activate_cloud(c_a) <> 'cloud_active' THEN RAISE EXCEPTION 'S4: activate'; END IF;
   IF public.game_activate_cloud(c_a) <> 'cloud_active' THEN RAISE EXCEPTION 'S5: activate is idempotent'; END IF;
-  -- flag off: paused, never back to local
-  BEGIN PERFORM public.game_apply_reward(c_a, 'daily:2026-11-20', 'daily_reward_1'); v_err := 'none';
+  BEGIN PERFORM public.game_apply_reward(c_a, 'mission', 'm_lesson', pg_temp.ev('journal_notes', c_a, 'n_a1')); v_err := 'none';
   EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
   IF v_err <> 'game_sync_paused' THEN RAISE EXCEPTION 'S6: flag off must pause, got %', v_err; END IF;
-
-  -- one way: cloud_active never goes back (even for the service)
-  BEGIN UPDATE public.game_accounts SET state = 'local' WHERE user_id = c_a; v_err := 'none';
-  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
-  IF v_err <> 'game_state_one_way' THEN RAISE EXCEPTION 'S7: cloud_active must be one way, got %', v_err; END IF;
-  -- begin migration on an active account changes nothing
-  IF public.game_begin_migration(c_a) <> 'cloud_active' THEN RAISE EXCEPTION 'S8: begin on active must keep it'; END IF;
-
-  -- B: activated too (for cross-user checks); both flags on
+  IF public.game_begin_migration(c_a) <> 'cloud_active' THEN RAISE EXCEPTION 'S7: begin on an active account must keep it'; END IF;
   PERFORM public.game_begin_migration(c_b);
   PERFORM public.game_activate_cloud(c_b);
+END $$;
+RESET ROLE;
+-- one way even for the owner role (an admin trying to roll an account back)
+SET LOCAL ROLE game_economy_owner;
+DO $$
+DECLARE v_err TEXT;
+BEGIN
+  BEGIN UPDATE public.game_accounts SET state = 'local' WHERE user_id = '00000000-0000-0000-0000-00000000ec01'; v_err := 'none';
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
+  IF v_err <> 'game_state_one_way' THEN RAISE EXCEPTION 'S8: cloud_active must be one way, got %', v_err; END IF;
 END $$;
 RESET ROLE;
 INSERT INTO public.user_features (user_id, game_sync) VALUES
@@ -85,147 +130,115 @@ INSERT INTO public.user_features (user_id, game_sync) VALUES
 ON CONFLICT (user_id) DO UPDATE SET game_sync = TRUE;
 
 --------------------------------------------------------------------------------
--- 3. Service: awards — amounts from the rules, repeats, evidence (TOCTOU), sources, caps, days
+-- 4. Mission awards: the server builds the key and the rule; evidence is required, of an accepted type, once
 --------------------------------------------------------------------------------
 SET LOCAL ROLE service_role;
 DO $$
 DECLARE
   c_a CONSTANT UUID := '00000000-0000-0000-0000-00000000ec01';
   c_b CONSTANT UUID := '00000000-0000-0000-0000-00000000ec02';
-  v_day DATE := public.game_day_for('00000000-0000-0000-0000-00000000ec01');
-  v_ev1 JSONB;
-  v_ev2 JSONB;
   v_r JSONB;
   v_r2 JSONB;
   v_err TEXT;
   v_n INT;
   v_p public.game_profile%ROWTYPE;
 BEGIN
-  SELECT jsonb_build_array(jsonb_build_object('table', 'journal_notes', 'id', id, 'version', client_updated_at, 'fp', md5(data::text), 'source_key', 'note:' || id))
-    INTO v_ev1 FROM public.journal_notes WHERE user_id = c_a AND id = 'n_a1';
-  SELECT jsonb_build_array(jsonb_build_object('table', 'journal_notes', 'id', id, 'version', client_updated_at, 'fp', md5(data::text), 'source_key', 'note:' || id))
-    INTO v_ev2 FROM public.journal_notes WHERE user_id = c_a AND id = 'n_a2';
-
-  -- 3.1 a mission: 40 XP + 10 Coins from the rule
-  v_r := public.game_apply_reward(c_a, 'mission:' || v_day || ':m_lesson', 'mission', v_ev1);
-  IF (v_r ->> 'xp')::int <> 40 OR (v_r ->> 'coins')::int <> 10 OR (v_r ->> 'replay')::boolean THEN
-    RAISE EXCEPTION 'T1: mission must pay 40/10 once: %', v_r;
+  -- 4.1 40 XP + 10 Coins from the rule; the key is mission:<server day>:<id>
+  v_r := public.game_apply_reward(c_a, 'mission', 'm_lesson', pg_temp.ev('journal_notes', c_a, 'n_a1'));
+  IF (v_r ->> 'xp')::int <> 40 OR (v_r ->> 'coins')::int <> 10 OR (v_r ->> 'replay')::boolean
+     OR v_r ->> 'key' <> 'mission:' || public.game_day_for(c_a) || ':m_lesson' THEN
+    RAISE EXCEPTION 'T1: mission must pay 40/10 once under the server key: %', v_r;
   END IF;
-
-  -- 3.2 the same key again (second tab, device, retry): the saved result, nothing more
-  v_r2 := public.game_apply_reward(c_a, 'mission:' || v_day || ':m_lesson', 'mission', v_ev1);
+  -- 4.2 the same mission again (tab, device, retry): the saved result
+  v_r2 := public.game_apply_reward(c_a, 'mission', 'm_lesson', pg_temp.ev('journal_notes', c_a, 'n_a1'));
   IF NOT (v_r2 ->> 'replay')::boolean OR (v_r2 - 'replay') <> (v_r - 'replay') THEN RAISE EXCEPTION 'T2: repeat must return the saved result: %', v_r2; END IF;
   SELECT count(*) INTO v_n FROM public.game_ledger WHERE user_id = c_a;
   SELECT * INTO v_p FROM public.game_profile WHERE user_id = c_a;
   IF v_n <> 1 OR v_p.xp_total <> 40 OR v_p.coins <> 10 OR v_p.version <> 1 THEN
-    RAISE EXCEPTION 'T3: one ledger row and one projection update: rows % xp % coins % version %', v_n, v_p.xp_total, v_p.coins, v_p.version;
+    RAISE EXCEPTION 'T3: one ledger row, one projection update: rows % xp % coins % version %', v_n, v_p.xp_total, v_p.coins, v_p.version;
   END IF;
-
-  -- 3.3 the same key with another rule (a client trying a bigger reward under a paid key): refused
-  BEGIN PERFORM public.game_apply_reward(c_a, 'mission:' || v_day || ':m_lesson', 'pq_gold_app', v_ev1); v_err := 'none';
+  -- 4.3 a mission without evidence
+  BEGIN PERFORM public.game_apply_reward(c_a, 'mission', 'm_observation', '[]'); v_err := 'none';
   EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
-  IF v_err <> 'game_key_conflict' THEN RAISE EXCEPTION 'T4: key reuse with another rule, got %', v_err; END IF;
-
-  -- 3.4 an amount that is not a rule: refused (there is no «xp» parameter at all)
-  BEGIN PERFORM public.game_apply_reward(c_a, 'mission:' || v_day || ':x', 'mission_9999', v_ev2); v_err := 'none';
+  IF v_err <> 'game_evidence_required' THEN RAISE EXCEPTION 'T4: a mission needs evidence, got %', v_err; END IF;
+  -- 4.4 an invented mission id (an arbitrary key with an allowed rule)
+  BEGIN PERFORM public.game_apply_reward(c_a, 'mission', 'm_free_xp', pg_temp.ev('journal_notes', c_a, 'n_a2')); v_err := 'none';
   EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
-  IF v_err <> 'game_unknown_rule' THEN RAISE EXCEPTION 'T5: unknown rule, got %', v_err; END IF;
-
-  -- 3.5 one record pays one mission a day, whatever key a device invents
-  BEGIN PERFORM public.game_apply_reward(c_a, 'mission:' || v_day || ':m_observation', 'mission', v_ev1); v_err := 'none';
+  IF v_err <> 'game_unknown_mission' THEN RAISE EXCEPTION 'T5: unknown mission, got %', v_err; END IF;
+  -- 4.5 key-shaped or odd items cannot smuggle a key
+  BEGIN PERFORM public.game_apply_reward(c_a, 'mission', 'm_lesson:2026-01-01', pg_temp.ev('journal_notes', c_a, 'n_a2')); v_err := 'none';
   EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
-  IF v_err <> 'game_source_used' THEN RAISE EXCEPTION 'T6: a record must pay once, got %', v_err; END IF;
-
-  -- 3.6 evidence of another user: not found for this user
-  BEGIN PERFORM public.game_apply_reward(c_a, 'mission:' || v_day || ':m_b',
-      'mission', (SELECT jsonb_build_array(jsonb_build_object('table','journal_notes','id',id,'version',client_updated_at,'fp',md5(data::text))) FROM public.journal_notes WHERE id = 'n_b1'));
+  IF v_err <> 'game_bad_request' THEN RAISE EXCEPTION 'T6: item with a colon, got %', v_err; END IF;
+  -- 4.6 evidence of another kind of task (a note for a trade review)
+  BEGIN PERFORM public.game_apply_reward(c_a, 'mission', 'm_trade_review', pg_temp.ev('journal_notes', c_a, 'n_a2')); v_err := 'none';
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
+  IF v_err <> 'game_evidence_type' THEN RAISE EXCEPTION 'T7: evidence of another task type, got %', v_err; END IF;
+  -- 4.7 the same record for another mission (a second payment under another key)
+  BEGIN PERFORM public.game_apply_reward(c_a, 'mission', 'm_observation', pg_temp.ev('journal_notes', c_a, 'n_a1')); v_err := 'none';
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
+  IF v_err <> 'game_source_used' THEN RAISE EXCEPTION 'T8: a record pays once, got %', v_err; END IF;
+  -- 4.8 another user's record
+  BEGIN PERFORM public.game_apply_reward(c_a, 'mission', 'm_observation',
+      (SELECT jsonb_build_array(jsonb_build_object('table','journal_notes','id',id,'version',client_updated_at,'fp',md5(data::text))) FROM public.journal_notes WHERE id = 'n_b1'));
     v_err := 'none';
   EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
-  IF v_err <> 'game_evidence_missing' THEN RAISE EXCEPTION 'T7: another user''s record must not count, got %', v_err; END IF;
-
-  -- 3.7 evidence of a table outside the list: refused
-  BEGIN PERFORM public.game_apply_reward(c_a, 'mission:' || v_day || ':m_p', 'mission', '[{"table":"profiles","id":"x","version":"2026-11-01T10:00:00Z","fp":"x"}]'); v_err := 'none';
-  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
-  IF v_err <> 'game_bad_evidence' THEN RAISE EXCEPTION 'T8: evidence table outside the list, got %', v_err; END IF;
-
-  -- 3.8 a level-up in the same transaction: Gold app 250 → total 290 → level 3 (120 to reach 2, 160 more to reach 3)
-  v_r := public.game_apply_reward(c_a, 'pq:run_gold_1', 'pq_gold_app');
-  IF (v_r ->> 'level_before')::int <> 1 OR (v_r ->> 'level_after')::int <> 3 OR (v_r ->> 'xp_total')::int <> 290 THEN
-    RAISE EXCEPTION 'T9: level-up in the award: %', v_r;
+  IF v_err <> 'game_evidence_missing' THEN RAISE EXCEPTION 'T9: another user''s record must not count, got %', v_err; END IF;
+  -- 4.9 one day plan, two different parts (preparation, risk): two missions; the cap of three; level-up at 120 XP
+  PERFORM public.game_apply_reward(c_a, 'mission', 'q_bias', pg_temp.ev('journal_day_plans', c_a, '2026-11-01'));
+  v_r := public.game_apply_reward(c_a, 'mission', 'q_riskcheck', pg_temp.ev('journal_day_plans', c_a, '2026-11-01'));
+  IF (v_r ->> 'xp_total')::int <> 120 OR (v_r ->> 'level_after')::int <> 2 OR (v_r ->> 'level_before')::int <> 1 THEN
+    RAISE EXCEPTION 'T10: two parts of one plan, level-up in the award: %', v_r;
   END IF;
-  -- paid once per run: the same run again is a replay
-  IF NOT (public.game_apply_reward(c_a, 'pq:run_gold_1', 'pq_gold_app') ->> 'replay')::boolean THEN RAISE EXCEPTION 'T10: a run pays once'; END IF;
-
-  -- 3.9 self-reports: 45 + 45 reach the 90 XP cap; the next one gives 0 XP (cut, not refused)
-  PERFORM public.game_apply_reward(c_a, 'self:' || v_day || ':q_gym', 'self_report_45');
-  PERFORM public.game_apply_reward(c_a, 'self:' || v_day || ':q_walk', 'self_report_45');
-  v_r := public.game_apply_reward(c_a, 'self:' || v_day || ':q_sleep', 'self_report_25');
-  IF (v_r ->> 'xp')::int <> 0 THEN RAISE EXCEPTION 'T11: self-report cap 90 XP a day: %', v_r; END IF;
-
-  -- 3.10 a game day in the future or in the past (window 0): refused
-  BEGIN PERFORM public.game_apply_reward(c_a, 'daily:' || (v_day + 1), 'daily_reward_1', '[]', v_day + 1); v_err := 'none';
+  -- 4.10 a fourth mission (the cap is three a day), with fresh evidence
+  BEGIN PERFORM public.game_apply_reward(c_a, 'mission', 'm_mistake', pg_temp.ev('journal_notes', c_a, 'n_a2')); v_err := 'none';
   EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
-  IF v_err <> 'game_day_not_open' THEN RAISE EXCEPTION 'T12: tomorrow must be refused, got %', v_err; END IF;
-  BEGIN PERFORM public.game_apply_reward(c_a, 'daily:' || (v_day - 1), 'daily_reward_1', '[]', v_day - 1); v_err := 'none';
+  IF v_err <> 'game_day_cap' THEN RAISE EXCEPTION 'T11: three missions a day, got %', v_err; END IF;
+  -- 4.11 the same part of a record for two missions (day review: «Day summary» and «Day state»): once
+  PERFORM public.game_apply_reward(c_b, 'mission', 'q_reflect', pg_temp.ev('journal_day_plans', c_b, '2026-11-01'));
+  BEGIN PERFORM public.game_apply_reward(c_b, 'mission', 'm_day_state', pg_temp.ev('journal_day_plans', c_b, '2026-11-01')); v_err := 'none';
   EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
-  IF v_err <> 'game_day_not_open' THEN RAISE EXCEPTION 'T13: yesterday outside the window must be refused, got %', v_err; END IF;
-
-  -- 3.11 the daily reward once a day (count cap), whatever key
-  PERFORM public.game_apply_reward(c_a, 'daily:' || v_day, 'daily_reward_7');
-  BEGIN PERFORM public.game_apply_reward(c_a, 'daily:' || v_day || ':again', 'daily_reward_7'); v_err := 'none';
-  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
-  IF v_err <> 'game_day_cap' THEN RAISE EXCEPTION 'T14: daily reward once a day, got %', v_err; END IF;
+  IF v_err <> 'game_source_used' THEN RAISE EXCEPTION 'T12: one review pays one mission, got %', v_err; END IF;
 END $$;
 RESET ROLE;
 
 --------------------------------------------------------------------------------
--- 4. TOCTOU: the Journal record changes between the route's check and the award
+-- 5. TOCTOU: the Journal record changes between the route's check and the award
 --------------------------------------------------------------------------------
 DO $$
 DECLARE
-  c_a CONSTANT UUID := '00000000-0000-0000-0000-00000000ec01';
-  v_day DATE := public.game_day_for('00000000-0000-0000-0000-00000000ec01');
+  c_b CONSTANT UUID := '00000000-0000-0000-0000-00000000ec02';
   v_ev JSONB;
   v_err TEXT;
 BEGIN
-  -- the route read n_a2 and checked it …
-  SELECT jsonb_build_array(jsonb_build_object('table','journal_notes','id',id,'version',client_updated_at,'fp',md5(data::text),'source_key','note:'||id))
-    INTO v_ev FROM public.journal_notes WHERE user_id = c_a AND id = 'n_a2';
-  -- … then the text is cut short with the SAME updatedAt (the Journal accepts it as a retry)
-  UPDATE public.journal_notes SET data = jsonb_set(data, '{body}', '"x"') WHERE user_id = c_a AND id = 'n_a2';
+  v_ev := pg_temp.ev('journal_notes', c_b, 'n_b2');
+  -- the text is cut short with the SAME updatedAt (the Journal accepts it as a retry)
+  UPDATE public.journal_notes SET data = jsonb_set(data, '{body}', '"x"') WHERE user_id = c_b AND id = 'n_b2';
   SET LOCAL ROLE service_role;
-  BEGIN PERFORM public.game_apply_reward(c_a, 'mission:' || v_day || ':m_lesson2', 'mission', v_ev); v_err := 'none';
+  BEGIN PERFORM public.game_apply_reward(c_b, 'mission', 'm_lesson', v_ev); v_err := 'none';
   EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
   RESET ROLE;
   IF v_err <> 'game_evidence_changed' THEN RAISE EXCEPTION 'X1: same version, other content must be refused, got %', v_err; END IF;
-
-  -- a newer version (edited later): refused
-  SELECT jsonb_build_array(jsonb_build_object('table','journal_notes','id',id,'version',client_updated_at,'fp',md5(data::text)))
-    INTO v_ev FROM public.journal_notes WHERE user_id = c_a AND id = 'n_a2';
-  UPDATE public.journal_notes SET data = data || '{"updatedAt":"2026-11-01T12:00:00Z"}' WHERE user_id = c_a AND id = 'n_a2';
+  v_ev := pg_temp.ev('journal_notes', c_b, 'n_b2');
+  UPDATE public.journal_notes SET data = data || '{"updatedAt":"2026-11-01T12:00:00Z"}' WHERE user_id = c_b AND id = 'n_b2';
   SET LOCAL ROLE service_role;
-  BEGIN PERFORM public.game_apply_reward(c_a, 'mission:' || v_day || ':m_lesson2', 'mission', v_ev); v_err := 'none';
+  BEGIN PERFORM public.game_apply_reward(c_b, 'mission', 'm_lesson', v_ev); v_err := 'none';
   EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
   RESET ROLE;
   IF v_err <> 'game_evidence_changed' THEN RAISE EXCEPTION 'X2: a newer version must be refused, got %', v_err; END IF;
-
-  -- deleted (tombstone): refused
-  SELECT jsonb_build_array(jsonb_build_object('table','journal_notes','id',id,'version',client_updated_at,'fp',md5(data::text)))
-    INTO v_ev FROM public.journal_notes WHERE user_id = c_a AND id = 'n_a2';
-  UPDATE public.journal_notes SET data = data || '{"deletedAt":"2026-11-01T12:00:00Z"}' WHERE user_id = c_a AND id = 'n_a2';
+  v_ev := pg_temp.ev('journal_notes', c_b, 'n_b2');
+  UPDATE public.journal_notes SET data = data || '{"deletedAt":"2026-11-01T12:00:00Z"}' WHERE user_id = c_b AND id = 'n_b2';
   SET LOCAL ROLE service_role;
-  BEGIN PERFORM public.game_apply_reward(c_a, 'mission:' || v_day || ':m_lesson2', 'mission', v_ev); v_err := 'none';
+  BEGIN PERFORM public.game_apply_reward(c_b, 'mission', 'm_lesson', v_ev); v_err := 'none';
   EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
   RESET ROLE;
-  IF v_err NOT IN ('game_evidence_changed') THEN RAISE EXCEPTION 'X3: a deleted record must be refused, got %', v_err; END IF;
-  -- nothing was written by the refused calls
-  IF EXISTS (SELECT 1 FROM public.game_ledger WHERE user_id = c_a AND idempotency_key LIKE '%m_lesson2') THEN
+  IF v_err <> 'game_evidence_changed' THEN RAISE EXCEPTION 'X3: a deleted record must be refused, got %', v_err; END IF;
+  IF EXISTS (SELECT 1 FROM public.game_ledger WHERE user_id = c_b AND idempotency_key LIKE '%:m_lesson') THEN
     RAISE EXCEPTION 'X4: a refused award must leave nothing';
   END IF;
 END $$;
 
 --------------------------------------------------------------------------------
--- 5. Authenticated user A: reads only own rows, cannot write or call anything that gives
+-- 6. Authenticated user A: own rows only, no writes, no award functions
 --------------------------------------------------------------------------------
 SET LOCAL ROLE authenticated;
 DO $$
@@ -243,20 +256,16 @@ BEGIN
   IF v_n <> 1 THEN RAISE EXCEPTION 'U2: A must see only own projection, sees %', v_n; END IF;
   v_status := public.game_account_status();
   IF v_status ->> 'state' <> 'cloud_active' OR NOT (v_status ->> 'game_sync')::boolean THEN RAISE EXCEPTION 'U3: status %', v_status; END IF;
-
-  -- direct INSERT of a paid row (XP, Coins, a mission, an achievement, a paid personal quest): refused
   v_blocked := FALSE;
   BEGIN INSERT INTO public.game_ledger (user_id, idempotency_key, kind, rule_code, game_day, xp, coins, rules_version, result)
         VALUES (c_a::uuid, 'pq:forged', 'personal_quest', 'pq_gold_app', current_date, 250, 0, 'q4.1', '{}');
   EXCEPTION WHEN insufficient_privilege THEN v_blocked := TRUE; END;
-  IF NOT v_blocked THEN RAISE EXCEPTION 'U4: direct ledger insert must fail'; END IF;
-  -- … with another user's id: refused
+  IF NOT v_blocked THEN RAISE EXCEPTION 'U4: direct ledger insert (a paid quest) must fail'; END IF;
   v_blocked := FALSE;
   BEGIN INSERT INTO public.game_ledger (user_id, idempotency_key, kind, rule_code, game_day, xp, coins, rules_version, result)
         VALUES (c_b, 'mission:forged', 'mission', 'mission', current_date, 40, 10, 'q4.1', '{}');
   EXCEPTION WHEN insufficient_privilege THEN v_blocked := TRUE; END;
   IF NOT v_blocked THEN RAISE EXCEPTION 'U5: insert for another user must fail'; END IF;
-  -- UPDATE XP / Coins / level / state; DELETE ledger: refused
   v_blocked := FALSE;
   BEGIN UPDATE public.game_profile SET xp_total = 999999, level = 99, coins = 999999; EXCEPTION WHEN insufficient_privilege THEN v_blocked := TRUE; END;
   IF NOT v_blocked THEN RAISE EXCEPTION 'U6: projection update must fail'; END IF;
@@ -270,81 +279,161 @@ BEGIN
   BEGIN UPDATE public.game_accounts SET state = 'local'; EXCEPTION WHEN insufficient_privilege THEN v_blocked := TRUE; END;
   IF NOT v_blocked THEN RAISE EXCEPTION 'U9: state change must fail'; END IF;
   v_blocked := FALSE;
-  BEGIN INSERT INTO public.game_source_claims (user_id, scope, source_key, game_day, ledger_id) VALUES (c_a::uuid, 'mission', 'note:x', current_date, 1);
-  EXCEPTION WHEN insufficient_privilege THEN v_blocked := TRUE; END;
-  IF NOT v_blocked THEN RAISE EXCEPTION 'U10: claim insert must fail'; END IF;
-  v_blocked := FALSE;
   BEGIN UPDATE public.game_reward_rules SET xp = 1000 WHERE code = 'mission'; EXCEPTION WHEN insufficient_privilege THEN v_blocked := TRUE; END;
-  IF NOT v_blocked THEN RAISE EXCEPTION 'U11: rules update must fail'; END IF;
-  -- the award functions are not callable by a signed-in user (only the server route)
+  IF NOT v_blocked THEN RAISE EXCEPTION 'U10: rules update must fail'; END IF;
   v_blocked := FALSE;
-  BEGIN PERFORM public.game_apply_reward(c_a::uuid, 'daily:x', 'daily_reward_7'); EXCEPTION WHEN insufficient_privilege THEN v_blocked := TRUE; END;
-  IF NOT v_blocked THEN RAISE EXCEPTION 'U12: user must not call the award'; END IF;
+  BEGIN PERFORM public.game_apply_reward(c_a::uuid, 'mission', 'm_lesson'); EXCEPTION WHEN insufficient_privilege THEN v_blocked := TRUE; END;
+  IF NOT v_blocked THEN RAISE EXCEPTION 'U11: user must not call the award'; END IF;
   v_blocked := FALSE;
   BEGIN PERFORM public.game_activate_cloud(c_a::uuid); EXCEPTION WHEN insufficient_privilege THEN v_blocked := TRUE; END;
-  IF NOT v_blocked THEN RAISE EXCEPTION 'U13: user must not change the state'; END IF;
+  IF NOT v_blocked THEN RAISE EXCEPTION 'U12: user must not change the state'; END IF;
   v_blocked := FALSE;
   BEGIN PERFORM public.game_rebuild_profile(c_a::uuid); EXCEPTION WHEN insufficient_privilege THEN v_blocked := TRUE; END;
-  IF NOT v_blocked THEN RAISE EXCEPTION 'U14: user must not rebuild'; END IF;
+  IF NOT v_blocked THEN RAISE EXCEPTION 'U13: user must not rebuild'; END IF;
 END $$;
--- B sees nothing of A
 DO $$
 DECLARE v_n INT;
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000ec02', true);
   SELECT count(*) INTO v_n FROM public.game_ledger WHERE user_id = '00000000-0000-0000-0000-00000000ec01';
-  IF v_n <> 0 THEN RAISE EXCEPTION 'U15: B must not see A''s ledger'; END IF;
+  IF v_n <> 0 THEN RAISE EXCEPTION 'U14: B must not see A''s ledger'; END IF;
   SELECT count(*) INTO v_n FROM public.game_profile WHERE user_id = '00000000-0000-0000-0000-00000000ec01';
-  IF v_n <> 0 THEN RAISE EXCEPTION 'U16: B must not see A''s projection'; END IF;
+  IF v_n <> 0 THEN RAISE EXCEPTION 'U15: B must not see A''s projection'; END IF;
 END $$;
 RESET ROLE;
 
 --------------------------------------------------------------------------------
--- 6. Even the service (RLS bypass) cannot edit history or the projection by hand
+-- 7. Writer guard: the service role (and an admin's ad-hoc SQL) cannot write — SET / set_config change nothing
 --------------------------------------------------------------------------------
+-- The privilege layer on its own (the trigger raises the same SQLSTATE, so a write attempt alone cannot tell which
+-- layer refused): no API role holds any write privilege on any game table
+DO $$
+DECLARE
+  r TEXT;
+  t TEXT;
+  p TEXT;
+BEGIN
+  FOREACH r IN ARRAY ARRAY['anon', 'authenticated', 'service_role'] LOOP
+    FOREACH t IN ARRAY ARRAY['game_accounts', 'game_award_kinds', 'game_reward_rules', 'game_limits', 'game_mission_sources',
+                             'game_ledger', 'game_source_claims', 'game_profile'] LOOP
+      FOREACH p IN ARRAY ARRAY['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE'] LOOP
+        IF has_table_privilege(r, 'public.' || t, p) THEN
+          RAISE EXCEPTION 'W0: % must not have % on %', r, p, t;
+        END IF;
+      END LOOP;
+    END LOOP;
+  END LOOP;
+  IF has_function_privilege('authenticated', 'public.game_apply_reward(uuid,text,text,jsonb)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.game_apply_reward(uuid,text,text,jsonb)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'W0: only the server may execute the award';
+  END IF;
+END $$;
 SET LOCAL ROLE service_role;
+DO $$
+DECLARE
+  v_err TEXT;
+  v_blocked BOOLEAN;
+BEGIN
+  -- the old writer mark of the first draft, set by hand: it is not an authority any more
+  PERFORM set_config('ayra.game_writer', 'on', true);
+  v_blocked := FALSE;
+  BEGIN INSERT INTO public.game_ledger (user_id, idempotency_key, kind, rule_code, game_day, xp, coins, rules_version, result)
+        VALUES ('00000000-0000-0000-0000-00000000ec01', 'mission:2099-01-01:forged', 'mission', 'mission', current_date, 40, 10, 'q4.1', '{}');
+  EXCEPTION WHEN insufficient_privilege THEN v_blocked := TRUE; END;
+  IF NOT v_blocked THEN RAISE EXCEPTION 'W1: service role must not insert into the ledger, even with the old writer mark'; END IF;
+  v_blocked := FALSE;
+  BEGIN UPDATE public.game_profile SET coins = 999999; EXCEPTION WHEN insufficient_privilege THEN v_blocked := TRUE; END;
+  IF NOT v_blocked THEN RAISE EXCEPTION 'W2: service role must not edit projections'; END IF;
+  v_blocked := FALSE;
+  BEGIN UPDATE public.game_award_kinds SET enabled = TRUE WHERE kind = 'personal_quest'; EXCEPTION WHEN insufficient_privilege THEN v_blocked := TRUE; END;
+  IF NOT v_blocked THEN RAISE EXCEPTION 'W3: service role must not switch kinds on'; END IF;
+  v_blocked := FALSE;
+  BEGIN INSERT INTO public.game_mission_sources (mission_id, table_name, part) VALUES ('m_free_xp', 'journal_notes', ''); EXCEPTION WHEN insufficient_privilege THEN v_blocked := TRUE; END;
+  IF NOT v_blocked THEN RAISE EXCEPTION 'W4: service role must not add missions'; END IF;
+  v_blocked := FALSE;
+  BEGIN DELETE FROM public.game_ledger; EXCEPTION WHEN insufficient_privilege THEN v_blocked := TRUE; END;
+  IF NOT v_blocked THEN RAISE EXCEPTION 'W5: service role must not delete the ledger'; END IF;
+  -- and it cannot become the owner: no API role is a member of it (SET ROLE is checked against the session user, so
+  -- the real refusal is tested on PostgreSQL with a login role like Supabase's authenticator: scripts/test-concurrency.sh)
+  IF pg_has_role('service_role', 'game_economy_owner', 'MEMBER') OR pg_has_role('authenticated', 'game_economy_owner', 'MEMBER')
+     OR pg_has_role('anon', 'game_economy_owner', 'MEMBER') THEN
+    RAISE EXCEPTION 'W6: no API role may be a member of the owner role';
+  END IF;
+END $$;
+RESET ROLE;
+-- an admin's ad-hoc SQL (not the owner) is refused by the guard; the owner itself cannot update the ledger
+DO $$
+DECLARE v_err TEXT;
+BEGIN
+  BEGIN INSERT INTO public.game_ledger (user_id, idempotency_key, kind, rule_code, game_day, xp, coins, rules_version, result)
+        VALUES ('00000000-0000-0000-0000-00000000ec01', 'mission:2099-01-01:admin', 'mission', 'mission', current_date, 40, 10, 'q4.1', '{}');
+    v_err := 'none';
+  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
+  IF v_err <> 'game_write_only_through_functions' THEN RAISE EXCEPTION 'W7: ad-hoc insert, got %', v_err; END IF;
+  BEGIN UPDATE public.game_profile SET coins = 999999; v_err := 'none'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
+  IF v_err <> 'game_write_only_through_functions' THEN RAISE EXCEPTION 'W8: ad-hoc projection edit, got %', v_err; END IF;
+END $$;
+SET LOCAL ROLE game_economy_owner;
 DO $$
 DECLARE v_err TEXT;
 BEGIN
   BEGIN UPDATE public.game_ledger SET xp = 9999; v_err := 'none'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
-  IF v_err <> 'game_ledger_append_only' THEN RAISE EXCEPTION 'V1: ledger update, got %', v_err; END IF;
-  BEGIN DELETE FROM public.game_ledger; v_err := 'none'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
-  IF v_err <> 'game_ledger_append_only' THEN RAISE EXCEPTION 'V2: ledger delete, got %', v_err; END IF;
-  BEGIN INSERT INTO public.game_ledger (user_id, idempotency_key, kind, rule_code, game_day, xp, coins, rules_version, result)
-        VALUES ('00000000-0000-0000-0000-00000000ec01', 'adjustment:hand', 'mission', 'mission', current_date, 40, 10, 'q4.1', '{}');
-    v_err := 'none';
-  EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
-  IF v_err <> 'game_write_only_through_functions' THEN RAISE EXCEPTION 'V3: hand insert, got %', v_err; END IF;
-  BEGIN UPDATE public.game_profile SET coins = 999999; v_err := 'none'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
-  IF v_err <> 'game_write_only_through_functions' THEN RAISE EXCEPTION 'V4: hand projection edit, got %', v_err; END IF;
+  IF v_err <> 'game_ledger_append_only' THEN RAISE EXCEPTION 'W9: even the owner cannot update the ledger, got %', v_err; END IF;
 END $$;
 RESET ROLE;
 
 --------------------------------------------------------------------------------
--- 7. Rebuild: a damaged projection is restored from the ledger
+-- 8. DELETE: an unrelated nested trigger cannot erase history; only the account deletion cascade removes it
 --------------------------------------------------------------------------------
-DO $$
-DECLARE
-  c_a CONSTANT UUID := '00000000-0000-0000-0000-00000000ec01';
-  v_good public.game_profile%ROWTYPE;
-  v_after public.game_profile%ROWTYPE;
-  v_r JSONB;
+CREATE TEMP TABLE purge_probe (id INT);
+CREATE OR REPLACE FUNCTION pg_temp.purge_ledger() RETURNS TRIGGER AS $$
 BEGIN
-  SELECT * INTO v_good FROM public.game_profile WHERE user_id = c_a;
-  IF v_good.xp_total <> (SELECT sum(xp) FROM public.game_ledger WHERE user_id = c_a) THEN RAISE EXCEPTION 'R0: projection equals ledger'; END IF;
-  -- damage it (as a broken script would, with the writer mark set)
-  PERFORM set_config('ayra.game_writer', 'on', true);
-  UPDATE public.game_profile SET xp_total = 7, coins = 3, level = 1 WHERE user_id = c_a;
-  PERFORM set_config('ayra.game_writer', '', true);
-  v_r := public.game_rebuild_profile(c_a);
-  SELECT * INTO v_after FROM public.game_profile WHERE user_id = c_a;
-  IF NOT (v_r ->> 'changed')::boolean OR v_after.xp_total <> v_good.xp_total OR v_after.coins <> v_good.coins OR v_after.level <> v_good.level THEN
-    RAISE EXCEPTION 'R1: rebuild must restore % / % / %, got %', v_good.xp_total, v_good.coins, v_good.level, row_to_json(v_after);
+  DELETE FROM public.game_ledger WHERE user_id = '00000000-0000-0000-0000-00000000ec01';
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+CREATE TRIGGER purge_probe_tr AFTER INSERT ON purge_probe FOR EACH ROW EXECUTE FUNCTION pg_temp.purge_ledger();
+DO $$
+DECLARE v_err TEXT;
+BEGIN
+  -- nested two levels deep (the old pg_trigger_depth rule would have let this through)
+  BEGIN INSERT INTO purge_probe VALUES (1); v_err := 'none'; EXCEPTION WHEN OTHERS THEN v_err := SQLERRM; END;
+  IF v_err <> 'game_write_only_through_functions' THEN RAISE EXCEPTION 'DEL1: a nested trigger must not delete history, got %', v_err; END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.game_ledger WHERE user_id = '00000000-0000-0000-0000-00000000ec01') THEN
+    RAISE EXCEPTION 'DEL2: history must be intact';
   END IF;
 END $$;
 
 --------------------------------------------------------------------------------
--- 8. Game day by the account zone; account deletion removes everything (cascade passes the append-only guard)
+-- 9. Rebuild: a damaged projection is restored from the ledger
+--------------------------------------------------------------------------------
+DO $$
+DECLARE
+  v_good public.game_profile%ROWTYPE;
+BEGIN
+  SELECT * INTO v_good FROM public.game_profile WHERE user_id = '00000000-0000-0000-0000-00000000ec01';
+  IF v_good.xp_total <> (SELECT sum(xp) FROM public.game_ledger WHERE user_id = '00000000-0000-0000-0000-00000000ec01') THEN
+    RAISE EXCEPTION 'R0: projection equals ledger';
+  END IF;
+END $$;
+SET LOCAL ROLE game_economy_owner;
+UPDATE public.game_profile SET xp_total = 7, coins = 3, level = 1 WHERE user_id = '00000000-0000-0000-0000-00000000ec01';
+RESET ROLE;
+SET LOCAL ROLE service_role;
+DO $$
+DECLARE
+  v_r JSONB;
+  v_after public.game_profile%ROWTYPE;
+BEGIN
+  v_r := public.game_rebuild_profile('00000000-0000-0000-0000-00000000ec01');
+  SELECT * INTO v_after FROM public.game_profile WHERE user_id = '00000000-0000-0000-0000-00000000ec01';
+  IF NOT (v_r ->> 'changed')::boolean OR v_after.xp_total <> 120 OR v_after.coins <> 30 OR v_after.level <> 2 THEN
+    RAISE EXCEPTION 'R1: rebuild must restore 120 / 30 / 2, got %', row_to_json(v_after);
+  END IF;
+END $$;
+RESET ROLE;
+
+--------------------------------------------------------------------------------
+-- 10. Game day by the account zone; account deletion removes everything (cascade runs as the owner)
 --------------------------------------------------------------------------------
 DO $$
 BEGIN
@@ -357,8 +446,12 @@ BEGIN
   DELETE FROM auth.users WHERE id = '00000000-0000-0000-0000-00000000ec01';
   IF EXISTS (SELECT 1 FROM public.game_ledger WHERE user_id = '00000000-0000-0000-0000-00000000ec01')
      OR EXISTS (SELECT 1 FROM public.game_profile WHERE user_id = '00000000-0000-0000-0000-00000000ec01')
-     OR EXISTS (SELECT 1 FROM public.game_source_claims WHERE user_id = '00000000-0000-0000-0000-00000000ec01') THEN
-    RAISE EXCEPTION 'D3: account deletion must remove the ledger, projection and claims';
+     OR EXISTS (SELECT 1 FROM public.game_source_claims WHERE user_id = '00000000-0000-0000-0000-00000000ec01')
+     OR EXISTS (SELECT 1 FROM public.game_accounts WHERE user_id = '00000000-0000-0000-0000-00000000ec01') THEN
+    RAISE EXCEPTION 'D3: account deletion must remove the ledger, projection, claims and state';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.game_ledger WHERE user_id = '00000000-0000-0000-0000-00000000ec02') THEN
+    RAISE EXCEPTION 'D4: other accounts keep their history';
   END IF;
 END $$;
 
