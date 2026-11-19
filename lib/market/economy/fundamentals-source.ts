@@ -63,5 +63,3 @@ export async function loadFundamental(series: FundamentalSeries, history: boolea
   const document = await read(url, "text/html");
   return { points: series === "retail" ? parseRetail(document.body) : parseProduction(document.body), retrievedAt: document.retrievedAt };
 }
-
-

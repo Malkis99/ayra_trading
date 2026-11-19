@@ -41,5 +41,3 @@ export async function fetchFundamental(url: string, type: string, body?: string)
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
   return new TextDecoder().decode(bytes);
 }
-
-

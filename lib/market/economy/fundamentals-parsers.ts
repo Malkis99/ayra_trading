@@ -127,4 +127,3 @@ export function parseProduction(html: string): FundamentalObservation[] {
   }
   return points;
 }
-
