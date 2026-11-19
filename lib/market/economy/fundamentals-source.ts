@@ -29,7 +29,8 @@ export async function loadFundamental(series: FundamentalSeries, history: boolea
   }
   if (series === "continuing") {
     const year = new Date(now).getUTCFullYear();
-    const body = new URLSearchParams({ level: "us", strtdate: String(history ? year - 2 : year), enddate: String(year), filetype: "xml" });
+    // In early January the newest published week can still belong to the previous year.
+    const body = new URLSearchParams({ level: "us", strtdate: String(history ? year - 2 : year - 1), enddate: String(year), filetype: "xml" });
     const document = await read("https://oui.doleta.gov/unemploy/wkclaims/report.asp", "xml", body.toString());
     const points = parseContinuing(document.body);
     if (points.some(point => Date.parse(point.vintage) > now)) throw new FundamentalFailure("future_report");

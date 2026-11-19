@@ -40,9 +40,12 @@ it("uses one report POST for current continued claims and an explicit bounded hi
   vi.stubGlobal("fetch", mock);
   const result = await loadFundamental("continuing", false, Date.now());
   expect(result.points.length).toBeGreaterThan(20);
-  expect(mock.mock.calls[0][1].body).toBe("level=us&strtdate=2026&enddate=2026&filetype=xml");
+  expect(mock.mock.calls[0][1].body).toBe("level=us&strtdate=2025&enddate=2026&filetype=xml");
   await loadFundamental("continuing", true, Date.now());
   expect(mock.mock.calls[1][1].body).toBe("level=us&strtdate=2024&enddate=2026&filetype=xml");
+  vi.setSystemTime(new Date("2027-01-01T07:00:00Z"));
+  await loadFundamental("continuing", false, Date.now());
+  expect(mock.mock.calls[2][1].body).toBe("level=us&strtdate=2026&enddate=2027&filetype=xml");
 });
 it("shares BEA discovery and the latest document across income and spending; no history before requested", async () => {
   const { loadFundamental } = await import("./fundamentals-source");
