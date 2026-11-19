@@ -1,5 +1,6 @@
 import { unstable_cache } from "next/cache";
 import { beaEconomyRss, parsePceRelease, pceReleases, type PceObservation, type PceSnapshot } from "./bea-pce";
+import { fetchFundamental } from "./fundamentals-http";
 
 const recentAugust = {
   period: "2026-08",
@@ -8,22 +9,36 @@ const recentAugust = {
 };
 
 async function read(url: string, type: string) {
-  const response = await fetch(url, { redirect: "error", cache: "no-store", signal: AbortSignal.timeout(6_000) });
-  if (!response.ok) throw new Error("http_" + response.status);
-  if (!response.headers.get("content-type")?.includes(type)) throw new Error("unexpected_media_type");
-  return response.text();
+  return fetchFundamental(url, type);
 }
 
-const releaseList = unstable_cache(async () => pceReleases(await read(beaEconomyRss, "xml"), Date.now()), ["bea-economy-feed-v1"], { revalidate: 3600 });
+const cachedList = unstable_cache(async () => pceReleases(await read(beaEconomyRss, "xml"), Date.now()), ["bea-economy-feed-v1"], { revalidate: 3600 });
+const cachedDocument = unstable_cache(async (url: string) => ({
+  html: await read(url, "text/html"), retrievedAt: new Date().toISOString(),
+}), ["bea-economy-document-v1"], { revalidate: 43_200 });
+let listPending: ReturnType<typeof cachedList> | undefined;
+const documentsPending = new Map<string, ReturnType<typeof cachedDocument>>();
+
+export function beaReleaseList() {
+  listPending ??= cachedList().finally(() => { listPending = undefined; });
+  return listPending;
+}
+export function beaReleaseDocument(url: string) {
+  const current = documentsPending.get(url);
+  if (current) return current;
+  const request = cachedDocument(url).finally(() => documentsPending.delete(url));
+  documentsPending.set(url, request);
+  return request;
+}
 const fetchRelease = unstable_cache(async (release: Omit<PceObservation, "values">) =>
-  parsePceRelease(await read(release.url, "text/html"), release), ["bea-pce-release-v1"], { revalidate: 43_200 });
+  parsePceRelease((await beaReleaseDocument(release.url)).html, release), ["bea-pce-release-v1"], { revalidate: 43_200 });
 
 let lastKnown: PceObservation | undefined;
 
 export async function pceSnapshot(history: boolean): Promise<PceSnapshot> {
   let releases: Omit<PceObservation, "values">[];
   try {
-    releases = await releaseList();
+    releases = await beaReleaseList();
   } catch {
     console.warn(JSON.stringify({ event: "bea_pce_read_failed", stage: "feed" }));
     return lastKnown ? { status: "stale", points: [lastKnown] } : { status: "error", points: [] };

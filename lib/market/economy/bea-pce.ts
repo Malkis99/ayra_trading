@@ -37,7 +37,7 @@ function uniqueChange(body: string, introduction: string): [number, number] {
   return [(a === "decreased" ? -1 : 1) * Number(b), (c === "decreased" ? -1 : 1) * Number(d)];
 }
 
-export function parsePceRelease(html: string, release: PceRelease): PceObservation {
+export function verifyBeaRelease(html: string, release: PceRelease) {
   const body = plainText(html);
   const embargo = body.match(/EMBARGOED UNTIL RELEASE AT 8:30 a\.m\. E[DS]T, [A-Za-z]+, ([A-Za-z]+) (\d{1,2}), (\d{4})/);
   const title = [...html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)].map(hit => plainText(hit[1]))
@@ -47,8 +47,13 @@ export function parsePceRelease(html: string, release: PceRelease): PceObservati
     || release.period >= publishedMonth || /\b(?:corrected release|reissued release)\b/i.test(body)) throw new Error("pce_vintage_unverified");
   const day = publishedMonth + "-" + embargo[2].padStart(2, "0");
   if (wallToUtc(day, "08:30", NEW_YORK) !== Date.parse(release.publishedAt)) throw new Error("pce_date_mismatch");
-  const mo = uniqueChange(body, "From the preceding month, the PCE price index for " + title[1] + " ");
-  const yo = uniqueChange(body, "From the same month one year ago, the PCE price index for " + title[1] + " ");
   const id = body.match(/\bBEA\s+(\d{2})\s*[-–—]\s*(\d+)\b/);
-  return { ...release, ...(id ? { vintageId: "BEA " + id[1] + "-" + id[2] } : {}), values: [mo[0], yo[0], mo[1], yo[1]] };
+  return { body, month: title[1], ...(id ? { vintageId: "BEA " + id[1] + "-" + id[2] } : {}) };
+}
+
+export function parsePceRelease(html: string, release: PceRelease): PceObservation {
+  const checked = verifyBeaRelease(html, release);
+  const mo = uniqueChange(checked.body, "From the preceding month, the PCE price index for " + checked.month + " ");
+  const yo = uniqueChange(checked.body, "From the same month one year ago, the PCE price index for " + checked.month + " ");
+  return { ...release, ...(checked.vintageId ? { vintageId: checked.vintageId } : {}), values: [mo[0], yo[0], mo[1], yo[1]] };
 }

@@ -9,6 +9,7 @@ import { useEconomyObservations } from "@/lib/market/economy/use-economy-observa
 import { MarketPublicFinances } from "./MarketPublicFinances";
 import { MarketMonetary } from "./MarketMonetary";
 import { MarketInflation } from "./MarketInflation";
+import { MarketFundamentals } from "./MarketFundamentals";
 
 type Labels = typeof economyText.en;
 
@@ -104,11 +105,6 @@ export function MarketEconomy() {
                   <div><dt className="text-xs text-mu">{t.actual}</dt><dd className="text-2xl font-semibold tabular-nums text-tx">{format(latest.actual)}</dd></div>
                   {latest.previous !== null && <div><dt className="text-xs text-mu">{t.previous}</dt><dd className="text-2xl font-semibold tabular-nums text-tx">{format(latest.previous)}</dd></div>}
                 </dl>
-                {latest.unemployment !== undefined && <div className="border-t border-line pt-2 text-xs text-mu">
-                  <p>{t.unemployment}</p>
-                  <p className="my-1 text-lg font-semibold tabular-nums text-tx">{number.format(latest.unemployment)}%</p>
-                  <p>{t.unemploymentContext}</p>
-                </div>}
                 <p className="text-xs text-mu">{labels.unit}</p>
                 <div className="space-y-1 text-xs text-mu">
                   <div>{t.period} · <span className="text-tx">{latest.period}</span></div>
@@ -130,6 +126,7 @@ export function MarketEconomy() {
           );
         })}
         </div>
+        <MarketFundamentals lang={lang} series={index === 0 ? ["production"] : ["earnings", "unemployment", "continuing"]} />
         {index === 0 && <div className="rounded-lg border border-line bg-s1 p-3 text-xs text-mu">
           <p className="font-semibold text-tx">{beaPceText[lang].debtGdp} · {t.empty}</p>
           <p className="mt-1">{beaPceText[lang].debtGdpUnavailable}</p>
@@ -139,7 +136,7 @@ export function MarketEconomy() {
       ))}
       <section className="space-y-2 rounded-lg border border-line bg-s1 p-4" aria-label={t.categories[3]}>
         <h3 className="font-serif text-lg font-semibold text-tx">{t.categories[3]}</h3>
-        <p className="text-xs text-mu">{t.empty}</p>
+        <MarketFundamentals lang={lang} series={["income", "consumption", "retail"]} />
       </section>
       <MarketPublicFinances lang={lang} />
       <MarketMonetary lang={lang} />

@@ -1,0 +1,36 @@
+export const fundamentalsText = {
+  ru: {
+    history: "Загрузить историю", historyNote: "Доступные наблюдения. Пропуски не заполняются.", source: "Официальный источник",
+    current: "Текущая версия ряда", initial: "Датированный выпуск", preliminary: "Предварительное", revised: "Пересмотрено",
+    vintage: "Версия", sourceDate: "Дата выпуска", dateUnknown: "Не подтверждена", adjustment: "Сезонность",
+    retrieved: "Получено от источника", stale: "Данные могут быть устаревшими", partial: "Часть выпусков недоступна",
+    short: "Недостаточно данных для графика", frequency: { monthly: "Ежемесячно", weekly: "Еженедельно" },
+    units: { "USD/hour": "USD за час", percent: "% рабочей силы", persons: "человек", "percent-mom": "% к предыдущему месяцу" },
+    definitions: {
+      earnings: ["Средняя почасовая оплата", "Все работники частного несельскохозяйственного сектора. Номинальная оплата, с сезонной корректировкой."],
+      unemployment: ["Безработица", "Доля рабочей силы без работы, активно ищущей работу. С сезонной корректировкой."],
+      continuing: ["Повторные заявки на пособие", "Число получателей страховых пособий за отчётную неделю. С сезонной корректировкой. Текущая версия DOL может отставать от недельного релиза."],
+      income: ["Личные доходы", "Месячное изменение номинальных личных доходов, с сезонной корректировкой."],
+      consumption: ["Потребительские расходы", "Месячное изменение PCE в текущих долларах, с сезонной корректировкой. Отдельно от индекса цен PCE."],
+      retail: ["Розничные продажи", "Продажи розничной торговли и общепита: изменение за месяц с сезонной и календарной корректировкой. Инфляция не вычитается."],
+      production: ["Промышленное производство", "Изменение общего выпуска промышленности за месяц, с сезонной корректировкой. Все точки истории относятся к указанному выпуску G.17."],
+    },
+  },
+  en: {
+    history: "Load history", historyNote: "Available observations. Gaps are not filled.", source: "Official source",
+    current: "Current series vintage", initial: "Dated release", preliminary: "Preliminary", revised: "Revised",
+    vintage: "Vintage", sourceDate: "Release date", dateUnknown: "Unconfirmed", adjustment: "Adjustment",
+    retrieved: "Retrieved from source", stale: "Data may be outdated", partial: "Some releases are unavailable",
+    short: "Insufficient data for a chart", frequency: { monthly: "Monthly", weekly: "Weekly" },
+    units: { "USD/hour": "USD per hour", percent: "% of labor force", persons: "persons", "percent-mom": "% from preceding month" },
+    definitions: {
+      earnings: ["Average hourly earnings", "All employees on private nonfarm payrolls. Nominal hourly pay, seasonally adjusted."],
+      unemployment: ["Unemployment rate", "The share of the labor force without work and actively seeking work. Seasonally adjusted."],
+      continuing: ["Continuing claims", "Insured unemployment for the reference week, seasonally adjusted. The current DOL series may lag the weekly release."],
+      income: ["Personal income", "Monthly change in nominal personal income, seasonally adjusted."],
+      consumption: ["Personal consumption expenditures", "Monthly change in current-dollar PCE, seasonally adjusted. Separate from the PCE price index."],
+      retail: ["Retail sales", "Retail and food services sales: monthly change adjusted for seasonal and calendar effects. Not adjusted for inflation."],
+      production: ["Industrial production", "Monthly change in total industrial output, seasonally adjusted. All history points belong to the stated G.17 release."],
+    },
+  },
+} as const;
