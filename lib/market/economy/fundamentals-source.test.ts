@@ -1,9 +1,16 @@
 /** @vitest-environment node */
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-vi.mock("next/cache", () => ({ unstable_cache: (fn: () => unknown) => fn }));
+const cache = vi.hoisted(() => new Map<string, unknown>());
+vi.mock("next/cache", () => ({ unstable_cache: (fn: (...args: unknown[]) => unknown, keys: string[]) => async (...args: unknown[]) => {
+  const key = JSON.stringify([keys, args]);
+  if (cache.has(key)) return cache.get(key);
+  const result = await fn(...args);
+  cache.set(key, result);
+  return result;
+} }));
 const fixture = (name: string) => readFileSync(new URL("./fixtures/fundamentals/" + name, import.meta.url), "utf8");
-beforeEach(() => { vi.resetModules(); vi.useFakeTimers(); vi.setSystemTime(new Date("2026-11-19T07:00Z")); });
+beforeEach(() => { cache.clear(); vi.resetModules(); vi.useFakeTimers(); vi.setSystemTime(new Date("2026-11-19T07:00Z")); });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 it("rejects HTML disguised as JSON, oversized responses, and HTTP failures", async () => {
@@ -33,6 +40,29 @@ it("bounds a hung HTTP request with its abort signal", async () => {
     return Promise.reject(new DOMException("Timed out", "TimeoutError"));
   }));
   await expect(fetchFundamental("https://api.bls.gov/test", "json")).rejects.toMatchObject({ name: "TimeoutError" });
+});
+it("a BLS error inside HTTP 200 is not cached as a good document and can recover", async () => {
+  const { loadFundamental } = await import("./fundamentals-source");
+  const mock = vi.fn()
+    .mockResolvedValueOnce(new Response('{"status":"REQUEST_NOT_PROCESSED","Results":{}}', { headers: { "content-type": "application/json" } }))
+    .mockResolvedValueOnce(new Response(fixture("bls-earnings.json"), { headers: { "content-type": "application/json" } }));
+  vi.stubGlobal("fetch", mock);
+  await expect(loadFundamental("earnings", false, Date.now())).rejects.toThrow("bls_response");
+  expect((await loadFundamental("earnings", false, Date.now())).points[0].value).toBe(38);
+  await loadFundamental("earnings", true, Date.now());
+  expect(mock).toHaveBeenCalledTimes(2);
+});
+it("a BEA HTML challenge inside HTTP 200 is rejected before document caching and can recover", async () => {
+  const { loadFundamental } = await import("./fundamentals-source");
+  const rss = '<rss><item><title>Personal Income and Outlays, September 2026</title><link>https://www.bea.gov/news/2026/personal-income-and-outlays-september-2026</link><pubDate>Thu, 29 Oct 2026 08:30:00 EDT</pubDate></item></rss>';
+  const mock = vi.fn()
+    .mockResolvedValueOnce(new Response(rss, { headers: { "content-type": "application/xml" } }))
+    .mockResolvedValueOnce(new Response("<html>Temporarily unavailable</html>", { headers: { "content-type": "text/html" } }))
+    .mockResolvedValueOnce(new Response(fixture("bea-september.html"), { headers: { "content-type": "text/html" } }));
+  vi.stubGlobal("fetch", mock);
+  await expect(loadFundamental("income", false, Date.now())).rejects.toThrow("no_verified_releases");
+  expect((await loadFundamental("income", false, Date.now())).points[0].value).toBe(0.2);
+  expect(mock).toHaveBeenCalledTimes(3);
 });
 it("uses one report POST for current continued claims and an explicit bounded history range", async () => {
   const { loadFundamental } = await import("./fundamentals-source");

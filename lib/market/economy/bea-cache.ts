@@ -1,5 +1,5 @@
 import { unstable_cache } from "next/cache";
-import { beaEconomyRss, parsePceRelease, pceReleases, type PceObservation, type PceSnapshot } from "./bea-pce";
+import { beaEconomyRss, parsePceRelease, pceReleases, verifyBeaRelease, type PceObservation, type PceSnapshot } from "./bea-pce";
 import { fetchFundamental } from "./fundamentals-http";
 
 const recentAugust = {
@@ -13,9 +13,11 @@ async function read(url: string, type: string) {
 }
 
 const cachedList = unstable_cache(async () => pceReleases(await read(beaEconomyRss, "xml"), Date.now()), ["bea-economy-feed-v1"], { revalidate: 3600 });
-const cachedDocument = unstable_cache(async (url: string) => ({
-  html: await read(url, "text/html"), retrievedAt: new Date().toISOString(),
-}), ["bea-economy-document-v1"], { revalidate: 43_200 });
+const cachedDocument = unstable_cache(async (release: Omit<PceObservation, "values">) => {
+  const document = { html: await read(release.url, "text/html"), retrievedAt: new Date().toISOString() };
+  verifyBeaRelease(document.html, release);
+  return document;
+}, ["bea-economy-document-v2"], { revalidate: 43_200 });
 let listPending: ReturnType<typeof cachedList> | undefined;
 const documentsPending = new Map<string, ReturnType<typeof cachedDocument>>();
 
@@ -23,15 +25,16 @@ export function beaReleaseList() {
   listPending ??= cachedList().finally(() => { listPending = undefined; });
   return listPending;
 }
-export function beaReleaseDocument(url: string) {
-  const current = documentsPending.get(url);
+export function beaReleaseDocument(release: Omit<PceObservation, "values">) {
+  const key = JSON.stringify(release);
+  const current = documentsPending.get(key);
   if (current) return current;
-  const request = cachedDocument(url).finally(() => documentsPending.delete(url));
-  documentsPending.set(url, request);
+  const request = cachedDocument(release).finally(() => documentsPending.delete(key));
+  documentsPending.set(key, request);
   return request;
 }
 const fetchRelease = unstable_cache(async (release: Omit<PceObservation, "values">) =>
-  parsePceRelease((await beaReleaseDocument(release.url)).html, release), ["bea-pce-release-v1"], { revalidate: 43_200 });
+  parsePceRelease((await beaReleaseDocument(release)).html, release), ["bea-pce-release-v1"], { revalidate: 43_200 });
 
 let lastKnown: PceObservation | undefined;
 

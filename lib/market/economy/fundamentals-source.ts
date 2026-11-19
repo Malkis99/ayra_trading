@@ -8,11 +8,15 @@ import { fetchFundamental, FundamentalFailure } from "./fundamentals-http";
 type Document = { body: string; retrievedAt: string };
 const pending = new Map<string, Promise<Document>>();
 
-async function read(url: string, type: string, body?: string) {
+async function read(url: string, type: string, validate: (body: string) => void, body?: string) {
   const key = url + ":" + (body ?? "");
   const current = pending.get(key);
   if (current) return current;
-  const request = unstable_cache(async () => ({ body: await fetchFundamental(url, type, body), retrievedAt: new Date().toISOString() }),
+  const request = unstable_cache(async () => {
+    const document = { body: await fetchFundamental(url, type, body), retrievedAt: new Date().toISOString() };
+    validate(document.body);
+    return document;
+  },
     ["fundamentals-document-v1", url, body ?? ""], { revalidate: url.includes("api.bls.gov") ? 43_200 : 3600 })()
     .finally(() => pending.delete(key));
   pending.set(key, request);
@@ -24,14 +28,14 @@ export async function loadFundamental(series: FundamentalSeries, history: boolea
 }> {
   const url = fundamentalDefinitions[series].url;
   if (series === "earnings" || series === "unemployment") {
-    const document = await read(url, "json");
+    const document = await read(url, "json", body => { parseEmployment(JSON.parse(body), series); });
     return { points: parseEmployment(JSON.parse(document.body), series), retrievedAt: document.retrievedAt };
   }
   if (series === "continuing") {
     const year = new Date(now).getUTCFullYear();
     // In early January the newest published week can still belong to the previous year.
     const body = new URLSearchParams({ level: "us", strtdate: String(history ? year - 2 : year - 1), enddate: String(year), filetype: "xml" });
-    const document = await read("https://oui.doleta.gov/unemploy/wkclaims/report.asp", "xml", body.toString());
+    const document = await read("https://oui.doleta.gov/unemploy/wkclaims/report.asp", "xml", parseContinuing, body.toString());
     const points = parseContinuing(document.body);
     if (points.some(point => Date.parse(point.vintage) > now)) throw new FundamentalFailure("future_report");
     return { points, retrievedAt: document.retrievedAt };
@@ -49,7 +53,7 @@ export async function loadFundamental(series: FundamentalSeries, history: boolea
     let retrievedAt: string | undefined;
     for (const release of candidates) {
       try {
-        const document = await beaReleaseDocument(release.url);
+        const document = await beaReleaseDocument(release);
         points.push(parsePersonal(document.html, release, series));
         if (!retrievedAt || document.retrievedAt < retrievedAt) retrievedAt = document.retrievedAt;
       }
@@ -61,6 +65,7 @@ export async function loadFundamental(series: FundamentalSeries, history: boolea
     if (candidates.length && !points.length) throw new FundamentalFailure("no_verified_releases");
     return { points, partial, retrievedAt: retrievedAt ?? new Date(now).toISOString() };
   }
-  const document = await read(url, "text/html");
-  return { points: series === "retail" ? parseRetail(document.body) : parseProduction(document.body), retrievedAt: document.retrievedAt };
+  const parse = series === "retail" ? parseRetail : parseProduction;
+  const document = await read(url, "text/html", parse);
+  return { points: parse(document.body), retrievedAt: document.retrievedAt };
 }
