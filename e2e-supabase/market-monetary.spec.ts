@@ -51,7 +51,7 @@ for (const [width, lang] of [[390, "ru"], [1440, "en"]] as const) {
       await expect(policy.getByText(lang === "ru" ? "3,88%" : "3.88%", { exact: true })).toBeVisible();
       await expect(policy.getByText(/Данные EFFR могут быть устаревшими|EFFR data may be outdated/)).toBeHidden();
       await dollar.getByRole("button", { name: /Загрузить историю|Load history/ }).click();
-      await expect(dollar.locator("svg")).toBeVisible();
+      await expect(dollar.locator("svg[data-economy-chart]")).toBeVisible();
       expect(requests.filter(request => request.endsWith(":history"))).toEqual(["dollar:history"]);
       await expect(page.getByTestId("economy-us_gdp")).toBeAttached();
       await expect(page.getByTestId("market-public-finances")).toBeAttached();

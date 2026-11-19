@@ -24,6 +24,7 @@ for (const [width, lang] of [[390, "ru"], [1440, "en"]] as const) {
       const pce = page.getByTestId("economy-bea-pce");
       await expect(pce.getByText(lang === "ru" ? "+3,6%" : "+3.6%")).toBeVisible();
       await expect(pce.getByText(lang === "ru" ? "+3,1%" : "+3.1%")).toBeVisible();
+      await pce.locator("summary").filter({ hasText: /Подробнее|Details/ }).click();
       await expect(pce.getByRole("link").first()).toHaveAttribute("href", september.url);
       expect(calls).toEqual(["latest"]);
       await pce.getByRole("button", { name: /Загрузить историю PCE|Load PCE history/ }).click();

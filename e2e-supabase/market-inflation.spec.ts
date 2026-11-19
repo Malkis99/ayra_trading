@@ -34,6 +34,7 @@ for (const [width, lang] of [[390, "ru"], [1440, "en"]] as const) {
       await page.goto("/market?tab=economy");
       const headline = page.getByTestId("economy-us_cpi");
       await expect(headline.getByText(lang === "ru" ? "0,4%" : "0.4%", { exact: true })).toBeVisible();
+      await headline.locator("summary").filter({ hasText: /Подробнее|Details/ }).click();
       await expect(headline.getByRole("link").first()).toHaveAttribute("href", cpi.result_meta.release_url);
       await expect(page.getByTestId("economy-us_core_cpi")).toContainText(lang === "ru" ? "0,3%" : "0.3%");
       await expect(page.getByTestId("economy-us_cpi_yoy")).toContainText(lang === "ru" ? "Нет подтверждённых данных" : "No verified data");

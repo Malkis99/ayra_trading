@@ -5,6 +5,7 @@ import { fiscalRange, fiscalSources, formatUsd, type FiscalData, type FiscalPoin
 import { fiscalText } from "@/lib/market/economy/fiscal-dictionary";
 import { ranges, type HistoryRange } from "@/lib/market/economy/project-calendar";
 import { economyText } from "@/lib/market/economy/dictionary";
+import { EconomyDetails } from "./EconomyDetails";
 
 const groups = ["debt", "budget", "interest"] as const;
 
@@ -17,7 +18,7 @@ function FiscalChart({ points, series, column, lang }: { points: FiscalPoint[]; 
     const value = point.values[column];
     return value == null ? [] : [{ ...point, value, index }];
   });
-  if (graph.length < 2) return <p className="rounded-md bg-s1 p-3 text-xs text-mu">{words.historyEmpty}</p>;
+  if (graph.length < 2) return <p className="text-xs text-mu">{words.historyEmpty}</p>;
   const times = graph.map(point => Date.parse(point.date));
   const values = graph.map(point => Number(point.value));
   const min = Math.min(...values);
@@ -56,12 +57,9 @@ export function MarketPublicFinances({ lang }: { lang: "ru" | "en" }) {
   const t = fiscalText[lang];
   const words = economyText[lang];
   const [data, setData] = useState<Partial<FiscalData>>({});
-  const [open, setOpen] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const [range, setRange] = useState<HistoryRange>("1");
   const [columns, setColumns] = useState<Record<FiscalSeries, number>>({ debt: 0, budget: 2, interest: 0 });
   useEffect(() => {
-    if (!open) return;
     const abort = new AbortController();
     for (const series of groups) void readFiscal(series, "latest", abort.signal).then(result => {
       if (!abort.signal.aborted) setData(current => ({
@@ -71,25 +69,18 @@ export function MarketPublicFinances({ lang }: { lang: "ru" | "en" }) {
       }));
     });
     return () => abort.abort();
-  }, [attempt, open]);
+  }, [attempt]);
   const date = new Intl.DateTimeFormat(lang, { dateStyle: "medium", timeStyle: "short" });
   const hasErrors = groups.some(group => data[group]?.status === "error" || data[group]?.status === "stale");
-  return <details id="public-finances" open={open} onToggle={event => setOpen(event.currentTarget.open)}
-    className="scroll-mt-4 rounded-lg border border-line bg-s2 p-4" data-testid="market-public-finances">
-    <summary className="cursor-pointer font-serif text-lg font-semibold text-tx">{t.title}</summary>
-    {open && <div className="mt-4 space-y-4">
-      <p className="text-sm text-mu">{t.intro}</p>
-      <div role="group" aria-label={words.history} className="flex flex-wrap gap-1">
-        {ranges.map((value, index) => <button key={value} type="button" aria-pressed={range === value}
-          onClick={() => setRange(value)}
-          className={`rounded border border-line px-2 py-1.5 text-xs ${range === value ? "bg-vi/15 text-vi" : "text-mu"}`}>{words.ranges[index]}</button>)}
-      </div>
+  return <section id="public-finances" aria-label={t.title} className="scroll-mt-4 space-y-3" data-testid="market-public-finances">
+    <h3 className="font-serif text-lg font-semibold text-tx">{t.title}</h3>
+    <div className="space-y-3">
       {hasErrors && <div role="status" className="flex flex-wrap items-center justify-between gap-2 text-sm text-mu">
         {groups.some(group => data[group]?.status === "error") ? words.error : t.stale}
         <button type="button" onClick={() => setAttempt(value => value + 1)}
           className="rounded-md border border-line px-3 py-1 text-vi">{words.retry}</button>
       </div>}
-      <div className="grid gap-3 xl:grid-cols-3">
+      <div className="grid items-start gap-3 md:grid-cols-2">
         {groups.map(group => {
           const row = data[group];
           const points = row?.points ?? [];
@@ -99,38 +90,41 @@ export function MarketPublicFinances({ lang }: { lang: "ru" | "en" }) {
           const oldTotal = points[0]?.values[0];
           const latestTotal = latest?.values[0];
           const delta = group === "debt" && points.length > 1 && oldTotal && latestTotal ? String(BigInt(latestTotal) - BigInt(oldTotal)) : null;
-          return <section key={group} className="min-w-0 space-y-3 rounded-md border border-line bg-s1 p-3" data-testid={`fiscal-${group}`}>
-            <h3 className="font-semibold text-tx">{t.groups[group]}</h3>
+          return <section key={group} className="min-w-0 space-y-2 rounded-lg border border-line bg-s2 p-3 sm:p-4" data-testid={`fiscal-${group}`}>
+            <div className="flex flex-wrap items-baseline justify-between gap-1"><h4 className="font-semibold text-tx">{t.groups[group]}</h4>{row?.status === "ready" && !row.partial && <span className="text-xs text-vi">{words.confirmed}</span>}</div>
             {row?.status === "stale" && <p role="status" className="text-xs text-vi">{t.stale}</p>}
-            {row?.partial && <p className="text-xs text-mu">{t.partial}</p>}
+            {row?.status === "error" && <p role="status" className="text-xs text-mu">{words.error}</p>}
+            {row?.partial && <p role="status" className="text-xs text-mu">{t.partial}</p>}
             {latest ? <>
               <dl className="grid grid-cols-2 gap-2">
                 {latest.values.map((amount, index) => <div key={labels[index]}>
                   <dt className="text-xs text-mu">{labels[index]}</dt>
-                  <dd className="text-base font-semibold tabular-nums text-tx">{amount === null ? words.empty : formatUsd(amount, lang)}</dd>
+                  <dd className="break-words text-lg font-semibold tabular-nums text-tx">{amount === null ? words.empty : formatUsd(amount, lang)}</dd>
                 </div>)}
-                {delta !== null && <div><dt className="text-xs text-mu">{t.change}</dt>
-                  <dd className="text-base font-semibold tabular-nums text-tx">{formatUsd(delta, lang)}</dd>
-                  <dd className="text-xs text-mu">{points[0].date} — {latest.date}</dd></div>}
               </dl>
+              <p className="text-xs text-mu">{group === "debt" ? t.observed : t.monthEnding} · <time>{latest.date}</time></p>
+              <EconomyDetails label={words.details}>
+              <p>{t.notes[group]}</p>
+              {delta !== null && <p>{t.change} · {formatUsd(delta, lang)} · {points[0].date} — {latest.date}</p>}
               {latest.ytd && <div className="rounded border border-line p-2 text-xs text-mu">
                 <p className="font-medium text-tx">{t.fytd} {latest.fiscalYear}</p>
                 <dl className="mt-1 grid grid-cols-2 gap-2">{latest.ytd.map((amount, i) => <div key={labels[i]}><dt>{labels[i]}</dt><dd>{formatUsd(amount, lang)}</dd></div>)}</dl>
               </div>}
-              <p className="text-xs text-mu">{group === "debt" ? t.observed : t.monthEnding} · <time>{latest.date}</time></p>
               <p className="text-xs text-mu">{t.checked} · {row?.checkedAt ? <time dateTime={row.checkedAt}>{date.format(Date.parse(row.checkedAt))}</time> : words.timeUnknown}</p>
               <p className="text-xs text-mu">{words.updated} · {words.timeUnknown}</p>
+              <a href={fiscalSources[group]} target="_blank" rel="noreferrer" className="inline-block font-semibold text-vi">Treasury FiscalData ↗</a>
+              <p>{t.education[groups.indexOf(group)]}</p>
+              <p>{words.disclaimer}</p>
+              </EconomyDetails>
+              <EconomyDetails label={words.history}>
               {labels.length > 1 && <div role="group" aria-label={words.history} className="flex flex-wrap gap-1">
                 {labels.map((label, index) => <button key={label} type="button" aria-pressed={column === index}
                   onClick={() => setColumns(current => ({ ...current, [group]: index }))}
                   className={`rounded border border-line px-2 py-1 text-xs ${column === index ? "bg-vi/15 text-vi" : "text-mu"}`}>{label}</button>)}
               </div>}
-              <p className="text-xs text-mu">{t.recent}</p>
-              <FiscalChart points={points} series={group} column={column} lang={lang} />
+              <FiscalHistory series={group} column={column} lang={lang} />
+              </EconomyDetails>
             </> : <p className="text-sm text-mu">{row?.status === "error" ? words.unavailable : row ? words.empty : words.loading}</p>}
-            <FiscalHistory key={range} series={group} range={range} column={column} lang={lang} />
-            <a href={fiscalSources[group]} target="_blank" rel="noreferrer" className="inline-block text-xs font-semibold text-vi">Treasury FiscalData ↗</a>
-            <p className="text-xs text-mu">{t.notes[group]}</p>
           </section>;
         })}
       </div>
@@ -138,8 +132,8 @@ export function MarketPublicFinances({ lang }: { lang: "ru" | "en" }) {
         <summary className="cursor-pointer font-medium text-tx">{t.context}</summary>
         <div className="mt-2 space-y-2">{t.education.map(paragraph => <p key={paragraph}>{paragraph}</p>)}<p className="text-xs">{words.disclaimer}</p></div>
       </details>
-    </div>}
-  </details>;
+    </div>
+  </section>;
 }
 
 async function readFiscal(series: FiscalSeries, range: HistoryRange | "latest", signal: AbortSignal): Promise<FiscalSnapshot> {
@@ -150,13 +144,14 @@ async function readFiscal(series: FiscalSeries, range: HistoryRange | "latest", 
   return { status: "error", points: [] };
 }
 
-function FiscalHistory({ series, range, column, lang }: {
-  series: FiscalSeries; range: HistoryRange; column: number; lang: "ru" | "en";
+function FiscalHistory({ series, column, lang }: {
+  series: FiscalSeries; column: number; lang: "ru" | "en";
 }) {
   const words = economyText[lang];
   const t = fiscalText[lang];
   const [attempt, setAttempt] = useState(0);
   const [history, setHistory] = useState<FiscalSnapshot>();
+  const [range, setRange] = useState<HistoryRange>("1");
   useEffect(() => {
     if (attempt === 0) return;
     const abort = new AbortController();
@@ -169,6 +164,11 @@ function FiscalHistory({ series, range, column, lang }: {
   const first = points[0]?.values[0];
   const last = points.at(-1)?.values[0];
   return <div className="space-y-2 border-t border-line pt-2">
+    <div role="group" aria-label={words.history} className="flex flex-wrap gap-1">
+      {ranges.map((value, index) => <button key={value} type="button" aria-pressed={range === value}
+        onClick={() => { setHistory(undefined); setAttempt(0); setRange(value); }}
+        className={`rounded border border-line px-2 py-1.5 text-xs ${range === value ? "bg-vi/15 text-vi" : "text-mu"}`}>{words.ranges[index]}</button>)}
+    </div>
     {(!history || history.status === "error") && <button type="button" disabled={attempt > 0 && !history}
       onClick={() => { setHistory(undefined); setAttempt(value => value + 1); }}
       className="rounded border border-line px-2 py-1 text-xs text-vi">
@@ -176,6 +176,7 @@ function FiscalHistory({ series, range, column, lang }: {
     </button>}
     {history?.status === "error" && <p role="status" className="text-xs text-mu">{words.error}</p>}
     {history?.status === "stale" && <p role="status" className="text-xs text-vi">{t.stale}</p>}
+    {history?.partial && <p role="status" className="text-xs text-mu">{t.partial}</p>}
     {history && history.status !== "error" && <>
       {series === "debt" && points.length > 1 && first && last && <p className="text-xs text-mu">
         {t.change} · {points[0].date} — {points.at(-1)?.date} · {formatUsd(String(BigInt(last) - BigInt(first)), lang)}
