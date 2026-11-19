@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { marketGuest } from "../e2e/helpers/market";
 import { fundamentalDefinitions, type FundamentalSeries } from "../lib/market/economy/fundamentals-data";
 
-for (const [width, lang] of [[390, "ru"], [1440, "en"]] as const) {
+for (const [width, lang] of [[360, "ru"], [390, "ru"], [1440, "en"]] as const) {
   test("US fundamentals: independent cards, real zero, on-demand history and recovery at " + width, async ({ browser }) => {
     const { page } = await marketGuest(browser, width);
     let releaseEarnings = () => {};
@@ -55,7 +55,7 @@ for (const [width, lang] of [[390, "ru"], [1440, "en"]] as const) {
       await expect(retail.getByText("0", { exact: true })).toBeVisible();
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
       await earnings.scrollIntoViewIfNeeded();
-      if (process.env.AYRA_FUNDAMENTALS_SCREENSHOT_DIR) {
+      if (process.env.AYRA_FUNDAMENTALS_SCREENSHOT_DIR && width !== 360) {
         await page.screenshot({ path: process.env.AYRA_FUNDAMENTALS_SCREENSHOT_DIR + "/fundamentals-" + width + "-" + lang + ".png" });
       }
       await page.reload();
