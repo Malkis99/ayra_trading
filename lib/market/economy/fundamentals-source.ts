@@ -45,12 +45,12 @@ export async function loadFundamental(series: FundamentalSeries, history: boolea
     }
     const points: FundamentalObservation[] = [];
     let partial = false;
-    let retrievedAt = new Date(now).toISOString();
+    let retrievedAt: string | undefined;
     for (const release of candidates) {
       try {
         const document = await beaReleaseDocument(release.url);
         points.push(parsePersonal(document.html, release, series));
-        if (document.retrievedAt < retrievedAt) retrievedAt = document.retrievedAt;
+        if (!retrievedAt || document.retrievedAt < retrievedAt) retrievedAt = document.retrievedAt;
       }
       catch {
         partial = true;
@@ -58,7 +58,7 @@ export async function loadFundamental(series: FundamentalSeries, history: boolea
       }
     }
     if (candidates.length && !points.length) throw new FundamentalFailure("no_verified_releases");
-    return { points, partial, retrievedAt };
+    return { points, partial, retrievedAt: retrievedAt ?? new Date(now).toISOString() };
   }
   const document = await read(url, "text/html");
   return { points: series === "retail" ? parseRetail(document.body) : parseProduction(document.body), retrievedAt: document.retrievedAt };

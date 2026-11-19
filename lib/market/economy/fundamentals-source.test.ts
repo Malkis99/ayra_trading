@@ -46,13 +46,16 @@ it("uses one report POST for current continued claims and an explicit bounded hi
 });
 it("shares BEA discovery and the latest document across income and spending; no history before requested", async () => {
   const { loadFundamental } = await import("./fundamentals-source");
-  const mock = vi.fn((url: string) => Promise.resolve(new Response(
-    url.includes("rss") ? '<rss><item><title>Personal Income and Outlays, September 2026</title><link>https://www.bea.gov/news/2026/personal-income-and-outlays-september-2026</link><pubDate>Thu, 29 Oct 2026 08:30:00 EDT</pubDate></item></rss>'
-      : fixture("bea-september.html"), { headers: { "content-type": url.includes("rss") ? "application/xml" : "text/html" } })));
+  const mock = vi.fn((url: string) => {
+    if (!url.includes("rss")) vi.setSystemTime(new Date("2026-11-19T07:00:03Z"));
+    return Promise.resolve(new Response(
+      url.includes("rss") ? '<rss><item><title>Personal Income and Outlays, September 2026</title><link>https://www.bea.gov/news/2026/personal-income-and-outlays-september-2026</link><pubDate>Thu, 29 Oct 2026 08:30:00 EDT</pubDate></item></rss>'
+        : fixture("bea-september.html"), { headers: { "content-type": url.includes("rss") ? "application/xml" : "text/html" } }));
+  });
   vi.stubGlobal("fetch", mock);
   const [income, consumption] = await Promise.all([loadFundamental("income", false, Date.now()), loadFundamental("consumption", false, Date.now())]);
   expect(mock).toHaveBeenCalledTimes(2);
   expect(income.points[0].value).toBe(0.2);
   expect(consumption.points[0].value).toBe(0.5);
-  expect(consumption.retrievedAt).toBe("2026-11-19T07:00:00.000Z");
+  expect(consumption.retrievedAt).toBe("2026-11-19T07:00:03.000Z");
 });
