@@ -4,6 +4,13 @@ export const fundamentalsText = {
     current: "Текущая версия ряда", initial: "Датированный выпуск", preliminary: "Предварительное", revised: "Пересмотрено",
     vintage: "Версия", sourceDate: "Дата выпуска", dateUnknown: "Не подтверждена", adjustment: "Сезонность",
     retrieved: "Получено от источника", stale: "Данные могут быть устаревшими", partial: "Часть выпусков недоступна",
+    staleReasons: {
+      source_check_expired: "Данные могут быть устаревшими: требуется повторная проверка источника",
+      source_check_unconfirmed: "Время последней проверки источника не подтверждено",
+      observation_old: "Источник пока не предоставил более свежего наблюдения",
+      source_unavailable: "Источник недоступен. Показаны последние подтверждённые данные",
+      provenance_conflict: "Обновление не подтверждено. Показаны ранее проверенные данные",
+    },
     short: "Недостаточно данных для графика", frequency: { monthly: "Ежемесячно", weekly: "Еженедельно" },
     units: { "USD/hour": "USD за час", percent: "% рабочей силы", persons: "человек", "percent-mom": "% к предыдущему месяцу" },
     definitions: {
@@ -21,6 +28,13 @@ export const fundamentalsText = {
     current: "Current series vintage", initial: "Dated release", preliminary: "Preliminary", revised: "Revised",
     vintage: "Vintage", sourceDate: "Release date", dateUnknown: "Unconfirmed", adjustment: "Adjustment",
     retrieved: "Retrieved from source", stale: "Data may be outdated", partial: "Some releases are unavailable",
+    staleReasons: {
+      source_check_expired: "Data may be outdated: the source needs to be checked again",
+      source_check_unconfirmed: "The last source-check time is unconfirmed",
+      observation_old: "The source has not yet provided a more recent observation",
+      source_unavailable: "Source unavailable. Showing the last confirmed data",
+      provenance_conflict: "Update unconfirmed. Showing previously verified data",
+    },
     short: "Insufficient data for a chart", frequency: { monthly: "Monthly", weekly: "Weekly" },
     units: { "USD/hour": "USD per hour", percent: "% of labor force", persons: "persons", "percent-mom": "% from preceding month" },
     definitions: {

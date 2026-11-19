@@ -23,7 +23,7 @@ function FundamentalCard({ lang, series }: { lang: "ru" | "en"; series: Fundamen
     const controller = new AbortController();
     void load(series, "latest", controller.signal).then(result => {
       if (!controller.signal.aborted) setLatest(prior =>
-        result.status === "error" && prior?.points.length ? { ...prior, status: "stale" } : result);
+        result.status === "error" && prior?.points.length ? { ...prior, status: "stale", staleReason: "source_unavailable" } : result);
     });
     return () => controller.abort();
   }, [series, attempt]);
@@ -40,7 +40,9 @@ function FundamentalCard({ lang, series }: { lang: "ru" | "en"; series: Fundamen
     minimumFractionDigits: series === "earnings" ? 2 : 0,
   }).format(value);
   const date = (value: string) => new Intl.DateTimeFormat(lang, { dateStyle: "medium", timeZone: "UTC" }).format(Date.parse(value));
-  const status = (data: FundamentalSnapshot) => data.status === "stale" ? f.stale : data.status === "partial" ? f.partial
+  const retrieved = (value?: string) => value && Number.isFinite(Date.parse(value))
+    ? new Intl.DateTimeFormat(lang, { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(Date.parse(value)) + " UTC" : f.dateUnknown;
+  const status = (data: FundamentalSnapshot) => data.status === "stale" ? (data.staleReason ? f.staleReasons[data.staleReason] : f.stale) : data.status === "partial" ? f.partial
     : data.status === "error" ? t.error : t.empty;
   const button = "rounded border border-line px-2 py-1.5 text-xs text-vi focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi";
   return <article data-testid={"economy-fundamental-" + series} className="min-w-0 space-y-3 rounded-lg border border-line bg-s2 p-4">
@@ -59,7 +61,7 @@ function FundamentalCard({ lang, series }: { lang: "ru" | "en"; series: Fundamen
         <p>{t.period} · {point.period}</p>
         <p>{f.sourceDate} · {point.publishedAt ? date(point.publishedAt) : f.dateUnknown}</p>
         <p>{f.vintage} · {point.vintage === "current" ? f.current : point.vintage}{point.vintage !== "current" || point.stage !== "current" ? " · " + f[point.stage] : ""}</p>
-        <p>{f.retrieved} · {latest?.retrievedAt ? date(latest.retrievedAt) : f.dateUnknown}</p>
+        <p>{f.retrieved} · {retrieved(latest?.retrievedAt)}</p>
       </div>
     </>}
     <a className="block break-words text-xs font-semibold text-vi" href={point?.sourceUrl ?? definition.url} target="_blank" rel="noreferrer">{f.source} ↗</a>
@@ -69,6 +71,7 @@ function FundamentalCard({ lang, series }: { lang: "ru" | "en"; series: Fundamen
     </button>
     {history && <>
       {history.status !== "ready" && <p role="status" className="text-xs text-mu">{status(history)}</p>}
+      <p className="text-xs text-mu">{f.retrieved} · {retrieved(history.retrievedAt)}</p>
       {history.points.length < 2 && <p className="text-xs text-mu">{f.short}</p>}
       {!!history.points.length && <div className="max-h-80 space-y-2 overflow-y-auto text-xs text-mu">
         <p>{f.historyNote}</p>

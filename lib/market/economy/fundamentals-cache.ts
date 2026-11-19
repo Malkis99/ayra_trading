@@ -1,11 +1,11 @@
 import { loadFundamental } from "./fundamentals-source";
-import { fundamentalDefinitions, orderedObservations, type FundamentalSeries, type FundamentalSnapshot } from "./fundamentals-data";
+import { orderedObservations, type FundamentalSeries, type FundamentalSnapshot } from "./fundamentals-data";
+import { withFundamentalFreshness } from "./fundamentals-freshness";
 
 type Entry = { data: FundamentalSnapshot; at: number };
 const pending = new Map<string, Promise<FundamentalSnapshot>>();
 const good = new Map<string, Entry>();
 const retryAfter = new Map<string, number>();
-const day = 86_400_000;
 
 export function fundamentalSnapshot(series: FundamentalSeries, history: boolean): Promise<FundamentalSnapshot> {
   const key = series + ":" + history;
@@ -13,16 +13,17 @@ export function fundamentalSnapshot(series: FundamentalSeries, history: boolean)
   if (running) return running;
   const now = Date.now();
   const prior = good.get(key);
-  const fallback = (): FundamentalSnapshot => prior ? { ...prior.data, status: "stale" } : { status: "error", points: [] };
+  const fallback = (): FundamentalSnapshot => prior ? { ...prior.data, status: "stale", staleReason: "source_unavailable" } : { status: "error", points: [] };
   if ((retryAfter.get(key) ?? 0) > now) return Promise.resolve(fallback());
-  if (prior && now - prior.at < 60_000) return Promise.resolve(prior.data);
+  if (prior && now - prior.at < 60_000) return Promise.resolve(withFundamentalFreshness(series, prior.data, now));
   const request = loadFundamental(series, history, now).then(result => {
     const points = orderedObservations(result.points, now);
     const latest = points[0];
-    const cutoff = fundamentalDefinitions[series].frequency === "weekly" ? 28 : 70;
-    const stale = latest && now - Date.parse(latest.publishedAt ?? (latest.period.length === 7 ? latest.period + "-01" : latest.period)) > cutoff * day;
-    const data: FundamentalSnapshot = { status: !points.length ? "unavailable" : result.partial ? "partial" : stale ? "stale" : "ready",
-      points: history ? points : points.slice(0, 1), retrievedAt: result.retrievedAt };
+    if (!points.length && prior) return fallback();
+    const data = withFundamentalFreshness(series, {
+      status: !points.length ? "unavailable" : result.partial ? "partial" : "ready",
+      points: history ? points : points.slice(0, 1), retrievedAt: result.retrievedAt,
+    }, Date.now());
     if (prior && (result.retrievedAt < (prior.data.retrievedAt ?? "") || points.some(point => {
       const confirmed = prior.data.points.find(item => item.period === point.period);
       if (!confirmed) return false;
@@ -34,10 +35,10 @@ export function fundamentalSnapshot(series: FundamentalSeries, history: boolean)
       return olderRelease || olderReport || conflict;
     }))) {
       console.warn(JSON.stringify({ event: "fundamentals_vintage_conflict", series, period: latest?.period }));
-      return { ...prior.data, status: "stale" } as FundamentalSnapshot;
+      return { ...prior.data, status: "stale", staleReason: "provenance_conflict" } as FundamentalSnapshot;
     }
     if (points.length && (!prior || latest.period >= prior.data.points[0].period)) good.set(key, { data, at: now });
-    else if (points.length && prior) return { ...prior.data, status: "stale" } as FundamentalSnapshot;
+    else if (points.length && prior) return { ...prior.data, status: "stale", staleReason: "provenance_conflict" } as FundamentalSnapshot;
     return data;
   }).catch(error => {
     retryAfter.set(key, Date.now() + 60_000);

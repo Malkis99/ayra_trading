@@ -91,4 +91,11 @@ it("shares BEA discovery and the latest document across income and spending; no 
   expect(income.points[0].value).toBe(0.2);
   expect(consumption.points[0].value).toBe(0.5);
   expect(consumption.retrievedAt).toBe("2026-11-19T07:00:03.000Z");
+  vi.setSystemTime(new Date("2026-11-19T07:30:00Z"));
+  const { pceSnapshot, beaReleaseDocument } = await import("./bea-cache");
+  expect((await pceSnapshot(false)).points[0].values).toEqual([0.5, 3.6, 0.3, 3.1]);
+  expect((await loadFundamental("income", false, Date.now())).retrievedAt).toBe(income.retrievedAt);
+  expect((await beaReleaseDocument({ period: "2026-09", publishedAt: "2026-10-29T12:30:00.000Z",
+    url: "https://www.bea.gov/news/2026/personal-income-and-outlays-september-2026" })).retrievedAt).toBe(income.retrievedAt);
+  expect(mock).toHaveBeenCalledTimes(2);
 });

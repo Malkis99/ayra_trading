@@ -14,6 +14,7 @@ for (const [width, lang] of [[360, "ru"], [390, "ru"], [1440, "en"]] as const) {
       }, lang);
       const calls: string[] = [];
       let retailFailed = true;
+      let retailChecks = 0;
       await page.route("**/api/market-economy/fundamentals?*", async route => {
         const params = new URL(route.request().url()).searchParams;
         const series = params.get("series")!;
@@ -21,6 +22,7 @@ for (const [width, lang] of [[360, "ru"], [390, "ru"], [1440, "en"]] as const) {
         calls.push(series + ":" + range);
         if (series === "earnings") await gate;
         if (series === "retail" && retailFailed) return route.fulfill({ status: 503, json: { status: "error", points: [] } });
+        const staleRetail = series === "retail" && ++retailChecks === 1;
         const values: Record<string, [number, number | null]> = {
           earnings: [38, 37.86], unemployment: [4.1, 4.2], continuing: [1717000, null],
           income: [0.2, 0.3], consumption: [0.5, 0.9], production: [-0.4, 0.7], retail: [0, 0.8],
@@ -30,8 +32,9 @@ for (const [width, lang] of [[360, "ru"], [390, "ru"], [1440, "en"]] as const) {
           previous: values[series][1], sourceUrl: bea ? "https://www.bea.gov/news/2026/personal-income-and-outlays-september-2026" : fundamentalDefinitions[series as FundamentalSeries].url,
           publishedAt: bea ? "2026-10-29T12:30:00Z" : null, vintage: bea ? "BEA 26-46" : "current",
           stage: bea ? "initial" : series === "earnings" ? "preliminary" : "current" };
-        return route.fulfill({ json: { status: "ready", points: range === "history" ? [point, { ...point, period: "2026-09", value: 0.7 }] : [point],
-          retrievedAt: "2026-11-19T07:00:00Z" } });
+        return route.fulfill({ json: { status: staleRetail ? "stale" : "ready", staleReason: staleRetail ? "source_check_expired" : undefined,
+          points: range === "history" ? [point, { ...point, period: "2026-09", value: 0.7 }] : [point],
+          retrievedAt: staleRetail ? "2026-11-01T07:00:00Z" : "2026-11-19T07:00:00Z" } });
       });
       await page.goto("/market?tab=economy");
       const income = page.getByTestId("economy-fundamental-income");
@@ -53,6 +56,11 @@ for (const [width, lang] of [[360, "ru"], [390, "ru"], [1440, "en"]] as const) {
       retailFailed = false;
       await retail.getByRole("button", { name: /Повторить|Retry/ }).click();
       await expect(retail.getByText("0", { exact: true })).toBeVisible();
+      await expect(retail.getByRole("status")).toContainText(lang === "ru" ? "требуется повторная проверка" : "source needs to be checked again");
+      await expect(retail.getByText(/UTC/)).toContainText("2026");
+      await expect(income.getByRole("status")).toHaveCount(0);
+      await retail.getByRole("button", { name: /Повторить|Retry/ }).click();
+      await expect(retail.getByRole("status")).toHaveCount(0);
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
       await earnings.scrollIntoViewIfNeeded();
       if (process.env.AYRA_FUNDAMENTALS_SCREENSHOT_DIR && width !== 360) {

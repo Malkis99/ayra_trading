@@ -70,3 +70,61 @@ it("an older DOL report cannot overwrite a newer confirmed vintage for the same 
   vi.advanceTimersByTime(61_000);
   expect(await fundamentalSnapshot("continuing", false)).toMatchObject({ status: "stale", points: [claim] });
 });
+
+it("November 19: an October observation retrieved on November 1 is stale, not ready", async () => {
+  const { fundamentalSnapshot } = await import("./fundamentals-cache");
+  load.mockResolvedValue({ points: [point], retrievedAt: "2026-11-01T07:00:00.000Z" });
+  expect(await fundamentalSnapshot("earnings", false)).toMatchObject({
+    status: "stale", staleReason: "source_check_expired", points: [point], retrievedAt: "2026-11-01T07:00:00.000Z",
+  });
+});
+
+it.each(["earnings", "unemployment", "continuing", "income", "consumption", "retail", "production"] as const)(
+  "%s expires at its exact document TTL, including in-process hits", async series => {
+    const { fundamentalSnapshot } = await import("./fundamentals-cache");
+    const { sourceCheckTtlSeconds } = await import("./fundamentals-freshness");
+    const retrievedAt = new Date(Date.now() - sourceCheckTtlSeconds(series) * 1000 + 1).toISOString();
+    load.mockResolvedValue({ points: [{ ...point, period: series === "continuing" ? "2026-11-14" : "2026-10" }], retrievedAt });
+    expect((await fundamentalSnapshot(series, false)).status).toBe("ready");
+    vi.advanceTimersByTime(1);
+    expect(await fundamentalSnapshot(series, false)).toMatchObject({ status: "stale", staleReason: "source_check_expired", retrievedAt });
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+it.each([undefined, "not-a-date", "2026-11-20T07:00:00.000Z"])("unconfirmed retrieval time %s never becomes ready", async retrievedAt => {
+  const { fundamentalSnapshot } = await import("./fundamentals-cache");
+  load.mockResolvedValue({ points: [point], retrievedAt });
+  expect(await fundamentalSnapshot("earnings", false)).toMatchObject({ status: "stale", staleReason: "source_check_unconfirmed", points: [point] });
+});
+
+it("failed background revalidation returns the cached document as stale without restamping it; a real refresh recovers", async () => {
+  const { fundamentalSnapshot } = await import("./fundamentals-cache");
+  const retrievedAt = "2026-11-18T19:00:00.000Z";
+  // Next SWR returns the old successful document, rather than throwing a failed background request.
+  load.mockResolvedValue({ points: [point], retrievedAt });
+  expect((await fundamentalSnapshot("earnings", false)).status).toBe("stale");
+  vi.advanceTimersByTime(61_000);
+  expect(await fundamentalSnapshot("earnings", false)).toMatchObject({ status: "stale", retrievedAt, points: [point] });
+  vi.advanceTimersByTime(61_000);
+  const refreshedAt = new Date().toISOString();
+  load.mockResolvedValue({ points: [point], retrievedAt: refreshedAt });
+  expect(await fundamentalSnapshot("earnings", false)).toMatchObject({ status: "ready", retrievedAt: refreshedAt, points: [point] });
+});
+
+it("a failed request preserves the value and exact successful retrieval time", async () => {
+  const { fundamentalSnapshot } = await import("./fundamentals-cache");
+  const confirmed = data();
+  load.mockResolvedValueOnce(confirmed).mockRejectedValue(new Error("http_503"));
+  await fundamentalSnapshot("income", false);
+  vi.advanceTimersByTime(61_000);
+  expect(await fundamentalSnapshot("income", false)).toMatchObject({ status: "stale", staleReason: "source_unavailable", retrievedAt: confirmed.retrievedAt, points: [point] });
+});
+
+it("an unavailable refreshed dataset does not erase the last confirmed observation", async () => {
+  const { fundamentalSnapshot } = await import("./fundamentals-cache");
+  const confirmed = data();
+  load.mockResolvedValueOnce(confirmed).mockResolvedValueOnce({ points: [], retrievedAt: new Date().toISOString() });
+  await fundamentalSnapshot("retail", false);
+  vi.advanceTimersByTime(61_000);
+  expect(await fundamentalSnapshot("retail", false)).toMatchObject({ status: "stale", staleReason: "source_unavailable", retrievedAt: confirmed.retrievedAt, points: [point] });
+});

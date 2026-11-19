@@ -13,6 +13,7 @@ export type FundamentalSnapshot = {
   status: "ready" | "partial" | "stale" | "unavailable" | "error";
   points: FundamentalObservation[];
   retrievedAt?: string;
+  staleReason?: "source_check_expired" | "source_check_unconfirmed" | "observation_old" | "source_unavailable" | "provenance_conflict";
 };
 export const fundamentalDefinitions = {
   earnings: { group: "employment", seriesId: "CES0500000003", unit: "USD/hour", adjustment: "SA", frequency: "monthly",
