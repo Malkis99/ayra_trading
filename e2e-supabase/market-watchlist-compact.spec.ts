@@ -154,4 +154,3 @@ for (const width of [360, 1440]) test(`full 30-instrument Watchlist ${width}`, a
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
   } finally { await page.context().close(); }
 });
-
