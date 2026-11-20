@@ -2,6 +2,7 @@ import { economyText, inflationText } from "@/lib/market/economy/dictionary";
 import { inflationCodes, type projectInflation } from "@/lib/market/economy/project-inflation";
 import { MarketBeaPce } from "./MarketBeaPce";
 import { EconomyDetails } from "./EconomyDetails";
+import { EconomyEmptyState } from "./EconomyEmptyState";
 
 export function MarketInflation({ lang, data, loading }: {
   lang: "ru" | "en"; data?: ReturnType<typeof projectInflation>; loading: boolean;
@@ -17,9 +18,9 @@ export function MarketInflation({ lang, data, loading }: {
       {inflationCodes.map((code, i) => {
         const rows = data?.[code] ?? [];
         const latest = rows[0];
-        return <article key={code} data-testid={"economy-" + code} className="min-w-0 space-y-2 rounded-lg border border-line bg-s2 p-3 sm:p-4">
+        return <article key={code} data-testid={"economy-" + code} className={`min-w-0 rounded-lg border border-line bg-s2 p-3 ${latest ? "space-y-2 sm:p-4" : "space-y-1"}`}>
           <div className="flex flex-wrap items-baseline justify-between gap-1"><h4 className="font-semibold text-tx">{copy.metrics[i]}</h4>{latest && <span className="text-xs text-vi">{t.confirmed}</span>}</div>
-          <p className="text-xs text-mu">% · {i % 2 === 0 ? "SA" : "NSA"}</p>
+          {latest && <p className="text-xs text-mu">% · {i % 2 === 0 ? "SA" : "NSA"}</p>}
           {latest ? <>
             <dl className="grid grid-cols-2 gap-1">
               <div><dt className="text-xs text-mu">{t.actual}</dt><dd className="text-xl font-semibold tabular-nums text-tx">{format(latest.actual)}</dd></div>
@@ -41,7 +42,7 @@ export function MarketInflation({ lang, data, loading }: {
                 <a href={row.sourceUrl} target="_blank" rel="noreferrer" className="hover:text-vi">{row.period} · {format(row.actual)}</a>
               </li>)}</ul>
             </details>
-          </> : <p className="text-sm text-mu">{loading ? t.loading : t.empty}</p>}
+          </> : <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1"><span className="text-xs text-mu">% · {i % 2 === 0 ? "SA" : "NSA"}</span><EconomyEmptyState>{loading ? t.loading : t.empty}</EconomyEmptyState></div>}
         </article>;
       })}
     </div>

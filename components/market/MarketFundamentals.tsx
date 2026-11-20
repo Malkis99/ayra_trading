@@ -48,10 +48,11 @@ function FundamentalCard({ lang, series }: { lang: "ru" | "en"; series: Fundamen
   const status = (data: FundamentalSnapshot) => data.status === "stale" ? (data.staleReason ? f.staleReasons[data.staleReason] : f.stale) : data.status === "partial" ? f.partial
     : data.status === "error" ? t.error : t.empty;
   const button = "rounded border border-line px-2 py-1.5 text-xs text-vi focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi";
-  return <article data-testid={"economy-fundamental-" + series} className="min-w-0 space-y-2 rounded-lg border border-line bg-s2 p-3 sm:p-4">
-      <header><p className="text-xs text-vi">{t.country} · {f.frequency[definition.frequency]}{latest?.status === "ready" ? " · " + t.confirmed : ""}</p>
-      <h4 className="mt-1 font-semibold text-tx">{title}</h4>
+  return <article data-testid={"economy-fundamental-" + series} className={"min-w-0 rounded-lg border border-line bg-s2 p-3 " + (point ? "space-y-2 sm:p-4" : "space-y-1")}>
+      <header>{point && <p className="text-xs text-vi">{t.country} · {f.frequency[definition.frequency]}{latest?.status === "ready" ? " · " + t.confirmed : ""}</p>}
+      <h4 className={(point ? "mt-1 " : "") + "font-semibold text-tx"}>{title}</h4>
     </header>
+    {!point && <p className="text-xs text-mu">{f.units[definition.unit]} · {definition.adjustment}</p>}
     {(!latest || latest.status !== "ready") && <p role="status" className="text-xs text-mu">{latest ? status(latest) : t.loading}</p>}
     {latest && ["error", "stale", "partial"].includes(latest.status) && <button type="button" className={button} onClick={() => setAttempt(value => value + 1)}>{t.retry}</button>}
     {point && <>
@@ -64,7 +65,7 @@ function FundamentalCard({ lang, series }: { lang: "ru" | "en"; series: Fundamen
         <p>{t.period} · {point.period}</p>
       </div>
     </>}
-    <EconomyDetails label={t.details}>
+    <EconomyDetails compact={!point} label={t.details}>
       <p>{description}</p>
       <p>{f.sourceDate} · {point?.publishedAt ? date(point.publishedAt) : f.dateUnknown}</p>
       <p>{f.vintage} · {point ? (point.vintage === "current" ? f.current : point.vintage) + " · " + f[point.stage] : f.dateUnknown}</p>
@@ -82,9 +83,11 @@ function FundamentalCard({ lang, series }: { lang: "ru" | "en"; series: Fundamen
     <div id={historyId} hidden={!history || !historyVisible}>
     {history && <>
       {history.status !== "ready" && <p role="status" className="text-xs text-mu">{status(history)}</p>}
-      <p className="text-xs text-mu">{f.retrieved} · {retrieved(history.retrievedAt)}</p>
-      <EconomyHistoryChart points={history.points.map(row => ({ period: row.period, value: row.value, group: [series, definition.unit, row.vintage, row.stage].join(":") }))}
-        format={format} empty={f.short} cadence={definition.frequency} />
+      {!!history.points.length && <>
+        <p className="text-xs text-mu">{f.retrieved} · {retrieved(history.retrievedAt)}</p>
+        <EconomyHistoryChart points={history.points.map(row => ({ period: row.period, value: row.value, group: [series, definition.unit, row.vintage, row.stage].join(":") }))}
+          format={format} empty={f.short} cadence={definition.frequency} />
+      </>}
       {!!history.points.length && <div className="max-h-80 space-y-2 overflow-y-auto text-xs text-mu">
         <p>{f.historyNote}</p>
         <ul className="space-y-2">{history.points.map(row => <li key={row.period} className="border-t border-line pt-2">
