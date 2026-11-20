@@ -11,14 +11,14 @@ import { MarketInflation } from "./MarketInflation";
 import { MarketFundamentals } from "./MarketFundamentals";
 import { EconomyDetails } from "./EconomyDetails";
 import { EconomyEmptyState } from "./EconomyEmptyState";
+import { EconomyColumns } from "./EconomyColumns";
 
 type Labels = typeof economyText.en;
 
-function History({ rows, t, format }: {
-  rows: Observation[]; t: Labels; format: (value: number) => string;
+function History({ points, t, format }: {
+  points: Observation[]; t: Labels; format: (value: number) => string;
 }) {
-  const points = economyHistory(rows, rows[0]?.stage ?? "", "max", Date.now());
-  if (points.length < 2) return <EconomyEmptyState>{t.historyEmpty}</EconomyEmptyState>;
+  if (points.length < 2) return null;
   const first = periodIndex(points[0]);
   const last = periodIndex(points[points.length - 1]);
   const min = Math.min(...points.map(point => point.actual));
@@ -77,11 +77,12 @@ export function MarketEconomy() {
       {index === 1 && <MarketInflation lang={lang} data={data?.inflation} loading={status === "loading"} />}
       <section className="space-y-3" aria-label={t.categories[index]}>
         <h3 className="font-serif text-lg font-semibold text-tx">{t.categories[index]}</h3>
-        <div className="grid items-start gap-3 md:grid-cols-2">
+        <EconomyColumns splitAt={2}>
         {codes.map(code => {
           const labels = t.indicators[code];
           const rows = data?.[code] ?? [];
           const latest = rows[0];
+          const history = economyHistory(rows, latest?.stage ?? "", "max", Date.now());
           const format = (value: number) => (code === "us_jobless_claims" ? number : change).format(value) + (code === "us_gdp" ? "%" : "");
           const stage = latest ? t.stages[latest.stage as keyof Labels["stages"]] : "";
           return (
@@ -111,12 +112,10 @@ export function MarketEconomy() {
                 </dl>
                 <p className="mt-3 text-xs">{t.disclaimer}</p>
               </EconomyDetails>
-              {!!rows.length && <EconomyDetails label={t.history}><History rows={rows} t={t} format={format} /></EconomyDetails>}
+              {history.length >= 2 && <EconomyDetails label={t.history}><History points={history} t={t} format={format} /></EconomyDetails>}
             </article>
           );
         })}
-        <MarketFundamentals embedded lang={lang} series={index === 0 ? ["production"] : ["earnings", "unemployment", "continuing"]} />
-        </div>
         {index === 0 && <details data-testid="economy-debt-gdp" className="group rounded-md border border-line bg-s1 px-3 py-2 text-xs text-mu">
           <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi [&::-webkit-details-marker]:hidden">
             <span className="font-medium text-tx">{beaPceText[lang].debtGdpShort}</span><span>{t.empty}</span>
@@ -124,6 +123,9 @@ export function MarketEconomy() {
           </summary>
           <div className="mt-2 space-y-1 leading-snug"><p>{beaPceText[lang].debtGdp}</p><p>{beaPceText[lang].debtGdpUnavailable}</p></div>
         </details>}
+        {(index === 0 ? ["production"] as const : ["earnings", "unemployment", "continuing"] as const).map(series =>
+          <MarketFundamentals key={series} embedded lang={lang} series={[series]} />)}
+        </EconomyColumns>
       </section>
       </div>
       ))}

@@ -6,10 +6,11 @@ import { fundamentalsText } from "@/lib/market/economy/fundamentals-dictionary";
 import { fundamentalDefinitions, type FundamentalSeries, type FundamentalSnapshot } from "@/lib/market/economy/fundamentals-data";
 import { EconomyDetails } from "./EconomyDetails";
 import { EconomyHistoryChart } from "./EconomyHistoryChart";
+import { EconomyColumns } from "./EconomyColumns";
 
 export function MarketFundamentals({ lang, series, embedded = false }: { lang: "ru" | "en"; series: readonly FundamentalSeries[]; embedded?: boolean }) {
   const cards = series.map(value => <FundamentalCard key={value} lang={lang} series={value} />);
-  return embedded ? <>{cards}</> : <div className="grid min-w-0 items-start gap-3 md:grid-cols-2">{cards}</div>;
+  return embedded ? <>{cards}</> : <EconomyColumns>{cards}</EconomyColumns>;
 }
 
 function FundamentalCard({ lang, series }: { lang: "ru" | "en"; series: FundamentalSeries }) {
@@ -37,6 +38,7 @@ function FundamentalCard({ lang, series }: { lang: "ru" | "en"; series: Fundamen
     return () => controller.abort();
   }, [series, historyAttempt]);
   const point = latest?.points[0];
+  const historyContentVisible = !!history && historyVisible && (history.points.length > 0 || !["ready", "unavailable"].includes(history.status));
   const [title, description] = f.definitions[series];
   const format = (value: number) => new Intl.NumberFormat(lang, {
     maximumFractionDigits: series === "earnings" ? 2 : series === "continuing" ? 0 : 1,
@@ -73,14 +75,14 @@ function FundamentalCard({ lang, series }: { lang: "ru" | "en"; series: Fundamen
     <a className="block break-words text-xs font-semibold text-vi" href={point?.sourceUrl ?? definition.url} target="_blank" rel="noreferrer">{f.source} ↗</a>
     </EconomyDetails>
     <button type="button" className={button} disabled={historyAttempt > 0 && !history}
-      aria-expanded={!!history && historyVisible} aria-controls={historyId}
+      aria-expanded={historyContentVisible} aria-controls={historyId}
       onClick={() => {
-        if (history && history.status !== "error") setHistoryVisible(value => !value);
+        if (history?.points.length && history.status !== "error") setHistoryVisible(value => !value);
         else { setHistoryVisible(true); setHistory(undefined); setHistoryAttempt(value => value + 1); }
       }}>
-      {historyAttempt > 0 && !history ? t.loading : history?.status === "error" ? t.retry : history && historyVisible ? t.hideHistory : f.history}
+      {historyAttempt > 0 && !history ? t.loading : history?.status === "error" ? t.retry : history?.points.length && historyVisible ? t.hideHistory : f.history}
     </button>
-    <div id={historyId} hidden={!history || !historyVisible}>
+    <div id={historyId} hidden={!historyContentVisible}>
     {history && <>
       {history.status !== "ready" && <p role="status" className="text-xs text-mu">{status(history)}</p>}
       {!!history.points.length && <>

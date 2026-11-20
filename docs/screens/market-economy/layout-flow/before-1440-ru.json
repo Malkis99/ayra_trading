@@ -1,0 +1,34 @@
+{
+  "economy-us_gdp": {
+    "y": -4373,
+    "height": 695.5
+  },
+  "economy-debt-gdp": {
+    "y": -3665.5,
+    "height": 34
+  },
+  "fiscal-debt": {
+    "y": -1380.5,
+    "height": 805
+  },
+  "fiscal-budget": {
+    "y": -1380.5,
+    "height": 852
+  },
+  "fiscal-interest": {
+    "y": -516.5,
+    "height": 726
+  },
+  "monetary-policy": {
+    "y": 323.5,
+    "height": 387.5
+  },
+  "monetary-yields": {
+    "y": 323.5,
+    "height": 628
+  },
+  "monetary-dollar": {
+    "y": 723,
+    "height": 607.5
+  }
+}

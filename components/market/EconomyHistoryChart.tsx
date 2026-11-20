@@ -1,5 +1,4 @@
 import React from "react";
-import { EconomyEmptyState } from "./EconomyEmptyState";
 
 type Point = { period: string; value: number; group: string };
 
@@ -9,14 +8,15 @@ function ordinal(period: string) {
 }
 
 /** Groups encode series/unit/stage/vintage; gaps and incompatible versions are never joined. */
-export function EconomyHistoryChart({ points, empty, format, cadence = "monthly" }: {
+export function EconomyHistoryChart({ points, format, cadence = "monthly" }: {
   points: Point[]; empty: string; format: (value: number) => string; cadence?: "monthly" | "weekly";
 }) {
   const rows = [...points].filter(point => Number.isFinite(point.value) && Number.isFinite(ordinal(point.period)))
     .sort((a, b) => ordinal(a.period) - ordinal(b.period));
   const groups = new Map<string, Set<string>>();
   rows.forEach(row => groups.set(row.group, (groups.get(row.group) ?? new Set()).add(row.period)));
-  if (![...groups.values()].some(periods => periods.size >= 2)) return <EconomyEmptyState>{empty}</EconomyEmptyState>;
+  // The caller retains the observation list; do not add an empty chart message above it.
+  if (![...groups.values()].some(periods => periods.size >= 2)) return null;
   const values = rows.map(row => row.value);
   const min = Math.min(...values), max = Math.max(...values);
   const first = ordinal(rows[0].period), last = ordinal(rows.at(-1)!.period);
