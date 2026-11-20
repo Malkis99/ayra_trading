@@ -6,7 +6,7 @@ import { fiscalText } from "@/lib/market/economy/fiscal-dictionary";
 import { ranges, type HistoryRange } from "@/lib/market/economy/project-calendar";
 import { economyText } from "@/lib/market/economy/dictionary";
 import { EconomyDetails } from "./EconomyDetails";
-import { EconomyEmptyState } from "./EconomyEmptyState";
+import { EconomyColumns } from "./EconomyColumns";
 
 const groups = ["debt", "budget", "interest"] as const;
 
@@ -19,7 +19,9 @@ function FiscalChart({ points, series, column, lang }: { points: FiscalPoint[]; 
     const value = point.values[column];
     return value == null ? [] : [{ ...point, value, index }];
   });
-  if (new Set(graph.map(point => point.date)).size < 2) return <EconomyEmptyState>{words.historyEmpty}</EconomyEmptyState>;
+  if (new Set(graph.map(point => point.date)).size < 2) return graph.length ? <ul className="text-xs text-mu">
+    {graph.map(point => <li key={point.date}>{point.date} · {formatUsd(point.value, lang)}</li>)}
+  </ul> : null;
   const times = graph.map(point => Date.parse(point.date));
   const values = graph.map(point => Number(point.value));
   const min = Math.min(...values);
@@ -81,8 +83,8 @@ export function MarketPublicFinances({ lang }: { lang: "ru" | "en" }) {
         <button type="button" onClick={() => setAttempt(value => value + 1)}
           className="rounded-md border border-line px-3 py-1 text-vi">{words.retry}</button>
       </div>}
-      <div className="grid items-start gap-3 md:grid-cols-2">
-        {groups.map(group => {
+      <EconomyColumns splitAt={2}>
+        {(["debt", "interest", "budget"] as const).map(group => {
           const row = data[group];
           const points = row?.points ?? [];
           const latest = points[points.length - 1];
@@ -128,7 +130,7 @@ export function MarketPublicFinances({ lang }: { lang: "ru" | "en" }) {
             </> : <p className="text-sm text-mu">{row?.status === "error" ? words.unavailable : row ? words.empty : words.loading}</p>}
           </section>;
         })}
-      </div>
+      </EconomyColumns>
       <details className="rounded border border-line p-3 text-sm text-mu">
         <summary className="cursor-pointer font-medium text-tx">{t.context}</summary>
         <div className="mt-2 space-y-2">{t.education.map(paragraph => <p key={paragraph}>{paragraph}</p>)}<p className="text-xs">{words.disclaimer}</p></div>
@@ -170,7 +172,7 @@ function FiscalHistory({ series, column, lang }: {
         onClick={() => { setHistory(undefined); setAttempt(0); setRange(value); }}
         className={`rounded border border-line px-2 py-1.5 text-xs ${range === value ? "bg-vi/15 text-vi" : "text-mu"}`}>{words.ranges[index]}</button>)}
     </div>
-    {(!history || history.status === "error") && <button type="button" disabled={attempt > 0 && !history}
+    {(!history || !history.points.length || history.status === "error") && <button type="button" disabled={attempt > 0 && !history}
       onClick={() => { setHistory(undefined); setAttempt(value => value + 1); }}
       className="rounded border border-line px-2 py-1 text-xs text-vi">
       {history ? words.retry : attempt > 0 ? words.loading : t.loadHistory + " · " + words.ranges[ranges.indexOf(range)]}

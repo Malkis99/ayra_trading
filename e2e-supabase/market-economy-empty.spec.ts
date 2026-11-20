@@ -29,17 +29,12 @@ for (const width of [360, 390, 768, 1024, 1440]) for (const lang of ["ru", "en"]
       await expect(page.getByTestId("economy-us_nfp").getByText("+165", { exact: true })).toBeVisible();
       for (const code of ["us_gdp", "us_nfp", "us_jobless_claims"]) {
         const card = page.getByTestId("economy-" + code);
-        await card.locator("summary").filter({ hasText: /^(История|History)$/ }).click();
-        await expect(card.getByText(/Недостаточно данных для графика|Not enough data to chart/)).toBeVisible();
+        await expect(card.locator("summary").filter({ hasText: /^(История|History)$/ })).toHaveCount(0);
         await expect(card.locator("svg:not(.lucide)")).toHaveCount(0);
-        if (process.env.AYRA_ECO_EMPTY_BASELINE !== "1") {
-          const note = card.locator("[data-economy-empty]");
-          expect((await note.locator("..").boundingBox())!.height).toBeLessThanOrEqual(48);
-        }
       }
       const dollar = page.getByTestId("monetary-dollar");
       await dollar.getByRole("button", { name: /Загрузить историю|Load history/ }).click();
-      await expect(dollar.getByText(/Недостаточно данных для графика|Not enough data to chart/)).toBeVisible();
+      await expect(dollar.getByRole("listitem")).toHaveText(/2026-11-19.*122[,.]6503/);
       await expect(dollar.locator("svg[data-economy-chart]")).toHaveCount(0);
       const baseline = process.env.AYRA_ECO_EMPTY_BASELINE === "1";
       if (!baseline) {
@@ -67,8 +62,8 @@ for (const width of [360, 390, 768, 1024, 1440]) for (const lang of ["ru", "en"]
           const policy = (await page.getByTestId("monetary-policy").boundingBox())!;
           const yields = (await page.getByTestId("monetary-yields").boundingBox())!;
           const usd = (await dollar.boundingBox())!;
-          expect(yields.y).toBeGreaterThanOrEqual(policy.y + policy.height);
-          expect(usd.y).toBeGreaterThanOrEqual(yields.y + yields.height);
+          expect(usd.y).toBeGreaterThanOrEqual(policy.y + policy.height);
+          expect(yields.y).toBeGreaterThanOrEqual(usd.y + usd.height);
         }
         await expect(page.getByTestId("monetary-policy").getByText(/Данные EFFR могут быть устаревшими|EFFR data may be outdated/)).toBeVisible();
       }

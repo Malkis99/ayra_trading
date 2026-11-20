@@ -6,10 +6,11 @@ import { fiscalText } from "@/lib/market/economy/fiscal-dictionary";
 import { monetaryText } from "@/lib/market/economy/monetary-dictionary";
 import { dayMs, maturities, monetarySources, type MonetaryPoint, type MonetarySeries, type MonetarySnapshot } from "@/lib/market/economy/monetary-data";
 import { EconomyDetails } from "./EconomyDetails";
-import { EconomyEmptyState } from "./EconomyEmptyState";
+import { EconomyColumns } from "./EconomyColumns";
 
 type Language = "en" | "ru";
-const seriesList = Object.keys(monetarySources) as MonetarySeries[];
+// Column-major reading order is also the DOM/mobile/keyboard order.
+const seriesList: MonetarySeries[] = ["policy", "dollar", "yields"];
 const chartYears = [1, 3, 5, 10, 0];
 
 async function read(series: MonetarySeries, history: boolean, signal: AbortSignal): Promise<MonetarySnapshot> {
@@ -25,7 +26,9 @@ function HistoryChart({ points, column, lang, gap, format }: {
 }) {
   const t = economyText[lang];
   const values = points.flatMap((point, index) => point.values[column] == null ? [] : [{ date: point.date, value: point.values[column]!, index }]);
-  if (new Set(values.map(point => point.date)).size < 2) return <EconomyEmptyState>{t.historyEmpty}</EconomyEmptyState>;
+  if (new Set(values.map(point => point.date)).size < 2) return values.length ? <ul className="text-xs text-mu">
+    {values.map(point => <li key={point.date}>{point.date} · {format(point.value)}</li>)}
+  </ul> : null;
   const times = values.map(point => Date.parse(point.date));
   const min = Math.min(...values.map(point => point.value));
   const max = Math.max(...values.map(point => point.value));
@@ -85,8 +88,7 @@ function MonetaryCard({ series, lang }: { series: MonetarySeries; lang: Language
   const first = columnPoints[0]?.values[column];
   const last = columnPoints.at(-1)?.values[column];
   const delta = columnPoints.length > 1 && first != null && last != null ? (column >= 5 ? last - first : Math.round((last - first) * 100)) : null;
-  return <article className={"min-w-0 space-y-2 self-start rounded-lg border border-line bg-s2 p-3 sm:p-4 " +
-    (series === "yields" ? "md:col-start-2 md:row-start-1 md:row-span-2" : series === "dollar" ? "md:col-start-1 md:row-start-2" : "")}
+  return <article className="min-w-0 space-y-2 rounded-lg border border-line bg-s2 p-3 sm:p-4"
     data-testid={"monetary-" + series}>
     <div className="flex flex-wrap items-baseline justify-between gap-1"><h4 className="font-serif text-lg font-semibold text-tx">{t[series]}</h4>{latest?.status === "ready" && <span className="text-xs text-vi">{words.confirmed}</span>}</div>
     {(!latest || latest.status !== "ready") && <p role="status" className="text-sm text-mu">
@@ -123,24 +125,23 @@ function MonetaryCard({ series, lang }: { series: MonetarySeries; lang: Language
         return <div key={label}><dt className="text-xs text-mu">{label}</dt><dd className="tabular-nums">{value == null ? "—" : signed.format(value) + "%"}</dd></div>;
       })}</dl>
     </>}
-    {(!history || history.status === "error" || history.status === "unavailable") && <button type="button" disabled={fetchingHistory}
+    {(!history || !history.points.length || history.status === "error" || history.status === "unavailable") && <button type="button" disabled={fetchingHistory}
       onClick={() => { setHistory(undefined); setHistoryRequest(value => value + 1); }} className="rounded border border-line px-2 py-1 text-xs text-vi">
       {fetchingHistory ? words.loading : history ? words.retry : t.history}
     </button>}
     {history?.status === "error" && <p role="status" className="text-xs text-mu">{words.error}</p>}
     {history?.status === "stale" && <p role="status" className="text-xs text-mu">{fiscalText[lang].stale}</p>}
     {history?.status === "unavailable" && <p role="status" className="text-xs text-mu">{words.unavailable}</p>}
-    {history && (history.status === "ready" || history.status === "stale") && <div role="group" aria-label={words.history} className="flex flex-wrap gap-1">
+    {history && points.length > 0 && (history.status === "ready" || history.status === "stale") && <div role="group" aria-label={words.history} className="flex flex-wrap gap-1">
       {chartYears.map((value, i) => <button key={value} type="button" aria-pressed={value === years} onClick={() => setYears(value)}
         className={"rounded border border-line px-2 py-1 text-xs " + (value === years ? "bg-vi/15 text-vi" : "text-mu")}>{words.ranges[i]}</button>)}
     </div>}
     {history && (history.status === "ready" || history.status === "stale") && series !== "policy" && <HistoryChart points={points} column={series === "dollar" ? 0 : column} lang={lang} gap={4 * dayMs} format={format} />}
-    {history && (history.status === "ready" || history.status === "stale") && series === "policy" && points.length > 1 && <details className="text-xs text-mu">
+    {history && (history.status === "ready" || history.status === "stale") && series === "policy" && points.length > 0 && <details className="text-xs text-mu">
       <summary className="cursor-pointer">{t.policyHistory}</summary>
       <ul className="mt-2 max-h-40 overflow-y-auto">{points.slice().reverse().map(point =>
         <li key={point.date}>{point.date} · {format(point.values[0]!)}–{format(point.values[1]!)}</li>)}</ul>
     </details>}
-    {history && (history.status === "ready" || history.status === "stale") && series === "policy" && points.length < 2 && <EconomyEmptyState>{words.historyEmpty}</EconomyEmptyState>}
     <EconomyDetails label={words.details}>
     {latest?.releasedOn && <p>{t.published} · <time>{latest.releasedOn}</time></p>}
     <p>{words.retrieved} · {words.timeUnknown}</p>
@@ -159,7 +160,7 @@ export function MarketMonetary({ lang }: { lang: Language }) {
   const t = monetaryText[lang];
   return <section className="space-y-3" aria-labelledby="market-monetary-title">
     <h3 id="market-monetary-title" className="font-serif text-lg font-semibold text-tx">{t.heading}</h3>
-    <div className="grid items-start gap-3 md:grid-cols-2">{seriesList.map(series => <MonetaryCard key={series} series={series} lang={lang} />)}</div>
+    <EconomyColumns splitAt={2}>{seriesList.map(series => <MonetaryCard key={series} series={series} lang={lang} />)}</EconomyColumns>
     <details className="rounded-lg border border-line bg-s1 p-3 text-sm text-mu">
       <summary className="cursor-pointer font-medium text-tx">{economyText[lang].markets}</summary>
       <div className="mt-2 space-y-2">{t.scenarios.map(text => <p key={text}>{text}</p>)}<p className="text-xs">{economyText[lang].disclaimer}</p></div>
