@@ -6,6 +6,7 @@ import { fiscalText } from "@/lib/market/economy/fiscal-dictionary";
 import { ranges, type HistoryRange } from "@/lib/market/economy/project-calendar";
 import { economyText } from "@/lib/market/economy/dictionary";
 import { EconomyDetails } from "./EconomyDetails";
+import { EconomyEmptyState } from "./EconomyEmptyState";
 
 const groups = ["debt", "budget", "interest"] as const;
 
@@ -18,7 +19,7 @@ function FiscalChart({ points, series, column, lang }: { points: FiscalPoint[]; 
     const value = point.values[column];
     return value == null ? [] : [{ ...point, value, index }];
   });
-  if (graph.length < 2) return <p className="text-xs text-mu">{words.historyEmpty}</p>;
+  if (new Set(graph.map(point => point.date)).size < 2) return <EconomyEmptyState>{words.historyEmpty}</EconomyEmptyState>;
   const times = graph.map(point => Date.parse(point.date));
   const values = graph.map(point => Number(point.value));
   const min = Math.min(...values);

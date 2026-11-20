@@ -6,6 +6,7 @@ import { fiscalText } from "@/lib/market/economy/fiscal-dictionary";
 import { monetaryText } from "@/lib/market/economy/monetary-dictionary";
 import { dayMs, maturities, monetarySources, type MonetaryPoint, type MonetarySeries, type MonetarySnapshot } from "@/lib/market/economy/monetary-data";
 import { EconomyDetails } from "./EconomyDetails";
+import { EconomyEmptyState } from "./EconomyEmptyState";
 
 type Language = "en" | "ru";
 const seriesList = Object.keys(monetarySources) as MonetarySeries[];
@@ -24,7 +25,7 @@ function HistoryChart({ points, column, lang, gap, format }: {
 }) {
   const t = economyText[lang];
   const values = points.flatMap((point, index) => point.values[column] == null ? [] : [{ date: point.date, value: point.values[column]!, index }]);
-  if (values.length < 2) return <p className="text-xs text-mu">{t.historyEmpty}</p>;
+  if (new Set(values.map(point => point.date)).size < 2) return <EconomyEmptyState>{t.historyEmpty}</EconomyEmptyState>;
   const times = values.map(point => Date.parse(point.date));
   const min = Math.min(...values.map(point => point.value));
   const max = Math.max(...values.map(point => point.value));
@@ -84,7 +85,9 @@ function MonetaryCard({ series, lang }: { series: MonetarySeries; lang: Language
   const first = columnPoints[0]?.values[column];
   const last = columnPoints.at(-1)?.values[column];
   const delta = columnPoints.length > 1 && first != null && last != null ? (column >= 5 ? last - first : Math.round((last - first) * 100)) : null;
-  return <article className="min-w-0 space-y-2 rounded-lg border border-line bg-s2 p-3 sm:p-4" data-testid={"monetary-" + series}>
+  return <article className={"min-w-0 space-y-2 self-start rounded-lg border border-line bg-s2 p-3 sm:p-4 " +
+    (series === "yields" ? "md:col-start-2 md:row-start-1 md:row-span-2" : series === "dollar" ? "md:col-start-1 md:row-start-2" : "")}
+    data-testid={"monetary-" + series}>
     <div className="flex flex-wrap items-baseline justify-between gap-1"><h4 className="font-serif text-lg font-semibold text-tx">{t[series]}</h4>{latest?.status === "ready" && <span className="text-xs text-vi">{words.confirmed}</span>}</div>
     {(!latest || latest.status !== "ready") && <p role="status" className="text-sm text-mu">
       {!latest ? words.loading : latest.status === "stale" ? fiscalText[lang].stale : latest.status === "unavailable" ? words.unavailable : words.error}
@@ -131,12 +134,13 @@ function MonetaryCard({ series, lang }: { series: MonetarySeries; lang: Language
       {chartYears.map((value, i) => <button key={value} type="button" aria-pressed={value === years} onClick={() => setYears(value)}
         className={"rounded border border-line px-2 py-1 text-xs " + (value === years ? "bg-vi/15 text-vi" : "text-mu")}>{words.ranges[i]}</button>)}
     </div>}
-    {history && series !== "policy" && <HistoryChart points={points} column={series === "dollar" ? 0 : column} lang={lang} gap={4 * dayMs} format={format} />}
-    {history && series === "policy" && points.length > 1 && <details className="text-xs text-mu">
+    {history && (history.status === "ready" || history.status === "stale") && series !== "policy" && <HistoryChart points={points} column={series === "dollar" ? 0 : column} lang={lang} gap={4 * dayMs} format={format} />}
+    {history && (history.status === "ready" || history.status === "stale") && series === "policy" && points.length > 1 && <details className="text-xs text-mu">
       <summary className="cursor-pointer">{t.policyHistory}</summary>
       <ul className="mt-2 max-h-40 overflow-y-auto">{points.slice().reverse().map(point =>
         <li key={point.date}>{point.date} · {format(point.values[0]!)}–{format(point.values[1]!)}</li>)}</ul>
     </details>}
+    {history && (history.status === "ready" || history.status === "stale") && series === "policy" && points.length < 2 && <EconomyEmptyState>{words.historyEmpty}</EconomyEmptyState>}
     <EconomyDetails label={words.details}>
     {latest?.releasedOn && <p>{t.published} · <time>{latest.releasedOn}</time></p>}
     <p>{words.retrieved} · {words.timeUnknown}</p>
