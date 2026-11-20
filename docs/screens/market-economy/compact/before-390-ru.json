@@ -1,0 +1,73 @@
+{
+  "height": 9119,
+  "cards": [
+    {
+      "id": "economy-us_gdp",
+      "height": 461
+    },
+    {
+      "id": "economy-fundamental-production",
+      "height": 368
+    },
+    {
+      "id": "economy-us_cpi",
+      "height": 110
+    },
+    {
+      "id": "economy-us_cpi_yoy",
+      "height": 110
+    },
+    {
+      "id": "economy-us_core_cpi",
+      "height": 110
+    },
+    {
+      "id": "economy-us_core_cpi_yoy",
+      "height": 110
+    },
+    {
+      "id": "economy-us_nfp",
+      "height": 279
+    },
+    {
+      "id": "economy-us_jobless_claims",
+      "height": 255
+    },
+    {
+      "id": "economy-fundamental-earnings",
+      "height": 368
+    },
+    {
+      "id": "economy-fundamental-unemployment",
+      "height": 352
+    },
+    {
+      "id": "economy-fundamental-continuing",
+      "height": 368
+    },
+    {
+      "id": "economy-fundamental-income",
+      "height": 368
+    },
+    {
+      "id": "economy-fundamental-consumption",
+      "height": 384
+    },
+    {
+      "id": "economy-fundamental-retail",
+      "height": 470
+    },
+    {
+      "id": "monetary-policy",
+      "height": 436
+    },
+    {
+      "id": "monetary-yields",
+      "height": 452
+    },
+    {
+      "id": "monetary-dollar",
+      "height": 440
+    }
+  ]
+}

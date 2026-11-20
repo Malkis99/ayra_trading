@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { beaPceText, economyText } from "@/lib/market/economy/dictionary";
 import type { PceSnapshot } from "@/lib/market/economy/bea-pce";
+import { EconomyDetails } from "./EconomyDetails";
 
 export function MarketBeaPce({ lang }: { lang: "ru" | "en" }) {
   const t = economyText[lang];
@@ -31,9 +32,8 @@ export function MarketBeaPce({ lang }: { lang: "ru" | "en" }) {
   const formatter = new Intl.NumberFormat(lang, { minimumFractionDigits: 1, maximumFractionDigits: 1, signDisplay: "exceptZero" });
   const format = (value: number) => formatter.format(value) + "%";
   const date = new Intl.DateTimeFormat(lang, { dateStyle: "medium", timeZone: "America/New_York" });
-  return <section data-testid="economy-bea-pce" className="space-y-3 rounded-lg border border-line bg-s2 p-4">
-    <h4 className="font-semibold text-tx">{labels.title}</h4>
-    <p className="text-xs text-mu">{labels.intro}</p>
+  return <section data-testid="economy-bea-pce" className="space-y-2 rounded-lg border border-line bg-s2 p-3 sm:p-4">
+    <div className="flex flex-wrap items-baseline justify-between gap-1"><h4 className="font-semibold text-tx">{labels.title}</h4>{latest?.status === "ready" && <span className="text-xs text-vi">{t.confirmed}</span>}</div>
     {(!latest || latest.status !== "ready") && <p role="status" className="text-xs text-mu">
       {!latest ? t.loading : latest.status === "stale" ? labels.stale : latest.status === "partial" ? labels.partial : latest.status === "error" ? t.error : t.empty}
     </p>}
@@ -46,10 +46,14 @@ export function MarketBeaPce({ lang }: { lang: "ru" | "en" }) {
         </div>)}
       </dl>
       <p className="text-xs text-mu">{t.period} · {snapshot.period}</p>
+      <EconomyDetails label={t.details}>
+      <p>{labels.intro}</p>
       <a href={snapshot.url} className="block text-xs font-semibold text-vi" target="_blank" rel="noreferrer">
         {labels.vintage} · <time dateTime={snapshot.publishedAt}>{date.format(Date.parse(snapshot.publishedAt))}</time>
         {snapshot.vintageId && " · " + snapshot.vintageId} ↗
       </a>
+      <p>{t.retrieved} · {t.timeUnknown}</p>
+      </EconomyDetails>
       {(!history || history.status === "error") && <button type="button" disabled={!history && historyAttempt > 0}
         onClick={() => { setHistory(undefined); setHistoryAttempt(value => value + 1); }} className="rounded border border-line px-2 py-1 text-xs text-vi">
         {history ? t.retry : historyAttempt > 0 ? t.loading : labels.load}

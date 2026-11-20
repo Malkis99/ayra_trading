@@ -37,9 +37,9 @@ for (const [width, lang] of [[390, "ru"], [1440, "en"]] as const) {
       await page.goto("/market?tab=economy");
       const finances = page.getByTestId("market-public-finances");
       await expect(finances).toBeVisible();
-      expect(requests).toHaveLength(0);
+      await expect.poll(() => requests.filter(request => request.endsWith(":latest")).length).toBe(3);
       const openedAt = Date.now();
-      await finances.locator("summary").first().click();
+      await finances.getByTestId("fiscal-interest").locator("summary").filter({ hasText: /Подробнее|Details/ }).click();
       await expect(finances.getByTestId("fiscal-budget").getByText(lang === "ru" ? "−404,06 млрд USD" : "−404.06 B USD", { exact: true }).first()).toBeVisible();
       await expect(finances.getByTestId("fiscal-interest").getByText(/FY 2027/)).toBeVisible();
       await expect(finances.getByTestId("fiscal-debt").getByText(lang === "ru" ? "Загружаем данные…" : "Loading data…")).toBeVisible();
@@ -47,6 +47,7 @@ for (const [width, lang] of [[390, "ru"], [1440, "en"]] as const) {
       finishDebt();
       await finances.getByRole("button", { name: lang === "ru" ? "Повторить" : "Retry" }).click();
       await expect(finances.getByTestId("fiscal-debt").locator("dd").filter({ hasText: lang === "ru" ? "40,61 трлн USD" : "40.61 T USD" })).toBeVisible();
+      await finances.getByTestId("fiscal-budget").locator("summary").filter({ hasText: /Подробнее|Details/ }).click();
       await expect(finances.getByText(/FY 2027/)).toHaveCount(2);
       await expect(finances.getByTestId("fiscal-budget").getByText(lang === "ru" ? "−404,06 млрд USD" : "−404.06 B USD", { exact: true }).first()).toBeVisible();
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
@@ -54,7 +55,8 @@ for (const [width, lang] of [[390, "ru"], [1440, "en"]] as const) {
         await finances.evaluate(element => element.scrollIntoView({ block: "start" }));
         await page.screenshot({ path: `${process.env.AYRA_ECO_SCREENSHOT_DIR}/public-finances-${width}.png` });
       }
-      await finances.getByRole("button", { name: lang === "ru" ? "Максимум" : "Maximum" }).click();
+      await finances.getByTestId("fiscal-debt").locator("summary").filter({ hasText: /История|History/ }).click();
+      await finances.getByTestId("fiscal-debt").getByRole("button", { name: lang === "ru" ? "Максимум" : "Maximum" }).click();
       expect(requests.every(request => request.endsWith(":latest"))).toBeTruthy();
       await finances.getByTestId("fiscal-debt").getByRole("button", { name: /Загрузить историю|Load history/ }).click();
       await expect.poll(() => requests.filter(request => request.endsWith(":max"))).toEqual(["debt:max"]);

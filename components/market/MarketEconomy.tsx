@@ -1,23 +1,23 @@
 "use client";
 
-import { useState } from "react";
 import { ArrowUpRight, Landmark } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { beaPceText, economyText } from "@/lib/market/economy/dictionary";
-import { economyCodes, economyHistory, periodIndex, ranges, type HistoryRange, type Observation } from "@/lib/market/economy/project-calendar";
+import { economyCodes, economyHistory, periodIndex, type Observation } from "@/lib/market/economy/project-calendar";
 import { useEconomyObservations } from "@/lib/market/economy/use-economy-observations";
 import { MarketPublicFinances } from "./MarketPublicFinances";
 import { MarketMonetary } from "./MarketMonetary";
 import { MarketInflation } from "./MarketInflation";
 import { MarketFundamentals } from "./MarketFundamentals";
+import { EconomyDetails } from "./EconomyDetails";
 
 type Labels = typeof economyText.en;
 
-function History({ rows, range, t, format }: {
-  rows: Observation[]; range: HistoryRange; t: Labels; format: (value: number) => string;
+function History({ rows, t, format }: {
+  rows: Observation[]; t: Labels; format: (value: number) => string;
 }) {
-  const points = economyHistory(rows, rows[0]?.stage ?? "", range, Date.now());
-  if (points.length < 2) return <p className="rounded-md bg-s1 p-3 text-xs text-mu">{t.historyEmpty}</p>;
+  const points = economyHistory(rows, rows[0]?.stage ?? "", "max", Date.now());
+  if (points.length < 2) return <p className="text-xs text-mu">{t.historyEmpty}</p>;
   const first = periodIndex(points[0]);
   const last = periodIndex(points[points.length - 1]);
   const min = Math.min(...points.map(point => point.actual));
@@ -54,13 +54,12 @@ export function MarketEconomy() {
   const { lang } = useApp();
   const t = economyText[lang];
   const { data, status, retry } = useEconomyObservations();
-  const [range, setRange] = useState<HistoryRange>("1");
   const number = new Intl.NumberFormat(lang, { maximumFractionDigits: 2 });
   const change = new Intl.NumberFormat(lang, { maximumFractionDigits: 2, signDisplay: "exceptZero" });
   const date = new Intl.DateTimeFormat(lang, { dateStyle: "medium", timeStyle: "short" });
   return (
-    <section className="space-y-5" data-testid="market-economy">
-      <header className="flex items-start gap-3 rounded-lg border border-line bg-s1 p-4 sm:p-5">
+    <section className="space-y-4" data-testid="market-economy">
+      <header className="flex items-start gap-3 rounded-lg border border-line bg-s1 p-3 sm:p-4">
         <span className="rounded-md bg-vi/10 p-2 text-vi"><Landmark size={20} aria-hidden="true" /></span>
         <div>
           <h2 className="font-serif text-xl font-bold text-tx">{t.title}</h2>
@@ -72,21 +71,12 @@ export function MarketEconomy() {
         {status === "error" ? t.error : t.unavailable}
         {status === "error" && <button type="button" onClick={retry} className="rounded-md border border-line px-3 py-1 text-vi">{t.retry}</button>}
       </div>}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-serif text-lg font-semibold text-tx">{t.data}</h3>
-        <div role="group" aria-label={t.history} className="flex max-w-full flex-wrap gap-1 rounded-md border border-line bg-s1 p-1">
-          {ranges.map((value, index) => <button key={value} type="button" aria-pressed={range === value} onClick={() => setRange(value)}
-            className={`rounded px-2 py-1.5 text-xs ${range === value ? "bg-vi/15 font-semibold text-vi" : "text-mu hover:text-tx"}`}>
-            {t.ranges[index]}
-          </button>)}
-        </div>
-      </div>
       {[economyCodes.slice(0, 1), economyCodes.slice(1)].map((codes, index) => (
       <div key={t.categories[index]} className="space-y-4">
       {index === 1 && <MarketInflation lang={lang} data={data?.inflation} loading={status === "loading"} />}
       <section className="space-y-3" aria-label={t.categories[index]}>
         <h3 className="font-serif text-lg font-semibold text-tx">{t.categories[index]}</h3>
-        <div className="grid gap-3 lg:grid-cols-2">
+        <div className="grid items-start gap-3 md:grid-cols-2">
         {codes.map(code => {
           const labels = t.indicators[code];
           const rows = data?.[code] ?? [];
@@ -94,11 +84,10 @@ export function MarketEconomy() {
           const format = (value: number) => (code === "us_jobless_claims" ? number : change).format(value) + (code === "us_gdp" ? "%" : "");
           const stage = latest ? t.stages[latest.stage as keyof Labels["stages"]] : "";
           return (
-            <article key={code} className="min-w-0 space-y-4 rounded-lg border border-line bg-s2 p-4" data-testid={`economy-${code}`}>
+            <article key={code} className="min-w-0 space-y-2 rounded-lg border border-line bg-s2 p-3 sm:p-4" data-testid={`economy-${code}`}>
               <div>
-                <p className="text-xs font-medium text-vi">{t.country} · {labels.frequency}{stage && ` · ${stage}`}</p>
+                <p className="text-xs font-medium text-vi">{t.country} · {labels.frequency}{stage && ` · ${stage}`}{latest && status === "ready" ? " · " + t.confirmed : ""}</p>
                 <h4 className="mt-1 text-base font-semibold text-tx">{labels.name}</h4>
-                <p className="mt-1 text-xs text-mu">{labels.definition}</p>
               </div>
               {latest ? <>
                 <dl className="grid grid-cols-2 gap-3">
@@ -106,35 +95,35 @@ export function MarketEconomy() {
                   {latest.previous !== null && <div><dt className="text-xs text-mu">{t.previous}</dt><dd className="text-2xl font-semibold tabular-nums text-tx">{format(latest.previous)}</dd></div>}
                 </dl>
                 <p className="text-xs text-mu">{labels.unit}</p>
-                <div className="space-y-1 text-xs text-mu">
-                  <div>{t.period} · <span className="text-tx">{latest.period}</span></div>
+                <p className="text-xs text-mu">{t.period} · <span className="text-tx">{latest.period}</span></p>
+              </> : <p className="text-sm text-mu">{status === "loading" ? t.loading : t.empty}</p>}
+              <EconomyDetails label={t.details}>
+                <p>{labels.definition}</p>
+                {latest && <div className="space-y-1">
                   {([[t.scheduled, latest.scheduledAt], [t.release, latest.releasedAt], [t.updated, latest.sourceUpdatedAt], [t.retrieved, latest.retrievedAt]] as const).map(([label, timestamp]) =>
                     <div key={label}>{label} · {timestamp ? <time dateTime={timestamp} className="text-tx">{date.format(Date.parse(timestamp))}</time> : t.timeUnknown}</div>)}
-                </div>
-                <a href={latest.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-vi">{latest.sourceKind === "release" ? t.source : t.archive}<ArrowUpRight size={13} aria-hidden="true" /></a>
-              </> : <p className="text-sm text-mu">{status === "loading" ? t.loading : t.empty}</p>}
-              <History rows={rows} range={range} t={t} format={format} />
-              <details className="border-t border-line pt-3 text-sm text-mu">
-                <summary className="cursor-pointer font-medium text-tx">{t.education}</summary>
+                </div>}
+                {latest && <a href={latest.sourceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-vi">{latest.sourceKind === "release" ? t.source : t.archive}<ArrowUpRight size={13} aria-hidden="true" /></a>}
                 <dl className="mt-3 space-y-2">
                   {([[t.what, labels.definition], [t.why, labels.why], [t.up, labels.up], [t.down, labels.down], [t.markets, labels.markets]]).map(([title, value]) =>
                     <div key={title}><dt className="font-medium text-tx">{title}</dt><dd>{value}</dd></div>)}
                 </dl>
                 <p className="mt-3 text-xs">{t.disclaimer}</p>
-              </details>
+              </EconomyDetails>
+              <EconomyDetails label={t.history}><History rows={rows} t={t} format={format} /></EconomyDetails>
             </article>
           );
         })}
+        <MarketFundamentals embedded lang={lang} series={index === 0 ? ["production"] : ["earnings", "unemployment", "continuing"]} />
         </div>
-        <MarketFundamentals lang={lang} series={index === 0 ? ["production"] : ["earnings", "unemployment", "continuing"]} />
         {index === 0 && <div className="rounded-lg border border-line bg-s1 p-3 text-xs text-mu">
           <p className="font-semibold text-tx">{beaPceText[lang].debtGdp} · {t.empty}</p>
-          <p className="mt-1">{beaPceText[lang].debtGdpUnavailable}</p>
+          <EconomyDetails label={t.details}><p>{beaPceText[lang].debtGdpUnavailable}</p></EconomyDetails>
         </div>}
       </section>
       </div>
       ))}
-      <section className="space-y-2 rounded-lg border border-line bg-s1 p-4" aria-label={t.categories[3]}>
+      <section className="space-y-2" aria-label={t.categories[3]}>
         <h3 className="font-serif text-lg font-semibold text-tx">{t.categories[3]}</h3>
         <MarketFundamentals lang={lang} series={["income", "consumption", "retail"]} />
       </section>

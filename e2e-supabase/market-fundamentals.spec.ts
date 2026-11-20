@@ -57,6 +57,7 @@ for (const [width, lang] of [[360, "ru"], [390, "ru"], [1440, "en"]] as const) {
       await retail.getByRole("button", { name: /Повторить|Retry/ }).click();
       await expect(retail.getByText("0", { exact: true })).toBeVisible();
       await expect(retail.getByRole("status")).toContainText(lang === "ru" ? "требуется повторная проверка" : "source needs to be checked again");
+      await retail.locator("summary").filter({ hasText: /Подробнее|Details/ }).click();
       await expect(retail.getByText(/UTC/)).toContainText("2026");
       await expect(income.getByRole("status")).toHaveCount(0);
       await retail.getByRole("button", { name: /Повторить|Retry/ }).click();
