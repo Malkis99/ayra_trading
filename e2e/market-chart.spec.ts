@@ -183,6 +183,7 @@ for (const engine of ["chromium", "webkit"] as const) {
         const rows = el(page, "market-watchlist-rows").getByRole("listitem");
         await expect(rows).toHaveCount(3);
         await expect(rows.nth(0)).toContainText("EUR/USD");
+        await el(page, "market-watchlist-quotes-summary").click();
         await expect(el(page, "market-watchlist-widget")).toHaveAttribute("data-status", "ready");
         await expect(stubText(page, "market-watchlist-widget")).toContainText("FX:EURUSD · FX:GBPUSD · BITSTAMP:BTCUSD");
         await expect(el(page, "market-watchlist-source")).toHaveText("Источник: TradingView · в реальном времени");
@@ -216,6 +217,7 @@ for (const engine of ["chromium", "webkit"] as const) {
         await expect(el(page, "market-chart-watch")).toHaveAttribute("aria-pressed", "true");
         await page.getByRole("tab", { name: "Список наблюдения" }).click();
         await expect(rows).toContainText(["Биткоин (BTC)", "EUR/USD", "Нефть WTI"]);
+        await el(page, "market-watchlist-quotes-summary").click();
         // oil may be delayed: the list says so
         await expect(el(page, "market-watchlist-source")).toHaveText("Источник: TradingView · возможна задержка");
       });
@@ -236,6 +238,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       await expect(el(page, "market-chart-widget")).toHaveAttribute("data-status", "ready");
       await el(page, "market-chart-watch").click();
       await page.getByRole("tab", { name: "Список наблюдения" }).click();
+      await el(page, "market-watchlist-quotes-summary").click();
       await expect(el(page, "market-watchlist-widget")).toHaveAttribute("data-status", "ready");
       const origin = new URL(page.url()).origin;
       for (const section of ["market-watchlist"]) {
