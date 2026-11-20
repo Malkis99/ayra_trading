@@ -14,5 +14,13 @@ const nextConfig = {
   eslint: { ignoreDuringBuilds: true },
   // Separate build output for the fake-Supabase e2e suite (see e2e/fake-supabase/run-app.mjs)
   distDir: process.env.AYRA_NEXT_DIST_DIR || ".next",
+  async redirects() {
+    return [{
+      source: "/market",
+      has: [{ type: "query", key: "tab", value: "backtest" }],
+      destination: "/academy?tab=backtests",
+      permanent: true,
+    }];
+  },
 };
 export default nextConfig;

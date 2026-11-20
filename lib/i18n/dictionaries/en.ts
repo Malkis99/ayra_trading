@@ -1876,7 +1876,7 @@ export const en: Dictionary = {
   },
   market: {
     title: "Market",
-    subtitle: "Market analysis: sessions, charts, calendar, news, economy and backtest",
+    subtitle: "Market analysis: sessions, charts, calendar, news and economy",
     disclaimer: "The Market is for analysis and learning only — no trading with money here. Not financial advice.",
     tabsLabel: "Market sections",
     tabs: {
@@ -1885,7 +1885,6 @@ export const en: Dictionary = {
       calendar: "Calendar",
       news: "News",
       economy: "Economy",
-      backtest: "Backtest",
       watchlist: "Watchlist",
     },
     sync: {
@@ -2197,16 +2196,6 @@ export const en: Dictionary = {
       instrument: "Instrument: {name}",
       clear: "Show all news",
       note: "Headlines are in English — TradingView sends them so. Links lead to TradingView's news pages, no ads or brokers.",
-    },
-    soon: {
-      badge: "Soon",
-      overview: { title: "Market cards", text: "DXY, S&P 500, Nasdaq, gold, oil and BTC, plus five categories: currencies, indices, crypto, commodities and metals, bonds and yields." },
-      chart: { title: "Chart", text: "A TradingView chart for any instrument. Later — our own chart with Replay: you pick the pair and the start date." },
-      calendar: { title: "Economic calendar", text: "Events and their importance, times in your time zone." },
-      news: { title: "News", text: "Important news: headline, source, time and link." },
-      economy: { title: "Economy", text: "Central bank rates, inflation, employment, GDP and yields." },
-      backtest: { title: "Backtest and Replay", text: "Replay, manual backtest and a strategy builder. Practice trades give no coins or XP." },
-      watchlist: { title: "Watchlist", text: "Your instruments with a quick jump to the chart." },
     },
     sessions: {
       title: "Sessions and killzones",
@@ -3437,6 +3426,7 @@ export const en: Dictionary = {
     },
   },
   academy: {
+    tabsLabel: "Academy sections",
     title: "Academy",
     subtitle: "Educational materials, risk management, and backtests",
     tabHeader: "Section under development (T13).",

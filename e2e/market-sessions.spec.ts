@@ -1,7 +1,7 @@
 import { test, expect, webkit, chromium, type Browser, type Page } from "@playwright/test";
 import { stubTradingView } from "./helpers/tradingview";
 
-// Market sessions (PR 1.1, the live cards, 1.1b): seven sections; Asia (Tokyo), London and New York cards with live
+// Market sessions (PR 1.1, the live cards, 1.1b): six sections; Asia (Tokyo), London and New York cards with live
 // countdowns and their killzones, the overlap, the sub-sessions, «What is next», the 24-hour bar, «Set up». Shown in
 // New York time by default. No market data: only clocks. The browser clock is controlled (clock.install + pauseAt);
 // the profile's zone is Tbilisi (UTC+4, no summer time).
@@ -333,17 +333,17 @@ for (const engine of ["chromium", "webkit"] as const) {
       });
     }
 
-    test("seven sections, «Soon» where nothing is there yet, the section is kept in the address", async () => {
+    test("six Market sections without duplicate Backtest, the section is kept in the address", async () => {
       const page = await guestPage(browser, 360, MONDAY);
       await page.goto("/market");
       const tabs = page.getByRole("tablist", { name: "Разделы рынка" }).getByRole("tab");
-      await expect(tabs).toHaveText(["Обзор", "График", "Календарь", "Новости", "Экономика", "Бэктест", "Список наблюдения"]);
-      await page.getByRole("tab", { name: "Бэктест" }).click();
-      await expect(page).toHaveURL(/tab=backtest/);
-      await expect(page.getByTestId("market-panel-backtest")).toContainText("Скоро");
-      await expect(page.getByTestId("market-panel-backtest")).toContainText("не дают монет и XP");
+      await expect(tabs).toHaveText(["Обзор", "График", "Календарь", "Новости", "Экономика", "Список наблюдения"]);
+      await expect(page.getByRole("tab", { name: "Бэктест", exact: true })).toHaveCount(0);
+      await page.getByRole("tab", { name: "Список наблюдения" }).click();
+      await expect(page).toHaveURL(/tab=watchlist/);
+      await expect(page.getByTestId("market-panel-watchlist")).toBeVisible();
       await page.reload();
-      await expect(page.getByRole("tab", { name: "Бэктест" })).toHaveAttribute("aria-selected", "true");
+      await expect(page.getByRole("tab", { name: "Список наблюдения" })).toHaveAttribute("aria-selected", "true");
       expect(await noSideScroll(page)).toBe(true);
     });
   });
