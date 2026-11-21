@@ -114,6 +114,7 @@ for (const width of [360, 390, 768, 1024, 1440]) for (const lang of ["ru", "en"]
         await expect(page.getByTestId("market-chart-interval-240")).toHaveAttribute("aria-checked", "true");
         await page.goto("/market?tab=watchlist"); await expect.poll(() => rowIds(page)).toEqual(ids);
         await page.getByTestId("market-watchlist-quotes-summary").focus(); await page.keyboard.press("Enter");
+        await page.getByTestId("market-watchlist-widget").scrollIntoViewIfNeeded();
         await expect(page.getByTestId("market-watchlist-widget")).toHaveAttribute("data-status", "ready");
         const scroll = page.getByTestId("market-watchlist-quotes-scroll");
         expect((await scroll.boundingBox())!.height).toBeLessThanOrEqual(322);

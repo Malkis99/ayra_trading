@@ -2055,6 +2055,12 @@ export const en: Dictionary = {
       notInCatalog: "«{symbol}» is not in the Market catalog, so {name} is shown.",
     },
     watchlist: {
+      priorities: {
+        filter: "Pinned", pin: "Pin", unpin: "Unpin", saved: "Saved", pending: "Pending", conflict: "Conflict", error: "Could not sync",
+        guest: "Sign in to pin instruments across your devices.", loading: "Loading pins…", disabled: "Turn on cloud sync to use pins.",
+        storageError: "Pins could not be saved on this device. Check your browser storage and reload.",
+        unsupported: "Update AYRA to use pins saved by a newer version.", keepMine: "Keep my choice", useCloud: "Use cloud choice", retry: "Retry", state: "Pins: {status}", showAll: "Show all instruments",
+      },
       title: "Watchlist",
       count: "{n} of {max}",
       add: "Add",
