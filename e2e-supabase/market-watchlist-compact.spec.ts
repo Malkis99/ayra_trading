@@ -149,7 +149,7 @@ for (const width of [360, 1440]) test(`full 30-instrument Watchlist ${width}`, a
     expect(await scroll.evaluate(n => n.scrollHeight > n.clientHeight)).toBe(true);
     await scroll.evaluate(n => { n.scrollTop = n.scrollHeight; });
     expect(await scroll.evaluate(n => n.scrollTop)).toBeGreaterThan(0);
-    const config = await page.getByTestId("market-watchlist-widget").locator("script").evaluate(n => JSON.parse(n.textContent!));
+    const config = await page.getByTestId("market-watchlist-widget").frameLocator("iframe[data-tradingview-quotes-frame]").locator("script[src]").evaluate(n => JSON.parse(n.textContent!));
     expect(config.symbolsGroups[0].symbols.map((s: { name: string }) => s.name)).toEqual(ids.map(id => INSTRUMENTS[id].symbol));
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
   } finally { await page.context().close(); }
