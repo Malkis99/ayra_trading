@@ -41,7 +41,9 @@ async function guestPage(browser: Browser, width: number, opts: { minor?: boolea
 const el = (page: Page, id: string) => page.getByTestId(id);
 const noSideScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
 const chartConfig = (page: Page) => el(page, "market-chart-widget").locator("script").evaluate((s) => JSON.parse(s.textContent || "{}"));
-const stubText = (page: Page, id: string) => el(page, id).frameLocator("iframe").locator("body");
+const stubText = (page: Page, id: string) => id === "market-watchlist-widget"
+  ? el(page, id).frameLocator("iframe[data-tradingview-quotes-frame]").frameLocator("iframe").locator("body")
+  : el(page, id).frameLocator("iframe").locator("body");
 
 for (const engine of ["chromium", "webkit"] as const) {
   test.describe(`${engine}: Market — Chart and Watchlist`, () => {

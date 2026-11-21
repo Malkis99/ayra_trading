@@ -22,7 +22,7 @@ export function WatchlistQuotes({ ids, origin }: { ids: InstrumentId[]; origin: 
       {open && <div tabIndex={0} role="region" aria-label={t.watchlist.quotesScroll}
         className="max-h-80 overflow-auto overscroll-contain rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi" data-testid="market-watchlist-quotes-scroll">
         <div className="min-w-[680px]">
-          <TradingViewWidget key={`${ids.join(",")}-${lang}`} widget="market-quotes"
+          <TradingViewWidget key={`${ids.join(",")}-${lang}`} widget="market-quotes" isolateScript
             config={widgetConfig({ width: "100%", height, showSymbolLogo: true,
               symbolsGroups: [{ name: t.watchlist.title, symbols: symbolsOf(ids).map(name => ({ name })) }] }, lang, origin)}
             height={height} label={t.watchlist.quotes} loadingText={t.overview.loading} errorText={t.overview.unavailable}
