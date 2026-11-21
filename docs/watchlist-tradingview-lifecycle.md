@@ -8,7 +8,7 @@
 
 ## Решение
 
-Только `market-quotes` выполняет тот же официальный скрипт в отдельном iframe-документе (`srcdoc`). При закрытии, смене языка/списка, retry или уходе со страницы удаляется весь browsing context. Внутренний DOM загружающегося скрипта по отдельности не очищается. Остальные виджеты сохраняют прежнюю реализацию.
+Только котировки Watchlist явно включают `isolateScript` и выполняют тот же официальный скрипт в отдельном iframe-документе (`srcdoc`). При закрытии, смене языка/списка, retry или уходе со страницы удаляется весь browsing context. Внутренний DOM загружающегося скрипта по отдельности не очищается. В том числе Overview, который тоже использует `market-quotes`, сохраняет прежний путь загрузки. Это дополнительно проверяется unit-тестами.
 
 Это граница **жизненного цикла**, а не защита от недоверенного кода поставщика. Скрипт доверенный, как и до изменения, когда он выполнялся прямо в документе AYRA. Sandbox без same-origin был проверен и отвергнут: реальный TradingView обращается к cookies и не работает в opaque origin. Обычный iframe сохраняет существующую модель доверия и совместимость. Отдельный origin для более сильной security isolation потребовал бы другого инфраструктурного решения; здесь его нет.
 
@@ -34,11 +34,12 @@ Ready, как и раньше, означает появление iframe пос
 3. Первый `npx playwright test -c playwright.supabase.config.ts e2e-supabase/market-watchlist-lifecycle.spec.ts e2e-supabase/market-watchlist-compact.spec.ts`: 15 PASS, 4 FAIL (`pending quotes: close/language/list/chart destroys the context, reopening has exactly one frame`). Точная причина: `SecurityError: Failed to read the 'sessionStorage' property from 'Window': The document is sandboxed and lacks the 'allow-same-origin' flag.` Также аналогичная ошибка для localStorage. Это промежуточная сборка sandbox-варианта; новый тест корректно обнаружил ошибки, хотя старые проверки видели только готовый iframe.
 4. Реальный TradingView в sandbox-варианте дал `SecurityError: Failed to read the 'cookie' property from 'Document': The document is sandboxed and lacks the 'allow-same-origin' flag.` В окончательном обычном iframe символ EURUSD отобразился, JS-ошибок не было. Нельзя считать наличие пустого iframe достаточным доказательством работы внешнего поставщика.
 5. Локальная Windows-обёртка `work/watch1a1-webkit.config.ts` вызвала `TS2769: No overload matches this call`: типизированный `base.webServer` допускает массив/undefined, поэтому его spread не гарантировал обязательный command. Обёртка исправлена явным webServer; она не входит в PR. Повторный `npx tsc --noEmit` — PASS.
+6. CI run `44877032503`, mock-auth: `e2e/market-overview.spec.ts:68` — четыре случая Chromium/WebKit × 360/1440, на строке 91: `Expected substring: "FX:EURUSD"; Received string: ""; Timeout: 5000ms`. Получилось 444 PASS / 1 skip / 4 FAIL; fake Supabase не запускался. Исходная версия применила изоляцию ко всем market-quotes, включая Overview, а тесты ожидали прежнюю вложенность. Исправление ограничено явным opt-in Watchlist; тесты Overview не ослаблялись и не менялись. Две unit-проверки фиксируют эту границу.
 
 ## Итоги локальных проверок
 
 - TypeScript и lint — PASS (только прежние предупреждения Login/Journal).
-- 12 целевых unit — PASS.
+- 12 первоначальных целевых unit — PASS; после ограничения opt-in добавлены ещё две проверки границы Overview/Watchlist.
 - 20 целевых fake Supabase E2E — PASS: 15 проверок компактного Watchlist и 5 lifecycle/контрольных тестов.
 - Повтор lifecycle-набора пять раз — 25 PASS, без нестабильных падений.
 - 20 существующих Chart/Watchlist E2E — PASS, Chromium и WebKit.

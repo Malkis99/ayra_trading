@@ -48,6 +48,7 @@ export function TradingViewWidget({
   errorText,
   retryLabel,
   testId,
+  isolateScript = false,
 }: {
   widget: TradingViewWidgetName;
   config: Record<string, unknown>;
@@ -57,6 +58,8 @@ export function TradingViewWidget({
   errorText: string;
   retryLabel: string;
   testId: string;
+  /** Opt in only where the host is removed while a quotes script may still be loading (Watchlist disclosure). */
+  isolateScript?: boolean;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLDivElement>(null);
@@ -91,7 +94,7 @@ export function TradingViewWidget({
     if (status !== "loading") return;
     const el = host.current;
     if (!el) return;
-    if (widget === "market-quotes") {
+    if (widget === "market-quotes" && isolateScript) {
       let ready = false;
       const frame = mountQuotesFrame(el, `${TRADINGVIEW_SCRIPT_BASE}${widget}.js`, JSON.parse(configJson), label, WIDGET_LOAD_TIMEOUT_MS, next => {
         ready = next === "ready";
@@ -129,7 +132,7 @@ export function TradingViewWidget({
       observer.disconnect();
       window.clearTimeout(timer);
     };
-  }, [status, widget, configJson, attempt, label]);
+  }, [status, widget, configJson, attempt, label, isolateScript]);
 
   // Leaving the page or retrying: drop what the widget put into the host
   useEffect(() => {

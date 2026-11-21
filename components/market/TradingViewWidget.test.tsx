@@ -36,6 +36,19 @@ describe("TradingViewWidget", () => {
     vi.useRealTimers();
   });
 
+  it("keeps Overview quotes on the original embed path unless explicitly isolated", () => {
+    const { container } = render(<TradingViewWidget widget="market-quotes" config={{}} height={200} label="Quotes" testId="w" {...texts} />);
+    expect(scriptOf(container)?.src).toBe(`${TRADINGVIEW_SCRIPT_BASE}market-quotes.js`);
+    expect(container.querySelector("iframe[data-tradingview-quotes-frame]")).toBeNull();
+  });
+
+  it("isolates Watchlist quotes without putting an external script in the parent document", () => {
+    const { container, unmount } = render(<TradingViewWidget widget="market-quotes" isolateScript config={{}} height={200} label="Quotes" testId="w" {...texts} />);
+    expect(scriptOf(container)).toBeNull();
+    expect(container.querySelectorAll("iframe[data-tradingview-quotes-frame]")).toHaveLength(1);
+    unmount(); expect(container.children).toHaveLength(0);
+  });
+
   it("inserts TradingView's embed script with the config (no IntersectionObserver in jsdom: loads at once)", () => {
     const { container } = renderWidget();
     const script = scriptOf(container);
