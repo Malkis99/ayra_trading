@@ -145,8 +145,8 @@ export function MarketWatchlist({ onOpenChart, priorities }: { onOpenChart: (id:
               <span className="self-center break-words text-[11px] text-mu" data-testid={`market-watchlist-row-category-${id}`}>{t.overview.categories[category]}</span>
               {state && <span className={`text-[11px] ${state === "conflict" || state === "error" ? "text-vi" : "text-mu"}`} role="status" data-testid={`watchlist-pin-status-${id}`} data-kind={state}>{p[state]}</span>}
               {(state === "conflict" || state === "error") && <div className="flex flex-wrap gap-x-3 text-xs sm:col-span-2">
-                <button type="button" className="min-h-[36px] rounded text-vi focus-visible:ring-2 focus-visible:ring-vi" data-testid={`watchlist-pin-mine-${id}`} onClick={() => void priorities.controller?.resolve(id, true).catch(priorities.failed)}>{p.keepMine}</button>
-                <button type="button" className="min-h-[36px] rounded text-mu focus-visible:ring-2 focus-visible:ring-vi" data-testid={`watchlist-pin-cloud-${id}`} onClick={() => void priorities.controller?.resolve(id, false).catch(priorities.failed)}>{p.useCloud}</button>
+                <button type="button" className="min-h-[36px] rounded text-vi focus-visible:ring-2 focus-visible:ring-vi" aria-label={`${p.keepMine}: ${name}`} data-testid={`watchlist-pin-mine-${id}`} onClick={() => void priorities.controller?.resolve(id, true).catch(priorities.failed)}>{p.keepMine}</button>
+                <button type="button" className="min-h-[36px] rounded text-mu focus-visible:ring-2 focus-visible:ring-vi" aria-label={`${p.useCloud}: ${name}`} data-testid={`watchlist-pin-cloud-${id}`} onClick={() => void priorities.controller?.resolve(id, false).catch(priorities.failed)}>{p.useCloud}</button>
               </div>}
             </div>
             <div className="flex items-center">

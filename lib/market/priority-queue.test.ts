@@ -53,6 +53,21 @@ describe("durable priority queue", () => {
     await Promise.all([a.queue.enqueue("eurusd", true), b.queue.enqueue("gold", true)]);
     expect(a.record.queue).toEqual([]);expect(b.record.queue).toEqual([]);expect(Object.keys(service.document!.entries).sort()).toEqual(["eurusd", "gold"]);
   });
+  it("a late empty read from a second tab cannot invalidate a newer confirmed shared cache", async () => {
+    const m = setup();await m.queue.run();const gate = deferred<unknown>();
+    const remote = { ...m.service.remote, read: vi.fn().mockImplementationOnce(() => gate.promise).mockImplementation(() => m.service.remote.read()) };
+    const second = new PriorityQueue("A", remote, m.store, () => "A", () => true, () => `00000000-0000-0000-0000-${String(++operationSequence).padStart(12, "0")}`);
+    const read = second.run();await vi.waitFor(() => expect(remote.read).toHaveBeenCalled());
+    await m.queue.enqueue("eurusd", true);gate.resolve(null);await read;
+    expect(m.record.issue).toBeUndefined();expect(priorityValue(m.record, "eurusd")).toBe(true);
+    await second.enqueue("gold", true);expect(m.service.document?.entries.gold.priority).toBe(true);
+  });
+  it("a fresh disappearance of an already confirmed document remains Error and never clears its pins", async () => {
+    const m = setup();await m.queue.run();await m.queue.enqueue("eurusd", true);
+    m.service.remote.read.mockResolvedValue(null);await m.queue.run();
+    expect(m.record.issue).toBe("error");expect(priorityValue(m.record, "eurusd")).toBe(true);
+    await m.queue.enqueue("gold", true);expect(m.service.remote.create).toHaveBeenCalledTimes(1);expect(m.record.queue).toEqual([]);
+  });
   it("same-instrument conflict requires an explicit choice and does not block another instrument", async () => {
     const service = backend(), a = setup(service), b = setup(service);await Promise.all([a.queue.run(), b.queue.run()]);
     b.online = false;await b.queue.enqueue("eurusd", false);await b.queue.enqueue("gold", true);

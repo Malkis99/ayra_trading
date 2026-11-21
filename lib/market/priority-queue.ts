@@ -25,11 +25,15 @@ export function priorityDocument(record: PriorityAccount): WatchlistMeta | null 
 export function priorityValue(record: PriorityAccount, id: InstrumentId): boolean {
   return record.queue.filter(q => q.operation.instrument === id).at(-1)?.operation.priority ?? priorityDocument(record)?.entries[id]?.priority ?? false;
 }
-function mergeConfirmed(record: PriorityAccount, raw: unknown): PriorityAccount {
+function mergeConfirmed(record: PriorityAccount, raw: unknown, revisionWhenRequested?: number): PriorityAccount {
   const incoming = parseWatchlistMeta(raw), previous = parseWatchlistMeta(record.raw);
   if (incoming.kind === "unsupported" || previous.kind === "unsupported") return { ...record, raw: incoming.kind === "unsupported" ? raw : record.raw, issue: "unsupported" };
   if (incoming.kind === "invalid") return { ...record, issue: "invalid" };
-  if (incoming.kind === "missing") return previous.kind === "v1" ? { ...record, issue: "error" } : { ...record, checked: true, issue: undefined };
+  if (incoming.kind === "missing") {
+    // A response started before another tab's acknowledgement cannot invalidate that newer receipt.
+    if (previous.kind === "v1" && revisionWhenRequested !== undefined && previous.document.revision > revisionWhenRequested) return record;
+    return previous.kind === "v1" ? { ...record, issue: "error" } : { ...record, checked: true, issue: undefined };
+  }
   const accepted = acceptConfirmedMeta(previous.kind === "v1" ? previous.document : null, incoming.document);
   return { ...record, raw: accepted.document, checked: true, issue: accepted.kind === "conflict" ? "error" : undefined };
 }
@@ -91,9 +95,12 @@ export class PriorityQueue {
       if (!scope.current()) return;
       await update(r => ({ ...r, enabled }));
       if (!enabled || !scope.current()) return;
+      const beforeRead = await this.store.read(this.userId);
+      if (!scope.current()) return;
+      const revisionWhenRequested = priorityDocument(beforeRead)?.revision ?? 0;
       const raw = await this.remote.read(this.userId);
       if (!scope.current()) return;
-      let record = await update(r => mergeConfirmed(r, raw));
+      let record = await update(r => mergeConfirmed(r, raw, revisionWhenRequested));
       if (record.issue) return;
       while (scope.current() && this.online()) {
         record = await this.store.read(this.userId);
