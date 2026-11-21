@@ -2824,6 +2824,7 @@ export const en: Dictionary = {
           open: "To quests",
         },
         economy: {
+          scheduled: "Your progress will soon be moved to the cloud. Until the move starts, XP and Coins are given as usual and will be moved too.",
           pending: "Your progress is being moved to the cloud. Until the move is finished, no XP or Coins are given, on the device or on the server.",
           cloudPaused: "The server keeps your game day. Server rewards are paused right now.",
           cloudOn: "The server keeps your game day. Server rewards are not switched on yet.",

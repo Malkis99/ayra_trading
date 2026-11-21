@@ -3,6 +3,7 @@
 import { CloudCog, PauseCircle, WifiOff } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
+import { deviceRewardsAllowed } from "@/lib/economy-mode";
 import { formatString } from "@/lib/i18n";
 
 /**
@@ -14,9 +15,11 @@ export function EconomyNotice() {
   const { economy } = useGame();
   const e = dict.questsPage.q2.quest.economy;
   const lines: Array<{ key: string; text: string; icon: "pause" | "cloud" | "offline" }> = [];
+  // a move is announced: rewards go on as usual until it starts (owner decision 2026-11-18)
+  if (economy.mode === "migration_scheduled") lines.push({ key: "mode", text: e.scheduled, icon: "cloud" });
   if (economy.mode === "migration_pending") lines.push({ key: "mode", text: e.pending, icon: "pause" });
   if (economy.mode === "cloud_active") lines.push({ key: "mode", text: economy.gameSync ? e.cloudOn : e.cloudPaused, icon: economy.gameSync ? "cloud" : "pause" });
-  if (economy.notice === "rewardsPaused" && economy.mode !== "local") lines.push({ key: "notice", text: e.rewardsPaused, icon: "pause" });
+  if (economy.notice === "rewardsPaused" && !deviceRewardsAllowed(economy.mode)) lines.push({ key: "notice", text: e.rewardsPaused, icon: "pause" });
   if (economy.notice === "offline") lines.push({ key: "notice", text: e.offline, icon: "offline" });
   if (economy.notice === "serverRefused") lines.push({ key: "notice", text: formatString(e.serverRefused, { reason: economy.noticeReason || "" }), icon: "pause" });
   if (lines.length === 0) return null;

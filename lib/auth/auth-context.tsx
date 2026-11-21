@@ -8,6 +8,7 @@ import { mapSupabaseError, type SanitizedErrorInfo } from "./error-sanitizer";
 import { authTabChannel } from "./tab-channel";
 import { spaceTabChannel } from "./space-channel";
 import { AppStorage, GUEST_SPACE_ID } from "@/lib/storage";
+import { sessionEconomyOf, type SessionEconomy } from "@/lib/economy-mode";
 import {
   getMockState,
   setMockState,
@@ -99,6 +100,11 @@ interface AuthContextType {
   isConfigured: boolean;
   /** Not signed in and did not choose "continue without signing in": sees only public content. */
   isPublicVisitor: boolean;
+  /**
+   * Q4.5-1: the economy mark of the signed-in account's session (`app_metadata.ayra_economy`, written only by the server)
+   * with where it came from and when the token expires. null when signed out or with the e2e auth mock.
+   */
+  sessionEconomy: SessionEconomy | null;
   guestDismissed: boolean;
   setGuestDismissed: (val: boolean) => void;
   lateSignInNotice: boolean;
@@ -142,6 +148,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authState, setAuthState] = useState<AuthState>("loading");
   const [loadingTimedOut, setLoadingTimedOut] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [sessionEconomy, setSessionEconomy] = useState<SessionEconomy | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [profileStatus, setProfileStatus] = useState<ProfileStatus>("idle");
   const [profileError, setProfileError] = useState<ProfileLoadError | null>(null);
@@ -310,6 +317,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (!isMounted) return;
           if (session?.user) {
             const u = toAuthUser(session.user);
+            setSessionEconomy(sessionEconomyOf(session.user, "cached", session.expires_at));
             updateToAuthenticated(u, true);
             // The stored session may hold old user data (a password set on another device, the owner role just given):
             // refresh only these flags from the server
@@ -317,6 +325,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               .getUser()
               .then(({ data }) => {
                 if (!isMounted || !data.user) return;
+                // the economy mark as the auth server holds it now (a mark given after this token was issued shows here)
+                const verifiedUser = data.user;
+                setSessionEconomy((prev) => sessionEconomyOf(verifiedUser, "verified", prev && prev.userId === verifiedUser.id && prev.expiresAt !== null ? prev.expiresAt / 1000 : session.expires_at));
                 const fresh = toAuthUser(data.user);
                 setUser((prev) =>
                   prev && prev.id === fresh.id && (prev.hasPassword !== fresh.hasPassword || prev.isOwner !== fresh.isOwner)
@@ -333,12 +344,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // 2. Auth state change listener (INITIAL_SESSION, SIGNED_IN, TOKEN_REFRESHED, SIGNED_OUT)
         const {
           data: { subscription },
-        } = supabase.auth.onAuthStateChange((_event, session) => {
+        } = supabase.auth.onAuthStateChange((event, session) => {
           if (!isMounted) return;
           if (session?.user) {
             const u = toAuthUser(session.user);
+            const fresh = event === "TOKEN_REFRESHED" || event === "SIGNED_IN" || event === "USER_UPDATED";
+            setSessionEconomy(sessionEconomyOf(session.user, fresh ? "verified" : "cached", session.expires_at));
             updateToAuthenticated(u);
           } else {
+            setSessionEconomy(null);
             updateToGuest();
           }
         });
@@ -375,6 +389,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             supabase.auth.getSession().then(({ data: { session } }) => {
               if (session?.user) {
                 const u = toAuthUser(session.user);
+                setSessionEconomy(sessionEconomyOf(session.user, "cached", session.expires_at));
                 setUser(u);
                 loadProfile(session.user.id);
                 setAuthState("authenticated");
@@ -383,6 +398,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
       } else if (msg.type === "AUTH_SIGNED_OUT") {
+        setSessionEconomy(null);
         setUser(null);
         setProfile(null);
         setAuthState("guest");
@@ -847,6 +863,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isGuest: authState === "guest",
         isConfigured: envInfo.isConfigured || mockMode,
         isPublicVisitor: authState === "guest" && (envInfo.isConfigured || mockMode) && !guestDismissed,
+        sessionEconomy,
         guestDismissed,
         setGuestDismissed,
         lateSignInNotice,
@@ -872,6 +889,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       {children}
     </AuthContext.Provider>
   );
+}
+
+/** The auth context, or null outside an AuthProvider (the game provider is also used alone, e.g. in tests). */
+export function useOptionalAuth() {
+  return useContext(AuthContext) ?? null;
 }
 
 export function useAuth() {
