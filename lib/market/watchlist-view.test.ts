@@ -18,6 +18,13 @@ describe("Watchlist view without changing its cloud format", () => {
     expect(visibleWatchlistIds(list, "gold", "stocks", names)).toEqual([]);
     expect(visibleWatchlistIds(list, "", "all", names)).toEqual(list.ids);
   });
+  it("intersects pins, category and search without reordering, including moves around hidden instruments", () => {
+    const pinned = (id: string) => ["eurusd", "gbpusd", "gold"].includes(id);
+    expect(visibleWatchlistIds(list, "usd", "forex", names, pinned)).toEqual(["eurusd", "gbpusd"]);
+    expect(visibleWatchlistIds(list, "", "all", names, pinned)).toEqual(["eurusd", "gbpusd", "gold"]);
+    expect(moveVisible(list, "gold", -1, "", "all", names, pinned).ids).toEqual(["eurusd", "btc", "gold", "gbpusd", "us10y", "aapl", "dxy"]);
+    expect(list.ids).toEqual(["eurusd", "btc", "gbpusd", "gold", "us10y", "aapl", "dxy"]);
+  });
   it("moves filtered neighbours while every hidden instrument keeps its original index", () => {
     const next = moveVisible(list, "gbpusd", -1, "", "forex", names);
     expect(next.ids).toEqual(["gbpusd", "btc", "eurusd", "gold", "us10y", "aapl", "dxy"]);

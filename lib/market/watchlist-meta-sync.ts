@@ -3,6 +3,11 @@ import { captureMarketAccount } from "./account-scope";
 import { parseWatchlistMeta, proposePriority, validPriorityOperation, WATCHLIST_META_ROW, type PriorityOperation, type WatchlistMeta, type WatchlistMetaWrite } from "./watchlist-meta";
 
 export const META_CAS_ATTEMPTS = 3;
+export const META_HTTP_TIMEOUT_MS = 15_000;
+async function metadataRequest<T>(run: (signal: AbortSignal) => PromiseLike<T>): Promise<T> {
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), META_HTTP_TIMEOUT_MS);
+  try { return await run(controller.signal); } finally { clearTimeout(timer); }
+}
 export class WatchlistMetaError extends Error {
   constructor(public readonly code: string | undefined, message: string) { super(message); this.name = "WatchlistMetaError"; }
 }
@@ -17,27 +22,27 @@ const checked = (error: { code?: string; message?: string } | null) => {
   if (error) throw new WatchlistMetaError(error.code || undefined, error.message || "market_meta_remote_failed");
 };
 
-/** Dormant foundation: no UI, automatic reads/writes, local storage, new RPC or service-role client. */
+/** Account-bound PostgREST adapter; no new RPC or service-role client. Retries belong to the bounded CAS helper. */
 export class SupabaseWatchlistMetaRemote implements WatchlistMetaRemote {
   constructor(private readonly getClient: () => SupabaseClient | null) {}
   private client() { const c = this.getClient(); if (!c) throw new WatchlistMetaError("not_configured", "market_meta_not_configured"); return c; }
   async currentUserId() { const { data, error } = await this.client().auth.getSession(); checked(error); return data.session?.user.id ?? null; }
   async isSyncEnabled(userId: string) {
-    const { data, error } = await this.client().from("user_features").select("cloud_sync").eq("user_id", userId).maybeSingle();
+    const { data, error } = await metadataRequest(signal => this.client().from("user_features").select("cloud_sync").eq("user_id", userId).abortSignal(signal).maybeSingle().retry(false));
     checked(error); return data?.cloud_sync === true;
   }
   async read(userId: string) {
-    const { data, error } = await this.client().from("market_user_data").select("data").eq("user_id", userId).eq("id", WATCHLIST_META_ROW).maybeSingle();
+    const { data, error } = await metadataRequest(signal => this.client().from("market_user_data").select("data").eq("user_id", userId).eq("id", WATCHLIST_META_ROW).abortSignal(signal).maybeSingle().retry(false));
     checked(error); return data?.data ?? null;
   }
   async create(userId: string, data: WatchlistMetaWrite) {
-    const result = await this.client().from("market_user_data").insert({ user_id: userId, id: WATCHLIST_META_ROW, data }).select("data").maybeSingle();
+    const result = await metadataRequest(signal => this.client().from("market_user_data").insert({ user_id: userId, id: WATCHLIST_META_ROW, data }).select("data").abortSignal(signal).maybeSingle().retry(false));
     if (result.error?.code === "23505") return null; // concurrent first creation; read/rebase within the bounded loop
     checked(result.error); return result.data?.data ?? null;
   }
   async replace(userId: string, expectedRevision: number, data: WatchlistMetaWrite) {
-    const result = await this.client().from("market_user_data").update({ data }).eq("user_id", userId).eq("id", WATCHLIST_META_ROW)
-      .eq("data->>revision", String(expectedRevision)).select("data").maybeSingle();
+    const result = await metadataRequest(signal => this.client().from("market_user_data").update({ data }).eq("user_id", userId).eq("id", WATCHLIST_META_ROW)
+      .eq("data->>revision", String(expectedRevision)).select("data").abortSignal(signal).maybeSingle().retry(false));
     checked(result.error); return result.data?.data ?? null; // empty representation is NOT an acknowledgement
   }
 }

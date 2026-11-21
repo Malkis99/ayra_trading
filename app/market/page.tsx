@@ -13,6 +13,7 @@ import { TodayImportant } from "@/components/market/TodayImportant";
 import { MarketEconomy } from "@/components/market/MarketEconomy";
 import { INSTRUMENTS, type InstrumentId } from "@/lib/market/instruments";
 import { useMarketCloudSync } from "@/lib/market/cloud-sync-engine";
+import { useWatchlistPriorities } from "@/lib/market/use-watchlist-priorities";
 
 /** Market sections; Backtests live in Academy (owner's navigation cleanup 2026-11-20). Scanner comes later. */
 const MARKET_TABS = ["overview", "chart", "calendar", "news", "economy", "watchlist"] as const;
@@ -25,6 +26,10 @@ export default function MarketPage() {
   const [tab, setTabState] = useState<MarketTab>("overview");
   // the Watchlist, notes and the chart view in the account (0008), while the Market is open
   useMarketCloudSync();
+  // Start only after visiting Watchlist; keep its outbox alive when opening an instrument's Chart.
+  const [prioritiesStarted, setPrioritiesStarted] = useState(false);
+  useEffect(() => { if (tab === "watchlist") setPrioritiesStarted(true); }, [tab]);
+  const priorities = useWatchlistPriorities(prioritiesStarted);
 
   // The section is kept in the address (?tab=…): a link or a reload opens the same one.
   // A click on a symbol in a TradingView widget comes back as ?tvwidgetsymbol=… and opens the Chart.
@@ -80,7 +85,7 @@ export default function MarketPage() {
         ) : tab === "economy" ? (
           <MarketEconomy />
         ) : tab === "watchlist" ? (
-          <MarketWatchlist onOpenChart={openChart} />
+          <MarketWatchlist onOpenChart={openChart} priorities={priorities} />
         ) : null}
       </div>
     </div>

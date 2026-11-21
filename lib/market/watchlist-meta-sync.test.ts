@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createClient } from "@supabase/supabase-js";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
-import { commitPriority, META_CAS_ATTEMPTS, SupabaseWatchlistMetaRemote, WatchlistMetaError, type WatchlistMetaRemote } from "./watchlist-meta-sync";
+import { commitPriority, META_CAS_ATTEMPTS, META_HTTP_TIMEOUT_MS, SupabaseWatchlistMetaRemote, WatchlistMetaError, type WatchlistMetaRemote } from "./watchlist-meta-sync";
 import { proposePriority, type PriorityOperation, type WatchlistMeta, type WatchlistMetaWrite } from "./watchlist-meta";
 
 const operation = (n = 1, instrument: PriorityOperation["instrument"] = "eurusd"): PriorityOperation => ({ userId: "A", instrument, priority: true, expectedEntryRevision: 0, operationId: `00000000-0000-0000-0000-${String(n).padStart(12, "0")}` });
@@ -100,6 +100,18 @@ describe("bounded metadata CAS", () => {
 });
 
 describe("real Supabase JS query contract", () => {
+  it("disables SDK retry amplification and aborts a stalled GET within the metadata deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+      }));
+      const client = createClient("http://127.0.0.1:54329", "test-only", { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch } });
+      const job = new SupabaseWatchlistMetaRemote(() => client).read("A").catch(error => error);
+      await vi.advanceTimersByTimeAsync(META_HTTP_TIMEOUT_MS);
+      expect(await job).toBeInstanceOf(WatchlistMetaError);expect(fetch).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
   it("uses owner/id/revision filters and return=representation; 0 rows stays null", async () => {
     const requests: { url: URL; init: RequestInit }[] = [];
     const client = createClient("http://127.0.0.1:54329", "test-only", { auth: { persistSession: false, autoRefreshToken: false }, global: { fetch: async (input, init) => {
