@@ -13,6 +13,7 @@ import { useMarketInAccount } from "@/lib/market/cloud-sync-engine";
 import { MarketSyncLine } from "./MarketSyncLine";
 import { InstrumentPicker } from "./InstrumentPicker";
 import { WatchlistQuotes } from "./WatchlistQuotes";
+import { MarketFocus } from "./MarketFocus";
 import type { useWatchlistPriorities } from "@/lib/market/use-watchlist-priorities";
 import { priorityDocument, priorityValue } from "@/lib/market/priority-queue";
 
@@ -82,7 +83,7 @@ export function MarketWatchlist({ onOpenChart, priorities }: { onOpenChart: (id:
   const clearFilters = () => { setQuery(""); setCategory("all"); setPinnedOnly(false); queryInput.current?.focus(); };
   const iconButton = "grid h-11 w-9 sm:w-11 shrink-0 place-items-center rounded-md text-mu hover:bg-s2 hover:text-tx focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi disabled:opacity-30 disabled:hover:bg-transparent";
 
-  return <section ref={root} className="card min-w-0 space-y-3" data-testid="market-watchlist" aria-labelledby="market-watchlist-title">
+  return <><section ref={root} className="card min-w-0 space-y-3" data-testid="market-watchlist" aria-labelledby="market-watchlist-title">
     <div className="flex flex-wrap items-start justify-between gap-2">
       <div className="min-w-0 space-y-1">
         <h2 id="market-watchlist-title" className="font-serif text-lg font-bold text-tx">{w.title}</h2>
@@ -162,5 +163,5 @@ export function MarketWatchlist({ onOpenChart, priorities }: { onOpenChart: (id:
       </ol>}
     {!!list.ids.length && <WatchlistQuotes ids={list.ids} origin={origin} />}
     <p role="status" aria-live="polite" className="sr-only">{notice ? formatString(w[notice.kind], { name: instrumentName(notice.id, t.instruments) }) : ""}</p>
-  </section>;
+  </section><MarketFocus ids={list.ids} /></>;
 }
