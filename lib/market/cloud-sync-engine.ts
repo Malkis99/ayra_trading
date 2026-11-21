@@ -193,11 +193,19 @@ export async function syncMarketOnce(remote: MarketCloudRemote, store: MarketLoc
 // ---- The state for the screens ----
 
 let status: MarketSyncStatus = { kind: "guest" };
+let statusSpace: string | null = null;
 let lastSyncedAt: number | null = null;
+const guestStatus: MarketSyncStatus = { kind: "guest" };
+const waitingStatus: MarketSyncStatus = { kind: "waiting" };
+const currentStatus = () => statusSpace === AppStorage.getActiveSpaceId() ? status : AppStorage.getUserId() ? waitingStatus : guestStatus;
 const listeners = new Set<() => void>();
 const setStatus = (next: MarketSyncStatus) => {
+  const space = AppStorage.getActiveSpaceId();
+  const sameSpace = statusSpace === space;
+  if (!sameSpace) lastSyncedAt = null;
+  statusSpace = space;
   if (next.kind === "on") lastSyncedAt = Date.now();
-  if (status.kind === next.kind && status.detail === next.detail && next.kind !== "on") return;
+  if (sameSpace && status.kind === next.kind && status.detail === next.detail && next.kind !== "on") return;
   status = next;
   listeners.forEach((l) => l());
 };
@@ -212,13 +220,13 @@ export const requestMarketSync = () => syncNow?.();
 
 /** Is the Market kept in the account right now (sync on and the last exchange went through)? */
 export function useMarketInAccount(): boolean {
-  return useSyncExternalStore(subscribe, () => status.kind === "on", () => false);
+  return useSyncExternalStore(subscribe, () => currentStatus().kind === "on", () => false);
 }
 
 /** What the last exchange found, and when it last went through. */
 export function useMarketSyncStatus(): MarketSyncStatus & { lastSyncedAt: number | null } {
-  const s = useSyncExternalStore(subscribe, () => status, () => status);
-  return { ...s, lastSyncedAt };
+  const s = useSyncExternalStore(subscribe, currentStatus, () => guestStatus);
+  return { ...s, lastSyncedAt: statusSpace === AppStorage.getActiveSpaceId() ? lastSyncedAt : null };
 }
 
 /**
