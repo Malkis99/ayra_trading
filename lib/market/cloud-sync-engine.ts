@@ -10,6 +10,8 @@ import { normalizeChartPrefs, normalizeWatchlist } from "./watchlist";
 import { normalizeChartView, normalizeNotes } from "./chart-workspace";
 import { readMarketSettings, writeMarketSettings } from "./settings-store";
 import { normalizeCalendarNews } from "./calendar-news";
+import { captureMarketAccount } from "./account-scope";
+import { spaceTabChannel } from "@/lib/auth/space-channel";
 import {
   MARKET_CALENDAR_KEY,
   MARKET_CHART_KEY,
@@ -49,8 +51,8 @@ export interface MarketCloudRemote {
   currentUserId(): Promise<string | null>;
   /** user_features.cloud_sync (0004): the same switch as the journal's. */
   isSyncEnabled(userId: string): Promise<boolean>;
-  fetchAll(): Promise<MarketCloudRow[]>;
-  upsert(rows: MarketCloudRow[]): Promise<void>;
+  fetchAll(userId: string): Promise<MarketCloudRow[]>;
+  upsert(rows: MarketCloudRow[], userId: string): Promise<void>;
 }
 
 type ErrorLike = { code?: string; message?: string } | null;
@@ -76,18 +78,18 @@ export class SupabaseMarketRemote implements MarketCloudRemote {
     check(error);
     return (data as { cloud_sync?: boolean } | null)?.cloud_sync === true;
   }
-  async fetchAll() {
+  async fetchAll(userId: string) {
     // a handful of rows per account (Watchlist, view, up to one note per instrument)
-    const { data, error } = await this.client().from(MARKET_TABLE).select("id, data").order("id").range(0, 499);
+    const { data, error } = await this.client().from(MARKET_TABLE).select("id, data").eq("user_id", userId).order("id").range(0, 499);
     check(error);
     return (data || []) as MarketCloudRow[];
   }
-  async upsert(rows: MarketCloudRow[]) {
+  async upsert(rows: MarketCloudRow[], userId: string) {
     if (!rows.length) return;
-    // only id, data and device_id: user_id comes from the session, the rest is filled by the server (0008 trigger)
+    // Bind identity explicitly: a token switch must fail RLS, never default this payload into another account.
     const { error } = await this.client()
       .from(MARKET_TABLE)
-      .upsert(rows.map((r) => ({ id: r.id, data: r.data, device_id: null })), { onConflict: "user_id,id" });
+      .upsert(rows.map((r) => ({ user_id: userId, id: r.id, data: r.data, device_id: null })), { onConflict: "user_id,id" });
     check(error);
   }
 }
@@ -96,7 +98,7 @@ export class SupabaseMarketRemote implements MarketCloudRemote {
 export interface MarketLocalStore {
   userId(): string | null;
   read(): MarketLocal;
-  write(next: MarketLocal, changed: { watchlist: boolean; view: boolean; notes: boolean; prefs: boolean; sessions: boolean; calendar: boolean }): void;
+  write(next: MarketLocal, changed: { watchlist: boolean; view: boolean; notes: boolean; prefs: boolean; sessions: boolean; calendar: boolean }, scope: ReturnType<typeof captureMarketAccount>): void;
   joined(): boolean;
   markJoined(): void;
 }
@@ -111,13 +113,19 @@ export const appMarketStore: MarketLocalStore = {
     sessions: readMarketSettings(),
     calendar: readMarketKey(MARKET_CALENDAR_KEY, normalizeCalendarNews),
   }),
-  write: (next, changed) => {
-    if (changed.watchlist) writeMarketKey(MARKET_WATCHLIST_KEY, next.watchlist, "cloud");
-    if (changed.view) writeMarketKey(MARKET_CHART_VIEW_KEY, next.view, "cloud");
-    if (changed.notes) writeMarketKey(MARKET_NOTES_KEY, next.notes, "cloud");
-    if (changed.prefs) writeMarketKey(MARKET_CHART_KEY, next.prefs, "cloud");
-    if (changed.sessions) writeMarketSettings(next.sessions, "cloud");
-    if (changed.calendar) writeMarketKey(MARKET_CALENDAR_KEY, next.calendar, "cloud");
+  write: (next, changed, scope) => {
+    const writes: [boolean, () => void][] = [
+      [changed.watchlist, () => writeMarketKey(MARKET_WATCHLIST_KEY, next.watchlist, "cloud")],
+      [changed.view, () => writeMarketKey(MARKET_CHART_VIEW_KEY, next.view, "cloud")],
+      [changed.notes, () => writeMarketKey(MARKET_NOTES_KEY, next.notes, "cloud")],
+      [changed.prefs, () => writeMarketKey(MARKET_CHART_KEY, next.prefs, "cloud")],
+      [changed.sessions, () => writeMarketSettings(next.sessions, "cloud")],
+      [changed.calendar, () => writeMarketKey(MARKET_CALENDAR_KEY, next.calendar, "cloud")],
+    ];
+    for (const [dirty, write] of writes) {
+      if (!scope.current() || AppStorage.getUserId() !== scope.userId) return;
+      if (dirty) write();
+    }
   },
   joined: () => AppStorage.getItem(MARKET_CLOUD_JOINED_KEY) === "1",
   markJoined: () => AppStorage.setItem(MARKET_CLOUD_JOINED_KEY, "1"),
@@ -154,24 +162,32 @@ export function classifySyncError(error: unknown): MarketSyncStatus {
 
 /** One exchange: pull, merge (newest wins; the first time the Watchlists are joined), write here, send what is newer. */
 export async function syncMarketOnce(remote: MarketCloudRemote, store: MarketLocalStore, now: () => Date = () => new Date()): Promise<MarketSyncStatus> {
+  const scope = captureMarketAccount(() => store.userId());
   try {
     const userId = await remote.currentUserId();
+    if (!scope.current()) return { kind: "waiting" };
     if (!userId) return { kind: "guest" };
     // only the signed-in account's own space (never a guest's data, never another account's)
-    if (userId !== store.userId()) return { kind: "waiting" };
-    if (!(await remote.isSyncEnabled(userId))) return { kind: "flagOff" };
-    const rows = await remote.fetchAll();
+    if (userId !== scope.userId) return { kind: "waiting" };
+    const enabled = await remote.isSyncEnabled(userId);
+    if (!scope.current()) return { kind: "waiting" };
+    if (!enabled) return { kind: "flagOff" };
+    const rows = await remote.fetchAll(userId);
+    if (!scope.current()) return { kind: "waiting" };
     // the device may have changed while the rows were coming: read it now
     const result = mergeMarket(store.read(), rows, !store.joined(), now());
-    if (result.changed.watchlist || result.changed.view || result.changed.notes || result.changed.prefs || result.changed.sessions || result.changed.calendar) store.write(result.local, result.changed);
+    if (result.changed.watchlist || result.changed.view || result.changed.notes || result.changed.prefs || result.changed.sessions || result.changed.calendar) store.write(result.local, result.changed, scope);
     // a Watchlist stamped by the merge (joined, or never stamped) is kept here too
-    if (result.push.some((r) => r.id === "watchlist") && !result.changed.watchlist) store.write(result.local, { watchlist: true, view: false, notes: false, prefs: false, sessions: false, calendar: false });
-    await remote.upsert(result.push);
+    if (scope.current() && result.push.some((r) => r.id === "watchlist") && !result.changed.watchlist) store.write(result.local, { watchlist: true, view: false, notes: false, prefs: false, sessions: false, calendar: false }, scope);
+    if (!scope.current()) return { kind: "waiting" };
+    await remote.upsert(result.push, userId);
+    if (!scope.current()) return { kind: "waiting" };
     store.markJoined();
     return { kind: "on" };
   } catch (error) {
+    if (!scope.current()) return { kind: "waiting" };
     return classifySyncError(error);
-  }
+  } finally { scope.dispose(); }
 }
 
 // ---- The state for the screens ----
@@ -221,6 +237,7 @@ export function useMarketCloudSync(): void {
     let stopped = false;
 
     const run = async () => {
+      if (stopped) return;
       if (timer) {
         clearTimeout(timer);
         timer = null;
@@ -232,8 +249,9 @@ export function useMarketCloudSync(): void {
       running = true;
       do {
         again = false;
+        const space = AppStorage.getActiveSpaceId();
         const next = await syncMarketOnce(remote, appMarketStore);
-        setStatus(next);
+        if (!stopped && AppStorage.getActiveSpaceId() === space) setStatus(next);
         if (retry) clearTimeout(retry);
         retry = null;
         if (!stopped && (next.kind === "offline" || next.kind === "waiting")) retry = setTimeout(run, MARKET_SYNC_RETRY_MS);
@@ -255,6 +273,13 @@ export function useMarketCloudSync(): void {
       if (document.visibilityState === "visible") run();
       else flush();
     };
+    const unsubscribeSpace = spaceTabChannel.subscribe(message => {
+      if (message.fromSpaceId === message.toSpaceId) return;
+      lastSyncedAt = null;
+      setStatus({ kind: AppStorage.getUserId() ? "waiting" : "guest" });
+      // Do not add a per-exchange scope listener while SpaceTabChannel is iterating its listener set.
+      queueMicrotask(run);
+    });
 
     syncNow = () => run();
     run();
@@ -270,6 +295,7 @@ export function useMarketCloudSync(): void {
       if (timer) clearTimeout(timer);
       if (retry) clearTimeout(retry);
       clearInterval(interval);
+      unsubscribeSpace();
       window.removeEventListener(MARKET_STORE_EVENT, onChange);
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", onVisibility);

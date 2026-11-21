@@ -3,6 +3,7 @@
 //   node scripts/test-migrations.mjs
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { installBaseline, readSql, runMetaChecks, seed, snapshot } from "./watchlist-meta-sql-checks.mjs";
 const repo = fileURLToPath(new URL("..", import.meta.url));
 let PGlite;
 try {
@@ -38,6 +39,23 @@ const STORAGE_STUB = `
 async function fresh() { const db = new PGlite(); await db.exec(STUB); await db.exec(STORAGE_STUB); return db; }
 const ok = (m) => console.log("PASS", m);
 const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
+
+// WATCH-1B.1: separate metadata, safe reapplication, all legacy rows preserved, RLS and guarded rollback.
+{
+  const db = await fresh();
+  const sqlDb = { query: async (sql, args) => args ? db.query(sql, args) : (await db.exec(sql)).at(-1) };
+  try {
+    await installBaseline(sqlDb); await seed(sqlDb);
+    const before = await snapshot(sqlDb);
+    for (let i = 0; i < 2; i++) await db.exec(readSql("migrations/0017_watchlist_meta.sql"));
+    if (JSON.stringify(await snapshot(sqlDb)) !== JSON.stringify(before)) throw new Error("0017 changed existing rows");
+    ok("WATCH: 0017 twice preserves every existing column");
+    await runMetaChecks(sqlDb, ok);
+    await db.exec(read("supabase/tests/market_sync_rls.sql"));
+    ok("WATCH: old 0008 RLS tests pass with 0017");
+  } catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`WATCH: ${e.message}`); }
+  finally { await db.close(); }
+}
 
 // A. 0001 only: new user without age group -> sign-up fails (reproduces production 23502)
 {

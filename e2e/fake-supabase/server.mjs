@@ -594,7 +594,10 @@ export function createFakeSupabase() {
         const rows = Array.isArray(body) ? body : [body];
         for (const r of rows) {
           const data = r.data || {};
-          if (Object.keys(r).some((k) => !["id", "data", "device_id"].includes(k))) return send(403, { code: "42501", message: "permission denied for column" });
+          // 0008 grants user_id for Market writes. An explicitly bound owner still must match the JWT (RLS).
+          const columns = table === "market_user_data" ? ["id", "data", "device_id", "user_id"] : ["id", "data", "device_id"];
+          if (Object.keys(r).some((k) => !columns.includes(k))) return send(403, { code: "42501", message: "permission denied for column" });
+          if (table === "market_user_data" && r.user_id !== undefined && r.user_id !== user.id) return send(403, { code: "42501", message: "new row violates row-level security policy" });
           if (data[JOURNAL_ID_KEY[table] || "id"] !== r.id) return send(400, { code: "P0001", message: "journal_row_id_mismatch" });
           const changedAt = Date.parse(data.updatedAt || data.createdAt || "");
           if (Number.isNaN(changedAt)) return send(400, { code: "P0001", message: "journal_row_missing_updated_at" });
