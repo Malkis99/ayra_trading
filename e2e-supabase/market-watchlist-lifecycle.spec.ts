@@ -47,7 +47,12 @@ for (const scenario of ["close", "language", "list", "chart"] as const) {
       if (scenario === "list") await page.getByTestId("market-watchlist-up-btc").click();
       if (scenario === "chart") await page.getByTestId("market-watchlist-chart-eurusd").click();
       release(); await delivery;
-      if (scenario === "chart") await page.getByRole("tab", { name: "Watchlist", exact: true }).click();
+      if (scenario === "chart") {
+        // The held Quotes request was already released after leaving Watchlist. Wait for the independent
+        // Chart fixture before leaving it: this regression exercises Quotes teardown, not a second loader.
+        await expect(page.getByTestId("market-chart-widget")).toHaveAttribute("data-status", "ready");
+        await page.getByRole("tab", { name: "Watchlist", exact: true }).click();
+      }
       if (scenario === "close" || scenario === "chart") await summary.click();
       const widget = page.getByTestId("market-watchlist-widget");
       await expect(widget).toHaveAttribute("data-status", "ready");

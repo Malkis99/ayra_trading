@@ -35,6 +35,7 @@ Ready, как и раньше, означает появление iframe пос
 4. Реальный TradingView в sandbox-варианте дал `SecurityError: Failed to read the 'cookie' property from 'Document': The document is sandboxed and lacks the 'allow-same-origin' flag.` В окончательном обычном iframe символ EURUSD отобразился, JS-ошибок не было. Нельзя считать наличие пустого iframe достаточным доказательством работы внешнего поставщика.
 5. Локальная Windows-обёртка `work/watch1a1-webkit.config.ts` вызвала `TS2769: No overload matches this call`: типизированный `base.webServer` допускает массив/undefined, поэтому его spread не гарантировал обязательный command. Обёртка исправлена явным webServer; она не входит в PR. Повторный `npx tsc --noEmit` — PASS.
 6. CI run `44877032503`, mock-auth: `e2e/market-overview.spec.ts:68` — четыре случая Chromium/WebKit × 360/1440, на строке 91: `Expected substring: "FX:EURUSD"; Received string: ""; Timeout: 5000ms`. Получилось 444 PASS / 1 skip / 4 FAIL; fake Supabase не запускался. Исходная версия применила изоляцию ко всем market-quotes, включая Overview, а тесты ожидали прежнюю вложенность. Исправление ограничено явным opt-in Watchlist; тесты Overview не ослаблялись и не менялись. Две unit-проверки фиксируют эту границу.
+7. CI run `44878253976`: mock-auth PASS; fake Supabase 224 PASS / 1 FAIL. Тест `pending quotes: chart destroys the context, reopening has exactly one frame`, строка 65, получил `Uncaught TypeError: Cannot read properties of null (reading 'appendChild')` из `embed-widget-advanced-chart.js:8:15`. Это код тестовой заглушки `e2e/helpers/tradingview.ts`, а не скачанный официальный advanced-chart JS. Тест успевал уйти из отдельного Chart до завершения его загрузки. Возврат в Watchlist теперь ожидает Chart ready; задержанный Quotes по-прежнему освобождается сразу после ухода из Watchlist, до этого ожидания. Проверка всех pageerror остаётся строгой, без фильтров и увеличения timeout. Это не объявляется исправлением lifecycle графика: прежние прямые embed-пути не менялись, агрессивное прерывание их реальных внешних скриптов потребовало бы отдельного исследования.
 
 ## Итоги локальных проверок
 
@@ -42,6 +43,7 @@ Ready, как и раньше, означает появление iframe пос
 - 12 первоначальных целевых unit — PASS; после ограничения opt-in добавлены ещё две проверки границы Overview/Watchlist.
 - 20 целевых fake Supabase E2E — PASS: 15 проверок компактного Watchlist и 5 lifecycle/контрольных тестов.
 - Повтор lifecycle-набора пять раз — 25 PASS, без нестабильных падений.
+- После уточнения барьера Chart ready lifecycle-набор повторён десять раз — 50 PASS (47.3 s), без фильтрации pageerror.
 - 20 существующих Chart/Watchlist E2E — PASS, Chromium и WebKit.
 - Четыре lifecycle-сценария отдельно в WebKit — 4 PASS на готовой сборке; локальная Windows-обёртка не входит в PR.
 - Реальная задержка официального скрипта вне production AYRA: ответ получен, wrapper закрыт до доставки JS, затем повторно открыт. Символ EURUSD отобразился; два embed GET, ноль pageerror; после закрытия остался только основной browser frame. Поставщик доступен из среды разработки; это не гарантия постоянной доступности.
