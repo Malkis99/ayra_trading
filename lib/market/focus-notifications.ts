@@ -1,4 +1,4 @@
-import { FocusDataError, type FocusEntry, type FocusPatch } from "./market-focus";
+import { FocusDataError, systemFocusValue, type FocusEntry, type FocusPatch } from "./market-focus";
 import { occurrences, sessionDefs, type SessionSettings } from "./sessions";
 
 /** Local delivery only. UTC instants are derived from the existing AYRA session calendar. */
@@ -39,8 +39,9 @@ export function dueAlerts(entry: FocusEntry, now: number, hours?: SessionSetting
   const recent = (at: number) => at >= a.enabledAt && at <= now && now - at < ALERT_GRACE;
   if (a.completion && allChecked(entry) && a.completionEvent && a.completionEvent.revision > a.seenCompletion && recent(a.completionEvent.at)) out.push({ kind: "completion", at: a.completionEvent.at, token: a.completionEvent.revision });
   if (a.reminder && a.reminder > a.seenReminder && recent(a.reminder)) out.push({ kind: "reminder", at: a.reminder, token: a.reminder });
-  if (a.session && (entry.session === "london" || entry.session === "newYork")) {
-    const def = sessionDefs(hours)[entry.session === "london" ? "london" : "newyork"];
+  const session = systemFocusValue(entry, "session");
+  if (a.session && (session === "london" || session === "newYork")) {
+    const def = sessionDefs(hours)[session === "london" ? "london" : "newyork"];
     for (const o of occurrences(def, now, 1)) {
       const at = o.start - a.lead * 60_000;
       if (o.start > a.seenSession && recent(at)) out.push({ kind: "session", at, token: o.start });

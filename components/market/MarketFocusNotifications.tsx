@@ -15,7 +15,7 @@ import { defaultSettings } from "@/lib/notifications/types";
 import { Button } from "@/components/ui";
 
 /** Visible-page local cues only; never inserts into Inbox or requests browser permission. */
-export function MarketFocusNotifications({ space, id, ids }: { space: string; id: InstrumentId; ids: InstrumentId[] }) {
+export function MarketFocusNotifications({ space, id, ids, customSession = false }: { space: string; id: InstrumentId; ids: InstrumentId[]; customSession?: boolean }) {
   const { dict } = useApp(), t = dict.market.focus.alerts;
   const [config, setConfig] = useState<FocusAlerts | null>(null), [failed, setFailed] = useState(false), [busy, setBusy] = useState(false);
   const [paused, setPaused] = useState(false), [messages, setMessages] = useState<{ kind: FocusAlertKind; id: InstrumentId }[]>([]);
@@ -97,10 +97,11 @@ export function MarketFocusNotifications({ space, id, ids }: { space: string; id
       <p className="my-2 text-xs text-mu">{t.local}</p>
       <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs">
         <label className="flex min-h-[44px] items-center gap-2"><input type="checkbox" checked={draft?.completion ?? config?.completion ?? false} disabled={disabled} onChange={e => void save({ completion: e.target.checked })} />{t.enableCompletion}</label>
-        <label className="flex min-h-[44px] items-center gap-2"><input type="checkbox" checked={draft?.session ?? config?.session ?? false} disabled={disabled} onChange={e => void save({ session: e.target.checked })} />{t.enableSession}</label>
-        <label className="flex min-h-[44px] items-center gap-2">{t.lead}<select className="rounded border border-pri bg-bg p-2" disabled={disabled} value={config?.lead ?? 5} onChange={e => void save({ lead: Number(e.target.value) })}>{[0, 5, 15].map(n => <option key={n} value={n}>{n}</option>)}</select></label>
+        <label className="flex min-h-[44px] items-center gap-2"><input type="checkbox" checked={!customSession && (draft?.session ?? config?.session ?? false)} disabled={disabled || customSession} onChange={e => void save({ session: e.target.checked })} />{t.enableSession}</label>
+        <label className="flex min-h-[44px] items-center gap-2">{t.lead}<select className="rounded border border-pri bg-bg p-2" disabled={disabled || customSession} value={config?.lead ?? 5} onChange={e => void save({ lead: Number(e.target.value) })}>{[0, 5, 15].map(n => <option key={n} value={n}>{n}</option>)}</select></label>
       </div>
       <p className="my-2 text-xs text-mu">{t.sessionHint}</p>
+      {customSession && <p role="status" className="my-2 text-xs text-vi">{dict.market.focus.catalog.sessionDisabled}</p>}
       <div className="flex flex-wrap items-end gap-2"><label className="min-w-0 flex-1 text-xs">{t.reminderLabel}<input className="mt-1 min-h-[44px] w-full min-w-0 rounded border border-pri bg-bg px-3" type="datetime-local" value={reminder} onChange={e => setReminder(e.target.value)} disabled={disabled} /></label>
         <Button size="sm" disabled={disabled || !Number.isFinite(at) || at <= Date.now()} onClick={() => void save({ reminder: at })}>{t.setReminder}</Button>
         {config?.reminder && <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void save({ reminder: null })}>{t.cancelReminder}</Button>}

@@ -1,8 +1,8 @@
-/** Architecture evidence only: no custom runtime, real database upgrade or new notification producer. */
+/** Frozen deployed V2 client: its restrictions must survive changes to the current implementation. */
 import "fake-indexeddb/auto";
 import { expect, it } from "vitest";
-import { emptyFocus, parseFocus, patchFocus, type FocusField } from "./market-focus";
-import { FocusStorage } from "@/lib/storage/market-focus";
+import { emptyFocus, parseFocus, patchFocus, type FocusField } from "../../test-fixtures/market-focus-v2/model";
+import { FocusStorage } from "../../test-fixtures/market-focus-v2/storage";
 import { instantOf, wallAt } from "./sessions";
 
 const id = "custom:00000000-0000-4000-8000-000000000001";
