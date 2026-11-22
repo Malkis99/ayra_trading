@@ -2055,6 +2055,13 @@ export const en: Dictionary = {
       notInCatalog: "«{symbol}» is not in the Market catalog, so {name} is shown.",
     },
     focus: {
+      alerts: {
+        title: "Local reminders", local: "Only while Watchlist is open and visible on this device. No Push or cloud Inbox delivery. All triggers are off by default. Expired reminders are not replayed.",
+        enableCompletion: "Checklist completion", enableSession: "Selected session reminder", lead: "Minutes before", sessionHint: "Uses the selected Focus session and AYRA session hours (London / New York, including DST). Holidays are not a separate exchange calendar.",
+        reminderLabel: "Reminder date and time (UTC)", setReminder: "Set reminder", cancelReminder: "Delete reminder", scheduled: "Scheduled (UTC)", off: "Off by default", processed: "Processed locally (UTC)", elapsed: "Time elapsed (UTC); not replayed after a minute",
+        completion: "You marked all checklist items. This is not a trading signal.", session: "Your selected session is approaching or starting.", reminder: "Time to review this instrument.",
+        dismiss: "Dismiss", error: "Local settings could not be saved/read. Reload to retry; no save confirmed.", paused: "Reminders paused by notification settings or unavailable settings/storage.", pending: "Saving on device…", saved: "Settings saved on this device", loading: "Loading local settings…", retry: "Reload",
+      },
       title: "Market Focus", subtitle: "Manual focus for the selected instrument", instrument: "Instrument", reset: "Reset", notSelected: "Not selected",
       fields: { direction: "Market direction", poi: "POI", mss: "MSS", session: "Trading session" },
       options: { bullish: "Bullish", bearish: "Bearish", neutral: "Neutral", fvg: "FVG", orderBlock: "Order Block", liquidity: "Liquidity", waiting: "Waiting", notConfirmed: "Not confirmed", london: "London", newYork: "New York", none: "None", mssBullish: "Bullish", mssBearish: "Bearish" },
