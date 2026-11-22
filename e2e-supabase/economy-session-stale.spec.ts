@@ -31,6 +31,16 @@ async function account(page: Page, request: APIRequestContext) {
   return { email, userId };
 }
 
+/**
+ * signIn() of a known account only submits the form: wait until the sign-in has finished (the page left /login and the
+ * session cookie is there) before asking the API. Only «not signed in yet» is waited out — every other answer is
+ * asserted exactly by the test.
+ */
+async function signedIn(page: Page) {
+  await page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 30_000 });
+  await expect.poll(async () => (await api(page, "/api/game/day/status")).body.error ?? "ok", { timeout: 30_000 }).not.toBe("not_signed_in");
+}
+
 async function openQuests(page: Page) {
   await page.goto("/quests");
   await expect(page.getByTestId("missions")).toBeVisible();
@@ -102,6 +112,7 @@ test.describe("Q4.5-2 stale sessions (fake Supabase with the 0014–0018 stand-i
     const other = await browser.newContext({ baseURL: test.info().project.use.baseURL });
     const device2 = await other.newPage();
     await signIn(device2, email);
+    await signedIn(device2);
     expect(await api(device2, "/api/game/day/status")).toMatchObject({ status: 200, body: { status: { state: "cloud_active" } } });
     expect((await api(page, "/api/game/day/status")).body).toMatchObject({ error: "session_stale", state: "cloud_active" });
     await other.close();
@@ -131,6 +142,7 @@ test.describe("Q4.5-2 stale sessions (fake Supabase with the 0014–0018 stand-i
     await page.waitForURL((u) => u.pathname === "/login" || u.pathname === "/", { timeout: 30_000 });
     expect((await live(request, email)).live).toBe(0);
     await signIn(page, email);
+    await signedIn(page);
     expect((await live(request, email)).live).toBe(1);
     expect(await api(page, "/api/game/day/status")).toMatchObject({ status: 200, body: { status: { state: "migration_pending" } } });
     // another account on the same device: its own state (local), fresh, not marked by the first one
