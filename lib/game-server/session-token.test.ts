@@ -55,4 +55,21 @@ describe("Q4.5-2 the economy request's user", () => {
     expect(await verifiedSessionUser(client(null, { id: A }))).toBeNull();
     expect(await verifiedSessionUser(client(jwt({ sub: A, session_id: SID, iat: 7 }), null))).toBeNull();
   });
+
+  it("one request uses one token: a refresh while the request runs never mixes the verified token with another's claims", async () => {
+    const t1 = jwt({ sub: A, session_id: SID, iat: 1, app_metadata: { ayra_economy: "migration_pending" } });
+    const t2 = jwt({ sub: A, session_id: SID, iat: 2, app_metadata: { ayra_economy: "cloud_active" } });
+    const seen: string[] = [];
+    let reads = 0;
+    const refreshing = {
+      auth: {
+        getSession: async () => ({ data: { session: { access_token: reads++ === 0 ? t1 : t2 } } }),
+        getUser: async (j?: string) => { seen.push(j ?? "<none>"); return { data: { user: { id: A } }, error: null }; },
+      },
+    };
+    const u = await verifiedSessionUser(refreshing);
+    expect(reads).toBe(1);
+    expect(seen).toEqual([t1]);
+    expect(u?.token).toMatchObject({ iat: 1, claim: "migration_pending" });
+  });
 });

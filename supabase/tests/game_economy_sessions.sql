@@ -271,6 +271,30 @@ BEGIN
     RAISE EXCEPTION 'G5: nobody logs in as the mark writer and no API role is a member';
   END IF;
 END $$;
+-- Every award path, whatever its name (0014 bare, 0015 «_at» with a time, 0018 with the session): the server reaches
+-- only the session-checked one; no client role reaches any; no API role is a member (even inherited) of an owner role
+DO $$
+DECLARE
+  f RECORD;
+  r TEXT;
+BEGIN
+  FOR f IN SELECT p.oid, p.oid::regprocedure::text AS sig, p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+           WHERE n.nspname = 'public' AND p.proname LIKE 'game_apply_reward%' LOOP
+    FOREACH r IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+      IF has_function_privilege(r, f.oid, 'EXECUTE') THEN RAISE EXCEPTION 'G11: % must not execute %', r, f.sig; END IF;
+    END LOOP;
+    IF has_function_privilege('service_role', f.oid, 'EXECUTE') <> (f.proname = 'game_apply_reward_for_session') THEN
+      RAISE EXCEPTION 'G11: service_role and % (only the session-checked award is the server''s)', f.sig;
+    END IF;
+  END LOOP;
+  IF (SELECT count(*) FROM pg_proc WHERE proname LIKE 'game_apply_reward%') < 3 THEN RAISE EXCEPTION 'G11: the three award functions are there'; END IF;
+  FOREACH r IN ARRAY ARRAY['anon', 'authenticated', 'service_role', 'authenticator'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r)
+       AND (pg_has_role(r, 'game_economy_owner', 'MEMBER') OR pg_has_role(r, 'game_auth_marker', 'MEMBER')) THEN
+      RAISE EXCEPTION 'G12: % must not be a member of an owner role', r;
+    END IF;
+  END LOOP;
+END $$;
 SET LOCAL ROLE service_role;
 DO $$
 BEGIN
