@@ -105,7 +105,7 @@ export class FocusStorage {
       const a = alertsOf(entry);
       if (a.revision !== revision) throw new FocusDataError("conflict");
       if (typeof values.completion !== "boolean" || typeof values.session !== "boolean" || ![0, 5, 15].includes(values.lead)
-        || !(values.reminder === null || Number.isSafeInteger(values.reminder) && values.reminder > Date.now())) throw new FocusDataError("invalid");
+        || !(values.reminder === null || Number.isSafeInteger(values.reminder) && values.reminder > Date.now() && Number.isFinite(new Date(values.reminder).getTime()))) throw new FocusDataError("invalid");
       if (!Number.isSafeInteger(a.revision + 1)) throw new FocusDataError("invalid");
       return { entry: { ...entry, localAlerts: { ...a, ...values, revision: a.revision + 1, enabledAt: Date.now(), completionEvent: null } }, write: true };
     }, epoch)).entry;

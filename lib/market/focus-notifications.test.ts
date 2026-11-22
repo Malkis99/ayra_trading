@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { IDBObjectStore } from "fake-indexeddb";
 import { afterEach, expect, it, vi } from "vitest";
 import { FocusStorage } from "@/lib/storage/market-focus";
-import { FOCUS_CHECKS, templateId } from "./market-focus";
+import { emptyFocus, FOCUS_CHECKS, templateId } from "./market-focus";
 import { alertsOf, dueAlerts, ALERT_GRACE } from "./focus-notifications";
 import { defaultSessionHours } from "./sessions";
 import { defaultSettings } from "@/lib/notifications/types";
@@ -11,6 +11,12 @@ let count = 0;
 const setup = () => { const name = `focus-alerts-${++count}`; return [new FocusStorage(name), new FocusStorage(name)] as const; };
 const values = { completion: true, session: false, lead: 5, reminder: null };
 afterEach(() => { vi.restoreAllMocks(); });
+it("rejects malformed metadata and integer timestamps outside the JavaScript Date range",()=>{
+  const entry=emptyFocus("guest","eurusd"),a=alertsOf(entry);
+  for(const extra of [{reminder:Number.MAX_SAFE_INTEGER},{enabledAt:Number.MAX_SAFE_INTEGER},{completionEvent:undefined},{completionEvent:{at:0,revision:-1}}]){
+    entry.localAlerts={...a,...extra};expect(()=>alertsOf(entry)).toThrowError("market_focus_invalid");
+  }
+});
 it("defaults off, completion is recorded only for the committed last manual check; two tabs claim once", async () => {
   const [a,b] = setup(); expect(alertsOf(await a.read("guest","eurusd")).completion).toBe(false);
   await a.configureAlerts("guest","eurusd",0,values,0);

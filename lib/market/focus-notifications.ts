@@ -11,6 +11,7 @@ export interface FocusAlerts {
 }
 export type FocusAlert = { kind: FocusAlertKind; at: number; token: number };
 export const ALERT_GRACE = 60_000;
+const instant = (value: number) => Number.isSafeInteger(value) && value >= 0 && Number.isFinite(new Date(value).getTime());
 export function alertsOf(entry: FocusEntry): FocusAlerts {
   const raw = entry.localAlerts;
   if (raw === undefined) return { version: 1, revision: 0, completion: false, session: false, lead: 5, enabledAt: 0, reminder: null, completionEvent: null, seenCompletion: 0, seenSession: 0, seenReminder: 0 };
@@ -19,8 +20,9 @@ export function alertsOf(entry: FocusEntry): FocusAlerts {
   if (v.version !== 1) throw new FocusDataError("unsupported");
   if (![v.revision, v.enabledAt, v.seenCompletion, v.seenSession, v.seenReminder].every(n => Number.isSafeInteger(n) && n >= 0)
     || typeof v.completion !== "boolean" || typeof v.session !== "boolean" || ![0, 5, 15].includes(v.lead)
-    || !(v.reminder === null || Number.isSafeInteger(v.reminder) && v.reminder > 0)
-    || !(v.completionEvent === null || Number.isSafeInteger(v.completionEvent.at) && Number.isSafeInteger(v.completionEvent.revision))) throw new FocusDataError("invalid");
+    || !instant(v.enabledAt) || !instant(v.seenSession) || !instant(v.seenReminder)
+    || !(v.reminder === null || instant(v.reminder) && v.reminder > 0)
+    || !(v.completionEvent === null || !!v.completionEvent && typeof v.completionEvent === "object" && instant(v.completionEvent.at) && Number.isSafeInteger(v.completionEvent.revision) && v.completionEvent.revision > 0)) throw new FocusDataError("invalid");
   return v;
 }
 export const allChecked = (entry: FocusEntry) => entry.checklist.items.length > 0 && entry.checklist.items.every(item => item.checked);
