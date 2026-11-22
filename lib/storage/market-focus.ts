@@ -1,6 +1,8 @@
 import { validateUserId } from "@/lib/storage";
 import { clearedFocus, FocusDataError, migrateFocusV1, parseFocus, patchFocus, type FocusEntry, type FocusPatch } from "@/lib/market/market-focus";
 import type { InstrumentId } from "@/lib/market/instruments";
+import { alertsOf, claimAlert, recordCompletion, type FocusAlert } from "@/lib/market/focus-notifications";
+import type { SessionSettings } from "@/lib/market/sessions";
 
 export const FOCUS_DATABASE = "ayra_market_focus_v1";
 const EVENT = "ayra-market-focus-change", CHANNEL = "ayra-market-focus-local";
@@ -96,7 +98,23 @@ export class FocusStorage {
     return result;
   }
   async patch(space: string, id: InstrumentId, patch: FocusPatch, epoch?: number) {
-    return (await this.change(space, id, entry => ({ entry: patchFocus(entry, patch), write: true }), epoch)).entry;
+    return (await this.change(space, id, entry => ({ entry: recordCompletion(entry, patchFocus(entry, patch), patch, Date.now()), write: true }), epoch)).entry;
+  }
+  async configureAlerts(space: string, id: InstrumentId, revision: number, values: { completion: boolean; session: boolean; lead: number; reminder: number | null }, epoch: number) {
+    return (await this.change(space, id, entry => {
+      const a = alertsOf(entry);
+      if (a.revision !== revision) throw new FocusDataError("conflict");
+      if (typeof values.completion !== "boolean" || typeof values.session !== "boolean" || ![0, 5, 15].includes(values.lead)
+        || !(values.reminder === null || Number.isSafeInteger(values.reminder) && values.reminder > Date.now() && Number.isFinite(new Date(values.reminder).getTime()))) throw new FocusDataError("invalid");
+      if (!Number.isSafeInteger(a.revision + 1)) throw new FocusDataError("invalid");
+      return { entry: { ...entry, localAlerts: { ...a, ...values, revision: a.revision + 1, enabledAt: Date.now(), completionEvent: null } }, write: true };
+    }, epoch)).entry;
+  }
+  async claimAlert(space: string, id: InstrumentId, alert: FocusAlert, epoch: number, hours?: SessionSettings) {
+    return (await this.change(space, id, entry => {
+      const next = claimAlert(entry, alert, Date.now(), hours);
+      return { entry: next ?? entry, write: next !== null };
+    }, epoch)).write;
   }
   async reset(space: string, id: InstrumentId, revision: number, epoch?: number) {
     const result = await this.change(space, id, entry => entry.revision === revision ? { entry: clearedFocus(entry), write: true } : { entry, write: false }, epoch);
