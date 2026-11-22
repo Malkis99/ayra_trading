@@ -12,6 +12,7 @@ import { instrumentName, type InstrumentId } from "@/lib/market/instruments";
 import { formatString } from "@/lib/i18n";
 import { Button, Select } from "@/components/ui";
 import { MarketFocusChecklist } from "./MarketFocusChecklist";
+import { MarketFocusNotifications } from "./MarketFocusNotifications";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 function Heading() {
@@ -98,6 +99,7 @@ function FocusInstrument({ space, id, ids, select }: { space: string; id: Instru
       <span>{space === "guest" ? t.guest : t.localOnly}</span>
     </footer>
     <p className="mt-2 text-[10px] text-mu">{t.disclaimer}</p>
+    <MarketFocusNotifications space={space} id={id} ids={ids} />
     <ConfirmDialog isOpen={dialog !== null} title={formatString(t.resetTitle, { instrument: instrumentName(id, dict.market.instruments) })}
       description={<>{dialog?.conflict && <p role="alert" className="mb-3 text-vi">{t.conflict}</p>}<p>{t.resetDescription}</p></>}
       isDanger confirmLabel={dialog?.conflict ? t.reviewReset : t.resetConfirm} cancelLabel={t.cancel} onCancel={() => setDialog(null)}
