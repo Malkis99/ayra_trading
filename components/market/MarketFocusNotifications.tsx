@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useApp } from "@/lib/context";
 import { AppStorage } from "@/lib/storage";
 import { focusStorage, subscribeFocus } from "@/lib/storage/market-focus";
@@ -45,7 +45,8 @@ export function MarketFocusNotifications({ space, id, ids }: { space: string; id
       running = true;
       try {
         const epoch = await focusStorage.epoch(space), snapshot = await focusStorage.exportSpace(space);
-        if (!current()) return;
+        const canDeliver = () => current() && ticket.current === epoch && !document.hidden;
+        if (!canDeliver()) return;
         const entries = snapshot.entries.flatMap(raw => {
           try { const key = (raw as { instrumentId?: string })?.instrumentId; if (!idsKey.split(",").includes(key ?? "")) return []; const entry = parseFocus(raw, space, key as InstrumentId); alertsOf(entry); return [entry]; } catch { return []; }
         });
@@ -54,14 +55,14 @@ export function MarketFocusNotifications({ space, id, ids }: { space: string; id
         if (!candidates.length) return;
         // Fail closed: a missing account policy is not permission to ignore a master pause.
         const policy = space === "guest" ? { settings: defaultSettings(), preferences: [] } : await notificationRepository.settings(space.slice(8), "UTC");
-        if (!current()) return;
+        if (!canDeliver()) return;
         let denied = false;
         for (const { entry, alert } of candidates) {
-          if (!current() || document.hidden) break;
+          if (!canDeliver()) break;
           const type = alert.kind === "session" ? "session_open" : `focus_${alert.kind}`;
           if (inQuietHours(policy.settings, new Date()) || !shouldStore(type, policy.settings, policy.preferences, 3, [entry.instrumentId])) { denied = true; continue; }
           if (await focusStorage.claimAlert(space, entry.instrumentId, alert, epoch, hours)) {
-            if (current() && !document.hidden) setMessages(old => [...old, { kind: alert.kind, id: entry.instrumentId }].slice(-Math.max(1, idsKey.split(",").length * 3)));
+            if (canDeliver()) setMessages(old => [...old, { kind: alert.kind, id: entry.instrumentId }].slice(-Math.max(1, idsKey.split(",").length * 3)));
           }
         }
         if (current()) setPaused(denied);
