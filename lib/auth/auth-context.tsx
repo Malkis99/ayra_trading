@@ -8,7 +8,7 @@ import { mapSupabaseError, type SanitizedErrorInfo } from "./error-sanitizer";
 import { authTabChannel } from "./tab-channel";
 import { spaceTabChannel } from "./space-channel";
 import { AppStorage, GUEST_SPACE_ID } from "@/lib/storage";
-import { mergeSessionEconomy, sessionEconomyOf, type SessionEconomy } from "@/lib/economy-mode";
+import { joinVerifiedReading, mergeSessionEconomy, sessionEconomyOf, type SessionEconomy } from "@/lib/economy-mode";
 import {
   getMockState,
   setMockState,
@@ -326,9 +326,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               .getUser()
               .then(({ data }) => {
                 if (!isMounted || !data.user) return;
-                // the economy mark as the auth server holds it now (a mark given after this token was issued shows here)
+                // the economy mark as the auth server holds it now (a mark given after this token was issued shows here);
+                // a late answer after a sign-out or an account change is dropped (joinVerifiedReading)
                 const verifiedUser = data.user;
-                setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(verifiedUser, "verified", session.expires_at)));
+                setSessionEconomy((prev) => joinVerifiedReading(prev, sessionEconomyOf(verifiedUser, "verified", session.expires_at)));
                 const fresh = toAuthUser(data.user);
                 setUser((prev) =>
                   prev && prev.id === fresh.id && (prev.hasPassword !== fresh.hasPassword || prev.isOwner !== fresh.isOwner)

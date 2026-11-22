@@ -109,14 +109,23 @@ export function sessionEconomyOf(
 /**
  * A new reading of the same account's session joined to what is already known. The auth events do not arrive in a fixed
  * order (getSession, getUser, INITIAL_SESSION, SIGNED_IN, TOKEN_REFRESHED, another tab): an older stored session may come
- * after the auth server's fresher answer. For one account nothing goes back — the stricter mark, the verified source and
- * the later expiry are kept (the server never moves an account backwards). Another account, or no session, replaces it.
+ * after the auth server's fresher answer. For one account the mark never goes back — the stricter one is kept (the server
+ * never moves an account backwards). The freshness (source and expiry) belongs to one token and is never mixed from two:
+ * the token that expires later is the newer one and brings its own source (a newer token only read from storage is not
+ * verified); for the same token a verified reading wins; an older token changes nothing. Another account, or no session,
+ * replaces it.
  */
 export function mergeSessionEconomy(prev: SessionEconomy | null, next: SessionEconomy | null): SessionEconomy | null {
   if (!next || !prev || prev.userId !== next.userId) return next;
   const claim = prev.claim && next.claim ? laterMode(prev.claim, next.claim) : prev.claim ?? next.claim;
-  const source: SessionEconomy["source"] = prev.source === "verified" || next.source === "verified" ? "verified" : "cached";
-  const expiresAt = prev.expiresAt === null ? next.expiresAt : next.expiresAt === null ? prev.expiresAt : Math.max(prev.expiresAt, next.expiresAt);
+  let source = prev.source;
+  let expiresAt = prev.expiresAt;
+  if (next.expiresAt !== null && (prev.expiresAt === null || next.expiresAt > prev.expiresAt)) {
+    source = next.source;
+    expiresAt = next.expiresAt;
+  } else if (next.expiresAt === prev.expiresAt && next.source === "verified") {
+    source = "verified";
+  }
   if (claim === prev.claim && source === prev.source && expiresAt === prev.expiresAt) return prev;
   return { userId: next.userId, claim, source, expiresAt };
 }
@@ -135,6 +144,15 @@ export function economyBasis(mode: EconomyMode, session: SessionEconomy | null, 
   if (mode !== "local") return "marked";
   if (session && session.source === "verified" && session.expiresAt !== null && session.expiresAt > now) return "confirmed";
   return "unconfirmed";
+}
+
+/**
+ * The auth server's late answer about an account (getUser started at load) joins only the session still known for that
+ * account: after a sign-out or another account's sign-in it is dropped, never brought back as a verified session.
+ */
+export function joinVerifiedReading(prev: SessionEconomy | null, verified: SessionEconomy | null): SessionEconomy | null {
+  if (!prev || !verified || prev.userId !== verified.userId) return prev;
+  return mergeSessionEconomy(prev, verified);
 }
 
 /**

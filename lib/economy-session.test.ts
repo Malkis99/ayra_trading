@@ -6,6 +6,7 @@ import {
   claimOf,
   deviceRewardsAllowed,
   economyBasis,
+  joinVerifiedReading,
   laterMode,
   mergeSessionEconomy,
   readStickyMode,
@@ -169,3 +170,44 @@ describe("Q4.5-1 the agreed rule for device rewards (owner, 2026-11-18)", () => 
   });
 });
 
+describe("Q4.5-1 an earlier verified reading never makes a newer session look fresh", () => {
+  const T1 = NOW + 1_800_000; // the token verified at load
+  const T2 = NOW + 3_600_000; // a newer token (refreshed in another tab), only read from storage here
+  const read = (claim: EconomyMode | null, source: SessionEconomy["source"], expiresAt: number | null, userId = A): SessionEconomy => ({ userId, claim, source, expiresAt });
+
+  it("a newer token read only from storage brings its own source: not verified, so not confirmed", () => {
+    const joined = mergeSessionEconomy(read(null, "verified", T1), read(null, "cached", T2));
+    expect(joined).toMatchObject({ source: "cached", expiresAt: T2 });
+    expect(economyBasis("local", joined, NOW)).toBe("unconfirmed");
+  });
+
+  it("the same token: a verified reading wins in either order; an older token changes nothing", () => {
+    expect(mergeSessionEconomy(read(null, "verified", T1), read(null, "cached", T1))).toMatchObject({ source: "verified", expiresAt: T1 });
+    expect(mergeSessionEconomy(read(null, "cached", T1), read(null, "verified", T1))).toMatchObject({ source: "verified", expiresAt: T1 });
+    expect(mergeSessionEconomy(read(null, "cached", T2), read(null, "verified", T1))).toMatchObject({ source: "cached", expiresAt: T2 });
+  });
+
+  it("the newer token verified later (TOKEN_REFRESHED) is confirmed; the mark still never goes back", () => {
+    const joined = mergeSessionEconomy(read("migration_pending", "verified", T1), read(null, "verified", T2));
+    expect(joined).toMatchObject({ claim: "migration_pending", source: "verified", expiresAt: T2 });
+  });
+
+  it("a late getUser answer after a sign-out is dropped: no session comes back", () => {
+    expect(joinVerifiedReading(null, read("cloud_active", "verified", T1))).toBeNull();
+  });
+
+  it("a late getUser answer for A after B signed in leaves B's session as it is", () => {
+    const b = read(null, "cached", T2, B);
+    expect(joinVerifiedReading(b, read("cloud_active", "verified", T1))).toBe(b);
+  });
+
+  it("a getUser answer for the account still signed in joins as usual", () => {
+    expect(joinVerifiedReading(read(null, "cached", T1), read("migration_pending", "verified", T1))).toMatchObject({ claim: "migration_pending", source: "verified" });
+  });
+
+  it("sign-out, then the same account signs in again: nothing of the old session is carried", () => {
+    const afterSignOut = mergeSessionEconomy(read(null, "verified", T1), null);
+    expect(afterSignOut).toBeNull();
+    expect(mergeSessionEconomy(afterSignOut, read(null, "cached", T2))).toMatchObject({ source: "cached", expiresAt: T2 });
+  });
+});
