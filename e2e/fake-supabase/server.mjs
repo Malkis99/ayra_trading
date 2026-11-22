@@ -3,6 +3,7 @@
 // runs its real PKCE magic-link flow: /otp -> email link -> /auth/callback?code -> /token?grant_type=pkce.
 import http from "node:http";
 import crypto from "node:crypto";
+import { metadataWrite } from "./watchlist-meta.mjs";
 
 const b64url = (buf) => Buffer.from(buf).toString("base64url");
 
@@ -575,6 +576,26 @@ export function createFakeSupabase() {
       const table = path.slice("/rest/v1/".length);
       const user = userFromAuthHeader(req);
       if (!user) return send(401, { code: "PGRST301", message: "JWT required" });
+      const metaKey = `${user.id}:market_user_data:watchlist_meta`;
+      const metadataResponse = (data, status = 200) => send(status, req.headers.accept?.includes("object+json") ? data : data ? [data] : []);
+      const saveMetadata = (data, expected) => {
+        if (!cloudFlags.get(user.id)) return send(403, { code: "42501", message: "metadata RLS denied" });
+        const old = journalRows.get(metaKey), now = new Date().toISOString();
+        const result = metadataWrite(old?.data, data, expected, now);
+        if (result.error) return send(result.error === "23505" ? 409 : 400, { code: result.error, message: "metadata write refused" });
+        if (!result.data) return metadataResponse(null);
+        journalRows.set(metaKey, { user_id: user.id, table: "market_user_data", id: "watchlist_meta", data: result.data, updated_at: now, first_seen_at: old?.first_seen_at || now });
+        return metadataResponse({ data: result.data });
+      };
+      if (table === "market_user_data" && url.searchParams.get("id") === "eq.watchlist_meta") {
+        if (url.searchParams.get("user_id") !== `eq.${user.id}`) return metadataResponse(null);
+        if (req.method === "GET") return send(200, journalRows.has(metaKey) ? [{ data: journalRows.get(metaKey).data }] : []);
+        if (req.method === "PATCH") {
+          const revision = url.searchParams.get("data->>revision");
+          if (!revision?.startsWith("eq.")) return send(400, { code: "P0001", message: "metadata CAS filter required" });
+          return saveMetadata((await readBody(req)).data, revision.slice(3));
+        }
+      }
       if (req.method === "GET") {
         if (journalReadFailuresLeft > 0) {
           journalReadFailuresLeft--;
@@ -603,9 +624,16 @@ export function createFakeSupabase() {
         }
         const body = await readBody(req);
         const rows = Array.isArray(body) ? body : [body];
+        if (table === "market_user_data" && rows.some(r => r.id === "watchlist_meta")) {
+          if (rows.length !== 1 || rows[0].user_id !== user.id || Object.keys(rows[0]).some(k => !["user_id", "id", "data"].includes(k))) return send(403, { code: "42501", message: "metadata owner/columns denied" });
+          return saveMetadata(rows[0].data, undefined);
+        }
         for (const r of rows) {
           const data = r.data || {};
-          if (Object.keys(r).some((k) => !["id", "data", "device_id"].includes(k))) return send(403, { code: "42501", message: "permission denied for column" });
+          // 0008 grants user_id for Market writes. An explicitly bound owner still must match the JWT (RLS).
+          const columns = table === "market_user_data" ? ["id", "data", "device_id", "user_id"] : ["id", "data", "device_id"];
+          if (Object.keys(r).some((k) => !columns.includes(k))) return send(403, { code: "42501", message: "permission denied for column" });
+          if (table === "market_user_data" && r.user_id !== undefined && r.user_id !== user.id) return send(403, { code: "42501", message: "new row violates row-level security policy" });
           if (data[JOURNAL_ID_KEY[table] || "id"] !== r.id) return send(400, { code: "P0001", message: "journal_row_id_mismatch" });
           const changedAt = Date.parse(data.updatedAt || data.createdAt || "");
           if (Number.isNaN(changedAt)) return send(400, { code: "P0001", message: "journal_row_missing_updated_at" });

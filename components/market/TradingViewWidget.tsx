@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/components/ui";
+import { mountQuotesFrame } from "@/lib/market/tradingview-quotes-frame";
 
 /**
  * The free TradingView widgets used on the Market (PR 1.2). «Technical analysis» is not here on purpose: it shows a
@@ -47,6 +48,7 @@ export function TradingViewWidget({
   errorText,
   retryLabel,
   testId,
+  isolateScript = false,
 }: {
   widget: TradingViewWidgetName;
   config: Record<string, unknown>;
@@ -56,6 +58,8 @@ export function TradingViewWidget({
   errorText: string;
   retryLabel: string;
   testId: string;
+  /** Opt in only where the host is removed while a quotes script may still be loading (Watchlist disclosure). */
+  isolateScript?: boolean;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLDivElement>(null);
@@ -90,6 +94,14 @@ export function TradingViewWidget({
     if (status !== "loading") return;
     const el = host.current;
     if (!el) return;
+    if (widget === "market-quotes" && isolateScript) {
+      let ready = false;
+      const frame = mountQuotesFrame(el, `${TRADINGVIEW_SCRIPT_BASE}${widget}.js`, JSON.parse(configJson), label, WIDGET_LOAD_TIMEOUT_MS, next => {
+        ready = next === "ready";
+        setStatus(next);
+      });
+      return () => { if (ready) frame.release(); else frame.dispose(); };
+    }
     let settled = false;
     const finish = (next: Status) => {
       if (settled) return;
@@ -120,7 +132,7 @@ export function TradingViewWidget({
       observer.disconnect();
       window.clearTimeout(timer);
     };
-  }, [status, widget, configJson, attempt]);
+  }, [status, widget, configJson, attempt, label, isolateScript]);
 
   // Leaving the page or retrying: drop what the widget put into the host
   useEffect(() => {

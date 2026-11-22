@@ -5,9 +5,12 @@ import { economyText } from "@/lib/market/economy/dictionary";
 import { fiscalText } from "@/lib/market/economy/fiscal-dictionary";
 import { monetaryText } from "@/lib/market/economy/monetary-dictionary";
 import { dayMs, maturities, monetarySources, type MonetaryPoint, type MonetarySeries, type MonetarySnapshot } from "@/lib/market/economy/monetary-data";
+import { EconomyDetails } from "./EconomyDetails";
+import { EconomyColumns } from "./EconomyColumns";
 
 type Language = "en" | "ru";
-const seriesList = Object.keys(monetarySources) as MonetarySeries[];
+// Column-major reading order is also the DOM/mobile/keyboard order.
+const seriesList: MonetarySeries[] = ["policy", "dollar", "yields"];
 const chartYears = [1, 3, 5, 10, 0];
 
 async function read(series: MonetarySeries, history: boolean, signal: AbortSignal): Promise<MonetarySnapshot> {
@@ -23,7 +26,9 @@ function HistoryChart({ points, column, lang, gap, format }: {
 }) {
   const t = economyText[lang];
   const values = points.flatMap((point, index) => point.values[column] == null ? [] : [{ date: point.date, value: point.values[column]!, index }]);
-  if (values.length < 2) return <p className="text-xs text-mu">{t.historyEmpty}</p>;
+  if (new Set(values.map(point => point.date)).size < 2) return values.length ? <ul className="text-xs text-mu">
+    {values.map(point => <li key={point.date}>{point.date} · {format(point.value)}</li>)}
+  </ul> : null;
   const times = values.map(point => Date.parse(point.date));
   const min = Math.min(...values.map(point => point.value));
   const max = Math.max(...values.map(point => point.value));
@@ -35,7 +40,7 @@ function HistoryChart({ points, column, lang, gap, format }: {
   }).join(" ");
   return <div className="rounded-md bg-s1 p-2">
     <div className="flex justify-between text-xs text-mu"><span>{format(min)}</span><span>{format(max)}</span></div>
-    <svg viewBox="0 0 400 90" preserveAspectRatio="none" aria-hidden="true" className="h-24 w-full text-vi">
+    <svg data-economy-chart viewBox="0 0 400 90" preserveAspectRatio="none" aria-hidden="true" className="h-24 w-full text-vi">
       <path d="M5 10H395 M5 45H395 M5 80H395" stroke="currentColor" opacity=".2" />
       <path d={path} stroke="currentColor" fill="none" vectorEffect="non-scaling-stroke" />
     </svg>
@@ -83,27 +88,22 @@ function MonetaryCard({ series, lang }: { series: MonetarySeries; lang: Language
   const first = columnPoints[0]?.values[column];
   const last = columnPoints.at(-1)?.values[column];
   const delta = columnPoints.length > 1 && first != null && last != null ? (column >= 5 ? last - first : Math.round((last - first) * 100)) : null;
-  return <article className="min-w-0 space-y-3 rounded-lg border border-line bg-s2 p-4" data-testid={"monetary-" + series}>
-    <h4 className="font-serif text-lg font-semibold text-tx">{t[series]}</h4>
+  return <article className="min-w-0 space-y-2 rounded-lg border border-line bg-s2 p-3 sm:p-4"
+    data-testid={"monetary-" + series}>
+    <div className="flex flex-wrap items-baseline justify-between gap-1"><h4 className="font-serif text-lg font-semibold text-tx">{t[series]}</h4>{latest?.status === "ready" && <span className="text-xs text-vi">{words.confirmed}</span>}</div>
     {(!latest || latest.status !== "ready") && <p role="status" className="text-sm text-mu">
       {!latest ? words.loading : latest.status === "stale" ? fiscalText[lang].stale : latest.status === "unavailable" ? words.unavailable : words.error}
     </p>}
     {(latest?.status === "error" || latest?.status === "stale") && <button type="button" onClick={() => setRefresh(value => value + 1)}
       className="rounded border border-line px-2 py-1 text-xs text-vi">{words.retry}</button>}
     {tip && series === "policy" && <>
-      <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+      <dl className="grid gap-2 sm:grid-cols-2">
         <div><dt className="text-xs text-mu">{t.target}</dt><dd className="text-2xl font-semibold tabular-nums">{format(tip.values[0]!)}–{format(tip.values[1]!)}</dd>
           <dd className="text-xs text-mu">{t.effectiveSince} · <time>{tip.date}</time></dd></div>
         <div><dt className="text-xs text-mu">{t.effective}</dt><dd className="text-lg font-semibold tabular-nums">{latest?.effectiveRate ? format(latest.effectiveRate.values[0]!) : words.empty}</dd>
           {latest?.effectiveRate && <dd className="text-xs text-mu">{t.observed} · <time dateTime={latest.effectiveRate.date}>{latest.effectiveRate.date}</time> · <a className="text-vi" href="https://www.newyorkfed.org/markets/reference-rates/effr">New York Fed</a></dd>}
           {latest?.effectiveRate && latest.effectiveRateStale && <dd className="mt-1 text-xs text-vi">{t.effrStale}</dd>}</div>
       </dl>
-      <a href="https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm" className="text-xs text-vi">{t.documents} ↗</a>
-      {latest?.effectiveRate && <details className="text-xs text-mu">
-        <summary className="cursor-pointer">{t.terms}</summary>
-        <p className="mt-1">{t.effrTerms}</p>
-        <a href="https://www.newyorkfed.org/privacy/termsofuse" className="text-vi">{t.terms} ↗</a>
-      </details>}
     </>}
     {tip && series === "yields" && <>
       <p className="text-xs text-mu">{t.observed} · <time>{tip.date}</time> · {t.annual}</p>
@@ -118,33 +118,41 @@ function MonetaryCard({ series, lang }: { series: MonetarySeries; lang: Language
     {tip && series === "dollar" && <>
       <p className="text-xs text-mu">{t.index}</p>
       <p className="text-2xl font-semibold tabular-nums">{number.format(tip.values[0]!)}</p>
-      <p className="text-xs text-mu">{t.base}</p>
+      <p className="text-xs text-mu">{t.points}</p>
       <p className="text-xs text-mu">{t.observed} · <time>{tip.date}</time></p>
-      {latest?.releasedOn && <p className="text-xs text-mu">{t.published} · <time>{latest.releasedOn}</time></p>}
       <dl className="grid grid-cols-3 gap-1 text-sm">{t.changes.map((label, i) => {
         const value = latest?.dollarChanges?.[i];
         return <div key={label}><dt className="text-xs text-mu">{label}</dt><dd className="tabular-nums">{value == null ? "—" : signed.format(value) + "%"}</dd></div>;
       })}</dl>
     </>}
-    {(!history || history.status === "error" || history.status === "unavailable") && <button type="button" disabled={fetchingHistory}
+    {(!history || !history.points.length || history.status === "error" || history.status === "unavailable") && <button type="button" disabled={fetchingHistory}
       onClick={() => { setHistory(undefined); setHistoryRequest(value => value + 1); }} className="rounded border border-line px-2 py-1 text-xs text-vi">
       {fetchingHistory ? words.loading : history ? words.retry : t.history}
     </button>}
     {history?.status === "error" && <p role="status" className="text-xs text-mu">{words.error}</p>}
     {history?.status === "stale" && <p role="status" className="text-xs text-mu">{fiscalText[lang].stale}</p>}
     {history?.status === "unavailable" && <p role="status" className="text-xs text-mu">{words.unavailable}</p>}
-    {history && (history.status === "ready" || history.status === "stale") && <div role="group" aria-label={words.history} className="flex flex-wrap gap-1">
+    {history && points.length > 0 && (history.status === "ready" || history.status === "stale") && <div role="group" aria-label={words.history} className="flex flex-wrap gap-1">
       {chartYears.map((value, i) => <button key={value} type="button" aria-pressed={value === years} onClick={() => setYears(value)}
         className={"rounded border border-line px-2 py-1 text-xs " + (value === years ? "bg-vi/15 text-vi" : "text-mu")}>{words.ranges[i]}</button>)}
     </div>}
-    {series !== "policy" && <HistoryChart points={points} column={series === "dollar" ? 0 : column} lang={lang} gap={4 * dayMs} format={format} />}
-    {series === "policy" && points.length > 1 && <details className="text-xs text-mu">
+    {history && (history.status === "ready" || history.status === "stale") && series !== "policy" && <HistoryChart points={points} column={series === "dollar" ? 0 : column} lang={lang} gap={4 * dayMs} format={format} />}
+    {history && (history.status === "ready" || history.status === "stale") && series === "policy" && points.length > 0 && <details className="text-xs text-mu">
       <summary className="cursor-pointer">{t.policyHistory}</summary>
       <ul className="mt-2 max-h-40 overflow-y-auto">{points.slice().reverse().map(point =>
         <li key={point.date}>{point.date} · {format(point.values[0]!)}–{format(point.values[1]!)}</li>)}</ul>
     </details>}
-    <a className="block text-xs font-semibold text-vi" target="_blank" rel="noreferrer" href={monetarySources[series]}>{t.source} ↗</a>
+    <EconomyDetails label={words.details}>
+    {latest?.releasedOn && <p>{t.published} · <time>{latest.releasedOn}</time></p>}
+    <p>{words.retrieved} · {words.timeUnknown}</p>
+    {series === "dollar" && <p>{t.base}</p>}
+    {series === "policy" && <>
+      <a href="https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm" className="block text-vi">{t.documents} ↗</a>
+      {latest?.effectiveRate && <><p>{t.effrTerms}</p><a href="https://www.newyorkfed.org/privacy/termsofuse" className="text-vi">{t.terms} ↗</a></>}
+    </>}
+    <a className="block font-semibold text-vi" target="_blank" rel="noreferrer" href={monetarySources[series]}>{t.source} ↗</a>
     <p className="text-xs text-mu">{t.education[series]}</p>
+    </EconomyDetails>
   </article>;
 }
 
@@ -152,7 +160,7 @@ export function MarketMonetary({ lang }: { lang: Language }) {
   const t = monetaryText[lang];
   return <section className="space-y-3" aria-labelledby="market-monetary-title">
     <h3 id="market-monetary-title" className="font-serif text-lg font-semibold text-tx">{t.heading}</h3>
-    <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">{seriesList.map(series => <MonetaryCard key={series} series={series} lang={lang} />)}</div>
+    <EconomyColumns splitAt={2}>{seriesList.map(series => <MonetaryCard key={series} series={series} lang={lang} />)}</EconomyColumns>
     <details className="rounded-lg border border-line bg-s1 p-3 text-sm text-mu">
       <summary className="cursor-pointer font-medium text-tx">{economyText[lang].markets}</summary>
       <div className="mt-2 space-y-2">{t.scenarios.map(text => <p key={text}>{text}</p>)}<p className="text-xs">{economyText[lang].disclaimer}</p></div>

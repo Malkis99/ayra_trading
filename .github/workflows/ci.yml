@@ -41,6 +41,31 @@ jobs:
       - run: psql --version
       - run: bash scripts/test-concurrency.sh
 
+  # WATCH-1B.1: real CAS races and account RLS, in a throw-away database, never production.
+  watchlist-meta-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      AYRA_TEST_DB_LOCAL_ONLY: '1'
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: node scripts/test-watchlist-meta-postgres.mjs
+      - run: npx vitest run --config vitest.priority-postgres.config.ts
+
   # Browser tests (slower): mock auth suite and the sign-in suite against a fake Supabase server.
   # No secrets are needed: both use local stand-ins.
   e2e:

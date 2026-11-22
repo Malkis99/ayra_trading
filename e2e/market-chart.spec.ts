@@ -41,7 +41,9 @@ async function guestPage(browser: Browser, width: number, opts: { minor?: boolea
 const el = (page: Page, id: string) => page.getByTestId(id);
 const noSideScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
 const chartConfig = (page: Page) => el(page, "market-chart-widget").locator("script").evaluate((s) => JSON.parse(s.textContent || "{}"));
-const stubText = (page: Page, id: string) => el(page, id).frameLocator("iframe").locator("body");
+const stubText = (page: Page, id: string) => id === "market-watchlist-widget"
+  ? el(page, id).frameLocator("iframe[data-tradingview-quotes-frame]").frameLocator("iframe").locator("body")
+  : el(page, id).frameLocator("iframe").locator("body");
 
 for (const engine of ["chromium", "webkit"] as const) {
   test.describe(`${engine}: Market — Chart and Watchlist`, () => {
@@ -183,6 +185,7 @@ for (const engine of ["chromium", "webkit"] as const) {
         const rows = el(page, "market-watchlist-rows").getByRole("listitem");
         await expect(rows).toHaveCount(3);
         await expect(rows.nth(0)).toContainText("EUR/USD");
+        await el(page, "market-watchlist-quotes-summary").click();
         await expect(el(page, "market-watchlist-widget")).toHaveAttribute("data-status", "ready");
         await expect(stubText(page, "market-watchlist-widget")).toContainText("FX:EURUSD · FX:GBPUSD · BITSTAMP:BTCUSD");
         await expect(el(page, "market-watchlist-source")).toHaveText("Источник: TradingView · в реальном времени");
@@ -216,6 +219,7 @@ for (const engine of ["chromium", "webkit"] as const) {
         await expect(el(page, "market-chart-watch")).toHaveAttribute("aria-pressed", "true");
         await page.getByRole("tab", { name: "Список наблюдения" }).click();
         await expect(rows).toContainText(["Биткоин (BTC)", "EUR/USD", "Нефть WTI"]);
+        await el(page, "market-watchlist-quotes-summary").click();
         // oil may be delayed: the list says so
         await expect(el(page, "market-watchlist-source")).toHaveText("Источник: TradingView · возможна задержка");
       });
@@ -236,6 +240,7 @@ for (const engine of ["chromium", "webkit"] as const) {
       await expect(el(page, "market-chart-widget")).toHaveAttribute("data-status", "ready");
       await el(page, "market-chart-watch").click();
       await page.getByRole("tab", { name: "Список наблюдения" }).click();
+      await el(page, "market-watchlist-quotes-summary").click();
       await expect(el(page, "market-watchlist-widget")).toHaveAttribute("data-status", "ready");
       const origin = new URL(page.url()).origin;
       for (const section of ["market-watchlist"]) {

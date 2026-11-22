@@ -96,6 +96,11 @@ export const ALLOWED_LATIN_WORDS = [
   "SMC",
   "FVG",
   "MSS",
+  // WATCH-2: owner-approved manual Market Focus terminology.
+  "CISD",
+  "Order",
+  "Block",
+  "Displacement",
   "Sweep",
   "OTE",
   "POI",

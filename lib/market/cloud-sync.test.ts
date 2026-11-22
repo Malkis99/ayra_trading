@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { spaceTabChannel } from "@/lib/auth/space-channel";
 import { joinWatchlists, mergeMarket, type MarketCloudRow, type MarketLocal } from "./cloud-sync";
-import { MarketCloudError, syncMarketOnce, type MarketCloudRemote, type MarketLocalStore } from "./cloud-sync-engine";
+import { appMarketStore, MarketCloudError, syncMarketOnce, type MarketCloudRemote, type MarketLocalStore } from "./cloud-sync-engine";
+import { captureMarketAccount } from "./account-scope";
+import { AppStorage } from "@/lib/storage";
 import { DEFAULT_CHART_VIEW, withNote, noteText } from "./chart-workspace";
 import { normalizeChartPrefs, type Watchlist } from "./watchlist";
 import { normalizeSettings } from "./sessions";
@@ -10,6 +13,57 @@ const T = (h: number) => new Date(Date.UTC(2026, 10, 2, h)).toISOString();
 const list = (ids: string[], at?: string): Watchlist => ({ version: 1, ids: ids as Watchlist["ids"], ...(at ? { updatedAt: at } : {}) });
 const empty = (): MarketLocal => ({ watchlist: list([]), view: { ...DEFAULT_CHART_VIEW }, notes: {}, prefs: normalizeChartPrefs(null), sessions: normalizeSettings(null), calendar: normalizeCalendarNews(null) });
 const now = new Date(T(12));
+
+describe("Market account scope safety", () => {
+  it("rechecks account scope between individual local field writes", () => {
+    let user = "A";
+    const readUser = vi.spyOn(AppStorage, "getUserId").mockImplementation(() => user);
+    const write = vi.spyOn(AppStorage, "setItem").mockImplementation(() => {
+      user = "B";
+      spaceTabChannel.notifyLocal("user:A", "user:B");
+    });
+    const scope = captureMarketAccount(() => user);
+    try {
+      appMarketStore.write(empty(), { watchlist: true, view: true, notes: true, prefs: true, sessions: true, calendar: true }, scope);
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(scope.current()).toBe(false);
+    } finally { scope.dispose(); readUser.mockRestore(); write.mockRestore(); }
+  });
+  it.each(["B", null])("does not apply a delayed account A pull after switching to %s", async next => {
+    let user: string | null = "A";
+    let release!: (rows: MarketCloudRow[]) => void;
+    const rows = new Promise<MarketCloudRow[]>(resolve => release = resolve);
+    const store = device("A"); store.userId = () => user;
+    const write = vi.spyOn(store, "write"); const joined = vi.spyOn(store, "markJoined");
+    const cloud = fakeCloud().remote("A"); cloud.fetchAll = vi.fn(() => rows);
+    cloud.upsert = vi.fn();
+    const pending = syncMarketOnce(cloud, store);
+    await vi.waitFor(() => expect(cloud.fetchAll).toHaveBeenCalledWith("A"));
+    user = next;
+    release([{ id: "watchlist", data: { id: "watchlist", ids: ["btc"], updatedAt: T(5) } }]);
+    expect(await pending).toEqual({ kind: "waiting" });
+    expect(write).not.toHaveBeenCalled(); expect(joined).not.toHaveBeenCalled(); expect(cloud.upsert).not.toHaveBeenCalled();
+  });
+  it("ignores a delayed push acknowledgement after A → B → A", async () => {
+    const store = device("A", { ...empty(), watchlist: list(["eurusd"], T(1)) });
+    const cloud = fakeCloud().remote("A");
+    let release!: () => void;
+    cloud.upsert = vi.fn(() => new Promise<void>(resolve => release = resolve));
+    const joined = vi.spyOn(store, "markJoined");
+    const pending = syncMarketOnce(cloud, store);
+    await vi.waitFor(() => expect(cloud.upsert).toHaveBeenCalled());
+    expect(vi.mocked(cloud.upsert).mock.calls[0][1]).toBe("A");
+    spaceTabChannel.notifyLocal("user:A", "user:B"); spaceTabChannel.notifyLocal("user:B", "user:A");
+    release();
+    expect(await pending).toEqual({ kind: "waiting" }); expect(joined).not.toHaveBeenCalled();
+  });
+  it("legacy merge ignores the separate metadata row and never pushes it", () => {
+    const state = { ...empty(), watchlist: list(["eurusd"], T(1)) };
+    const withMeta = mergeMarket(state, [{ id: "watchlist_meta", data: { id: "watchlist_meta", version: 2, entries: { opaque: true } } }], false, now);
+    expect(withMeta).toEqual(mergeMarket(state, [], false, now));
+    expect(withMeta.push.some(row => row.id === "watchlist_meta")).toBe(false);
+  });
+});
 
 describe("Market data in the account: merge (newest wins; the first time the Watchlists are joined)", () => {
   it("the first sync joins the device's list with the account's, without duplicates, the account's first", () => {

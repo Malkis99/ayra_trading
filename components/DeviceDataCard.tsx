@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Smartphone, Download, Copy, Trash2, LogOut, UserRound } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -10,6 +10,8 @@ import { useJournal } from "@/lib/journal/context";
 import { formatNumber, formatString } from "@/lib/i18n";
 import { deviceJournalCounts } from "@/lib/journal/device-counts";
 import { signOutWarningState } from "@/lib/journal/cloud/account-notice";
+import { focusStorage } from "@/lib/storage/market-focus";
+import { AppStorage } from "@/lib/storage";
 import {
   accountHasProgress,
   copyGuestToAccount,
@@ -66,14 +68,21 @@ export function DeviceDataCard() {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<Status>(null);
+  const [guestFocus, setGuestFocus] = useState<"absent" | "present" | "error">("absent");
+  const inspection = useRef(0);
 
   const refresh = useCallback(() => {
     setGuest(summarizeSpace(null));
     setAccountHasData(user ? accountHasProgress(user.id) : true);
+    const request = ++inspection.current, space = AppStorage.getActiveSpaceId();
+    void focusStorage.exportSpace("guest").then(snapshot => {
+      if (request === inspection.current && space === AppStorage.getActiveSpaceId()) setGuestFocus(snapshot.entries.length || snapshot.preferences !== null ? "present" : "absent");
+    }, () => { if (request === inspection.current && space === AppStorage.getActiveSpaceId()) setGuestFocus("error"); });
   }, [user]);
 
   useEffect(() => {
     refresh();
+    return () => { inspection.current++; };
   }, [refresh]);
 
   const run = async (action: () => Promise<string | null>) => {
@@ -133,7 +142,7 @@ export function DeviceDataCard() {
     });
   };
 
-  const hasGuest = !!guest?.hasData;
+  const hasGuest = !!guest?.hasData || guestFocus !== "absent";
   const btnBase =
     "text-xs py-2 px-3.5 inline-flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi";
 
@@ -145,7 +154,7 @@ export function DeviceDataCard() {
         <span>{t.exportBtn}</span>
       </button>
 
-      {user && !accountHasData && (
+      {user && guest?.hasData && !accountHasData && (
         <button type="button" onClick={handleCopy} disabled={busy} title={t.copyHint} className={`btn ${btnBase}`}>
           <Copy size={14} aria-hidden="true" />
           <span>{t.copyBtn}</span>
@@ -196,7 +205,7 @@ export function DeviceDataCard() {
             <span className="rounded-full border border-line px-2 py-0.5 text-[10px] text-mu">{t.guestNotLinked}</span>
           </div>
           <p className="text-[11px] text-mu">{t.guestExplain}</p>
-          {hasGuest && guest ? (
+          {guest?.hasData ? (
             <p className="break-all text-xs text-tx/90" data-testid="guest-line">
               {formatString(t.guestLine, {
                 name: guest.nickname || "—",
@@ -204,22 +213,26 @@ export function DeviceDataCard() {
                 trades: formatNumber(lang, guest.tradesCount),
               })}
             </p>
+          ) : guestFocus !== "absent" ? (
+            <p className="text-xs text-mu">{guestFocus === "error" ? dict.market.focus.guestInspectError : dict.market.focus.guestData}</p>
           ) : (
             <p className="text-xs text-mu">{t.guestNone}</p>
           )}
           {hasGuest && guestButtons}
-          {hasGuest && !accountHasData && <p className="text-[11px] text-mu">{t.copyHint}</p>}
+          {guest?.hasData && !accountHasData && <p className="text-[11px] text-mu">{t.copyHint}</p>}
         </div>
       ) : (
         <>
           <div className="rounded-xl border border-line bg-s2/40 p-3.5 space-y-1">
             <div className="text-[11px] font-semibold uppercase tracking-wider text-mu">{t.guestOwnTitle}</div>
-            {hasGuest && guest ? (
+            {guest?.hasData ? (
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="font-serif text-base font-bold text-tx break-all">{guest.nickname}</span>
                 <span className="text-xs text-mu">{formatString(t.levelLabel, { level: formatNumber(lang, guest.level) })}</span>
                 <span className="text-xs text-mu">{formatString(t.tradesLabel, { count: formatNumber(lang, guest.tradesCount) })}</span>
               </div>
+            ) : guestFocus !== "absent" ? (
+              <p className="text-xs text-mu">{guestFocus === "error" ? dict.market.focus.guestInspectError : dict.market.focus.guestData}</p>
             ) : (
               <p className="text-xs text-mu">{t.noGuestData}</p>
             )}

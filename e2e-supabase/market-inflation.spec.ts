@@ -26,14 +26,23 @@ for (const [width, lang] of [[390, "ru"], [1440, "en"]] as const) {
           result_meta: { period: "2026-10", series: "us_nfp", unit: "thousand-change-and-percent", adjustment: "SA" } },
       ] }));
       await page.route("**/api/market-economy/monetary?*", route => route.fulfill({ json: { status: "unavailable", points: [] } }));
+      await page.route("**/api/market-economy/fundamentals?series=unemployment&range=latest", route => route.fulfill({ json: {
+        status: "ready", points: [{ period: "2026-10", value: 4.1, previous: 4.2,
+          sourceUrl: "https://api.bls.gov/publicAPI/v1/timeseries/data/LNS14000000",
+          publishedAt: null, vintage: "current", stage: "current" }],
+      } }));
       await page.goto("/market?tab=economy");
       const headline = page.getByTestId("economy-us_cpi");
       await expect(headline.getByText(lang === "ru" ? "0,4%" : "0.4%", { exact: true })).toBeVisible();
+      await headline.locator("summary").filter({ hasText: /Подробнее|Details/ }).click();
       await expect(headline.getByRole("link").first()).toHaveAttribute("href", cpi.result_meta.release_url);
       await expect(page.getByTestId("economy-us_core_cpi")).toContainText(lang === "ru" ? "0,3%" : "0.3%");
       await expect(page.getByTestId("economy-us_cpi_yoy")).toContainText(lang === "ru" ? "Нет подтверждённых данных" : "No verified data");
       await expect(page.getByTestId("economy-us_gdp")).toBeAttached();
-      await expect(page.getByTestId("economy-us_nfp")).toContainText(lang === "ru" ? "4,1%" : "4.1%");
+      await expect(page.getByTestId("economy-us_nfp")).toContainText("+165");
+      const unemployment = page.getByTestId("economy-fundamental-unemployment");
+      await expect(unemployment.getByText(lang === "ru" ? "4,1" : "4.1", { exact: true })).toBeVisible();
+      await expect(unemployment).toContainText(lang === "ru" ? "% рабочей силы" : "% of labor force");
       await expect(page.getByTestId("market-public-finances")).toBeAttached();
       await expect(page.getByTestId("monetary-policy")).toBeAttached();
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);

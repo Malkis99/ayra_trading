@@ -12,6 +12,8 @@ export async function marketGuest(
 ): Promise<{ page: Page; scripts: string[] }> {
   const context = await browser.newContext({ viewport: { width, height: opts.height ?? 900 }, timezoneId: "Asia/Tbilisi", reducedMotion: "reduce" });
   await stubTradingView(context, opts.tradingView ?? "ok");
+  // New fundamentals have deterministic, isolated source fixtures in their own E2E suite.
+  await context.route("**/api/market-economy/fundamentals?*", route => route.fulfill({ json: { status: "unavailable", points: [] } }));
   const page = await context.newPage();
   const scripts: string[] = [];
   page.on("request", (r) => {

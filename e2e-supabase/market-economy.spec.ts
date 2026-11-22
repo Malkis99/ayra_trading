@@ -41,7 +41,8 @@ for (const width of [390, 1440]) {
       await expect(fact).toBeVisible();
       await expect(gdp.getByText(locale === "ru" ? "+2,2%" : "+2.2%", { exact: true })).toBeVisible();
       await expect(gdp.getByText(/Forecast|Прогноз/)).toHaveCount(0);
-      await expect(gdp.getByText(/Not enough data to chart|Недостаточно данных для графика/)).toBeVisible();
+      await expect(gdp.getByText(/Not enough data to chart|Недостаточно данных для графика/)).toBeHidden();
+      await expect(gdp.locator("summary").filter({ hasText: /История|History/ })).toHaveCount(0);
       await expect(page.getByTestId("economy-us_nfp").getByText(/No verified data|Нет подтверждённых данных/)).toBeVisible();
       await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
       await page.locator("#market-tab-calendar").click();

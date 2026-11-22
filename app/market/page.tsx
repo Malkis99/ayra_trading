@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { BarChart3, CalendarDays, Eye, FlaskConical, Info, Landmark, LayoutGrid, Newspaper } from "lucide-react";
+import { Info } from "lucide-react";
 import { useApp } from "@/lib/context";
-import { Chip, EmptyState, Tabs } from "@/components/ui";
+import { Tabs } from "@/components/ui";
 import { SessionsClock } from "@/components/market/SessionsClock";
 import { MarketOverview } from "@/components/market/MarketOverview";
 import { MarketChart } from "@/components/market/MarketChart";
@@ -13,21 +13,12 @@ import { TodayImportant } from "@/components/market/TodayImportant";
 import { MarketEconomy } from "@/components/market/MarketEconomy";
 import { INSTRUMENTS, type InstrumentId } from "@/lib/market/instruments";
 import { useMarketCloudSync } from "@/lib/market/cloud-sync-engine";
+import { useWatchlistPriorities } from "@/lib/market/use-watchlist-priorities";
 
-/** Market sections (owner's decision 2026-10-28, `docs/market-plan.md` section 8); Scanner comes later. */
-const MARKET_TABS = ["overview", "chart", "calendar", "news", "economy", "backtest", "watchlist"] as const;
+/** Market sections; Backtests live in Academy (owner's navigation cleanup 2026-11-20). Scanner comes later. */
+const MARKET_TABS = ["overview", "chart", "calendar", "news", "economy", "watchlist"] as const;
 type MarketTab = (typeof MARKET_TABS)[number];
 const isMarketTab = (v: string | null): v is MarketTab => !!v && (MARKET_TABS as readonly string[]).includes(v);
-
-const SOON_ICONS: Record<MarketTab, React.ReactNode> = {
-  overview: <LayoutGrid size={18} />,
-  chart: <BarChart3 size={18} />,
-  calendar: <CalendarDays size={18} />,
-  news: <Newspaper size={18} />,
-  economy: <Landmark size={18} />,
-  backtest: <FlaskConical size={18} />,
-  watchlist: <Eye size={18} />,
-};
 
 export default function MarketPage() {
   const { dict } = useApp();
@@ -35,6 +26,10 @@ export default function MarketPage() {
   const [tab, setTabState] = useState<MarketTab>("overview");
   // the Watchlist, notes and the chart view in the account (0008), while the Market is open
   useMarketCloudSync();
+  // Start only after visiting Watchlist; keep its outbox alive when opening an instrument's Chart.
+  const [prioritiesStarted, setPrioritiesStarted] = useState(false);
+  useEffect(() => { if (tab === "watchlist") setPrioritiesStarted(true); }, [tab]);
+  const priorities = useWatchlistPriorities(prioritiesStarted);
 
   // The section is kept in the address (?tab=…): a link or a reload opens the same one.
   // A click on a symbol in a TradingView widget comes back as ?tvwidgetsymbol=… and opens the Chart.
@@ -59,19 +54,6 @@ export default function MarketPage() {
     setTab("chart", INSTRUMENTS[id].symbol);
     window.scrollTo({ top: 0 });
   };
-
-  const soon = (id: MarketTab) => (
-    <EmptyState
-      icon={SOON_ICONS[id]}
-      title={
-        <span className="inline-flex items-center gap-2">
-          {t.soon[id].title}
-          <Chip tone="accent">{t.soon.badge}</Chip>
-        </span>
-      }
-      description={t.soon[id].text}
-    />
-  );
 
   return (
     <div className="space-y-4">
@@ -103,10 +85,8 @@ export default function MarketPage() {
         ) : tab === "economy" ? (
           <MarketEconomy />
         ) : tab === "watchlist" ? (
-          <MarketWatchlist onOpenChart={openChart} />
-        ) : (
-          soon(tab)
-        )}
+          <MarketWatchlist onOpenChart={openChart} priorities={priorities} />
+        ) : null}
       </div>
     </div>
   );
