@@ -2,6 +2,7 @@ import { AppStorage, parseKey, validateUserId, STORAGE_SCHEMA_KEY, GUEST_SPACE_I
 import { IndexedDBAttachmentRepository } from "./indexeddb-repository";
 import { INITIAL_GAME_STATE } from "@/lib/game";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
+import { focusStorage, type FocusSnapshot } from "./market-focus";
 
 const GAME_KEY = "ayra_demo_v1";
 const JOURNAL_KEY = "ayra_journal_v1";
@@ -201,6 +202,7 @@ export interface GuestExport {
   exportedAt: string;
   attachmentsCount: number;
   data: Record<string, unknown>;
+  marketFocus: FocusSnapshot;
 }
 
 /**
@@ -208,6 +210,8 @@ export interface GuestExport {
  * only their count is reported.
  */
 export async function exportGuestData(): Promise<GuestExport> {
+  // Failure is explicit: never download a file pretending to include unreadable local Focus.
+  const marketFocus = await focusStorage.exportSpace(GUEST_SPACE_ID);
   const data: Record<string, unknown> = {};
   for (const key of listGuestDataKeys()) {
     const raw = AppStorage.getItem(key, null);
@@ -233,6 +237,7 @@ export async function exportGuestData(): Promise<GuestExport> {
     exportedAt: new Date().toISOString(),
     attachmentsCount,
     data,
+    marketFocus,
   };
 }
 
@@ -278,6 +283,7 @@ export async function deleteGuestData(): Promise<{ removedKeys: number }> {
     throw new Error("deleteGuestData requires an account to be the active space.");
   }
   const keys = listGuestDataKeys();
+  await focusStorage.clearSpace(GUEST_SPACE_ID);
   for (const key of keys) AppStorage.removeItem(key, null);
   await clearAttachmentStore(AppStorage.getAttachmentDbName(null));
   return { removedKeys: keys.length };
@@ -293,6 +299,7 @@ export async function deleteAccountDeviceData(userId: string): Promise<{ removed
     throw new Error("deleteAccountDeviceData requires signing out of the account first.");
   }
   const prefix = `ayra:${userId}:`;
+  await focusStorage.clearSpace(`account:${userId}`);
   const keys: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);

@@ -6,11 +6,12 @@ import { useApp } from "@/lib/context";
 import { useAuth } from "@/lib/auth/auth-context";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
 import { focusStorage } from "@/lib/storage/market-focus";
-import { FOCUS_CHECKS, FOCUS_FIELDS, hasFocus, type FocusField, type FocusPatch } from "@/lib/market/market-focus";
+import { FOCUS_FIELDS, FOCUS_ITEM_LIMIT, FOCUS_TEXT_LIMIT, hasFocus, type FocusField, type FocusPatch } from "@/lib/market/market-focus";
 import { useMarketFocus } from "@/lib/market/use-market-focus";
 import { instrumentName, type InstrumentId } from "@/lib/market/instruments";
 import { formatString } from "@/lib/i18n";
-import { Button, Checkbox, Select } from "@/components/ui";
+import { Button, Select } from "@/components/ui";
+import { MarketFocusChecklist } from "./MarketFocusChecklist";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 function Heading() {
@@ -31,11 +32,11 @@ function FocusSpace({ space, ids }: { space: string; ids: InstrumentId[] }) {
   const t = useApp().dict.market.focus;
   const [selection, setSelection] = useState<string | null>(null), [loaded, setLoaded] = useState(false);
   const [selectionError, setSelectionError] = useState(false), [changed, setChanged] = useState(false);
-  const active = useRef(true), selectionSequence = useRef(0);
+  const active = useRef(true), selectionSequence = useRef(0), ticket = useRef<number>();
   useEffect(() => {
     let reading = true;
     active.current = true;
-    void focusStorage.selection(space).then(value => { if (reading) setSelection(value); }, () => { if (reading) setSelectionError(true); }).finally(() => { if (reading) setLoaded(true); });
+    void focusStorage.epoch(space).then(value => { if (!reading) return null; ticket.current = value; return focusStorage.selection(space); }).then(value => { if (reading) setSelection(value); }, () => { if (reading) setSelectionError(true); }).finally(() => { if (reading) setLoaded(true); });
     return () => { reading = false; active.current = false; };
   }, [space]);
   const selected = ids.includes(selection as InstrumentId) ? selection as InstrumentId : ids[0];
@@ -49,7 +50,8 @@ function FocusSpace({ space, ids }: { space: string; ids: InstrumentId[] }) {
   }, [selected, ids, loaded, selection]);
   const select = (id: InstrumentId) => {
     setSelection(id); setChanged(false); const seq = ++selectionSequence.current;
-    void focusStorage.select(space, id).then(() => { if (active.current && seq === selectionSequence.current) setSelectionError(false); }, () => { if (active.current && seq === selectionSequence.current) setSelectionError(true); });
+    if (ticket.current === undefined) { setSelectionError(true); return; }
+    void focusStorage.select(space, id, ticket.current).then(() => { if (active.current && seq === selectionSequence.current) setSelectionError(false); }, () => { if (active.current && seq === selectionSequence.current) setSelectionError(true); });
   };
   if (!loaded) return <div aria-busy="true"><Heading /><p role="status" className="mt-3 text-xs text-mu">{t.loading}</p></div>;
   if (!selected) return <><Heading /><p className="mt-3 text-sm text-mu" data-testid="market-focus-empty">{t.empty}</p></>;
@@ -65,7 +67,7 @@ function FocusInstrument({ space, id, ids, select }: { space: string; id: Instru
   const mounted = useRef(true), resetRunning = useRef(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const disabled = !state.entry || !!state.issue;
-  const status = state.issue ? t[state.issue] : state.pending ? t.pending : !state.entry ? t.loading : state.entry.revision > 0 ? t.saved : t.localDefault;
+  const status = state.issue ? formatString(t[state.issue], { max: FOCUS_ITEM_LIMIT, length: FOCUS_TEXT_LIMIT }) : state.pending ? t.pending : !state.entry ? t.loading : state.entry.revision > 0 ? t.saved : t.localDefault;
   const reset = async () => {
     if (!dialog || resetRunning.current) return;
     resetRunning.current = true;
@@ -89,9 +91,7 @@ function FocusInstrument({ space, id, ids, select }: { space: string; id: Instru
       options={ids.map(value => ({ value, label: instrumentName(value, dict.market.instruments) }))} /></div>
     <div className="grid min-w-0 gap-3 md:grid-cols-2 lg:grid-cols-4">{(Object.keys(FOCUS_FIELDS) as FocusField[]).map(field)}</div>
     <div className="my-4 h-px bg-pri/30" />
-    <h3 className="mb-1 text-xs font-semibold text-tx">{t.checklist}</h3>
-    <div className="grid min-w-0 gap-x-4 md:grid-cols-2 lg:grid-cols-3" data-testid="market-focus-checklist">{FOCUS_CHECKS.map(key => <Checkbox key={key} label={t.checks[key]} disabled={disabled}
-      checked={state.entry?.checklist[key] ?? false} onChange={value => state.api?.patch({ check: key, value })} className="text-xs" />)}</div>
+    <MarketFocusChecklist entry={state.entry} disabled={disabled} pending={state.pending} patch={patch => state.api?.patch(patch) ?? Promise.resolve(false)} />
     <footer className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-pri/30 pt-3 text-[11px] text-mu">
       <span role={state.issue ? "alert" : "status"} data-testid="market-focus-status" data-kind={state.issue ?? (state.pending ? "pending" : !state.entry ? "loading" : state.entry.revision > 0 ? "saved" : "default")}>{status}</span>
       {state.issue && <Button size="sm" variant="ghost" onClick={() => state.api?.reload()}>{t.retry}</Button>}

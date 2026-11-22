@@ -23,8 +23,8 @@ it("does not confirm an optimistic change before commit or erase newer rapid int
 });
 it("A's delayed read never paints B, Guest or a new A epoch",async()=>{
   const gate=deferred<ReturnType<typeof emptyFocus>>();change(A);const a=`account:${A}`,b=`account:${B}`;
-  vi.spyOn(focusStorage,"read").mockReturnValueOnce(gate.promise).mockImplementation(async(space,id)=>emptyFocus(space,id));
-  const view=render(<Probe key="A1" space={a}/>);act(()=>change(B));view.rerender(<Probe key="B" space={b}/>);await waitFor(()=>expect(api.entry?.spaceId).toBe(b));
+  const read=vi.spyOn(focusStorage,"read").mockReturnValueOnce(gate.promise).mockImplementation(async(space,id)=>emptyFocus(space,id));
+  const view=render(<Probe key="A1" space={a}/>);await waitFor(()=>expect(read).toHaveBeenCalledWith(a,"eurusd",0));act(()=>change(B));view.rerender(<Probe key="B" space={b}/>);await waitFor(()=>expect(api.entry?.spaceId).toBe(b));
   act(()=>change(null));view.rerender(<Probe key="guest" space="guest"/>);await waitFor(()=>expect(api.entry?.spaceId).toBe("guest"));
   act(()=>change(A));view.rerender(<Probe key="A2" space={a}/>);await waitFor(()=>expect(api.entry?.spaceId).toBe(a));
   await act(async()=>{gate.resolve({...emptyFocus(a,"eurusd"),direction:"bearish",revision:99});await gate.promise;});expect(api.entry?.direction).toBeNull();expect(api.entry?.revision).toBe(0);
@@ -32,12 +32,20 @@ it("A's delayed read never paints B, Guest or a new A epoch",async()=>{
 it("an accepted A write stays bound to A and a late failed acknowledgement cannot mark B",async()=>{
   change(A);const gate=deferred<ReturnType<typeof emptyFocus>>(),a=`account:${A}`,b=`account:${B}`;
   vi.spyOn(focusStorage,"read").mockImplementation(async(space,id)=>emptyFocus(space,id));const write=vi.spyOn(focusStorage,"patch").mockReturnValue(gate.promise);
-  const view=render(<Probe key="a" space={a}/>);await waitFor(()=>expect(api.entry).toBeDefined());act(()=>api.api!.patch({field:"poi",value:"fvg"}));
+  const view=render(<Probe key="a" space={a}/>);await waitFor(()=>expect(api.entry).toBeDefined());act(()=>{void api.api!.patch({field:"poi",value:"fvg"});});
   act(()=>change(B));view.rerender(<Probe key="b" space={b}/>);await waitFor(()=>expect(api.entry?.spaceId).toBe(b));
-  await act(async()=>{gate.resolve({...emptyFocus(a,"eurusd"),poi:"fvg",revision:1});await gate.promise;});expect(write).toHaveBeenCalledWith(a,"eurusd",{field:"poi",value:"fvg"});expect(api.entry?.poi).toBeNull();expect(api.pending).toBe(false);
+  await act(async()=>{gate.resolve({...emptyFocus(a,"eurusd"),poi:"fvg",revision:1});await gate.promise;});expect(write).toHaveBeenCalledWith(a,"eurusd",{field:"poi",value:"fvg"},0);expect(api.entry?.poi).toBeNull();expect(api.pending).toBe(false);
 });
 it("failed writes never report saved, retain the confirmed document and allow explicit re-read",async()=>{
   change(null);vi.spyOn(focusStorage,"read").mockResolvedValue({...emptyFocus("guest","eurusd"),direction:"bullish",revision:1});vi.spyOn(focusStorage,"patch").mockRejectedValue(new Error("quota"));
-  render(<Probe space="guest"/>);await waitFor(()=>expect(api.entry).toBeDefined());act(()=>api.api!.patch({field:"direction",value:"bearish"}));
+  render(<Probe space="guest"/>);await waitFor(()=>expect(api.entry).toBeDefined());act(()=>{void api.api!.patch({field:"direction",value:"bearish"});});
   await waitFor(()=>expect(api.issue).toBe("storage"));expect(api.entry?.direction).toBe("bullish");act(()=>api.api!.reload());await waitFor(()=>expect(api.issue).toBeUndefined());
+});
+it("profile purge invalidates a pending acknowledgement even after the user reopens local focus",async()=>{
+  change(null);const gate=deferred<ReturnType<typeof emptyFocus>>();
+  vi.spyOn(focusStorage,"read").mockResolvedValue(emptyFocus("guest","eurusd"));vi.spyOn(focusStorage,"patch").mockReturnValue(gate.promise);
+  render(<Probe space="guest"/>);await waitFor(()=>expect(api.entry).toBeDefined());act(()=>{void api.api!.patch({field:"direction",value:"bearish"});});
+  await act(async()=>{await focusStorage.clearSpace("guest");});await waitFor(()=>expect(api.issue).toBe("cleared"));expect(api.entry).toBeUndefined();
+  act(()=>api.api!.reload());await waitFor(()=>expect(api.issue).toBeUndefined());
+  await act(async()=>{gate.resolve({...emptyFocus("guest","eurusd"),direction:"bearish",revision:99});await gate.promise;});expect(api.entry?.direction).toBeNull();expect(api.entry?.revision).toBe(0);
 });

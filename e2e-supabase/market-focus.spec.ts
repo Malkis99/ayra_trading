@@ -4,6 +4,7 @@ import { signIn } from "../e2e/helpers/auth";
 import { completeOnboarding } from "../e2e/helpers/onboarding";
 import { stubTradingView } from "../e2e/helpers/tradingview";
 import { mkdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 
 async function seed(page: Page, lang: "ru" | "en" = "ru", ids = ["eurusd", "gold"]) {
   await page.addInitScript(({lang,ids})=>{
@@ -19,6 +20,10 @@ async function pick(page: Page, key: string, name: string) {
 }
 const focus = (p: Page) => p.getByTestId("market-focus");
 const saved = (p: Page) => expect(p.getByTestId("market-focus-status")).toHaveAttribute("data-kind","saved");
+async function addItem(page: Page, text: string) {
+  const customize=page.getByTestId("focus-checklist-customize");if(await customize.getAttribute("aria-pressed")!=="true")await customize.click();
+  await page.getByTestId("focus-item-add").click();await page.getByTestId("focus-item-text").fill(text);await page.getByTestId("focus-item-save").click();await expect(focus(page).getByRole("checkbox",{name:text,exact:true})).toBeVisible();await saved(page);
+}
 
 test("manual fields, six checks, reload/offline, removal/re-add and filters preserve local focus",async({browser})=>{
   const {page}=await marketGuest(browser,390);try{
@@ -69,12 +74,16 @@ test("real fake-auth A → B → Guest → A keeps focus local and sends no focu
   const context=await browser.newContext({reducedMotion:"reduce"});await stubTradingView(context,"ok");const page=await context.newPage();const stamp=Date.now();let aId="";try{
     const openAccount=async(email:string,first:boolean)=>{await signIn(page,email);if(first)await completeOnboarding(page,`Focus${Date.now()%10000000}`);const profile=await(await request.get(`http://127.0.0.1:54329/__test/profile?email=${encodeURIComponent(email)}`)).json();await page.evaluate(id=>{localStorage.setItem(`ayra:${id}:ayra_market_watchlist`,JSON.stringify({version:1,ids:["eurusd","gold"],updatedAt:"2026-11-22T00:00:00Z"}));},profile.id);await page.goto("/market?tab=watchlist");await expect(page.getByTestId("market-focus-direction")).toBeEnabled();return profile.id as string;};
     const signOut=async()=>{await page.goto("/settings/account");await page.getByRole("button",{name:"Выйти",exact:true}).click();await expect(page).toHaveURL(/\/login/);};
-    aId=await openAccount(`FocusA_${stamp}@example.com`,true);await pick(page,"direction","Бычье");await saved(page);await signOut();
-    await openAccount(`FocusB_${stamp}@example.com`,true);await expect(page.getByTestId("market-focus-direction")).toContainText("Не выбрано");await pick(page,"direction","Медвежье");await saved(page);await signOut();
+    aId=await openAccount(`FocusA_${stamp}@example.com`,true);await pick(page,"direction","Бычье");await addItem(page,"Account A condition");await focus(page).getByRole("checkbox",{name:"Account A condition",exact:true}).check();await saved(page);await signOut();
+    await openAccount(`FocusB_${stamp}@example.com`,true);await expect(page.getByTestId("market-focus-direction")).toContainText("Не выбрано");await expect(focus(page).getByRole("checkbox",{name:"Account A condition",exact:true})).toHaveCount(0);await pick(page,"direction","Медвежье");await addItem(page,"Account B condition");await saved(page);await signOut();
     await page.evaluate(()=>{localStorage.setItem("ayra_guest_dismissed","1");localStorage.setItem("ayra_market_watchlist",JSON.stringify({version:1,ids:["eurusd","gold"]}));});
-    await page.goto("/market?tab=watchlist");await expect(page.getByTestId("market-focus-direction")).toBeEnabled();await expect(page.getByTestId("market-focus-direction")).toContainText("Не выбрано");
-    await openAccount(`FocusA_${stamp}@example.com`,false);await expect(page.getByTestId("market-focus-direction")).toContainText("Бычье");
+    await page.goto("/market?tab=watchlist");await expect(page.getByTestId("market-focus-direction")).toBeEnabled();await expect(page.getByTestId("market-focus-direction")).toContainText("Не выбрано");await addItem(page,"Guest condition");
+    await openAccount(`FocusA_${stamp}@example.com`,false);await expect(page.getByTestId("market-focus-direction")).toContainText("Бычье");await expect(focus(page).getByRole("checkbox",{name:"Account A condition",exact:true})).toBeChecked();await expect(focus(page).getByRole("checkbox",{name:"Guest condition",exact:true})).toHaveCount(0);
+    await page.goto("/profile?tab=stats");const downloadEvent=page.waitForEvent("download");await page.getByRole("button",{name:"Экспортировать мои данные (JSON)",exact:true}).click();const download=await downloadEvent,payload=JSON.parse(readFileSync((await download.path())!,"utf8"));expect(JSON.stringify(payload.marketFocus)).toContain("Account A condition");expect(JSON.stringify(payload.marketFocus)).not.toContain("Account B condition");expect(JSON.stringify(payload.marketFocus)).not.toContain("Guest condition");
     const cloud=await(await request.get(`http://127.0.0.1:54329/__test/cloud-rows?email=${encodeURIComponent(`FocusA_${stamp}@example.com`)}`)).json();expect(cloud.some((r:{id:string})=>r.id==="watchlist_meta"||r.id.includes("focus"))).toBe(false);expect(aId).toBeTruthy();
+    const localRows=()=>page.evaluate(async()=>{const db=await new Promise<IDBDatabase>((resolve,reject)=>{const r=indexedDB.open("ayra_market_focus_v1",2);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});const rows=await new Promise<{spaceId:string}[]>((resolve,reject)=>{const tx=db.transaction("entries","readonly"),r=tx.objectStore("entries").getAll();tx.oncomplete=()=>resolve(r.result);tx.onabort=()=>reject(tx.error);});db.close();return rows;});
+    await page.goto("/settings/cloud");await page.getByRole("button",{name:"Удалить данные гостя",exact:true}).click();let dialog=page.getByRole("dialog");await dialog.getByRole("textbox").fill("УДАЛИТЬ");await dialog.getByRole("button",{name:"Удалить данные гостя",exact:true}).click();await expect.poll(async()=>(await localRows()).filter(row=>row.spaceId==="guest").length).toBe(0);expect((await localRows()).some(row=>row.spaceId===`account:${aId}`)).toBe(true);
+    await page.getByRole("button",{name:"Выйти и удалить данные аккаунта с этого устройства",exact:true}).click();dialog=page.getByRole("dialog");await dialog.getByRole("textbox").fill("ВЫЙТИ");await dialog.getByRole("button",{name:"Выйти и удалить",exact:true}).click();await expect(page.getByRole("button",{name:"Выйти и удалить данные аккаунта с этого устройства",exact:true})).toHaveCount(0);await expect.poll(async()=>(await localRows()).filter(row=>row.spaceId===`account:${aId}`).length).toBe(0);expect((await localRows()).some(row=>row.spaceId!=="guest")).toBe(true);
   }finally{await page.context().close();}
 });
 
