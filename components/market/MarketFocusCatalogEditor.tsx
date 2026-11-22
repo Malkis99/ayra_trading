@@ -6,7 +6,7 @@ import { useApp } from "@/lib/context";
 import { formatString } from "@/lib/i18n";
 import { FOCUS_FIELDS, FOCUS_ITEM_LIMIT, FOCUS_TEXT_LIMIT, focusText, type FocusField } from "@/lib/market/market-focus";
 import { validateCustomSession, type CatalogItem, type CatalogCommand, type CatalogSnapshot } from "@/lib/market/focus-catalog";
-import { instrumentName, type InstrumentId } from "@/lib/market/instruments";
+import { instrumentName, isInstrumentId } from "@/lib/market/instruments";
 import { browserTimeZone } from "@/lib/timezones";
 import { Button, Input } from "@/components/ui";
 import { TimezoneSelect } from "@/components/TimezoneSelect";
@@ -73,6 +73,6 @@ export function MarketFocusCatalogEditor({ field, snapshot, pending, issue, chan
     </form>
     <p role={issue ? "alert" : "status"} className="mt-2 text-xs text-mu">{issue ? t[issue] : pending ? t.pending : saved ? t.saved : !snapshot ? t.loading : ""}</p>
     {issue && <Button size="sm" variant="ghost" onClick={reload}>{t.retry}</Button>}
-    <ConfirmDialog isOpen={!!removing} title={t.removeTitle} description={<>{removing?.conflict && <p role="alert" className="mb-2 text-vi">{t.changed}</p>}<p className="break-words font-medium">{removing?.item.label}</p><p>{t.removeDescription}</p><p className="mt-2">{formatString(t.uses, { n: removing?.references.length ?? 0 })}</p><ul>{removing?.references.map(value => <li key={value}>{instrumentName(value as InstrumentId, dict.market.instruments)}</li>)}</ul></>} confirmLabel={removing?.conflict ? t.reviewRemove : t.confirmRemove} cancelLabel={f.cancel} isDanger onCancel={() => setRemoving(null)} onConfirm={() => void remove()} />
+    <ConfirmDialog isOpen={!!removing} title={t.removeTitle} description={<>{removing?.conflict && <p role="alert" className="mb-2 text-vi">{t.changed}</p>}<p className="break-words font-medium">{removing?.item.label}</p><p>{t.removeDescription}</p><p className="mt-2">{formatString(t.uses, { n: removing?.references.length ?? 0 })}</p><ul>{removing?.references.map(value => <li key={value}>{isInstrumentId(value) ? instrumentName(value, dict.market.instruments) : value}</li>)}</ul></>} confirmLabel={removing?.conflict ? t.reviewRemove : t.confirmRemove} cancelLabel={f.cancel} isDanger onCancel={() => setRemoving(null)} onConfirm={() => void remove()} />
   </div>;
 }
