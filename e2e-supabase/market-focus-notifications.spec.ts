@@ -72,6 +72,6 @@ for(const lang of ["ru","en"] as const)for(const width of [360,390,768,1024,1440
     await page.addInitScript(lang=>{localStorage.setItem("ayra_guest_dismissed","1");localStorage.setItem("ayra_lang",lang);localStorage.setItem("ayra_market_watchlist",JSON.stringify({version:1,ids:["eurusd"]}));},lang);
     const errors:string[]=[];page.on("pageerror",e=>errors.push(e.message));await page.goto("/market?tab=watchlist");const panel=page.getByTestId("focus-alerts");await panel.locator("summary").focus();await page.keyboard.press("Enter");await expect(panel.locator('input[type="datetime-local"]')).toBeEnabled();
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);expect(errors).toEqual([]);
-    if(process.env.AYRA_FOCUS_ALERT_SCREENS&&(width===390||width===1440)){mkdirSync(process.env.AYRA_FOCUS_ALERT_SCREENS,{recursive:true});await page.getByTestId("market-focus").screenshot({path:`${process.env.AYRA_FOCUS_ALERT_SCREENS}/${width}-${lang}.png`});}
+    if(process.env.AYRA_FOCUS_ALERT_SCREENS&&(width===390||width===1440)){mkdirSync(process.env.AYRA_FOCUS_ALERT_SCREENS,{recursive:true});await page.setViewportSize({width,height:width<768?2200:1500});await page.getByTestId("market-focus").scrollIntoViewIfNeeded();await page.getByTestId("market-focus").screenshot({path:`${process.env.AYRA_FOCUS_ALERT_SCREENS}/${width}-${lang}.png`});}
   }finally{await page.context().close();}
 });
