@@ -2054,6 +2054,20 @@ export const en: Dictionary = {
       inList: "In the list",
       notInCatalog: "«{symbol}» is not in the Market catalog, so {name} is shown.",
     },
+    focus: {
+      title: "Market Focus", subtitle: "Manual focus for the selected instrument", instrument: "Instrument", reset: "Reset", notSelected: "Not selected",
+      fields: { direction: "Market direction", poi: "POI", mss: "MSS", session: "Trading session" },
+      options: { bullish: "Bullish", bearish: "Bearish", neutral: "Neutral", fvg: "FVG", orderBlock: "Order Block", liquidity: "Liquidity", waiting: "Waiting", notConfirmed: "Not confirmed", london: "London", newYork: "New York", none: "None", mssBullish: "Bullish", mssBearish: "Bearish" },
+      checklist: "Checklist", checks: { poiReached: "POI reached", liquiditySweep: "Liquidity sweep", displacement: "Displacement", mssCisd: "MSS / CISD", retracementTest: "Retracement / Test", reaction: "Reaction" },
+      loading: "Opening local focus…", pending: "Saving on this device…", saved: "Saved on this device", localDefault: "No selections yet",
+      localOnly: "Local only · No cloud sync", guest: "Guest · This browser only", disclaimer: "Not financial advice",
+      empty: "Add an instrument to your watchlist.", storage: "Could not save or read local focus. Check browser storage and retry.", invalid: "This saved focus could not be read. Your data has not been overwritten.", unsupported: "Update AYRA to open focus saved by a newer version.", retry: "Retry reading",
+      selectionError: "The selected instrument could not be remembered on this device.", instrumentChanged: "The instrument was removed. Focus has switched to the next available instrument.",
+      resetTitle: "Reset {instrument} focus?", resetDescription: "Clear the four selections and all checks for this instrument. Item titles and order will stay unchanged, as will other instruments.", resetConfirm: "Reset focus", cancel: "Cancel", reviewReset: "Review reset", conflict: "This focus changed in another tab. Read it again and review the latest data before another action.",
+      limit: "A checklist can contain up to {max} items.", text: "Enter a title of up to {length} characters.", cleared: "Local data for this space was cleared. Read it again to start fresh.", exportError: "The complete export could not be prepared. No file was saved.",
+      guestData: "This device has local Guest Market Focus data. It is separate from your account.", guestInspectError: "Guest local focus could not be checked. A complete export or cleanup cannot yet be confirmed.",
+      custom: { customize: "Customize", done: "Done", add: "Add item", title: "Item title", save: "Save item", edit: "Edit", remove: "Delete", up: "Move up", down: "Move down", count: "{n} / {max} items", characters: "{n} / {max} characters", empty: "This checklist has no items yet.", removeTitle: "Delete item?", removeDescription: "The item and its check will be removed from this instrument's checklist. This cannot be undone.", removeConfirm: "Delete item", changed: "This item changed in another tab. Your draft was not applied. Load the latest text and review the changes.", useLatest: "Use latest text" },
+    },
     watchlist: {
       priorities: {
         filter: "Pinned", pin: "Pin", unpin: "Unpin", saved: "Saved", pending: "Pending", conflict: "Conflict", error: "Could not sync",

@@ -18,6 +18,9 @@ import {
 import { ChronicleEntry } from "@/lib/game";
 import { GAME_CONFIG } from "@/lib/game-config";
 import { formatString } from "@/lib/i18n";
+import { AppStorage } from "@/lib/storage";
+import { focusStorage } from "@/lib/storage/market-focus";
+import { captureMarketAccount } from "@/lib/market/account-scope";
 import { Shield, TrendingUp, Brain, Target, Smile, BookOpen, Activity, Zap, Download } from "lucide-react";
 
 /**
@@ -37,17 +40,23 @@ export function StatsTab() {
   const characterPower = getCharacterPower(statsMap);
   const statBalance = getStatBalance(statsMap);
 
-  const handleExportJSON = () => {
-    const jsonStr = exportProfileDataJSON(gameState);
-    const blob = new Blob([jsonStr], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const todayStr = new Date().toISOString().split("T")[0];
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `ayra-profile-${gameState.name || "TraderOne"}-${todayStr}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast(dict.profile.statsTab.downloadedToast);
+  const handleExportJSON = async () => {
+    const scope = captureMarketAccount(() => AppStorage.getUserId());
+    try {
+      const profileData = JSON.parse(exportProfileDataJSON(gameState));
+      const marketFocus = await focusStorage.exportSpace(AppStorage.getActiveSpaceId());
+      if (!scope.current()) return;
+      const blob = new Blob([JSON.stringify({ ...profileData, marketFocus }, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const todayStr = new Date().toISOString().split("T")[0];
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ayra-profile-${gameState.name || "TraderOne"}-${todayStr}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast(dict.profile.statsTab.downloadedToast);
+    } catch { if (scope.current()) showToast(dict.market.focus.exportError); }
+    finally { scope.dispose(); }
   };
 
 
