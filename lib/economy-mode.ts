@@ -107,6 +107,21 @@ export function sessionEconomyOf(
 }
 
 /**
+ * A new reading of the same account's session joined to what is already known. The auth events do not arrive in a fixed
+ * order (getSession, getUser, INITIAL_SESSION, SIGNED_IN, TOKEN_REFRESHED, another tab): an older stored session may come
+ * after the auth server's fresher answer. For one account nothing goes back — the stricter mark, the verified source and
+ * the later expiry are kept (the server never moves an account backwards). Another account, or no session, replaces it.
+ */
+export function mergeSessionEconomy(prev: SessionEconomy | null, next: SessionEconomy | null): SessionEconomy | null {
+  if (!next || !prev || prev.userId !== next.userId) return next;
+  const claim = prev.claim && next.claim ? laterMode(prev.claim, next.claim) : prev.claim ?? next.claim;
+  const source: SessionEconomy["source"] = prev.source === "verified" || next.source === "verified" ? "verified" : "cached";
+  const expiresAt = prev.expiresAt === null ? next.expiresAt : next.expiresAt === null ? prev.expiresAt : Math.max(prev.expiresAt, next.expiresAt);
+  if (claim === prev.claim && source === prev.source && expiresAt === prev.expiresAt) return prev;
+  return { userId: next.userId, claim, source, expiresAt };
+}
+
+/**
  * On what the device's answer rests (diagnostics and the notice; rewards depend on the mode alone):
  *   marked      — a mark from the device record, the session or the server (rewards then follow the mode:
  *                 «scheduled» still pays on the device, «pending» and «cloud» never);

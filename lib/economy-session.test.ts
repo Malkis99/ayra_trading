@@ -7,6 +7,7 @@ import {
   deviceRewardsAllowed,
   economyBasis,
   laterMode,
+  mergeSessionEconomy,
   readStickyMode,
   refusesReward,
   rememberMode,
@@ -119,6 +120,52 @@ describe("Q4.5-1 the reward gate at the moment of the change", () => {
 
   it("a change without a reward (an acceptance) is never refused, in any mode", () => {
     for (const m of ["local", "migration_scheduled", "migration_pending", "cloud_active"] as EconomyMode[]) expect(refusesReward(...noReward, m)).toBe(false);
+  });
+});
+
+describe("Q4.5-1 the order of auth events never takes a mark back (one account)", () => {
+  const read = (claim: EconomyMode | null, source: SessionEconomy["source"], expiresAt: number | null = NOW + 3_600_000, userId = A): SessionEconomy => ({ userId, claim, source, expiresAt });
+  /** The auth events of one page load, folded the way auth-context does (each reading joined to the last). */
+  const fold = (...readings: Array<SessionEconomy | null>) => readings.reduce<SessionEconomy | null>((prev, next) => mergeSessionEconomy(prev, next), null);
+
+  it("getSession (stored, no mark) → getUser (verified, pending) → INITIAL_SESSION (stored, no mark): pending stays, verified stays", () => {
+    expect(fold(read(null, "cached"), read("migration_pending", "verified"), read(null, "cached"))).toMatchObject({ claim: "migration_pending", source: "verified" });
+  });
+
+  it("SIGNED_IN (verified, cloud) → a late getSession of an older stored session (scheduled): cloud stays", () => {
+    expect(fold(read("cloud_active", "verified"), read("migration_scheduled", "cached"))).toMatchObject({ claim: "cloud_active", source: "verified" });
+  });
+
+  it("TOKEN_REFRESHED with a stricter mark moves forward; a refresh without the mark does not undo it", () => {
+    expect(fold(read("migration_scheduled", "cached"), read("migration_pending", "verified"))).toMatchObject({ claim: "migration_pending" });
+    expect(fold(read("migration_pending", "verified"), read(null, "verified"))).toMatchObject({ claim: "migration_pending" });
+  });
+
+  it("the later expiry is kept, so a stored older token does not make a verified session look expired", () => {
+    const later = NOW + 3_600_000;
+    expect(fold(read(null, "verified", later), read(null, "cached", NOW - 60_000))).toMatchObject({ expiresAt: later, source: "verified" });
+    expect(economyBasis("local", fold(read(null, "verified", later), read(null, "cached", NOW - 60_000)), NOW)).toBe("confirmed");
+    expect(economyBasis("local", fold(read(null, "verified", NOW - 1)), NOW)).toBe("unconfirmed"); // expired JWT
+  });
+
+  it("account isolation: another account's reading replaces it (nothing of A carries to B); signing out clears it", () => {
+    const b = fold(read("cloud_active", "verified"), read(null, "cached", NOW, B));
+    expect(b).toMatchObject({ userId: B, claim: null, source: "cached" });
+    expect(fold(read("cloud_active", "verified"), null)).toBeNull();
+    expect(resolveEconomyMode({ known: "local", spaceId: `account:${B}`, session: read("cloud_active", "verified") })).toBe("local");
+  });
+});
+
+describe("Q4.5-1 the agreed rule for device rewards (owner, 2026-11-18)", () => {
+  const reward = [INITIAL_GAME_STATE, { ...INITIAL_GAME_STATE, xp: 40, coins: 10 }] as const;
+  it.each([
+    ["local", false],
+    ["migration_scheduled", false],
+    ["migration_pending", true],
+    ["cloud_active", true],
+  ] as Array<[EconomyMode, boolean]>)("%s: refused = %s (with a valid or an expired token, online or offline — the mode alone decides)", (mode, refused) => {
+    expect(refusesReward(...reward, mode)).toBe(refused);
+    expect(deviceRewardsAllowed(mode)).toBe(!refused);
   });
 });
 

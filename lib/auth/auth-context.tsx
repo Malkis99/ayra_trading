@@ -8,7 +8,7 @@ import { mapSupabaseError, type SanitizedErrorInfo } from "./error-sanitizer";
 import { authTabChannel } from "./tab-channel";
 import { spaceTabChannel } from "./space-channel";
 import { AppStorage, GUEST_SPACE_ID } from "@/lib/storage";
-import { sessionEconomyOf, type SessionEconomy } from "@/lib/economy-mode";
+import { mergeSessionEconomy, sessionEconomyOf, type SessionEconomy } from "@/lib/economy-mode";
 import {
   getMockState,
   setMockState,
@@ -317,7 +317,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (!isMounted) return;
           if (session?.user) {
             const u = toAuthUser(session.user);
-            setSessionEconomy(sessionEconomyOf(session.user, "cached", session.expires_at));
+            // every reading is joined to what is known (an older one never takes a mark back: mergeSessionEconomy)
+            setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(session.user, "cached", session.expires_at)));
             updateToAuthenticated(u, true);
             // The stored session may hold old user data (a password set on another device, the owner role just given):
             // refresh only these flags from the server
@@ -327,7 +328,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 if (!isMounted || !data.user) return;
                 // the economy mark as the auth server holds it now (a mark given after this token was issued shows here)
                 const verifiedUser = data.user;
-                setSessionEconomy((prev) => sessionEconomyOf(verifiedUser, "verified", prev && prev.userId === verifiedUser.id && prev.expiresAt !== null ? prev.expiresAt / 1000 : session.expires_at));
+                setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(verifiedUser, "verified", session.expires_at)));
                 const fresh = toAuthUser(data.user);
                 setUser((prev) =>
                   prev && prev.id === fresh.id && (prev.hasPassword !== fresh.hasPassword || prev.isOwner !== fresh.isOwner)
@@ -349,7 +350,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (session?.user) {
             const u = toAuthUser(session.user);
             const fresh = event === "TOKEN_REFRESHED" || event === "SIGNED_IN" || event === "USER_UPDATED";
-            setSessionEconomy(sessionEconomyOf(session.user, fresh ? "verified" : "cached", session.expires_at));
+            setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(session.user, fresh ? "verified" : "cached", session.expires_at)));
             updateToAuthenticated(u);
           } else {
             setSessionEconomy(null);
@@ -389,7 +390,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             supabase.auth.getSession().then(({ data: { session } }) => {
               if (session?.user) {
                 const u = toAuthUser(session.user);
-                setSessionEconomy(sessionEconomyOf(session.user, "cached", session.expires_at));
+                setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(session.user, "cached", session.expires_at)));
                 setUser(u);
                 loadProfile(session.user.id);
                 setAuthState("authenticated");
