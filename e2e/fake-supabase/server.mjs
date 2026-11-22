@@ -401,6 +401,17 @@ export function createFakeSupabase() {
       }
       return send(200, { app_metadata: user?.app_metadata ?? null });
     }
+    if (path === "/__test/app-economy") {
+      // Q4.5-1: stands in for the server's mark (Q4.5-2 SQL on raw_app_meta_data.ayra_economy); the session sees it after
+      // a sign-in, a token refresh or a user read (/auth/v1/user), like the real auth server
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      const state = url.searchParams.get("state");
+      if (user) {
+        const { ayra_economy: _old, ...rest } = user.app_metadata || {};
+        user.app_metadata = state ? { ...rest, ayra_economy: state } : rest;
+      }
+      return send(200, { app_metadata: user?.app_metadata ?? null });
+    }
     if (path === "/__test/clear-password") {
       // stands in for an account made by the e-mail code before passwords existed
       const user = usersByEmail.get(url.searchParams.get("email"));
