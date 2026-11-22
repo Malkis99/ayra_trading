@@ -38,7 +38,8 @@ BEGIN
   END IF;
 END $$;
 -- the role running the migration may hand the function over to it (as for game_economy_owner in 0014)
-GRANT game_auth_marker TO CURRENT_USER;
+-- by NAME: on Supabase (supautils) «GRANT … TO CURRENT_USER» crashes the server process (docs section 7)
+DO $$ BEGIN EXECUTE format('GRANT game_auth_marker TO %I', current_user); END $$;
 GRANT USAGE ON SCHEMA public TO game_auth_marker;
 GRANT USAGE ON SCHEMA auth TO game_auth_marker;
 -- exactly what it needs on the auth schema (Supabase: the role running the migration must be able to grant these —

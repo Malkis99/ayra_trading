@@ -35,7 +35,8 @@ BEGIN
   END IF;
 END $$;
 -- the role running the migration may hand objects over to it (needed on a non-superuser admin such as Supabase postgres)
-GRANT game_economy_owner TO CURRENT_USER;
+-- by NAME: on Supabase (supautils) «GRANT … TO CURRENT_USER» crashes the server process (found in Q4.5-2, docs/q4-5-2 section 7)
+DO $$ BEGIN EXECUTE format('GRANT game_economy_owner TO %I', current_user); END $$;
 GRANT USAGE ON SCHEMA public TO game_economy_owner;
 
 ALTER TABLE public.user_features ADD COLUMN IF NOT EXISTS game_sync BOOLEAN NOT NULL DEFAULT FALSE;

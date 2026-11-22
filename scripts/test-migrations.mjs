@@ -1,7 +1,7 @@
 // Runs supabase/migrations against an in-memory Postgres (PGlite) with a minimal Supabase auth stub,
 // then the SQL tests in supabase/tests. PGlite is a dev dependency (runs in CI too):
 //   node scripts/test-migrations.mjs
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { installBaseline, readSql, runMetaChecks, seed, snapshot } from "./watchlist-meta-sql-checks.mjs";
 const repo = fileURLToPath(new URL("..", import.meta.url));
@@ -538,4 +538,12 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   try { await db.exec(read("supabase/tests/game_day_api.sql")); ok("Q: 0016 tests pass after the 0018 rollback (0014 entry points restored)"); }
   catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`Q: 0016 tests after rollback: ${e.message}`); }
   await db.close();
+}
+
+// S. Supabase compatibility (found on the official supabase/postgres image, Q4.5-2): «GRANT <role> TO CURRENT_USER»
+//    crashes the server process there (supautils, signal 11) — role grants must name the role (format(... %I, current_user))
+{
+  const dir = `${repo}supabase/migrations/`;
+  const bad = readdirSync(dir).filter((f) => f.endsWith(".sql")).filter((f) => /GRANT\s+[a-z_"][\w"]*\s+TO\s+CURRENT_USER/i.test(readFileSync(dir + f, "utf8").replace(/--.*$/gm, "")));
+  bad.length === 0 ? ok("S: no «GRANT <role> TO CURRENT_USER» in any migration (it crashes Supabase's server process)") : fail(`S: GRANT … TO CURRENT_USER in ${bad.join(", ")}`);
 }
