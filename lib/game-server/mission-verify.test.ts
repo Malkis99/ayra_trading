@@ -6,6 +6,7 @@ import type { Rpc } from "./day-api";
 
 const ORIGIN = "https://ayra.test";
 const A = "00000000-0000-0000-0000-00000000000a";
+const TOKEN_A = { sub: A, sessionId: "5e55e55e-0000-4000-8000-00000000000a", iat: 1_763_600_000, claim: "cloud_active" as const };
 const DAY = "2026-11-20";
 const LESSON = "Урок дня: вход только после закрытия свечи над уровнем, без догоняния цены и без лишних сделок.";
 const md5 = (d: unknown) => createHash("md5").update(JSON.stringify(d)).digest("hex");
@@ -23,23 +24,24 @@ const status = (over: Record<string, unknown> = {}, day: Record<string, unknown>
   ...over,
 });
 
-function deps(opts: { st?: unknown; notes?: CheckRow[]; payouts?: boolean; apply?: (args: Record<string, unknown>, n: number) => { data: unknown; error: { message: string } | null }; calls?: Array<[string, Record<string, unknown>]> } = {}): VerifyDeps {
+function deps(opts: { st?: unknown; notes?: CheckRow[]; payouts?: boolean; apply?: (args: Record<string, unknown>, n: number) => { data: unknown; error: { message: string } | null }; calls?: Array<[string, Record<string, unknown>]>; session?: unknown } = {}): VerifyDeps {
   const calls = opts.calls ?? [];
   let applies = 0;
   const rpc: Rpc = async (fn, args) => {
     calls.push([fn, args]);
+    if (fn === "game_session_check") return { data: opts.session ?? { fresh: true, state: "cloud_active", reason: null }, error: null };
     if (fn === "game_day_status") return { data: opts.st ?? status(), error: null };
     if (fn === "game_journal_for_check") {
       const notes = opts.notes ?? [note("n1")];
       return { data: { notes, trades: [], plans: [], rows: notes.length }, error: null };
     }
-    if (fn === "game_apply_reward") return opts.apply ? opts.apply(args, applies++) : { data: null, error: { message: "game_kind_disabled" } };
+    if (fn === "game_apply_reward_for_session") return opts.apply ? opts.apply(args, applies++) : { data: null, error: { message: "game_kind_disabled" } };
     return { data: null, error: { message: "unexpected" } };
   };
   return {
     enabled: true,
     payoutsEnabled: opts.payouts ?? false,
-    getUser: async () => ({ id: A }),
+    getUser: async () => ({ id: A, token: TOKEN_A }),
     rpc,
     limiter: createRateLimiter({ limit: 60, windowMs: 60_000 }),
     now: () => new Date("2026-11-20T10:00:00Z"),
@@ -64,7 +66,7 @@ describe("Q4.4 mission verify — the server day first", () => {
     const calls: Array<[string, Record<string, unknown>]> = [];
     const r = await verify(deps({ st, calls }));
     expect(r).toMatchObject({ status: 409, body: { error: reason } });
-    expect(calls.map(([fn]) => fn)).toEqual(["game_day_status"]);
+    expect(calls.map(([fn]) => fn)).toEqual(["game_session_check", "game_day_status"]);
   });
 
   it("only a known mission, only the mission field", async () => {
@@ -78,7 +80,7 @@ describe("Q4.4 mission verify — the content by the mission's rules, on the ser
     const calls: Array<[string, Record<string, unknown>]> = [];
     const r = await verify(deps({ calls }));
     expect(r).toMatchObject({ status: 200, body: { paid: false, confirmed: true, reason: "payout_disabled" } });
-    expect(calls.some(([fn]) => fn === "game_apply_reward")).toBe(false);
+    expect(calls.some(([fn]) => fn.startsWith("game_apply_reward"))).toBe(false);
   });
 
   it("a wrong or unconfirmed record: short text, a copy, imported, another template, deleted", async () => {
@@ -112,8 +114,8 @@ describe("Q4.4 mission verify — consistent with game_apply_reward (only when p
     const n = note("n1");
     const r = await verify(deps({ notes: [n], payouts: true, calls, apply: () => ({ data: { xp: 40, coins: 10 }, error: null }) }));
     expect(r).toMatchObject({ status: 200, body: { paid: true, confirmed: true } });
-    const apply = calls.find(([fn]) => fn === "game_apply_reward")!;
-    expect(apply[1]).toEqual({ p_user: A, p_kind: "mission", p_item: "m_lesson", p_evidence: [{ table: "journal_notes", id: "n1", version: n.client_updated_at, fp: n.fp }] });
+    const apply = calls.find(([fn]) => fn === "game_apply_reward_for_session")!;
+    expect(apply[1]).toEqual({ p_user: A, p_session: TOKEN_A.sessionId, p_iat: TOKEN_A.iat, p_claim: "cloud_active", p_kind: "mission", p_item: "m_lesson", p_evidence: [{ table: "journal_notes", id: "n1", version: n.client_updated_at, fp: n.fp }] });
   });
 
   it("a record that already paid another mission: the next suitable record is tried", async () => {
@@ -125,7 +127,7 @@ describe("Q4.4 mission verify — consistent with game_apply_reward (only when p
       apply: (_a, i) => (i === 0 ? { data: null, error: { message: "game_source_used" } } : { data: { xp: 40 }, error: null }),
     }));
     expect(r.body).toMatchObject({ paid: true });
-    expect(calls.filter(([fn]) => fn === "game_apply_reward").map(([, a]) => (a.p_evidence as Array<{ id: string }>)[0].id)).toEqual(["n1", "n2"]);
+    expect(calls.filter(([fn]) => fn === "game_apply_reward_for_session").map(([, a]) => (a.p_evidence as Array<{ id: string }>)[0].id)).toEqual(["n1", "n2"]);
   });
 
   it("the database still refuses while the award kind is disabled; a record changed meanwhile is refused", async () => {
@@ -145,5 +147,27 @@ describe("Q4.4 server trace rule", () => {
     expect(traceOk(`plan:${DAY}:prep`, row("2026-11-19T20:00:00Z", "2026-11-20T07:00:00Z", { createdAt: "2026-11-19T20:00:00Z", prepConfirmedAt: "2026-11-20T07:00:00Z" }), "UTC", DAY)).toBe(true);
     expect(traceOk(`plan:${DAY}:prep`, row("2026-11-19T20:00:00Z", "2026-11-20T07:00:00Z", { createdAt: "2026-11-20T06:00:00Z" }), "UTC", DAY)).toBe(false);
     expect(traceOk("note:x", row(null, "2026-11-20T01:00:00Z"), "UTC", DAY)).toBe(false);
+  });
+});
+
+describe("Q4.5-2 mission verify — only a fresh session, and the award only through the session-checked function", () => {
+  it("a stale session: 401 session_stale; neither the day nor the Journal is read, nothing is paid", async () => {
+    const calls: Array<[string, Record<string, unknown>]> = [];
+    const r = await verify(deps({ payouts: true, calls, session: { fresh: false, state: "cloud_active", reason: "session_revoked" } }));
+    expect(r).toMatchObject({ status: 401, body: { error: "session_stale", state: "cloud_active", reason: "session_revoked" } });
+    expect(calls.map(([fn]) => fn)).toEqual(["game_session_check"]);
+  });
+
+  it("the award gets the verified token's session, issue time and mark (the database re-checks them with the account row held)", async () => {
+    const calls: Array<[string, Record<string, unknown>]> = [];
+    await verify(deps({ payouts: true, calls, apply: () => ({ data: { xp: 40, coins: 10 }, error: null }) }));
+    const [, args] = calls.find(([fn]) => fn === "game_apply_reward_for_session")!;
+    expect(args).toMatchObject({ p_user: A, p_session: TOKEN_A.sessionId, p_iat: TOKEN_A.iat, p_claim: "cloud_active", p_kind: "mission", p_item: "m_lesson" });
+    expect(calls.some(([fn]) => fn === "game_apply_reward")).toBe(false);
+  });
+
+  it("the state changed between the check and the award: the award's own check refuses — 401 session_stale, nothing paid", async () => {
+    const r = await verify(deps({ payouts: true, apply: () => ({ data: null, error: { message: "game_session_stale" } }) }));
+    expect(r).toMatchObject({ status: 401, body: { error: "session_stale" } });
   });
 });

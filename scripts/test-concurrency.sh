@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AYRA Trading — concurrency tests of the server economy (migration 0014) on a REAL PostgreSQL (CI service container).
+# AYRA Trading — concurrency tests of the server economy (migrations 0014–0016, 0018) on a REAL PostgreSQL (CI service container).
 # PGlite has one connection; here many sessions run at the same moment. Never point this at Supabase or production:
 # it refuses to run unless PGHOST is localhost/127.0.0.1 and it creates its own throw-away database.
 #   PGHOST=localhost PGUSER=postgres PGPASSWORD=postgres bash scripts/test-concurrency.sh
@@ -296,6 +296,96 @@ left=$(q "SELECT (SELECT count(*) FROM public.game_ledger WHERE user_id = '$(u 3
   + (SELECT count(*) FROM public.game_days WHERE user_id = '$(u 3)')")
 others=$(q "SELECT count(*) FROM public.game_ledger WHERE user_id = '$(u 1)'")
 [ "$left" = 0 ] && [ "$others" = 1 ] && [ ! -s "$TMP/g2.err" ]   && ok "G2: deleting the account removes its ledger, projection, claims and state; other accounts keep theirs"   || bad "G2: left=$left others=$others err=$(cat "$TMP/g2.err")"
+
+# K. 0018 (Q4.5-2): the account state, the session mark and the session check under concurrency
+psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase/migrations/0018_game_economy_sessions.sql >/dev/null 2>"$TMP/m18.err" \
+  && ok "K0: migration 0018 on PostgreSQL $(q 'SHOW server_version')" || bad "K0: migration 0018: $(cat "$TMP/m18.err")"
+s() { printf '00000000-0000-0000-0000-0000005e5e0%s' "$1"; }
+q "INSERT INTO auth.users (id, email, raw_app_meta_data) VALUES ('$(u 7)', 'c7@example.com', '{\"provider\":\"email\"}'),
+     ('$(u 8)', 'c8@example.com', '{}'), ('$(u 9)', 'c9@example.com', '{}');
+   INSERT INTO auth.sessions (id, user_id) VALUES ('$(s 7)', '$(u 7)'), ('$(s 8)', '$(u 8)'), ('$(s 9)', '$(u 9)');
+   INSERT INTO auth.refresh_tokens (token, user_id, session_id) VALUES ('rt8', '$(u 8)', '$(s 8)'), ('rt8-legacy', '$(u 8)', NULL);
+   INSERT INTO public.journal_notes (user_id, id, data) VALUES ('$(u 7)', 'n1', '{\"id\":\"n1\",\"templateKey\":\"lesson\",\"body\":\"Урок пользователя 7.\",\"createdAt\":\"2026-11-01T10:01:00Z\",\"updatedAt\":\"2026-11-01T10:01:00Z\"}');
+   INSERT INTO public.user_features (user_id, game_sync) VALUES ('$(u 7)', TRUE) ON CONFLICT (user_id) DO UPDATE SET game_sync = TRUE;" >/dev/null
+
+# K1. Ten sessions ask local → migration_scheduled at once: one change, nine replays, one mark
+for k in $(seq 1 10); do echo "SELECT public.game_economy_transition('$(u 7)', 'local', 'migration_scheduled') ->> 'changed';"; done | parallel
+mark=$(q "SELECT (raw_app_meta_data ->> 'ayra_economy') || '/' || (raw_app_meta_data ->> 'provider') FROM auth.users WHERE id = '$(u 7)'")
+[ "$(count_out true)" = 1 ] && [ "$(count_out false)" = 9 ] && [ "$mark" = "migration_scheduled/email" ] && [ "$(other_errors 'no_error_is_expected')" = 0 ] \
+  && ok "K1: local → scheduled ×10 at once → 1 change + 9 replays; mark written once, other app_metadata kept" \
+  || bad "K1: true=$(count_out true) false=$(count_out false) mark=$mark errs=$(cat "$TMP"/out/*.err)"
+
+# K2. Four callers who saw «scheduled» and four who still think «local», all asking for pending at once
+for k in 1 2 3 4; do
+  echo "SELECT public.game_economy_transition('$(u 7)', 'migration_scheduled', 'migration_pending') ->> 'changed';"
+  echo "SELECT public.game_economy_transition('$(u 7)', 'local', 'migration_pending') ->> 'changed';"
+done | parallel
+st=$(q "SELECT state FROM public.game_accounts WHERE user_id = '$(u 7)'")
+mark=$(q "SELECT raw_app_meta_data ->> 'ayra_economy' FROM auth.users WHERE id = '$(u 7)'")
+[ "$(count_out true)" = 1 ] && [ "$st" = migration_pending ] && [ "$mark" = migration_pending ] && [ "$(other_errors game_state_conflict)" = 0 ] \
+  && ok "K2: 8 callers at once → exactly 1 change to pending; the rest replays or game_state_conflict; state and mark agree" \
+  || bad "K2: true=$(count_out true) state=$st mark=$mark errs=$(cat "$TMP"/out/*.err)"
+
+# K3. The activation while ten award calls carry the token from before it (mark «pending»): nothing is ever paid
+{ echo "SELECT public.game_economy_transition('$(u 7)', 'migration_pending', 'cloud_active') ->> 'changed';"
+  for k in $(seq 1 10); do
+    echo "SELECT public.game_apply_reward_for_session('$(u 7)', '$(s 7)', floor(extract(epoch FROM now()))::bigint, 'migration_pending', 'mission', 'm_lesson', public.test_ev('$(u 7)', 'n1')) ->> 'xp';"
+  done; } | parallel
+rows=$(q "SELECT count(*) FROM public.game_ledger WHERE user_id = '$(u 7)'")
+st=$(q "SELECT state || '/' || (SELECT raw_app_meta_data ->> 'ayra_economy' FROM auth.users WHERE id = '$(u 7)') FROM public.game_accounts WHERE user_id = '$(u 7)'")
+[ "$rows" = 0 ] && [ "$st" = "cloud_active/cloud_active" ] && [ "$(count_out true)" = 1 ] && [ "$(other_errors 'game_session_stale|game_account_not_active|game_day_not_open|game_profile_missing')" = 0 ] \
+  && ok "K3: activation racing 10 awards with the pre-activation token → activated once, 0 paid (stale or not active)" \
+  || bad "K3: rows=$rows state=$st true=$(count_out true) errs=$(cat "$TMP"/out/*.err)"
+
+# K4. After the activation: the old token is refused; a fresh one ×10 at once pays exactly once
+q "SET ROLE service_role; SELECT public.game_day_open('$(u 7)', '{}'); SELECT public.game_day_set_mode('$(u 7)', 'study'); SELECT public.game_day_accept('$(u 7)', 'm_lesson');" >/dev/null || bad "K4: day setup"
+OLD=$(psql -X -q -At -d "$DB" -c "SET ROLE service_role;" -c "SELECT public.game_apply_reward_for_session('$(u 7)', '$(s 7)', floor(extract(epoch FROM now()))::bigint, 'migration_pending', 'mission', 'm_lesson', public.test_ev('$(u 7)', 'n1'));" 2>&1)
+for k in $(seq 1 10); do
+  echo "SELECT public.game_apply_reward_for_session('$(u 7)', '$(s 7)', floor(extract(epoch FROM now()))::bigint, 'cloud_active', 'mission', 'm_lesson', public.test_ev('$(u 7)', 'n1')) ->> 'replay';"
+done | parallel
+rows=$(q "SELECT count(*) FROM public.game_ledger WHERE user_id = '$(u 7)'")
+prof=$(q "SELECT xp_total || '/' || coins FROM public.game_profile WHERE user_id = '$(u 7)'")
+echo "$OLD" | grep -q game_session_stale && [ "$(count_out false)" = 1 ] && [ "$(count_out true)" = 9 ] && [ "$rows" = 1 ] && [ "$prof" = "40/10" ] \
+  && ok "K4: the old token → game_session_stale; a fresh one ×10 at once → 1 award + 9 replays (40/10)" \
+  || bad "K4: old=$OLD false=$(count_out false) true=$(count_out true) rows=$rows profile=$prof errs=$(cat "$TMP"/out/*.err)"
+
+# K5. A transition that ends the sessions races eight checks of one of them: a check never calls the old session fresh
+#     for the new state (each sees the account entirely before or entirely after)
+{ echo "SELECT public.game_economy_transition('$(u 8)', 'local', 'migration_pending', TRUE) ->> 'revoked';"
+  for k in $(seq 1 8); do echo "SELECT public.game_session_check('$(u 8)', '$(s 8)', floor(extract(epoch FROM now()))::bigint, NULL)::text;"; done; } | parallel
+bad_fresh=$(grep -h '"fresh": true' "$TMP"/out/*.out 2>/dev/null | grep -vc '"state": "local"' || true)
+left=$(q "SELECT (SELECT count(*) FROM auth.sessions WHERE user_id = '$(u 8)') + (SELECT count(*) FROM auth.refresh_tokens WHERE user_id = '$(u 8)')")
+other=$(q "SELECT count(*) FROM auth.sessions WHERE user_id IN ('$(u 7)', '$(u 9)')")
+after=$(psql -X -q -At -d "$DB" -c "SET ROLE service_role;" -c "SELECT public.game_session_check('$(u 8)', '$(s 8)', floor(extract(epoch FROM now()))::bigint, 'migration_pending') ->> 'reason';" 2>&1)
+[ "$bad_fresh" = 0 ] && [ "$(count_out 1)" = 1 ] && [ "$left" = 0 ] && [ "$other" = 2 ] && [ "$after" = session_revoked ] && [ "$(other_errors 'no_error_is_expected')" = 0 ] \
+  && ok "K5: revoke racing 8 checks → never «fresh» for the new state; the session and both refresh tokens gone, others kept; then session_revoked" \
+  || bad "K5: bad_fresh=$bad_fresh out=$(cat "$TMP"/out/*.out | tr '\n' ' ') left=$left other=$other after=$after errs=$(cat "$TMP"/out/*.err)"
+
+# K6. The API login (like Supabase's authenticator): cannot become the mark writer, call it, or skip the session check
+K_OUT=$(PGPASSWORD=authenticator-test-only psql -X -q -At -h "$PGHOST" -U authenticator -d "$DB" -c "SET ROLE service_role;" -c "SET ROLE game_auth_marker;" 2>&1)
+echo "$K_OUT" | grep -q "permission denied to set role" && ok "K6a: authenticator → service_role cannot SET ROLE game_auth_marker" || bad "K6a: $K_OUT"
+K_OUT=$(PGPASSWORD=authenticator-test-only psql -X -q -At -h "$PGHOST" -U authenticator -d "$DB" -c "SET ROLE service_role;" \
+  -c "SELECT public.game_auth_mark('$(u 9)', 'cloud_active', TRUE);" 2>&1)
+echo "$K_OUT" | grep -q "permission denied for function game_auth_mark" && ok "K6b: service_role cannot write a mark or end sessions itself" || bad "K6b: $K_OUT"
+K_OUT=$(PGPASSWORD=authenticator-test-only psql -X -q -At -h "$PGHOST" -U authenticator -d "$DB" -c "SET ROLE service_role;" \
+  -c "SELECT public.game_apply_reward('$(u 7)', 'mission', 'm_observation', '[]');" 2>&1)
+echo "$K_OUT" | grep -q "permission denied for function game_apply_reward" && ok "K6c: service_role cannot award without the session check" || bad "K6c: $K_OUT"
+K_OUT=$(PGPASSWORD=authenticator-test-only psql -X -q -At -h "$PGHOST" -U authenticator -d "$DB" -c "SET ROLE service_role;" \
+  -c "UPDATE auth.users SET raw_app_meta_data = '{\"ayra_economy\":\"local\"}' WHERE id = '$(u 7)';" 2>&1)
+mark=$(q "SELECT raw_app_meta_data ->> 'ayra_economy' FROM auth.users WHERE id = '$(u 7)'")
+echo "$K_OUT" | grep -q "permission denied" && [ "$mark" = cloud_active ] \
+  && ok "K6d: service_role cannot rewrite the mark in SQL (in this stand-in; the Auth admin API is outside, docs section 8)" || bad "K6d: $K_OUT mark=$mark"
+
+# K7. Five owner sessions try to move the activated account back at once: all refused, state and mark unchanged
+rm -rf "$TMP/out" && mkdir -p "$TMP/out"
+for k in 1 2 3 4 5; do
+  ( psql -X -q -At -d "$DB" -c "SET ROLE game_economy_owner; UPDATE public.game_accounts SET state = 'migration_scheduled' WHERE user_id = '$(u 7)';" >"$TMP/out/$k.out" 2>"$TMP/out/$k.err" ) &
+done
+wait
+st=$(q "SELECT state || '/' || (SELECT raw_app_meta_data ->> 'ayra_economy' FROM auth.users WHERE id = '$(u 7)') FROM public.game_accounts WHERE user_id = '$(u 7)'")
+[ "$(count_err game_state_one_way)" = 5 ] && [ "$st" = "cloud_active/cloud_active" ] \
+  && ok "K7: 5 owner sessions moving cloud_active back at once → all game_state_one_way; state and mark unchanged" \
+  || bad "K7: one_way=$(count_err game_state_one_way) state=$st"
 
 psql -X -q -d postgres -c "DROP DATABASE IF EXISTS $DB" >/dev/null
 rm -rf "$TMP"

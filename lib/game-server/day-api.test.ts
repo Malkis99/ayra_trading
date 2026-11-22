@@ -5,16 +5,20 @@ import { createRateLimiter } from "./rate-limit";
 const ORIGIN = "https://ayra.test";
 const A = "00000000-0000-0000-0000-00000000000a";
 const B = "00000000-0000-0000-0000-00000000000b";
+const S_A = "5e55e55e-0000-4000-8000-00000000000a";
+const TOKEN_A = { sub: A, sessionId: S_A, iat: 1_763_600_000, claim: "cloud_active" as const };
+const FRESH = { fresh: true, state: "cloud_active", reason: null };
 const STATUS = { state: "cloud_active", game_sync: false, game_day: "2026-11-20", day: { game_day: "2026-11-20", mode: "trading", core: ["q_bias"] } };
 
 function deps(over: Partial<DayApiDeps> & { calls?: Array<[string, Record<string, unknown>]> } = {}): DayApiDeps {
   const calls = over.calls ?? [];
   const rpc: Rpc = async (fn, args) => {
     calls.push([fn, args]);
+    if (fn === "game_session_check") return { data: FRESH, error: null };
     if (fn === "game_day_status") return { data: STATUS, error: null };
     return { data: { ok: true }, error: null };
   };
-  return { enabled: true, getUser: async () => ({ id: A }), rpc, limiter: createRateLimiter({ limit: 60, windowMs: 60_000 }), now: () => new Date("2026-11-20T10:00:00Z"), origin: ORIGIN, ...over };
+  return { enabled: true, getUser: async () => ({ id: A, token: TOKEN_A }), rpc, limiter: createRateLimiter({ limit: 60, windowMs: 60_000 }), now: () => new Date("2026-11-20T10:00:00Z"), origin: ORIGIN, ...over };
 }
 const post = (action: string, body: unknown, headers: Record<string, string> = {}) =>
   new Request(`${ORIGIN}/api/game/day/${action}`, { method: "POST", headers: { "content-type": "application/json", origin: ORIGIN, ...headers }, body: typeof body === "string" ? body : JSON.stringify(body) });
@@ -46,7 +50,7 @@ describe("Q4.4 day API — who may ask", () => {
     const over = await handleDayApi(get(), "status", d);
     expect(over.status).toBe(429);
     expect(over.headers["Retry-After"]).toBeDefined();
-    expect((await handleDayApi(get(), "status", deps({ limiter, getUser: async () => ({ id: B }) }))).status).toBe(200);
+    expect((await handleDayApi(get(), "status", deps({ limiter, getUser: async () => ({ id: B, token: { ...TOKEN_A, sub: B } }) }))).status).toBe(200);
   });
 });
 
@@ -75,7 +79,7 @@ describe("Q4.4 day API — nothing the client says decides who, when or which mo
     await handleDayApi(post("open", { extras: ["q_walk"] }), "open", deps({ calls }));
     await handleDayApi(post("mode", { mode: "rest" }), "mode", deps({ calls }));
     await handleDayApi(post("trading-days", { days: [3, 0, 0, 1] }), "trading-days", deps({ calls }));
-    const writes = calls.filter(([fn]) => fn !== "game_day_status");
+    const writes = calls.filter(([fn]) => fn !== "game_day_status" && fn !== "game_session_check");
     expect(writes).toEqual([
       ["game_day_accept", { p_user: A, p_mission: "q_bias" }],
       ["game_day_open", { p_user: A, p_bonus: ["q_walk"] }],
@@ -94,7 +98,8 @@ describe("Q4.4 day API — nothing the client says decides who, when or which mo
 });
 
 describe("Q4.4 day API — refusals are codes", () => {
-  const refusing = (message: string, code?: string): Rpc => async (fn) => (fn === "game_day_status" ? { data: STATUS, error: null } : { data: null, error: { message, code } });
+  const refusing = (message: string, code?: string): Rpc => async (fn) =>
+    fn === "game_session_check" ? { data: FRESH, error: null } : fn === "game_day_status" ? { data: STATUS, error: null } : { data: null, error: { message, code } };
   it.each([
     ["game_mission_not_assigned", 409, "mission_not_assigned"],
     ["game_day_not_open", 409, "day_not_open"],
@@ -129,5 +134,66 @@ describe("Q4.4 day API — strict bodies", () => {
     expect(parseDayBody("replace", { from: "q_walk", to: "q_meditate" })).toEqual({ ok: true, args: { p_from: "q_walk", p_to: "q_meditate" } });
     expect(parseDayBody("replace", { from: "q_walk" })).toEqual({ ok: false });
     expect(parseDayBody("open", [])).toEqual({ ok: false });
+  });
+});
+
+describe("Q4.5-2 day API — the session must be fresh for the economy (the database decides)", () => {
+  const staleRpc = (calls: Array<[string, Record<string, unknown>]>, answer: unknown = { fresh: false, state: "cloud_active", reason: "mark_changed" }): Rpc => async (fn, args) => {
+    calls.push([fn, args]);
+    if (fn === "game_session_check") return { data: answer, error: null };
+    return { data: STATUS, error: null };
+  };
+
+  it("asks the database with exactly the verified token's session, issue time and mark — and the session's user", async () => {
+    const calls: Array<[string, Record<string, unknown>]> = [];
+    await handleDayApi(post("accept", { mission: "q_bias" }), "accept", deps({ calls }));
+    expect(calls[0]).toEqual(["game_session_check", { p_user: A, p_session: S_A, p_iat: TOKEN_A.iat, p_claim: "cloud_active" }]);
+    expect(calls.map(([fn]) => fn)).toEqual(["game_session_check", "game_day_accept", "game_day_status"]);
+  });
+
+  it("a stale session: 401 session_stale with the account's state; the change is never made", async () => {
+    for (const [action, body] of [["accept", { mission: "q_bias" }], ["open", { extras: [] }], ["trading-days", { days: [1] }]] as const) {
+      const calls: Array<[string, Record<string, unknown>]> = [];
+      const r = await handleDayApi(post(action, body), action, deps({ rpc: staleRpc(calls) }));
+      expect(r).toMatchObject({ status: 401, body: { error: "session_stale", state: "cloud_active", reason: "mark_changed" } });
+      expect(calls.map(([fn]) => fn)).toEqual(["game_session_check"]);
+    }
+    const calls: Array<[string, Record<string, unknown>]> = [];
+    const st = await handleDayApi(get(), "status", deps({ rpc: staleRpc(calls, { fresh: false, state: "migration_pending", reason: "issued_before_change" }) }));
+    expect(st).toMatchObject({ status: 401, body: { error: "session_stale", state: "migration_pending" } });
+    expect(calls.map(([fn]) => fn)).toEqual(["game_session_check"]);
+  });
+
+  it("an answer that is not a clear «fresh» is stale; unknown states and reasons are not echoed", async () => {
+    for (const answer of [null, {}, { fresh: "true" }, { fresh: 1 }, { fresh: false, state: "admin", reason: "<script>" }]) {
+      const r = await handleDayApi(get(), "status", deps({ rpc: staleRpc([], answer) }));
+      expect(r.status).toBe(401);
+      expect(r.body).toEqual({ error: "session_stale" });
+    }
+  });
+
+  it("a token whose subject is not the verified user: stale, the database is not asked", async () => {
+    const calls: Array<[string, Record<string, unknown>]> = [];
+    const r = await handleDayApi(get(), "status", deps({ calls, getUser: async () => ({ id: A, token: { ...TOKEN_A, sub: B } }) }));
+    expect(r).toMatchObject({ status: 401, body: { error: "session_stale" } });
+    expect(calls).toEqual([]);
+  });
+
+  it("a malformed body never reaches the database, not even the session check", async () => {
+    const calls: Array<[string, Record<string, unknown>]> = [];
+    expect((await handleDayApi(post("accept", { mission: "q_bias", user_id: B }), "accept", deps({ calls }))).status).toBe(400);
+    expect(calls).toEqual([]);
+  });
+
+  it("0018 not applied (the real Supabase today): 503 server_economy_unavailable, as before", async () => {
+    const r = await handleDayApi(get(), "status", deps({ rpc: async () => ({ data: null, error: { code: "PGRST202", message: "Could not find the function public.game_session_check" } }) }));
+    expect(r).toMatchObject({ status: 503, body: { error: "server_economy_unavailable" } });
+  });
+
+  it("the session check fails (database down): 503, nothing done", async () => {
+    const calls: string[] = [];
+    const r = await handleDayApi(post("accept", { mission: "q_bias" }), "accept", deps({ rpc: async (fn) => { calls.push(fn); throw new Error("ECONNRESET"); } }));
+    expect(r).toMatchObject({ status: 503, body: { error: "server_error" } });
+    expect(calls).toEqual(["game_session_check"]);
   });
 });

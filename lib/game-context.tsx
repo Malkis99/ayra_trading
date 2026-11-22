@@ -679,13 +679,28 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     },
     [setEconomyView, showState]
   );
+  /**
+   * Q4.5-2: a refused session (`session_stale`) still tells the account's state, read by the server from the database
+   * for this very user. The device keeps it, only forward (rememberMode), on the loaded account space only.
+   */
+  const learnRefusedState = useCallback(
+    (r: DayCall) => {
+      if (r.ok || !r.state) return;
+      const space = loadedSpaceRef.current;
+      if (!space || !space.startsWith("account:") || AppStorage.getActiveSpaceId() !== space) return;
+      const mode = rememberMode(laterMode(economyRef.current.mode, r.state), space);
+      if (mode !== economyRef.current.mode) setEconomyView({ mode });
+    },
+    [setEconomyView]
+  );
   const noteServerRefusal = useCallback(
     (r: DayCall) => {
       if (r.ok) return;
+      learnRefusedState(r);
       if (r.error === "network") setEconomyView({ notice: "offline", noticeReason: undefined });
       else setEconomyView({ notice: "serverRefused", noticeReason: r.error });
     },
-    [setEconomyView]
+    [learnRefusedState, setEconomyView]
   );
   const runCloud = useCallback(
     async (call: Promise<DayCall>): Promise<DayCall> => {
@@ -704,7 +719,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     if (!serverEconomyOn() || !AppStorage.getActiveSpaceId().startsWith("account:")) return;
     const r = await serverDay.status();
     if (!r.ok) {
-      // 404 = the feature is off; 503 = the server economy is not installed: the device keeps what it knows
+      // 404 = the feature is off; 503 = the server economy is not installed: the device keeps what it knows;
+      // 401 session_stale after a failed refresh: the account's state from the refusal is kept (Q4.5-2)
+      learnRefusedState(r);
       if (r.error === "network") setEconomyView({ notice: "offline", noticeReason: undefined });
       return;
     }
@@ -715,7 +732,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       const extras = generateDaySet(gameStateRef.current, st.game_day, st.opening_mode).bonus.slice(0, 2);
       await runCloud(serverDay.open(extras));
     }
-  }, [applyServerStatus, runCloud, setEconomyView]);
+  }, [applyServerStatus, learnRefusedState, runCloud, setEconomyView]);
 
   useEffect(() => {
     if (!isLoaded || !serverEconomyOn() || !loadedSpace?.startsWith("account:")) return;
