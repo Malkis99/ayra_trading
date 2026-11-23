@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { AppStorage } from "@/lib/storage";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
 import { focusStorage } from "@/lib/storage/market-focus";
-import { emptyFocus } from "./market-focus";
+import { emptyFocus, focusFieldRevision, systemFocusValue } from "./market-focus";
 import { useMarketFocus } from "./use-market-focus";
 const A="00000000-0000-4000-8000-000000002231",B="00000000-0000-4000-8000-000000002232";
 const deferred=<T,>()=>{let resolve!:(v:T)=>void;const promise=new Promise<T>(r=>resolve=r);return{promise,resolve};};
@@ -13,6 +13,19 @@ let api:ReturnType<typeof useMarketFocus>;
 function Probe({space}:{space:string}){api=useMarketFocus(space,"eurusd");return <span>{api.issue??(api.pending?"pending":api.entry?`confirmed:${api.entry.direction}:${api.entry.revision}`:"loading")}</span>}
 function change(user:string|null){const from=AppStorage.getActiveSpaceId();AppStorage.setUserId(user);spaceTabChannel.notifyLocal(from,AppStorage.getActiveSpaceId());}
 afterEach(()=>{cleanup();vi.restoreAllMocks();AppStorage.setUserId(null);});
+it("serializes real V2 standard → custom → standard writes using projected revisions",async()=>{
+  change(B);const space=`account:${B}`,id="00000000-0000-4000-8000-000000002299";
+  await focusStorage.changeCatalog(space,"eurusd",{create:id,kind:"poi",label:"Custom POI"},0);
+  render(<Probe space={space}/>);await waitFor(()=>expect(api.entry).toBeDefined());
+  let first!:Promise<boolean>,second!:Promise<boolean>,third!:Promise<boolean>;
+  act(()=>{first=api.api!.patch({field:"direction",value:"bullish"});});
+  act(()=>{second=api.api!.patch({custom:"poi",id,catalogRevision:1,entryRevision:api.entry!.revision,fieldRevision:focusFieldRevision(api.entry!,"poi")});});
+  act(()=>{third=api.api!.patch({field:"poi",value:"fvg",fieldRevision:focusFieldRevision(api.entry!,"poi")});});
+  await act(async()=>{expect(await Promise.all([first,second,third])).toEqual([true,true,true]);});
+  await waitFor(()=>expect(api.pending).toBe(false));expect(api.issue).toBeUndefined();
+  const saved=await focusStorage.read(space,"eurusd");expect(saved.version).toBe(3);expect(saved.revision).toBe(3);
+  expect(systemFocusValue(saved,"poi")).toBe("fvg");expect(systemFocusValue(saved,"direction")).toBe("bullish");
+});
 it("does not confirm an optimistic change before commit or erase newer rapid intent",async()=>{
   change(A);const space=`account:${A}`,one=deferred<ReturnType<typeof emptyFocus>>(),two=deferred<ReturnType<typeof emptyFocus>>();
   vi.spyOn(focusStorage,"read").mockResolvedValue(emptyFocus(space,"eurusd"));vi.spyOn(focusStorage,"patch").mockReturnValueOnce(one.promise).mockReturnValueOnce(two.promise);
@@ -33,8 +46,9 @@ it("an accepted A write stays bound to A and a late failed acknowledgement canno
   change(A);const gate=deferred<ReturnType<typeof emptyFocus>>(),a=`account:${A}`,b=`account:${B}`;
   vi.spyOn(focusStorage,"read").mockImplementation(async(space,id)=>emptyFocus(space,id));const write=vi.spyOn(focusStorage,"patch").mockReturnValue(gate.promise);
   const view=render(<Probe key="a" space={a}/>);await waitFor(()=>expect(api.entry).toBeDefined());act(()=>{void api.api!.patch({field:"poi",value:"fvg"});});
+  await waitFor(()=>expect(write).toHaveBeenCalledTimes(1));
   act(()=>change(B));view.rerender(<Probe key="b" space={b}/>);await waitFor(()=>expect(api.entry?.spaceId).toBe(b));
-  await act(async()=>{gate.resolve({...emptyFocus(a,"eurusd"),poi:"fvg",revision:1});await gate.promise;});expect(write).toHaveBeenCalledWith(a,"eurusd",{field:"poi",value:"fvg"},0);expect(api.entry?.poi).toBeNull();expect(api.pending).toBe(false);
+  await act(async()=>{gate.resolve({...emptyFocus(a,"eurusd"),poi:"fvg",revision:1});await gate.promise;});expect(write).toHaveBeenCalledWith(a,"eurusd",{field:"poi",value:"fvg"},0,expect.any(Function));expect(api.entry?.poi).toBeNull();expect(api.pending).toBe(false);
 });
 it("failed writes never report saved, retain the confirmed document and allow explicit re-read",async()=>{
   change(null);vi.spyOn(focusStorage,"read").mockResolvedValue({...emptyFocus("guest","eurusd"),direction:"bullish",revision:1});vi.spyOn(focusStorage,"patch").mockRejectedValue(new Error("quota"));

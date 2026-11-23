@@ -60,9 +60,9 @@ describe("Market Focus isolated local transactions",()=>{
   it("preserves opaque fields, unknown instruments, and does not downgrade a future contract",async()=>{
     const {name,one}=storage();await one.read(A,"eurusd");const raw={...emptyFocus(A,"eurusd"),revision:1,future:{keep:true},checklist:{...emptyFocus(A,"eurusd").checklist,extra:true}};await rawWrite(name,raw);
     expect(await one.patch(A,"eurusd",{field:"direction",value:"neutral"})).toMatchObject({future:{keep:true},checklist:{extra:true}});
-    await rawWrite(name,{...raw,instrumentId:"futureinstrument",version:3});await one.patch(A,"gold",{field:"poi",value:"liquidity"});
-    await rawWrite(name,{...raw,version:3});await expect(one.patch(A,"eurusd",{field:"poi",value:"fvg"})).rejects.toMatchObject({kind:"unsupported"});
-    expect(()=>parseFocus({...raw,version:3},A,"eurusd")).toThrow("unsupported");
+    await rawWrite(name,{...raw,instrumentId:"futureinstrument",version:4});await one.patch(A,"gold",{field:"poi",value:"liquidity"});
+    await rawWrite(name,{...raw,version:4});await expect(one.patch(A,"eurusd",{field:"poi",value:"fvg"})).rejects.toMatchObject({kind:"unsupported"});
+    expect(()=>parseFocus({...raw,version:4},A,"eurusd")).toThrow("unsupported");
   });
   it("quota failure aborts the write, retains confirmed data, and never emits cloud events",async()=>{
     const {one}=storage();await one.patch(A,"eurusd",{field:"direction",value:"bullish"});const cloud=vi.fn();window.addEventListener("ayra-market-store",cloud);

@@ -18,8 +18,9 @@ export function useMarketFocus(space: string, id: InstrumentId) {
     const scope = captureMarketAccount(() => AppStorage.getUserId());
     let active = true, confirmed: FocusEntry | undefined, issue: FocusIssue | undefined, generation = 0, sequence = 0, ticket: number | undefined;
     let pending: { seq: number; patch: FocusPatch }[] = [], resetting = false;
+    let writes: Promise<unknown> = Promise.resolve();
     const current = () => active && scope.current();
-    const publish = () => { if (current()) setView({ entry: confirmed && pending.reduce((entry, op) => { try { return patchFocus(entry, op.patch); } catch { return entry; } }, confirmed), pending: pending.length > 0 || resetting, issue }); };
+    const publish = () => { if (current()) setView({ entry: confirmed && pending.reduce((entry, op) => { try { return { ...patchFocus(entry, op.patch), revision: entry.revision + 1 }; } catch { return entry; } }, confirmed), pending: pending.length > 0 || resetting, issue }); };
     const accept = (entry: FocusEntry) => { if (!confirmed || entry.revision >= confirmed.revision) confirmed = entry; };
     const refresh = async (retry = false) => {
       const request = ++generation;
@@ -35,7 +36,9 @@ export function useMarketFocus(space: string, id: InstrumentId) {
         const operationTicket = ticket;
         const seq = ++sequence; pending.push({ seq, patch }); publish();
         try {
-          const entry = await focusStorage.patch(space, id, patch, operationTicket);
+          const write = writes.then(() => { if (!current() || ticket !== operationTicket) throw new FocusDataError("cleared"); return focusStorage.patch(space, id, patch, operationTicket, current); });
+          writes = write.then(() => undefined, () => undefined);
+          const entry = await write;
           if (!current() || ticket !== operationTicket) return false;
           accept(entry); return true;
         } catch (e) { if (current() && ticket === operationTicket) issue = focusIssue(e); return false; }
@@ -49,7 +52,7 @@ export function useMarketFocus(space: string, id: InstrumentId) {
         const operationTicket = ticket;
         resetting = true; publish();
         try {
-          const result = await focusStorage.reset(space, id, revision, operationTicket);
+          const result = await focusStorage.reset(space, id, revision, operationTicket, current);
           if (!current() || ticket !== operationTicket) return "error";
           accept(result.entry); return result.kind;
         } catch (e) { if (current() && ticket === operationTicket) issue = focusIssue(e); return "error"; }

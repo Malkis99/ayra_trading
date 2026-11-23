@@ -3,6 +3,7 @@ import { clearedFocus, FocusDataError, migrateFocusV1, parseFocus, patchFocus, t
 import type { InstrumentId } from "@/lib/market/instruments";
 import { alertsOf, claimAlert, recordCompletion, type FocusAlert } from "@/lib/market/focus-notifications";
 import type { SessionSettings } from "@/lib/market/sessions";
+import { FOCUS_CATALOG_NOTICE, catalogFromPreference, catalogSnapshot, patchCatalog, type CatalogCommand, type CatalogSnapshot } from "@/lib/market/focus-catalog";
 
 export const FOCUS_DATABASE = "ayra_market_focus_v1";
 const EVENT = "ayra-market-focus-change", CHANNEL = "ayra-market-focus-local";
@@ -54,18 +55,18 @@ export class FocusStorage {
     });
   }
   private async transaction<T>(space: string, storeName: "entries" | "preferences" | "spaces", key: IDBValidKey, write: boolean,
-    apply: (raw: unknown, store: IDBObjectStore) => T, epoch?: number): Promise<T> {
+    apply: (raw: unknown, store: IDBObjectStore, preference?: unknown) => T, epoch?: number, withCatalog = false): Promise<T> {
     validateSpace(space);
     const db = await this.open();
     return new Promise((resolve, reject) => {
       let value: T, failure: unknown;
       let tx: IDBTransaction;
-      try { tx = db.transaction(epoch === undefined ? storeName : [storeName, "spaces"], write ? "readwrite" : "readonly"); }
+      try { tx = db.transaction([...new Set([storeName, ...(epoch === undefined ? [] : ["spaces"]), ...(withCatalog ? ["preferences"] : [])])], write ? "readwrite" : "readonly"); }
       catch (error) { db.close(); reject(error); return; }
       const store = tx.objectStore(storeName);
       const load = () => {
-        const request = store.get(key);
-        request.onsuccess = () => { try { value = apply(request.result, store); } catch (e) { failure = e; tx.abort(); } };
+        const read = (preference?: unknown) => { const request = store.get(key); request.onsuccess = () => { try { value = apply(request.result, store, preference); } catch (e) { failure = e; tx.abort(); } }; };
+        if (withCatalog) { const pref = tx.objectStore("preferences").get(space); pref.onsuccess = () => read(pref.result); } else read();
       };
       if (epoch === undefined) load();
       else {
@@ -83,22 +84,58 @@ export class FocusStorage {
   }
   epoch(space: string) { return this.transaction(space, "spaces", space, false, raw => this.control(raw, space)); }
   read(space: string, id: InstrumentId, epoch?: number) { return this.transaction(space, "entries", [space, id], false, raw => parseFocus(raw, space, id), epoch); }
-  private async change(space: string, id: InstrumentId, change: (entry: FocusEntry) => { entry: FocusEntry; write: boolean }, epoch?: number) {
+  private async change(space: string, id: InstrumentId, change: (entry: FocusEntry, preference?: unknown) => { entry: FocusEntry; write: boolean }, epoch?: number, withCatalog = false, current: () => boolean = () => true) {
     const ticket = epoch ?? await this.epoch(space);
-    const result = await this.transaction(space, "entries", [space, id], true, (raw, store) => {
-      const entry = parseFocus(raw, space, id), result = change(entry);
+    const result = await this.transaction(space, "entries", [space, id], true, (raw, store, preference) => {
+      if (!current()) throw new FocusDataError("cleared");
+      const entry = parseFocus(raw, space, id), result = change(entry, preference);
       if (result.write) {
         if (entry.revision + 1 >= Number.MAX_SAFE_INTEGER) throw new FocusDataError("invalid");
         result.entry = { ...result.entry, revision: entry.revision + 1 };
         store.put(result.entry);
       }
       return result;
-    }, ticket);
+    }, ticket, withCatalog);
     if (result.write) notify({ spaceId: space, instrumentId: id });
     return result;
   }
-  async patch(space: string, id: InstrumentId, patch: FocusPatch, epoch?: number) {
-    return (await this.change(space, id, entry => ({ entry: recordCompletion(entry, patchFocus(entry, patch), patch, Date.now()), write: true }), epoch)).entry;
+  async patch(space: string, id: InstrumentId, patch: FocusPatch, epoch?: number, current?: () => boolean) {
+    return (await this.change(space, id, (entry, preference) => {
+      if ("custom" in patch) {
+        const catalog = catalogFromPreference(preference, space), item = catalog.items.find(value => value.id === patch.id);
+        if (!item || item.deleted || item.kind !== patch.custom || item.revision !== patch.catalogRevision) throw new FocusDataError("conflict");
+      }
+      return { entry: recordCompletion(entry, patchFocus(entry, patch), patch, Date.now()), write: true };
+    }, epoch, "custom" in patch, current)).entry;
+  }
+  async catalog(space: string): Promise<CatalogSnapshot> { const snapshot = await this.exportSpace(space); return catalogSnapshot(snapshot.preferences, snapshot.entries, space); }
+  async changeCatalog(space: string, selected: InstrumentId, command: CatalogCommand, epoch: number, current: () => boolean = () => true): Promise<CatalogSnapshot> {
+    validateSpace(space); const db = await this.open();
+    const result = await new Promise<CatalogSnapshot>((resolve, reject) => {
+      let tx: IDBTransaction;
+      try { tx = db.transaction(["entries", "preferences", "spaces"], "readwrite"); } catch (error) { db.close(); reject(error); return; }
+      let failure: unknown, result: CatalogSnapshot, preference: unknown, ready = 0;
+      const rows: unknown[] = [];
+      tx.oncomplete = () => { db.close(); resolve(result); };
+      tx.onerror = tx.onabort = () => { db.close(); reject(failure ?? new FocusDataError("storage")); };
+      const fail = (error: unknown) => { failure = error; tx.abort(); };
+      const finish = () => {
+        if (++ready !== 3) return;
+        try {
+          if (!current()) throw new FocusDataError("cleared");
+          this.preference(preference, space);
+          const snapshot = catalogSnapshot(preference, rows, space), catalog = patchCatalog(snapshot, command, space);
+          tx.objectStore("preferences").put({ ...(preference as object | undefined), version: 1, spaceId: space, selectedInstrumentId: this.preference(preference, space) ?? selected, customCatalog: catalog });
+          result = { ...snapshot, catalog };
+        } catch (error) { fail(error); }
+      };
+      const guard = tx.objectStore("spaces").get(space);
+      guard.onsuccess = () => { try { if (this.control(guard.result, space) !== epoch) throw new FocusDataError("cleared"); finish(); } catch (error) { fail(error); } };
+      const pref = tx.objectStore("preferences").get(space); pref.onsuccess = () => { preference = pref.result; finish(); };
+      const cursor = tx.objectStore("entries").openCursor(); cursor.onsuccess = () => { try { const row = cursor.result; if (!row) { finish(); return; } if (Array.isArray(row.key) && row.key[0] === space) rows.push(row.value); row.continue(); } catch (error) { fail(error); } };
+    });
+    notify({ spaceId: space, instrumentId: FOCUS_CATALOG_NOTICE });
+    return result;
   }
   async configureAlerts(space: string, id: InstrumentId, revision: number, values: { completion: boolean; session: boolean; lead: number; reminder: number | null }, epoch: number) {
     return (await this.change(space, id, entry => {
@@ -116,8 +153,8 @@ export class FocusStorage {
       return { entry: next ?? entry, write: next !== null };
     }, epoch)).write;
   }
-  async reset(space: string, id: InstrumentId, revision: number, epoch?: number) {
-    const result = await this.change(space, id, entry => entry.revision === revision ? { entry: clearedFocus(entry), write: true } : { entry, write: false }, epoch);
+  async reset(space: string, id: InstrumentId, revision: number, epoch?: number, current?: () => boolean) {
+    const result = await this.change(space, id, entry => entry.revision === revision ? { entry: clearedFocus(entry), write: true } : { entry, write: false }, epoch, false, current);
     return { kind: result.write ? "saved" as const : "conflict" as const, entry: result.entry };
   }
   private preference(raw: unknown, space: string): string | null {
@@ -127,9 +164,10 @@ export class FocusStorage {
     return raw.selectedInstrumentId;
   }
   selection(space: string) { return this.transaction(space, "preferences", space, false, raw => this.preference(raw, space)); }
-  async select(space: string, id: InstrumentId, epoch?: number) {
+  async select(space: string, id: InstrumentId, epoch?: number, current: () => boolean = () => true) {
     const ticket = epoch ?? await this.epoch(space);
     await this.transaction(space, "preferences", space, true, (raw, store) => {
+      if (!current()) throw new FocusDataError("cleared");
       this.preference(raw, space);
       store.put({ ...(raw as object | undefined), version: 1, spaceId: space, selectedInstrumentId: id });
     }, ticket);
