@@ -40,6 +40,11 @@ jobs:
       - uses: actions/checkout@v4
       - run: psql --version
       - run: bash scripts/test-concurrency.sh
+      # Q4.5-4: the owner's transfer tool end to end (Node 24 runs its TypeScript import directly)
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: bash scripts/test-migration-admin.sh
 
   # WATCH-1B.1: real CAS races and account RLS, in a throw-away database, never production.
   watchlist-meta-postgres:

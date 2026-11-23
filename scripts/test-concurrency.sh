@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AYRA Trading — concurrency tests of the server economy (migrations 0014–0016, 0018) on a REAL PostgreSQL (CI service container).
+# AYRA Trading — concurrency tests of the server economy (migrations 0014–0016, 0018, 0019) on a REAL PostgreSQL (CI service container).
 # PGlite has one connection; here many sessions run at the same moment. Never point this at Supabase or production:
 # it refuses to run unless PGHOST is localhost/127.0.0.1 and it creates its own throw-away database.
 #   PGHOST=localhost PGUSER=postgres PGPASSWORD=postgres bash scripts/test-concurrency.sh
@@ -387,6 +387,135 @@ st=$(q "SELECT state FROM public.game_accounts WHERE user_id = '$(u 7)'")
 [ "$(count_err game_state_one_way)" = 5 ] && [ "$st" = cloud_active ] \
   && ok "K7: 5 owner sessions moving cloud_active back at once → all game_state_one_way; state unchanged" \
   || bad "K7: one_way=$(count_err game_state_one_way) state=$st"
+
+# L. 0019 (Q4.5-4): device snapshots, legacy reviews and the owner's activation under concurrency
+psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase/migrations/0019_game_migration_import.sql >/dev/null 2>"$TMP/m19.err" \
+  && ok "L0: migration 0019 on PostgreSQL $(q 'SHOW server_version')" || bad "L0: migration 0019: $(cat "$TMP/m19.err")"
+m() { printf '00000000-0000-0000-0000-00000019c0%02d' "$1"; }
+snap() { printf '10000000-0000-0000-0000-00000019d0%02d' "$1"; }
+inst() { printf '20000000-0000-0000-0000-00000019e0%02d' "$1"; }
+# the route's call with a fresh token of the state the device saw (the database checks it against the state now)
+imp() { printf "SELECT public.game_import_snapshot('%s', '%s', floor(extract(epoch FROM now()))::bigint, 'migration_pending', '%s', '%s', 1, '%s'::jsonb) ->> '%s';\n" "$1" "$(s 7)" "$2" "$3" "$4" "${5:-status}"; }
+q "INSERT INTO auth.users (id, email) VALUES ('$(m 1)', 'l1@example.com'), ('$(m 2)', 'l2@example.com'), ('$(m 3)', 'l3@example.com');
+   SELECT public.game_economy_transition('$(m 1)', 'local', 'migration_pending');
+   SELECT public.game_economy_transition('$(m 2)', 'local', 'migration_pending');
+   SELECT public.game_economy_transition('$(m 3)', 'local', 'migration_pending');" >/dev/null
+
+# L1. One device retries its upload ×10 at once: one row, one first answer, nine replays
+for k in $(seq 1 10); do imp "$(m 1)" "$(snap 1)" "$(inst 1)" '{"level":3,"xp":50,"coins":120}' replay; done | parallel
+rows=$(q "SELECT count(*) FROM public.game_imports WHERE user_id = '$(m 1)'")
+[ "$rows" = 1 ] && [ "$(count_out false)" = 1 ] && [ "$(count_out true)" = 9 ] && [ "$(other_errors no_error_is_expected)" = 0 ] \
+  && ok "L1: the same snapshot ×10 at once → 1 row, 1 first answer + 9 replays" \
+  || bad "L1: rows=$rows false=$(count_out false) true=$(count_out true) errs=$(cat "$TMP"/out/*.err)"
+
+# L2. The same snapshot id with five different contents at once: exactly one stored, four refused
+for k in 1 2 3 4 5; do imp "$(m 1)" "$(snap 2)" "$(inst 2)" "{\"level\":$k}"; done | parallel
+rows=$(q "SELECT count(*) FROM public.game_imports WHERE user_id = '$(m 1)' AND snapshot_id = '$(snap 2)'")
+[ "$rows" = 1 ] && [ "$(count_out accepted)" = 1 ] && [ "$(count_err game_import_conflict)" = 4 ] && [ "$(other_errors game_import_conflict)" = 0 ] \
+  && ok "L2: one id, five contents at once → 1 stored + 4 game_import_conflict" \
+  || bad "L2: rows=$rows accepted=$(count_out accepted) conflicts=$(count_err game_import_conflict) errs=$(cat "$TMP"/out/*.err)"
+
+# L3. One install sends ten different snapshots at once: exactly one enters the reconciliation, nine are kept as duplicates
+for k in $(seq 10 19); do imp "$(m 1)" "$(snap $k)" "$(inst 3)" "{\"level\":1,\"n\":$k}"; done | parallel
+acc=$(q "SELECT count(*) FROM public.game_imports WHERE user_id = '$(m 1)' AND install_id = '$(inst 3)' AND status = 'accepted'")
+dup=$(q "SELECT count(*) FROM public.game_imports WHERE user_id = '$(m 1)' AND install_id = '$(inst 3)' AND status = 'duplicate_install'")
+[ "$acc" = 1 ] && [ "$dup" = 9 ] && [ "$(other_errors no_error_is_expected)" = 0 ] \
+  && ok "L3: one install, 10 snapshots at once → 1 accepted + 9 duplicate_install (all kept)" \
+  || bad "L3: accepted=$acc duplicates=$dup errs=$(cat "$TMP"/out/*.err)"
+
+# the owner's preparation: the 7 days passed (the test clock: the database owner sets the window's end to now), the
+# DATABASE's reconciliation saved, every remainder decided (the first accepted at its candidate, the rest rejected)
+close_window() {
+  q "SET ROLE game_economy_owner; INSERT INTO public.game_migration_windows (user_id, closes_at, changed_by, reason)
+     VALUES ('$1', now(), 'test clock', 'simulated: 7 days passed') ON CONFLICT (user_id) DO UPDATE SET closes_at = now();" >/dev/null
+}
+save_rec() { q "SET ROLE game_migration_admin; SELECT public.game_mig_save_reconciliation('$1', public.game_mig_reconcile('$1'), 'ci') ->> 'saved';"; }
+admin_prep() {
+  close_window "$1"
+  [ "$(save_rec "$1")" = true ] || return 1
+  q "SET ROLE game_migration_admin;
+     SELECT public.game_mig_decide_legacy('$1', snapshot_id, CASE WHEN n = 1 THEN 'accepted' ELSE 'rejected' END,
+       CASE WHEN n = 1 THEN candidate_xp END, CASE WHEN n = 1 THEN candidate_coins END, 'ci', 'test decision')
+     FROM (SELECT snapshot_id, candidate_xp, candidate_coins, row_number() OVER (ORDER BY snapshot_id) AS n
+           FROM public.game_legacy_reviews WHERE user_id = '$1') r;" >/dev/null
+}
+
+# L4. Two reviewers accept two different remainders of one account at once: one wins, never two
+for k in 20 21; do q "$(imp "$(m 2)" "$(snap $k)" "$(inst $k)" "{\"level\":2,\"coins\":10,\"n\":$k}")" >/dev/null; done
+[ "$(save_rec "$(m 2)")" = true ] || bad "L4: draft"
+for k in 20 21; do
+  echo "RESET ROLE; SET ROLE game_migration_admin; SELECT public.game_mig_decide_legacy('$(m 2)', '$(snap $k)', 'accepted', 100, 10, 'reviewer $k', 'parallel test') ->> 'status';"
+done | parallel
+acc=$(q "SELECT count(*) FROM public.game_legacy_reviews WHERE user_id = '$(m 2)' AND status = 'accepted'")
+[ "$acc" = 1 ] && [ "$(count_out accepted)" = 1 ] && [ "$(count_err 'duplicate key')" = 1 ] \
+  && ok "L4: two reviewers accept two remainders of one account at once → exactly one accepted" \
+  || bad "L4: accepted=$acc out=$(count_out accepted) errs=$(cat "$TMP"/out/*.err)"
+
+# L5. The activation racing five new devices' uploads after the window closed: the uploads are kept apart (late, or
+#     stale once the account is active) — never accepted, never left out of what was activated
+admin_prep "$(m 1)" || bad "L5: owner's preparation"
+rec=$(q "SELECT id FROM public.game_reconciliations WHERE user_id = '$(m 1)' AND status = 'draft'")
+{ echo "RESET ROLE; SET ROLE game_migration_admin; SELECT public.game_mig_activate('$(m 1)', $rec, 'ci', 'test') ->> 'state';"
+  for k in $(seq 30 34); do imp "$(m 1)" "$(snap $k)" "$(inst $k)" "{\"level\":1,\"n\":$k}"; done; } | parallel
+st=$(q "SELECT state FROM public.game_accounts WHERE user_id = '$(m 1)'")
+left_out=$(q "SELECT count(*) FROM public.game_imports i WHERE i.user_id = '$(m 1)' AND i.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM public.game_reconciliations r
+  WHERE r.user_id = i.user_id AND r.status = 'activated' AND (i.snapshot_id::text || ':' || i.content_md5) = ANY (r.inputs))")
+late=$(q "SELECT count(*) FROM public.game_imports WHERE user_id = '$(m 1)' AND snapshot_id IN ('$(snap 30)', '$(snap 31)', '$(snap 32)', '$(snap 33)', '$(snap 34)') AND status = 'late'")
+[ "$st" = cloud_active ] && [ "$left_out" = 0 ] && [ "$(count_out cloud_active)" = 1 ] && [ $((late + $(count_err game_session_stale))) = 5 ] \
+  && [ "$(other_errors game_session_stale)" = 0 ] \
+  && ok "L5: activation racing 5 uploads after the window → activated once; uploads late ($late) or stale ($(count_err game_session_stale)); nothing accepted left out" \
+  || bad "L5: state=$st left_out=$left_out late=$late out=$(cat "$TMP"/out/*.out | tr '\n' ' ') errs=$(cat "$TMP"/out/*.err)"
+
+# L6. Five activations of one account at once (double clicks, two owner windows): one activation, the ledger written once
+q "$(imp "$(m 3)" "$(snap 40)" "$(inst 40)" '{"level":2,"xp":0,"coins":10,"history":[{"questId":"q_bias","xp":40,"coins":10,"completedAt":"2026-11-01"}]}')" >/dev/null
+admin_prep "$(m 3)" || bad "L6: owner's preparation"
+rec=$(q "SELECT id FROM public.game_reconciliations WHERE user_id = '$(m 3)' AND status = 'draft'")
+for k in 1 2 3 4 5; do echo "RESET ROLE; SET ROLE game_migration_admin; SELECT public.game_mig_activate('$(m 3)', $rec, 'ci $k', NULL) ->> 'replay';"; done | parallel
+ledger=$(q "SELECT count(*) || '/' || sum(xp) || '/' || sum(coins) FROM public.game_ledger WHERE user_id = '$(m 3)'")
+prof=$(q "SELECT xp_total || '/' || coins FROM public.game_profile WHERE user_id = '$(m 3)'")
+acts=$(q "SELECT count(*) FROM public.game_migration_audit WHERE user_id = '$(m 3)' AND action = 'activated'")
+# the proven quest 40/10 + the accepted remainder 80/0 (level 2 = 120 XP in all)
+[ "$(count_out false)" = 1 ] && [ "$(count_out true)" = 4 ] && [ "$ledger" = "2/120/10" ] && [ "$prof" = "120/10" ] && [ "$acts" = 1 ] \
+  && ok "L6: 5 activations at once → 1 activation + 4 replays; ledger once (40 proven + 80 accepted XP), one audit entry" \
+  || bad "L6: false=$(count_out false) true=$(count_out true) ledger=$ledger profile=$prof audit=$acts errs=$(cat "$TMP"/out/*.err)"
+
+# L8. A save racing a new upload in the window: whatever wins, the saved result is the database's computation of the
+#     snapshots it covered — and the activation computes it again (never activated on a stale result)
+q "INSERT INTO auth.users (id, email) VALUES ('$(m 4)', 'l4@example.com'); SELECT public.game_economy_transition('$(m 4)', 'local', 'migration_pending');" >/dev/null
+q "$(imp "$(m 4)" "$(snap 50)" "$(inst 50)" '{"level":1,"xp":40,"coins":10,"history":[{"questId":"q_a","xp":40,"coins":10,"completedAt":"2026-11-01"}]}')" >/dev/null
+{ echo "RESET ROLE; SET ROLE game_migration_admin; SELECT public.game_mig_save_reconciliation('$(m 4)', public.game_mig_reconcile('$(m 4)'), 'ci') ->> 'saved';"
+  imp "$(m 4)" "$(snap 51)" "$(inst 51)" '{"level":1,"xp":40,"coins":10,"history":[{"questId":"q_b","xp":40,"coins":10,"completedAt":"2026-11-01"}]}'; } | parallel
+saved_ok=$(q "SELECT count(*) FROM public.game_reconciliations WHERE user_id = '$(m 4)' AND result = public.game_mig_reconcile('$(m 4)')")
+saved_all=$(q "SELECT count(*) FROM public.game_reconciliations WHERE user_id = '$(m 4)'")
+refused=$(q "SELECT count(*) FROM public.game_migration_audit WHERE user_id = '$(m 4)' AND action = 'reconciliation_refused'")
+if [ "$saved_all" = 0 ]; then
+  # the upload landed between the computation and the save: the save refused (the results differ) and logged it
+  [ "$refused" = 1 ] && [ "$(count_out false)" = 1 ] && [ "$(q "SELECT state FROM public.game_accounts WHERE user_id = '$(m 4)'")" = migration_pending ] \
+    && ok "L8: an upload between the computation and the save → the save refused (logged), nothing saved, still pending" \
+    || bad "L8(c): refused=$refused out=$(cat "$TMP"/out/*.out | tr '\n' ' ') errs=$(cat "$TMP"/out/*.err)"
+else
+  close_window "$(m 4)"
+  q "SET ROLE game_migration_admin; SELECT public.game_mig_decide_legacy('$(m 4)', snapshot_id, 'rejected', NULL, NULL, 'ci', 'test') FROM public.game_legacy_reviews WHERE user_id = '$(m 4)';" >/dev/null
+  rec=$(q "SELECT id FROM public.game_reconciliations WHERE user_id = '$(m 4)' AND status = 'draft'")
+  res=$(q "SET ROLE game_migration_admin; SELECT COALESCE(public.game_mig_activate('$(m 4)', $rec, 'ci', 'test') ->> 'refused', 'activated');" 2>&1)
+  if [ "$saved_ok" = 1 ]; then
+    # the save saw both snapshots: the activation goes through on exactly them
+    [ "$res" = activated ] && [ "$(q "SELECT count(*) FROM public.game_ledger WHERE user_id = '$(m 4)'")" = 2 ] \
+      && ok "L8: the save covered both snapshots → activated on exactly them (2 proven quests)" || bad "L8(a): $res"
+  else
+    # the upload came after the save: the activation computes again and refuses — nothing credited, still pending
+    [ "$res" = game_mig_result_changed ] && [ "$(q "SELECT count(*) FROM public.game_ledger WHERE user_id = '$(m 4)'")" = 0 ] \
+      && ok "L8: an upload after the save → the activation refuses (result changed), nothing credited" || bad "L8(b): $res"
+  fi
+fi
+
+# L7. The API login cannot reach the owner's tool; the owner's role cannot log in
+K_OUT=$(PGPASSWORD=authenticator-test-only psql -X -q -At -h "$PGHOST" -U authenticator -d "$DB" -c "SET ROLE game_migration_admin;" 2>&1)
+K_OUT2=$(PGPASSWORD=authenticator-test-only psql -X -q -At -h "$PGHOST" -U authenticator -d "$DB" -c "SET ROLE service_role;" -c "SELECT count(*) FROM public.game_imports;" 2>&1)
+LOGIN=$(q "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'game_migration_admin'")
+echo "$K_OUT" | grep -q "permission denied to set role" && echo "$K_OUT2" | grep -q "permission denied" && [ "$LOGIN" = f ] \
+  && ok "L7: the API login cannot become the owner's role nor read snapshots; the owner's role has no login" \
+  || bad "L7: $K_OUT / $K_OUT2 / login=$LOGIN"
 
 psql -X -q -d postgres -c "DROP DATABASE IF EXISTS $DB" >/dev/null
 rm -rf "$TMP"

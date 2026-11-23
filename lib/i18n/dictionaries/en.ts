@@ -2862,6 +2862,11 @@ export const en: Dictionary = {
           rewardsPaused: "The reward was not given: rewards are paused right now.",
           serverRefused: "The server did not accept the action: {reason}.",
           offline: "No connection to the server. The game day was not changed — try again.",
+          transferWaiting: "This device's progress will be sent for review when you are online. It stays saved on the device.",
+          transferSent: "This device's progress was sent for review. Nothing is lost: the transfer is decided by hand.",
+          transferLate: "This device's progress arrived after the transfer intake closed. It is kept and will be reviewed separately — it is not added automatically.",
+          achievementsOnDevice: "Achievements are still kept on this device. Moving them to the server is the next step; until then they may not show on another device.",
+          transferTooLarge: "This device's save is too large to send automatically. It was not deleted; please contact support.",
         },
       },
       missionSource: {

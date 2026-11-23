@@ -130,11 +130,14 @@ test.describe("Q4.4 server game day API (fake Supabase)", () => {
     const calls = (await (await request.get(`${FAKE_SUPABASE}/__test/economy-calls`)).json()) as Array<{ fn: string; user: string; args: string[] }>;
     expect(calls.every((c) => c.user === userId)).toBe(true);
     const allowed = ["p_bonus", "p_mission", "p_mode", "p_from", "p_to", "p_days", "p_day"];
-    // Q4.5-2: the claims of the verified token go only to the two session functions (never a device time: p_iat is the
+    // Q4.5-2: the claims of the verified token go only to the session functions (never a device time: p_iat is the
     // token's issue time, checked against the database's state time)
     const sessionArgs = ["p_session", "p_iat", "p_claim"];
-    const sessionFns = ["game_session_check", "game_apply_reward_for_session"];
-    expect(calls.flatMap((c) => c.args.filter((a) => !allowed.includes(a) && !(sessionFns.includes(c.fn) && sessionArgs.includes(a))).map((a) => `${c.fn}:${a}`))).toEqual([]);
+    const sessionFns = ["game_session_check", "game_apply_reward_for_session", "game_import_snapshot"];
+    // Q4.5-4: the device's frozen snapshot goes to quarantine as it came (0019) — it decides nothing, credits nothing
+    const snapshotArgs = ["p_snapshot", "p_install", "p_schema", "p_content"];
+    expect(calls.flatMap((c) => c.args.filter((a) => !allowed.includes(a) && !(sessionFns.includes(c.fn) && sessionArgs.includes(a))
+      && !(c.fn === "game_import_snapshot" && snapshotArgs.includes(a))).map((a) => `${c.fn}:${a}`))).toEqual([]);
     expect(calls.some((c) => c.fn === "game_session_check")).toBe(true);
     // the one day the routes pass is the server's own (to read the Journal for the mission check), never the client's
     expect(calls.filter((c) => c.args.includes("p_day")).map((c) => c.fn)).toEqual(calls.filter((c) => c.fn === "game_journal_for_check").map((c) => c.fn));

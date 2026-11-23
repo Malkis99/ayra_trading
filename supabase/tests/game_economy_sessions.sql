@@ -64,6 +64,8 @@ BEGIN
   IF pg_temp.err(format($q$SELECT public.game_economy_transition(%L, 'migration_pending', 'migration_scheduled')$q$, c_a)) <> 'game_state_one_way' THEN
     RAISE EXCEPTION 'T8: pending never goes back to scheduled';
   END IF;
+  -- with 0019 a direct activation needs the activation marker of this transaction (unused before 0019)
+  PERFORM set_config('ayra.mig_activation', c_a::text, TRUE);
   v := public.game_economy_transition(c_a, 'migration_pending', 'cloud_active');
   IF v ->> 'state' <> 'cloud_active' OR (SELECT activated_at FROM public.game_accounts WHERE user_id = c_a) IS NULL
      OR NOT EXISTS (SELECT 1 FROM public.game_profile WHERE user_id = c_a) THEN
@@ -90,6 +92,7 @@ DECLARE
 BEGIN
   IF public.game_begin_migration(c_d) <> 'migration_pending' THEN RAISE EXCEPTION 'B1: begin'; END IF;
   IF public.game_begin_migration(c_d) <> 'migration_pending' THEN RAISE EXCEPTION 'B2: begin again is a replay'; END IF;
+  PERFORM set_config('ayra.mig_activation', c_d::text, TRUE);
   IF public.game_activate_cloud(c_d, 'q4.5') <> 'cloud_active' OR (SELECT rules_version FROM public.game_accounts WHERE user_id = c_d) <> 'q4.5' THEN
     RAISE EXCEPTION 'B3: activate and the rules version';
   END IF;
@@ -241,7 +244,8 @@ BEGIN
      OR has_function_privilege('service_role', 'public.game_access_token_hook(jsonb)', 'EXECUTE') THEN
     RAISE EXCEPTION 'G2: the server cannot award without the session check, nor run the hook';
   END IF;
-  IF NOT has_function_privilege('service_role', 'public.game_economy_transition(uuid,text,text)', 'EXECUTE')
+  -- (0019, Q4.5-4: state changes belong to the owner's tool — with 0019 the server no longer moves accounts)
+  IF has_function_privilege('service_role', 'public.game_economy_transition(uuid,text,text)', 'EXECUTE') = (to_regclass('public.game_imports') IS NOT NULL)
      OR NOT has_function_privilege('service_role', 'public.game_session_check(uuid,uuid,bigint,text)', 'EXECUTE')
      OR NOT has_function_privilege('service_role', 'public.game_apply_reward_for_session(uuid,uuid,bigint,text,text,text,jsonb)', 'EXECUTE') THEN
     RAISE EXCEPTION 'G3: the server keeps its three entry points';
