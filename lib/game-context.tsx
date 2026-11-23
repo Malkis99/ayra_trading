@@ -765,6 +765,25 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   );
   const onCloud = () => economyRef.current.mode === "cloud_active";
 
+  /**
+   * Q4.6: on the server economy the account's achievements are read from the server (read only — nothing here can
+   * unlock one). An answer is applied only to the account and space it was asked for. Asked only after the server's
+   * day status (refreshServerDay): never in parallel with it, so a stale token refreshes the session once.
+   */
+  const refreshServerAchievements = useCallback(async () => {
+    if (!serverEconomyOn() || economyRef.current.mode !== "cloud_active") return;
+    const scope = requestScope();
+    if (!scope) return;
+    const r = await callDayApi("/api/game/achievements", "GET", undefined, fetch, undefined, undefined, scope);
+    if (!r.ok) {
+      if (stillIn(scope)) learnRefusedState(r, scope);
+      return;
+    }
+    if (!belongs(scope, r)) return;
+    const a = readAchievements(r.body);
+    if (a && a.state === "cloud_active") setEconomyView({ achievements: { transferred: a.transferred, items: a.achievements } });
+  }, [belongs, learnRefusedState, requestScope, setEconomyView, stillIn]);
+
   const refreshServerDay = useCallback(async () => {
     if (!serverEconomyOn()) return;
     const scope = requestScope();
@@ -786,7 +805,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       const extras = generateDaySet(gameStateRef.current, st.game_day, st.opening_mode).bonus.slice(0, 2);
       await runCloud(serverDay.open(extras, scope), scope);
     }
-  }, [applyServerStatus, belongs, learnRefusedState, requestScope, runCloud, setEconomyView, stillIn]);
+    if (st && st.state === "cloud_active") await refreshServerAchievements();
+  }, [applyServerStatus, belongs, learnRefusedState, refreshServerAchievements, requestScope, runCloud, setEconomyView, stillIn]);
 
   /**
    * Q4.5-4: in the transfer window (or after it, for a device that was offline) the device sends a frozen copy of its
@@ -826,27 +846,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     if (economy.mode === "migration_pending" || economy.mode === "cloud_active") void sendDeviceSnapshot();
   }, [economy.mode, isLoaded, loadedSpace, sendDeviceSnapshot]);
 
-  /**
-   * Q4.6: on the server economy the account's achievements are read from the server (read only — nothing here can
-   * unlock one). An answer is applied only to the account and space it was asked for.
-   */
-  const refreshServerAchievements = useCallback(async () => {
-    if (!serverEconomyOn() || economyRef.current.mode !== "cloud_active") return;
-    const scope = requestScope();
-    if (!scope) return;
-    const r = await callDayApi("/api/game/achievements", "GET", undefined, fetch, undefined, undefined, scope);
-    if (!r.ok) {
-      if (stillIn(scope)) learnRefusedState(r, scope);
-      return;
-    }
-    if (!belongs(scope, r)) return;
-    const a = readAchievements(r.body);
-    if (a && a.state === "cloud_active") setEconomyView({ achievements: { transferred: a.transferred, items: a.achievements } });
-  }, [belongs, learnRefusedState, requestScope, setEconomyView, stillIn]);
-  useEffect(() => {
-    if (!isLoaded || !loadedSpace?.startsWith("account:")) return;
-    if (economy.mode === "cloud_active") void refreshServerAchievements();
-  }, [economy.mode, isLoaded, loadedSpace, refreshServerAchievements]);
+
 
   useEffect(() => {
     if (!isLoaded || !serverEconomyOn() || !loadedSpace?.startsWith("account:")) return;
@@ -855,7 +855,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       if (document.visibilityState === "visible") {
         void refreshServerDay();
         void sendDeviceSnapshot();
-        void refreshServerAchievements();
       }
     };
     window.addEventListener("focus", onFocus);
@@ -864,7 +863,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onFocus);
     };
-  }, [isLoaded, loadedSpace, refreshServerAchievements, refreshServerDay, sendDeviceSnapshot]);
+  }, [isLoaded, loadedSpace, refreshServerDay, sendDeviceSnapshot]);
 
   // QH-6.6: accepting a mission gives nothing; it only marks the mission as taken for today (Q4.4: on the server day for
   // an account on the server economy — the device shows the server's answer)
