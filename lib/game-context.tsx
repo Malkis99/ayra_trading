@@ -65,6 +65,7 @@ import { ECONOMY_MODE_KEY, deviceRewardsAllowed, economyBasis, laterMode, readSt
 import { useOptionalAuth } from "@/lib/auth/auth-context";
 import { onSessionStale, serverDay, type DayCall, type ServerDayStatus } from "./server-day-client";
 import { answerBelongs, requestScopeOf, type RequestScope, type ScopeNow } from "./economy-scope";
+import { readUpload, transferViewOf, uploadSnapshotOnce, type TransferView } from "./migration/snapshot-upload";
 import { mirrorServerDay } from "./server-day-mirror";
 import type { WeekSnapshot } from "@/lib/day-snapshots";
 import type { PQNoteField, PQResult, PQStartInput } from "@/lib/personal-quests";
@@ -232,6 +233,8 @@ export interface EconomyView {
   notice: "rewardsPaused" | "serverRefused" | "offline" | null;
   /** The server's code for «serverRefused». */
   noticeReason?: string;
+  /** Q4.5-4: what happened to this device's progress in the transfer (null: nothing to say). */
+  transfer?: TransferView;
 }
 
 export interface QuestCompletion {
@@ -779,11 +782,50 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     }
   }, [applyServerStatus, belongs, learnRefusedState, requestScope, runCloud, setEconomyView, stillIn]);
 
+  /**
+   * Q4.5-4: in the transfer window (or after it, for a device that was offline) the device sends a frozen copy of its
+   * saved game state ONCE — the same copy until the server answers (lib/migration/snapshot-upload.ts). It credits and
+   * changes nothing; the device keeps its own progress.
+   */
+  const uploadingRef = React.useRef(false);
+  const sendDeviceSnapshot = useCallback(async () => {
+    const mode = economyRef.current.mode;
+    if (!serverEconomyOn() || uploadingRef.current) return;
+    const scope = requestScope();
+    if (!scope) return;
+    const kv = {
+      get: (key: string) => (AppStorage.getActiveSpaceId() === scope.space ? AppStorage.getItem(key) : null),
+      set: (key: string, value: string) => AppStorage.guardedSetItem(key, value, scope.space),
+    };
+    uploadingRef.current = true;
+    try {
+      const out = await uploadSnapshotOnce(mode, scope, {
+        kv,
+        rawState: kv.get(STORAGE_KEY),
+        now: new Date(),
+        uuid: () => crypto.randomUUID(),
+        belongs: (s, account) => answerBelongs(s, account, scopeNow()),
+      });
+      if (out.kind === "ignored") return;
+      if (out.kind === "retry" && out.state) learnRefusedState({ ok: false, error: "session_stale", state: out.state, account: scope.account }, scope);
+      setEconomyView({ transfer: transferViewOf(economyRef.current.mode, out.kind === "done" ? out.record : readUpload(kv), out.kind === "retry" ? out.error : null) });
+    } finally {
+      uploadingRef.current = false;
+    }
+  }, [learnRefusedState, requestScope, scopeNow, setEconomyView]);
+  useEffect(() => {
+    if (!isLoaded || !loadedSpace?.startsWith("account:")) return;
+    if (economy.mode === "migration_pending" || economy.mode === "cloud_active") void sendDeviceSnapshot();
+  }, [economy.mode, isLoaded, loadedSpace, sendDeviceSnapshot]);
+
   useEffect(() => {
     if (!isLoaded || !serverEconomyOn() || !loadedSpace?.startsWith("account:")) return;
     void refreshServerDay();
     const onFocus = () => {
-      if (document.visibilityState === "visible") void refreshServerDay();
+      if (document.visibilityState === "visible") {
+        void refreshServerDay();
+        void sendDeviceSnapshot();
+      }
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onFocus);
@@ -791,7 +833,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onFocus);
     };
-  }, [isLoaded, loadedSpace, refreshServerDay]);
+  }, [isLoaded, loadedSpace, refreshServerDay, sendDeviceSnapshot]);
 
   // QH-6.6: accepting a mission gives nothing; it only marks the mission as taken for today (Q4.4: on the server day for
   // an account on the server economy — the device shows the server's answer)

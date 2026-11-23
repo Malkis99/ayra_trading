@@ -241,7 +241,8 @@ BEGIN
      OR has_function_privilege('service_role', 'public.game_access_token_hook(jsonb)', 'EXECUTE') THEN
     RAISE EXCEPTION 'G2: the server cannot award without the session check, nor run the hook';
   END IF;
-  IF NOT has_function_privilege('service_role', 'public.game_economy_transition(uuid,text,text)', 'EXECUTE')
+  -- (0019, Q4.5-4: state changes belong to the owner's tool — with 0019 the server no longer moves accounts)
+  IF has_function_privilege('service_role', 'public.game_economy_transition(uuid,text,text)', 'EXECUTE') = (to_regclass('public.game_imports') IS NOT NULL)
      OR NOT has_function_privilege('service_role', 'public.game_session_check(uuid,uuid,bigint,text)', 'EXECUTE')
      OR NOT has_function_privilege('service_role', 'public.game_apply_reward_for_session(uuid,uuid,bigint,text,text,text,jsonb)', 'EXECUTE') THEN
     RAISE EXCEPTION 'G3: the server keeps its three entry points';

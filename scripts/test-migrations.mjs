@@ -553,6 +553,49 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   await db.close();
 }
 
+// R. 0019: device snapshots in quarantine, reconciliation, legacy reviews and the owner's activation (Q4.5-4) on top of
+//    0014–0016 + 0018 — applied twice; the SQL tests; nothing switched on; the 0018 tests still pass with it; rollback
+//    refused while any snapshot exists, otherwise restores 0018 (and its tests pass again)
+{
+  const base = ["0001_init", "0002_profile_defaults", "0003_nickname_cooldown", "0004_journal_sync", "0014_game_economy", "0015_game_days", "0016_game_day_api", "0018_game_economy_sessions"];
+  const db = await fresh();
+  for (const f of base) await db.exec(read(`supabase/migrations/${f}.sql`));
+  await db.exec(read("supabase/migrations/0019_game_migration_import.sql"));
+  await db.exec(read("supabase/migrations/0019_game_migration_import.sql")); ok("R: 0019 applied twice");
+  try { await db.exec(read("supabase/tests/game_migration_import.sql")); ok("R: tests/game_migration_import.sql passed"); }
+  catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`R: test script: ${e.message}`); }
+  const left = (await db.query(`SELECT (SELECT count(*) FROM public.game_imports)::int + (SELECT count(*) FROM public.game_migration_audit)::int
+    + (SELECT count(*) FROM public.game_accounts)::int AS n`)).rows[0].n;
+  left === 0 ? ok("R: test rolled back (no rows left)") : fail("R: rows left after test");
+  try { await db.exec(read("supabase/tests/game_economy_sessions.sql")); ok("R: tests/game_economy_sessions.sql (0018) pass with 0019"); }
+  catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`R: 0018 tests with 0019: ${e.message}`); }
+  const st = (await db.query(`SELECT has_schema_privilege('game_economy_owner', 'public', 'CREATE') AS cr,
+    (SELECT count(*) FROM public.game_award_kinds WHERE enabled)::int AS kinds,
+    (SELECT count(*) FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid JOIN pg_roles u ON u.oid = m.member
+      WHERE r.rolname = 'game_migration_admin' AND u.rolname IN ('anon', 'authenticated', 'service_role', 'supabase_auth_admin'))::int AS api_members,
+    (SELECT rolcanlogin FROM pg_roles WHERE rolname = 'game_migration_admin') AS login`)).rows[0];
+  !st.cr && st.kinds === 0 && st.api_members === 0 && st.login === false
+    ? ok("R: no CREATE left, nothing switched on, the owner's role has no login and no API role in it") : fail(`R: state ${JSON.stringify(st)}`);
+  await db.exec(`INSERT INTO auth.users (id, email) VALUES ('00000000-0000-0000-0000-00000019b001', 'keep@x');
+    SELECT public.game_economy_transition('00000000-0000-0000-0000-00000019b001', 'local', 'migration_pending');
+    SELECT public.game_import_snapshot('00000000-0000-0000-0000-00000019b001', gen_random_uuid(), floor(extract(epoch FROM now()))::bigint,
+      'migration_pending', gen_random_uuid(), gen_random_uuid(), 1, '{"level":2}');`);
+  let refused = false;
+  try { await db.exec(read("supabase/migrations/0019_game_migration_import.down.sql")); } catch { refused = true; await db.exec("ROLLBACK").catch(() => {}); }
+  const kept = (await db.query(`SELECT count(*)::int n FROM public.game_imports`)).rows[0].n;
+  refused && kept === 1 ? ok("R: rollback refused while a snapshot exists; the snapshot kept") : fail(`R: rollback with a snapshot refused=${refused} kept=${kept}`);
+  await db.exec(`DELETE FROM auth.users WHERE id = '00000000-0000-0000-0000-00000019b001'`);
+  await db.exec(read("supabase/migrations/0019_game_migration_import.down.sql"));
+  const after = (await db.query(`SELECT to_regclass('public.game_imports') IS NULL AS gone,
+    NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'game_migration_admin') AS role_gone,
+    has_function_privilege('service_role', 'public.game_economy_transition(uuid,text,text)', 'EXECUTE') AS tr,
+    has_schema_privilege('game_economy_owner', 'public', 'CREATE') AS cr`)).rows[0];
+  after.gone && after.role_gone && after.tr && !after.cr ? ok("R: rollback removes 0019 and restores the 0018 access") : fail(`R: rollback ${JSON.stringify(after)}`);
+  try { await db.exec(read("supabase/tests/game_economy_sessions.sql")); ok("R: 0018 tests pass after the 0019 rollback"); }
+  catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`R: 0018 tests after rollback: ${e.message}`); }
+  await db.close();
+}
+
 // S. Supabase compatibility (found on the official supabase/postgres image, Q4.5-2): «GRANT <role> TO CURRENT_USER»
 //    crashes the server process there (supautils, signal 11) — role grants must name the role (format(... %I, current_user))
 {

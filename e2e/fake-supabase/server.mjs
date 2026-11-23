@@ -55,6 +55,7 @@ export function createFakeSupabase() {
   const tokenAgeByEmail = new Map(); // e-mail (lower case) -> seconds: tokens issued «that long ago» (a device whose token is old)
   const economies = new Map(); // user id -> { state, game_sync, opening_mode, day }
   const economyCalls = []; // { fn, user, args } — what the routes asked (never a time or a day)
+  const imports = new Map(); // "user:snapshot" -> { user, snapshot, install, md5, status, content } (0019 stand-in)
   const SERVICE_KEY = "fake-service-key";
   const FAKE_MODE_MISSIONS = { trading: ["q_bias", "q_riskcheck", "q_reflect"], study: ["m_observation", "m_backtest", "m_lesson"], recovery: ["m_day_state", "m_mistake", "m_plan_tomorrow"] };
   let journalWriteFailuresLeft = 0; // next N journal writes fail with 500 (server trouble)
@@ -273,6 +274,11 @@ export function createFakeSupabase() {
       // the user's live auth sessions (auth.sessions) — e2e checks that a sign-out ends one and a sign-in makes a new one
       const user = usersByEmail.get(url.searchParams.get("email"));
       return send(200, { live: user ? [...liveSessions.values()].filter((id) => id === user.id).length : 0, refreshes: user ? refreshCount.get(user.id) || 0 : 0 });
+    }
+    // 0019 stand-in: the snapshots an account's devices sent (as game_imports keeps them)
+    if (path === "/__test/imports") {
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      return send(200, user ? [...imports.values()].filter((r) => r.user === user.id) : []);
     }
     if (path === "/__test/economy-calls") {
       if (url.searchParams.get("reset")) economyCalls.length = 0;
@@ -839,6 +845,20 @@ export function createFakeSupabase() {
       if (fn === "game_session_check") return send(200, sessionCheck());
       if (fn === "game_apply_reward_for_session" && !sessionCheck().fresh) return send(400, { code: "42501", message: "game_session_stale" });
       if (fn === "game_day_status") return send(200, statusOf());
+      // 0019 game_import_snapshot(): a fresh token; only in the window or after it (late); replay, conflict, one per install
+      if (fn === "game_import_snapshot") {
+        if (!sessionCheck().fresh) return send(400, { code: "42501", message: "game_session_stale" });
+        if (econ.state !== "migration_pending" && econ.state !== "cloud_active") return refuse("game_import_not_open");
+        const md5 = crypto.createHash("md5").update(JSON.stringify(body.p_content)).digest("hex");
+        const key = `${body.p_user}:${body.p_snapshot}`;
+        const old = imports.get(key);
+        if (old) return old.md5 === md5 && old.install === body.p_install ? send(200, { status: old.status, replay: true, received_at: old.received_at }) : refuse("game_import_conflict");
+        let status = econ.state === "cloud_active" ? "late" : "accepted";
+        if (status === "accepted" && [...imports.values()].some((r) => r.user === body.p_user && r.install === body.p_install && r.status === "accepted")) status = "duplicate_install";
+        const row = { user: body.p_user, snapshot: body.p_snapshot, install: body.p_install, md5, status, content: body.p_content, received_at: new Date().toISOString() };
+        imports.set(key, row);
+        return send(200, { status, replay: false, received_at: row.received_at });
+      }
       if (econ.state !== "cloud_active") return refuse("game_account_not_active");
       if (fn === "game_day_today") return send(200, today);
       if (fn === "game_day_open") {

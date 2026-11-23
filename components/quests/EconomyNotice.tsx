@@ -21,6 +21,11 @@ export function EconomyNotice() {
   if (economy.mode === "cloud_active") lines.push({ key: "mode", text: economy.gameSync ? e.cloudOn : e.cloudPaused, icon: economy.gameSync ? "cloud" : "pause" });
   if (economy.notice === "rewardsPaused" && !deviceRewardsAllowed(economy.mode)) lines.push({ key: "notice", text: e.rewardsPaused, icon: "pause" });
   if (economy.notice === "offline") lines.push({ key: "notice", text: e.offline, icon: "offline" });
+  // Q4.5-4: this device's progress in the transfer
+  if (economy.transfer === "waiting") lines.push({ key: "transfer", text: e.transferWaiting, icon: "cloud" });
+  if (economy.transfer === "sent") lines.push({ key: "transfer", text: e.transferSent, icon: "cloud" });
+  if (economy.transfer === "late") lines.push({ key: "transfer", text: e.transferLate, icon: "pause" });
+  if (economy.transfer === "tooLarge") lines.push({ key: "transfer", text: e.transferTooLarge, icon: "pause" });
   if (economy.notice === "serverRefused") lines.push({ key: "notice", text: formatString(e.serverRefused, { reason: economy.noticeReason || "" }), icon: "pause" });
   if (lines.length === 0) return null;
   return (
