@@ -8,7 +8,8 @@ BEGIN;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM public.game_imports) OR EXISTS (SELECT 1 FROM public.game_reconciliations)
-     OR EXISTS (SELECT 1 FROM public.game_legacy_reviews) OR EXISTS (SELECT 1 FROM public.game_migration_audit) THEN
+     OR EXISTS (SELECT 1 FROM public.game_legacy_reviews) OR EXISTS (SELECT 1 FROM public.game_migration_audit)
+     OR EXISTS (SELECT 1 FROM public.game_migration_windows) THEN
     RAISE EXCEPTION 'game_rollback_migration_data: snapshots or decisions exist — export and keep them before rolling back 0019';
   END IF;
 END $$;
@@ -16,6 +17,16 @@ END $$;
 GRANT CREATE ON SCHEMA public TO game_economy_owner;
 
 DROP FUNCTION IF EXISTS public.game_mig_activate(UUID, BIGINT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.game_mig_activate_new(UUID, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.game_mig_extend_window(UUID, TIMESTAMPTZ, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.game_mig_reconcile(UUID);
+DROP FUNCTION IF EXISTS public.game_mig_iso_time(TEXT);
+DROP FUNCTION IF EXISTS public.game_mig_is_day(TEXT);
+DROP FUNCTION IF EXISTS public.game_mig_obj(JSONB);
+DROP FUNCTION IF EXISTS public.game_mig_arr(JSONB);
+DROP FUNCTION IF EXISTS public.game_mig_str(JSONB);
+DROP FUNCTION IF EXISTS public.game_mig_int(JSONB);
+DROP FUNCTION IF EXISTS public.game_mig_is_int(JSONB);
 DROP FUNCTION IF EXISTS public.game_mig_decide_legacy(UUID, UUID, TEXT, INTEGER, INTEGER, TEXT, TEXT);
 DROP FUNCTION IF EXISTS public.game_mig_save_reconciliation(UUID, JSONB, TEXT);
 DROP FUNCTION IF EXISTS public.game_mig_transition(UUID, TEXT, TEXT, TEXT, TEXT);
@@ -24,6 +35,7 @@ DROP FUNCTION IF EXISTS public.game_mig_journal_days(UUID, TEXT);
 DROP FUNCTION IF EXISTS public.game_mig_timezone(UUID);
 DROP FUNCTION IF EXISTS public.game_mig_audit(TEXT, TEXT, UUID, JSONB);
 DROP FUNCTION IF EXISTS public.game_import_snapshot(UUID, UUID, BIGINT, TEXT, UUID, UUID, INTEGER, JSONB);
+DROP FUNCTION IF EXISTS public.game_mig_window_closes_at(UUID);
 
 -- 0018 transition (no snapshot check)
 CREATE OR REPLACE FUNCTION public.game_economy_transition(p_user UUID, p_from TEXT, p_to TEXT)
@@ -59,6 +71,7 @@ DROP TABLE IF EXISTS public.game_legacy_reviews;
 DROP TABLE IF EXISTS public.game_reconciliations;
 DROP TABLE IF EXISTS public.game_imports;
 DROP TABLE IF EXISTS public.game_migration_audit;
+DROP TABLE IF EXISTS public.game_migration_windows;
 DROP FUNCTION IF EXISTS public.game_import_immutable();
 
 DO $$

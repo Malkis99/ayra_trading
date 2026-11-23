@@ -565,7 +565,8 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   try { await db.exec(read("supabase/tests/game_migration_import.sql")); ok("R: tests/game_migration_import.sql passed"); }
   catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`R: test script: ${e.message}`); }
   const left = (await db.query(`SELECT (SELECT count(*) FROM public.game_imports)::int + (SELECT count(*) FROM public.game_migration_audit)::int
-    + (SELECT count(*) FROM public.game_accounts)::int AS n`)).rows[0].n;
+    + (SELECT count(*) FROM public.game_accounts)::int + (SELECT count(*) FROM public.game_migration_windows)::int
+    + (SELECT count(*) FROM public.game_reconciliations)::int AS n`)).rows[0].n;
   left === 0 ? ok("R: test rolled back (no rows left)") : fail("R: rows left after test");
   try { await db.exec(read("supabase/tests/game_economy_sessions.sql")); ok("R: tests/game_economy_sessions.sql (0018) pass with 0019"); }
   catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`R: 0018 tests with 0019: ${e.message}`); }
@@ -586,7 +587,8 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   refused && kept === 1 ? ok("R: rollback refused while a snapshot exists; the snapshot kept") : fail(`R: rollback with a snapshot refused=${refused} kept=${kept}`);
   await db.exec(`DELETE FROM auth.users WHERE id = '00000000-0000-0000-0000-00000019b001'`);
   await db.exec(read("supabase/migrations/0019_game_migration_import.down.sql"));
-  const after = (await db.query(`SELECT to_regclass('public.game_imports') IS NULL AS gone,
+  const after = (await db.query(`SELECT to_regclass('public.game_imports') IS NULL AND to_regclass('public.game_migration_windows') IS NULL
+      AND to_regprocedure('public.game_mig_reconcile(uuid)') IS NULL AS gone,
     NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'game_migration_admin') AS role_gone,
     has_function_privilege('service_role', 'public.game_economy_transition(uuid,text,text)', 'EXECUTE') AS tr,
     has_schema_privilege('game_economy_owner', 'public', 'CREATE') AS cr`)).rows[0];

@@ -64,6 +64,8 @@ BEGIN
   IF pg_temp.err(format($q$SELECT public.game_economy_transition(%L, 'migration_pending', 'migration_scheduled')$q$, c_a)) <> 'game_state_one_way' THEN
     RAISE EXCEPTION 'T8: pending never goes back to scheduled';
   END IF;
+  -- with 0019 a direct activation needs the activation marker of this transaction (unused before 0019)
+  PERFORM set_config('ayra.mig_activation', c_a::text, TRUE);
   v := public.game_economy_transition(c_a, 'migration_pending', 'cloud_active');
   IF v ->> 'state' <> 'cloud_active' OR (SELECT activated_at FROM public.game_accounts WHERE user_id = c_a) IS NULL
      OR NOT EXISTS (SELECT 1 FROM public.game_profile WHERE user_id = c_a) THEN
@@ -90,6 +92,7 @@ DECLARE
 BEGIN
   IF public.game_begin_migration(c_d) <> 'migration_pending' THEN RAISE EXCEPTION 'B1: begin'; END IF;
   IF public.game_begin_migration(c_d) <> 'migration_pending' THEN RAISE EXCEPTION 'B2: begin again is a replay'; END IF;
+  PERFORM set_config('ayra.mig_activation', c_d::text, TRUE);
   IF public.game_activate_cloud(c_d, 'q4.5') <> 'cloud_active' OR (SELECT rules_version FROM public.game_accounts WHERE user_id = c_d) <> 'q4.5' THEN
     RAISE EXCEPTION 'B3: activate and the rules version';
   END IF;

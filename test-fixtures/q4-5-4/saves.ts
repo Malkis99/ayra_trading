@@ -13,8 +13,8 @@ export const legacySave = {
 };
 
 /**
- * After #98 (2026-10-27 14:50 UTC), before #99 (15:34): first actions with the OLD amounts (a rule that lived 44 minutes,
- * inside the deploy margin — so its amount is never proven: the smaller one is), history without exact times,
+ * After #98 (2026-10-27 14:50 UTC), before #99 (15:34): first actions with the OLD amounts (a rule that lived 44 minutes;
+ * no coin log yet — so the amount is never proven: the smaller one of the two rules is), history without exact times,
  * the daily coin cap. Quests: 2 × (40 XP, 10 Coins). First actions: trade (20/20), note (10 XP / 10 Coins, old rule).
  * Journal XP on 2026-10-27: 15 beyond the quests. Total XP = 110 + 15 = 125 → level 2 (120) + 5. Coins = 20 + 20 + 10 + 7 = 57.
  */
@@ -76,8 +76,9 @@ export const missionsSave = {
 };
 
 /**
- * A tampered save: a quest worth 500 XP, a day with 150 Coins of quests after the cap, a level inconsistent with its
- * XP, a balance below its own records.
+ * A tampered save: a quest worth 500 XP, two quests above the largest Coins a quest ever paid (15), a first action dated
+ * before first actions existed (its time proves nothing; the amount is the same under both rules), a level inconsistent
+ * with its XP, a balance below its own records.
  */
 export const tamperedSave = {
   level: 2,
@@ -105,3 +106,15 @@ export const capSaveDeviceB = {
   firstActions: { trade: "2026-10-28T10:00:00Z" },
   achievements: { firstTrade: true, streak3: true },
 };
+
+/** Seven different quests of 10 Coins on one capped day (70 Coins: under the cap on this device alone). */
+const sevenQuests = (prefix: string, day: string) =>
+  Array.from({ length: 7 }, (_, i) => ({ questId: `${prefix}${i}`, questTitle: "Q", category: "x", xp: 40, coins: 10, completedAt: day, at: `${day}T1${i}:00:00.000Z` }));
+
+/**
+ * The owner's case (review 2026-11-23): device A and device B each earned 70 Coins of DIFFERENT quests on 2026-11-03 —
+ * each under the cap of 100 on its own device, 140 for the account together. Totals: 7 × 40 = 280 XP = 120 + 160 →
+ * level 3 with 0 XP in it; Coins 70.
+ */
+export const capDayDeviceA = { level: 3, xp: 0, coins: 70, history: sevenQuests("qa_", "2026-11-03"), coinLogSince: "2026-11-01T00:00:00.000Z", coinLog: [] };
+export const capDayDeviceB = { level: 3, xp: 0, coins: 70, history: sevenQuests("qb_", "2026-11-03"), coinLogSince: "2026-11-01T00:00:00.000Z", coinLog: [] };

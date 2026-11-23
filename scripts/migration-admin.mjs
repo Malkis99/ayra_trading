@@ -5,13 +5,19 @@
 // every decision needs an author (--actor), a reason (--reason) and a typed confirmation (the account id). Every change
 // is written to game_migration_audit by the database itself.
 //
+// The numbers are never the tool's: the database computes the reconciliation itself from the stored snapshots
+// (game_mig_reconcile) and saves only when this tool's own computation (lib/migration/reconcile.ts) is EQUAL to it —
+// two independent implementations; a difference is refused and logged. The activation computes it once more.
+//
 //   AYRA_MIGRATION_DB_URL=postgres://… node scripts/migration-admin.mjs <command> …
 //
 //   show       <user>                                         snapshots, reviews, reconciliations, decision log
 //   open       <user> --actor A --reason R                    local / scheduled → migration_pending (the window)
+//   window     <user> --until <ISO time> --actor A --reason R  extends the intake window (7 days by default; only later)
 //   reconcile  <user> [--save --actor A]                      computes the preview; --save stores it as the draft
 //   decide     <user> <snapshot> <pending_review|accepted|rejected|needs_evidence> [--xp N --coins N] --actor A --reason R
-//   activate   <user> <reconciliation id> --actor A [--level-gap-ack TEXT]
+//   activate   <user> <reconciliation id> --actor A [--level-gap-ack TEXT]   (after the window closed)
+//   activate-new <user> --actor A --reason R                  a genuinely new account: no snapshot, no history at all
 //
 // Confirmation: typed at the prompt, or --confirm <user> (the same account id) for a scripted run.
 // The connection string is never printed or logged. Never point it at Production before the owner's written approval.
@@ -65,8 +71,9 @@ async function connect() {
 const table = (rows) => (rows.length ? console.table(rows) : console.log("  (none)"));
 
 async function show(db, user) {
-  const acc = (await db.query("SELECT state, state_changed_at FROM public.game_accounts WHERE user_id = $1", [user])).rows[0];
+  const acc = (await db.query("SELECT state, state_changed_at, public.game_mig_window_closes_at(user_id) AS closes FROM public.game_accounts WHERE user_id = $1", [user])).rows[0];
   console.log(`State: ${acc ? `${acc.state} since ${acc.state_changed_at.toISOString()}` : "local (no row)"}`);
+  if (acc?.closes) console.log(`Intake window: ${acc.closes > new Date() ? "open" : "CLOSED"} — closes at ${acc.closes.toISOString()} (closing deletes nothing; later snapshots are kept as late)`);
   console.log("\nSnapshots (quarantine — nothing here is credited):");
   table((await db.query(`SELECT snapshot_id, install_id, status, account_state, byte_size, received_at,
       content->>'level' AS level, content->>'xp' AS xp_in_level, content->>'coins' AS coins
@@ -94,22 +101,28 @@ async function computePreview(db, user) {
     tz,
     Object.fromEntries(snaps.map((s) => [s.snapshot_id, s.content_md5])),
   );
+  // the database's own computation from the same stored snapshots: the two must be equal (the save checks it again)
+  const server = (await db.query("SELECT public.game_mig_reconcile($1) AS r", [user])).rows[0].r;
+  const agree = (await db.query("SELECT $1::jsonb = $2::jsonb AS eq", [JSON.stringify(r), JSON.stringify(server)])).rows[0].eq;
+  const differs = agree ? [] : Object.keys(server).filter((k) => JSON.stringify(server[k]) !== JSON.stringify(r[k]));
   const journal = (await db.query("SELECT public.game_mig_journal_days($1, $2) AS d", [user, tz])).rows[0].d || {};
   const dayCounts = Object.fromEntries(Object.entries(journal).map(([d, c]) => [d, Object.entries(c).filter(([k]) => k !== "imported").reduce((a, [, n]) => a + Number(n), 0)]));
-  return { tz, r, journal, dayCounts };
+  return { tz, r, journal, dayCounts, agree, differs };
 }
 
-function printPreview({ tz, r, journal, dayCounts }) {
-  console.log(`Time zone of the account: ${tz}`);
+function printPreview({ tz, r, journal, dayCounts, agree, differs }) {
+  console.log(`Time zone of the account: ${tz}. Algorithm ${r.algorithm}.`);
+  console.log(agree ? "The database computed the SAME result on its own (two independent implementations agree)."
+    : `THE DATABASE COMPUTED ANOTHER RESULT (${differs.join(", ")}): it will not be saved — report this, do not work around it.`);
   console.log(`\nProven events (${r.events.length}) — each counted once across devices:`);
   table(r.events.map((e) => ({ key: e.key, day: e.day, xp: e.xp, coins: e.coins, devices: e.sources.length })));
   console.log(`\nConflicts (${r.conflicts.length}) — nothing of these is confirmed:`);
-  table(r.conflicts.map((c) => ({ code: c.code, subject: c.subject, xp: c.xp, coins: c.coins, detail: c.detail.slice(0, 100) })));
+  table(r.conflicts.map((c) => ({ code: c.code, subject: c.subject, xp: c.xp, coins: c.coins })));
   console.log("\nLegacy candidates (per device — NEVER summed; at most one can be accepted):");
   for (const l of r.legacy) {
     console.log(`  ${l.snapshotId}  original level ${l.original.level} (${l.original.totalXp} XP total), ${l.original.coins} Coins, save ${l.original.saveVersion}`);
     console.log(`    confirmed ${l.confirmed.xp} XP / ${l.confirmed.coins} Coins → candidate ${l.candidate.xp} XP / ${l.candidate.coins} Coins`);
-    for (const x of l.reasons) console.log(`    · ${x.code}${x.xp ? ` ${x.xp} XP` : ""}${x.coins ? ` ${x.coins} Coins` : ""}${x.detail ? ` — ${x.detail}` : ""}`);
+    for (const x of l.reasons) console.log(`    · ${x.code}${x.xp ? ` ${x.xp} XP` : ""}${x.count ? ` ×${x.count}` : ""}${x.since ? ` since ${x.since}` : ""}`);
     const ev = journalEvidence(l, dayCounts);
     if (ev.length) console.log(`    Journal evidence (records per day, not a proof of any reward): ${ev.map((e) => `${e.day}:${e.recordsThatDay}`).join(" ")}`);
   }
@@ -118,13 +131,13 @@ function printPreview({ tz, r, journal, dayCounts }) {
   const p = r.proposed;
   console.log(`\nProposed from proven events only: ${p.confirmedXp} XP → level ${p.level}; ${p.confirmedCoins} Coins.`);
   console.log(`Original (highest device): level ${p.originalLevel}, ${p.originalCoins} Coins.${p.levelGap ? `  LEVEL GAP ${p.levelGap}: activation needs --level-gap-ack or an accepted remainder.` : ""}`);
-  console.log(`Achievements on the devices (kept as they are): ${r.achievements.join(", ") || "none"}`);
+  console.log(`Achievements on the devices (kept in the snapshots; not on the server before Q4.6): ${r.achievements.join(", ") || "none"}`);
 }
 
 async function main() {
   const { pos, opt } = parseArgs(process.argv.slice(2));
   const [cmd, user, ...rest] = pos;
-  if (!cmd || !["show", "open", "reconcile", "decide", "activate"].includes(cmd)) die("command: show | open | reconcile | decide | activate");
+  if (!cmd || !["show", "open", "window", "reconcile", "decide", "activate", "activate-new"].includes(cmd)) die("command: show | open | window | reconcile | decide | activate | activate-new");
   if (!user || !UUID_RE.test(user)) die("<user> must be the account id (UUID)");
   const db = await connect();
   try {
@@ -137,14 +150,31 @@ async function main() {
       const v = (await db.query("SELECT public.game_mig_transition($1, $2, 'migration_pending', $3, $4) AS v", [user, st, actor, reason])).rows[0].v;
       return console.log(JSON.stringify(v));
     }
+    if (cmd === "window") {
+      const until = new Date(need(opt.until, "--until"));
+      if (Number.isNaN(until.getTime())) die("--until must be a date and time (ISO, e.g. 2026-12-10T12:00:00Z)");
+      const actor = need(opt.actor, "--actor");
+      const reason = need(opt.reason, "--reason");
+      await confirm(user, opt, `Extend the intake window to ${until.toISOString()}. Reason: ${reason}`);
+      const v = (await db.query("SELECT public.game_mig_extend_window($1, $2, $3, $4) AS v", [user, until.toISOString(), actor, reason])).rows[0].v;
+      return console.log(JSON.stringify(v));
+    }
+    if (cmd === "activate-new") {
+      const actor = need(opt.actor, "--actor");
+      const reason = need(opt.reason, "--reason");
+      await confirm(user, opt, "ACTIVATE AS A NEW ACCOUNT (not a transfer): only for an account with no snapshot and no history at all; it starts at zero.");
+      const v = (await db.query("SELECT public.game_mig_activate_new($1, $2, $3) AS v", [user, actor, reason])).rows[0].v;
+      return console.log(JSON.stringify(v));
+    }
     if (cmd === "reconcile") {
       const preview = await computePreview(db, user);
       printPreview(preview);
       if (!opt.save) return console.log("\nPreview only. Add --save --actor <name> to store it as the draft.");
       const actor = need(opt.actor, "--actor");
       await confirm(user, opt, "Save this reconciliation as the draft (reviews of changed candidates go back to pending_review).");
-      const id = (await db.query("SELECT public.game_mig_save_reconciliation($1, $2, $3) AS id", [user, JSON.stringify(preview.r), actor])).rows[0].id;
-      return console.log(`Saved draft reconciliation ${id}.`);
+      const v = (await db.query("SELECT public.game_mig_save_reconciliation($1, $2, $3) AS v", [user, JSON.stringify(preview.r), actor])).rows[0].v;
+      if (!v.saved) die(`${v.refused}: the database did not save it (the refusal is in the decision log)`);
+      return console.log(`Saved draft reconciliation ${v.id} (result md5 ${v.result_md5}).`);
     }
     if (cmd === "decide") {
       const [snapshot, status] = rest;
@@ -167,6 +197,8 @@ async function main() {
       if (!rec) die("no such reconciliation for this account");
       await confirm(user, opt, `ACTIVATE the server economy for this account from reconciliation ${id} (${rec.status}): ${rec.p.confirmedXp} XP / ${rec.p.confirmedCoins} Coins proven + the accepted remainder. This cannot be undone.`);
       const v = (await db.query("SELECT public.game_mig_activate($1, $2, $3, $4) AS v", [user, id, actor, opt["level-gap-ack"] ?? null])).rows[0].v;
+      if (v.refused) die(`${v.refused}: nothing was credited, the account stays in migration_pending (the refusal is in the decision log)`);
+      if (v.achievements_transferred === false && !v.replay) console.log("Note: achievements stay on the devices and in the snapshots until Q4.6 — the transfer is not complete for the person yet.");
       return console.log(JSON.stringify(v));
     }
   } catch (e) {

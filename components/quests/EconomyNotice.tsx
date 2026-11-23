@@ -19,6 +19,8 @@ export function EconomyNotice() {
   if (economy.mode === "migration_scheduled") lines.push({ key: "mode", text: e.scheduled, icon: "cloud" });
   if (economy.mode === "migration_pending") lines.push({ key: "mode", text: e.pending, icon: "pause" });
   if (economy.mode === "cloud_active") lines.push({ key: "mode", text: economy.gameSync ? e.cloudOn : e.cloudPaused, icon: economy.gameSync ? "cloud" : "pause" });
+  // Q4.5-4: achievements are not on the server before Q4.6 — the transfer is not complete for the person yet
+  if (economy.mode === "cloud_active") lines.push({ key: "achievements", text: e.achievementsOnDevice, icon: "cloud" });
   if (economy.notice === "rewardsPaused" && !deviceRewardsAllowed(economy.mode)) lines.push({ key: "notice", text: e.rewardsPaused, icon: "pause" });
   if (economy.notice === "offline") lines.push({ key: "notice", text: e.offline, icon: "offline" });
   // Q4.5-4: this device's progress in the transfer

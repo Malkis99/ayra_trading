@@ -100,13 +100,15 @@ test.describe("Q4.5-4 device snapshots (fake Supabase with the 0019 stand-in)", 
     expect(await imports(request, email)).toHaveLength(1);
   });
 
-  test("a device that comes after the transfer: its copy is kept apart (late) and the person is told", async ({ page, request }) => {
+  test("a device that comes after the transfer: its copy is kept apart (late) and the person is told; achievements stay on the device", async ({ page, request }) => {
     const { email, userId } = await account(page, request, "Late");
     await setState(request, email, "cloud_active");
     await openQuests(page);
     await expect(notice(page)).toHaveAttribute("data-mode", "cloud_active");
     await expect.poll(async () => (await imports(request, email)).map((r) => r.status), { timeout: 30_000 }).toEqual(["late"]);
-    await expect(page.getByTestId("economy-line-transfer")).toContainText(/after the transfer|после переноса/);
+    await expect(page.getByTestId("economy-line-transfer")).toContainText(/after the transfer intake closed|после окончания приёма/);
+    // the transfer is not complete for the person before Q4.6: achievements are still the device's
+    await expect(page.getByTestId("economy-line-achievements")).toContainText(/kept on this device|хранятся на этом устройстве/);
     expect(await stored(page, userId, "ayra_migration_snapshot")).not.toBeNull();
   });
 
