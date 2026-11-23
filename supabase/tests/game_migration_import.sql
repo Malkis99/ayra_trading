@@ -63,8 +63,9 @@ BEGIN
   -- schema, size, shape
   e := pg_temp.err($q$SELECT public.game_import_snapshot('00000000-0000-0000-0000-00000019a001', '00000000-0000-0000-0000-0000000005e5', floor(extract(epoch FROM now()))::bigint, 'migration_pending', '10000000-0000-0000-0000-000000000009', '20000000-0000-0000-0000-000000000009', 2, '{}')$q$);
   IF e NOT LIKE '%game_import_schema%' THEN RAISE EXCEPTION 'I3: unknown schema refused: %', e; END IF;
-  e := pg_temp.err($q$SELECT pg_temp.imp('00000000-0000-0000-0000-00000019a001', '10000000-0000-0000-0000-000000000009', '20000000-0000-0000-0000-000000000009', jsonb_build_object('pad', repeat('x', 1100000)))$q$);
-  IF e NOT LIKE '%game_import_too_large%' THEN RAISE EXCEPTION 'I4: a snapshot above 1 MB refused: %', e; END IF;
+  e := pg_temp.err($q$SELECT pg_temp.imp('00000000-0000-0000-0000-00000019a001', '10000000-0000-0000-0000-000000000009', '20000000-0000-0000-0000-000000000009', jsonb_build_object('pad', repeat('x', CASE WHEN to_regclass('public.game_achievements') IS NULL THEN 1100000 ELSE 4300000 END)))$q$);
+  -- the limit of the version applied: 1 MB (0019), 4 MiB once 0020 (Q4.6) receives compressed snapshots
+  IF e NOT LIKE '%game_import_too_large%' THEN RAISE EXCEPTION 'I4: a snapshot above the limit refused: %', e; END IF;
   e := pg_temp.err($q$SELECT pg_temp.imp('00000000-0000-0000-0000-00000019a001', '10000000-0000-0000-0000-000000000009', '20000000-0000-0000-0000-000000000009', '[1]')$q$);
   IF e NOT LIKE '%game_bad_request%' THEN RAISE EXCEPTION 'I5: a non-object refused: %', e; END IF;
   -- device A, then the same request again (a retry): one row
@@ -325,8 +326,9 @@ BEGIN
   -- the proposal: 40 proven + 290 accepted = 330 XP → level 3 (equal to the original: no acknowledgement); 10 + 100 Coins
   v := public.game_mig_activate(c_m, v_id, 'owner', NULL);
   IF v ->> 'state' <> 'cloud_active' OR (v ->> 'xp')::int <> 330 OR (v ->> 'coins')::int <> 110 OR (v ->> 'level')::int <> 3
-     OR (v ->> 'achievements_transferred')::boolean THEN
-    RAISE EXCEPTION 'R16: activation (achievements not transferred before Q4.6): %', v;
+     -- before 0020 (Q4.6) achievements are not transferred; with 0020 the activation transfers them in the same transaction
+     OR (v ->> 'achievements_transferred')::boolean IS DISTINCT FROM (to_regclass('public.game_achievements') IS NOT NULL) THEN
+    RAISE EXCEPTION 'R16: activation (achievements transferred only with 0020): %', v;
   END IF;
   -- a second click: nothing more
   v := public.game_mig_activate(c_m, v_id, 'owner', NULL);
@@ -349,7 +351,7 @@ BEGIN
     RAISE EXCEPTION 'R19: the projection is rebuilt from the ledger';
   END IF;
   IF NOT EXISTS (SELECT 1 FROM public.game_migration_audit WHERE user_id = c_m AND action = 'activated' AND actor = 'owner' AND db_user = session_user
-                 AND details ->> 'achievements_transferred' = 'false') THEN
+                 AND (details ->> 'achievements_transferred')::boolean = (to_regclass('public.game_achievements') IS NOT NULL)) THEN
     RAISE EXCEPTION 'R20: the activation is audited (with the database login; achievements not yet transferred)';
   END IF;
   IF pg_temp.err($q$UPDATE public.game_migration_audit SET actor = 'x'$q$) <> 'game_ledger_append_only'

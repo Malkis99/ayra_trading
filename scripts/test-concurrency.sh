@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AYRA Trading — concurrency tests of the server economy (migrations 0014–0016, 0018, 0019) on a REAL PostgreSQL (CI service container).
+# AYRA Trading — concurrency tests of the server economy (migrations 0014–0016, 0018, 0019, 0020) on a REAL PostgreSQL (CI service container).
 # PGlite has one connection; here many sessions run at the same moment. Never point this at Supabase or production:
 # it refuses to run unless PGHOST is localhost/127.0.0.1 and it creates its own throw-away database.
 #   PGHOST=localhost PGUSER=postgres PGPASSWORD=postgres bash scripts/test-concurrency.sh
@@ -516,6 +516,73 @@ LOGIN=$(q "SELECT rolcanlogin FROM pg_roles WHERE rolname = 'game_migration_admi
 echo "$K_OUT" | grep -q "permission denied to set role" && echo "$K_OUT2" | grep -q "permission denied" && [ "$LOGIN" = f ] \
   && ok "L7: the API login cannot become the owner's role nor read snapshots; the owner's role has no login" \
   || bad "L7: $K_OUT / $K_OUT2 / login=$LOGIN"
+
+# M. 0020 (Q4.6): achievements recorded once whatever runs at the same time; a deletion racing an upload
+psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase/migrations/0020_game_achievements.sql >/dev/null 2>"$TMP/m20.err" \
+  && ok "M0: migration 0020 on PostgreSQL $(q 'SHOW server_version')" || bad "M0: migration 0020: $(cat "$TMP/m20.err")"
+q "INSERT INTO auth.users (id, email) VALUES ('$(m 5)', 'm5@example.com'), ('$(m 6)', 'm6@example.com'), ('$(m 7)', 'm7@example.com');
+   SELECT public.game_economy_transition('$(m 5)', 'local', 'migration_pending');
+   SELECT public.game_economy_transition('$(m 6)', 'local', 'migration_pending');
+   SELECT public.game_economy_transition('$(m 7)', 'local', 'migration_pending');" >/dev/null
+ach_save='{"level":1,"xp":40,"coins":10,"history":[{"questId":"q_bias","xp":40,"coins":10,"completedAt":"2026-11-01"}],"achievements":{"firstQuest":true,"stylist":true,"author":true}}'
+for k in 60 61; do q "$(imp "$(m 5)" "$(snap $k)" "$(inst $k)" "$ach_save")" >/dev/null; done
+
+# M1. Five activations at once of an account whose two devices share achievements: one activation, each id once
+admin_prep "$(m 5)" || bad "M1: owner's preparation"
+rec=$(q "SELECT id FROM public.game_reconciliations WHERE user_id = '$(m 5)' AND status = 'draft'")
+for k in 1 2 3 4 5; do echo "RESET ROLE; SET ROLE game_migration_admin; SELECT public.game_mig_activate('$(m 5)', $rec, 'ci $k', NULL) ->> 'replay';"; done | parallel
+ach=$(q "SELECT count(*) || '/' || count(DISTINCT achievement_id) FROM public.game_achievements WHERE user_id = '$(m 5)'")
+ledger=$(q "SELECT count(*) || '/' || sum(xp) FROM public.game_ledger WHERE user_id = '$(m 5)'")
+[ "$(count_out false)" = 1 ] && [ "$(count_out true)" = 4 ] && [ "$ach" = "3/3" ] && [ "$ledger" = "1/40" ] \
+  && ok "M1: 5 activations at once → 1 activation + 4 replays; 3 achievements once each (two devices); the ledger only the proven quest" \
+  || bad "M1: false=$(count_out false) true=$(count_out true) achievements=$ach ledger=$ledger errs=$(cat "$TMP"/out/*.err)"
+
+# M2. An account activated before 0020 (simulated by the database owner): five transfers at once record its achievements once
+q "$(imp "$(m 6)" "$(snap 62)" "$(inst 62)" "$ach_save")" >/dev/null
+admin_prep "$(m 6)" || bad "M2: owner's preparation"
+rec=$(q "SELECT id FROM public.game_reconciliations WHERE user_id = '$(m 6)' AND status = 'draft'")
+q "SET ROLE game_migration_admin; SELECT public.game_mig_activate('$(m 6)', $rec, 'ci', NULL);" >/dev/null
+q "SET ROLE game_economy_owner; DELETE FROM public.game_achievements WHERE user_id = '$(m 6)'; UPDATE public.game_reconciliations SET achievements_transferred_at = NULL WHERE id = $rec;" >/dev/null
+for k in 1 2 3 4 5; do echo "RESET ROLE; SET ROLE game_migration_admin; SELECT public.game_mig_transfer_achievements('$(m 6)', 'ci $k') ->> 'replay';"; done | parallel
+ach=$(q "SELECT count(*) FROM public.game_achievements WHERE user_id = '$(m 6)'")
+logs=$(q "SELECT count(*) FROM public.game_migration_audit WHERE user_id = '$(m 6)' AND action = 'achievements_transferred'")
+[ "$(count_out false)" = 1 ] && [ "$(count_out true)" = 4 ] && [ "$ach" = 3 ] && [ "$logs" = 1 ] \
+  && ok "M2: 5 transfers at once → 1 transfer + 4 replays; 3 achievements; one audit entry" \
+  || bad "M2: false=$(count_out false) true=$(count_out true) achievements=$ach audit=$logs errs=$(cat "$TMP"/out/*.err)"
+
+# M3. The account is deleted while its devices upload: whatever wins, nothing of the account is left
+{ echo "RESET ROLE; DELETE FROM auth.users WHERE id = '$(m 7)';"
+  for k in $(seq 70 74); do imp "$(m 7)" "$(snap $k)" "$(inst $k)" '{"level":1}'; done; } | parallel
+count_left() { q "SELECT (SELECT count(*) FROM public.game_imports WHERE user_id = '$(m 7)') + (SELECT count(*) FROM public.game_accounts WHERE user_id = '$(m 7)')
+  + (SELECT count(*) FROM public.game_migration_audit WHERE user_id = '$(m 7)')"; }
+left=$(count_left)
+# with the 0019 lock order this deadlocked and Postgres aborted the DELETION (3 of 3 runs); 0020 takes the user row first
+[ "$left" = 0 ] && ! grep -q "deadlock detected" "$TMP"/out/*.err && [ "$(other_errors 'violates foreign key constraint|game_import_not_open|game_session_stale')" = 0 ] \
+  && ok "M3: deletion racing 5 uploads → the deletion goes through (no deadlock), no row of the account left; later uploads refused" \
+  || bad "M3: left=$left errs=$(cat "$TMP"/out/*.err)"
+
+# M4. Under 0020's lock order: the same snapshot ×10 at once is still one row, one first answer and nine replays
+q "INSERT INTO auth.users (id, email) VALUES ('$(m 8)', 'm8@example.com'); SELECT public.game_economy_transition('$(m 8)', 'local', 'migration_pending');" >/dev/null
+for k in $(seq 1 10); do imp "$(m 8)" "$(snap 80)" "$(inst 80)" '{"level":2,"xp":10}' replay; done | parallel
+rows=$(q "SELECT count(*) FROM public.game_imports WHERE user_id = '$(m 8)'")
+[ "$rows" = 1 ] && [ "$(count_out false)" = 1 ] && [ "$(count_out true)" = 9 ] && [ "$(other_errors no_error_is_expected)" = 0 ] \
+  && ok "M4: 0020 intake: the same snapshot ×10 at once → 1 row, 1 first answer + 9 replays" \
+  || bad "M4: rows=$rows false=$(count_out false) true=$(count_out true) errs=$(cat "$TMP"/out/*.err)"
+
+# M5. Under 0020's lock order: the activation racing 5 uploads after the window — nothing accepted is left out
+for k in 81 82; do q "$(imp "$(m 8)" "$(snap $k)" "$(inst $k)" '{"level":1}')" >/dev/null; done
+admin_prep "$(m 8)" || bad "M5: owner's preparation"
+rec=$(q "SELECT id FROM public.game_reconciliations WHERE user_id = '$(m 8)' AND status = 'draft'")
+{ echo "RESET ROLE; SET ROLE game_migration_admin; SELECT public.game_mig_activate('$(m 8)', $rec, 'ci', 'test') ->> 'state';"
+  for k in $(seq 83 87); do imp "$(m 8)" "$(snap $k)" "$(inst $k)" "{\"level\":1,\"n\":$k}"; done; } | parallel
+st=$(q "SELECT state FROM public.game_accounts WHERE user_id = '$(m 8)'")
+left_out=$(q "SELECT count(*) FROM public.game_imports i WHERE i.user_id = '$(m 8)' AND i.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM public.game_reconciliations r
+  WHERE r.user_id = i.user_id AND r.status = 'activated' AND (i.snapshot_id::text || ':' || i.content_md5) = ANY (r.inputs))")
+late=$(q "SELECT count(*) FROM public.game_imports WHERE user_id = '$(m 8)' AND status = 'late'")
+[ "$st" = cloud_active ] && [ "$left_out" = 0 ] && [ "$(count_out cloud_active)" = 1 ] && [ $((late + $(count_err game_session_stale))) = 5 ] \
+  && [ "$(other_errors game_session_stale)" = 0 ] \
+  && ok "M5: 0020 intake: activation racing 5 uploads → activated once; uploads late ($late) or stale ($(count_err game_session_stale)); nothing left out" \
+  || bad "M5: state=$st left_out=$left_out late=$late out=$(cat "$TMP"/out/*.out | tr '\n' ' ') errs=$(cat "$TMP"/out/*.err)"
 
 psql -X -q -d postgres -c "DROP DATABASE IF EXISTS $DB" >/dev/null
 rm -rf "$TMP"

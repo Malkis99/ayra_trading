@@ -63,9 +63,10 @@ import { deviceRewardService, type RewardService } from "@/lib/reward-service";
 import { generateDaySet, type DayMode, type WeekChallenge } from "@/lib/quest-engine";
 import { ECONOMY_MODE_KEY, deviceRewardsAllowed, economyBasis, laterMode, readStickyMode, refusesReward, rememberMode, resolveEconomyMode, serverEconomyOn, type EconomyBasis, type EconomyMode, type SessionEconomy } from "./economy-mode";
 import { useOptionalAuth } from "@/lib/auth/auth-context";
-import { onSessionStale, serverDay, type DayCall, type ServerDayStatus } from "./server-day-client";
+import { callDayApi, onSessionStale, serverDay, type DayCall, type ServerDayStatus } from "./server-day-client";
 import { answerBelongs, requestScopeOf, type RequestScope, type ScopeNow } from "./economy-scope";
 import { readUpload, transferViewOf, uploadSnapshotOnce, type TransferView } from "./migration/snapshot-upload";
+import { readAchievements, type ServerAchievement } from "./server-achievements";
 import { mirrorServerDay } from "./server-day-mirror";
 import type { WeekSnapshot } from "@/lib/day-snapshots";
 import type { PQNoteField, PQResult, PQStartInput } from "@/lib/personal-quests";
@@ -235,6 +236,11 @@ export interface EconomyView {
   noticeReason?: string;
   /** Q4.5-4: what happened to this device's progress in the transfer (null: nothing to say). */
   transfer?: TransferView;
+  /**
+   * Q4.6: the account's achievements on the server (cloud_active only; undefined: not known yet). Once the transfer
+   * recorded them they are the source the profile shows; the device's own flags stay as an archive.
+   */
+  achievements?: { transferred: boolean; items: ServerAchievement[] };
 }
 
 export interface QuestCompletion {
@@ -759,6 +765,25 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   );
   const onCloud = () => economyRef.current.mode === "cloud_active";
 
+  /**
+   * Q4.6: on the server economy the account's achievements are read from the server (read only — nothing here can
+   * unlock one). An answer is applied only to the account and space it was asked for. Asked only after the server's
+   * day status (refreshServerDay): never in parallel with it, so a stale token refreshes the session once.
+   */
+  const refreshServerAchievements = useCallback(async () => {
+    if (!serverEconomyOn() || economyRef.current.mode !== "cloud_active") return;
+    const scope = requestScope();
+    if (!scope) return;
+    const r = await callDayApi("/api/game/achievements", "GET", undefined, fetch, undefined, undefined, scope);
+    if (!r.ok) {
+      if (stillIn(scope)) learnRefusedState(r, scope);
+      return;
+    }
+    if (!belongs(scope, r)) return;
+    const a = readAchievements(r.body);
+    if (a && a.state === "cloud_active") setEconomyView({ achievements: { transferred: a.transferred, items: a.achievements } });
+  }, [belongs, learnRefusedState, requestScope, setEconomyView, stillIn]);
+
   const refreshServerDay = useCallback(async () => {
     if (!serverEconomyOn()) return;
     const scope = requestScope();
@@ -780,7 +805,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       const extras = generateDaySet(gameStateRef.current, st.game_day, st.opening_mode).bonus.slice(0, 2);
       await runCloud(serverDay.open(extras, scope), scope);
     }
-  }, [applyServerStatus, belongs, learnRefusedState, requestScope, runCloud, setEconomyView, stillIn]);
+    if (st && st.state === "cloud_active") await refreshServerAchievements();
+  }, [applyServerStatus, belongs, learnRefusedState, refreshServerAchievements, requestScope, runCloud, setEconomyView, stillIn]);
 
   /**
    * Q4.5-4: in the transfer window (or after it, for a device that was offline) the device sends a frozen copy of its
@@ -805,6 +831,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         now: new Date(),
         uuid: () => crypto.randomUUID(),
         belongs: (s, account) => answerBelongs(s, account, scopeNow()),
+        // Q4.6: two tabs never freeze two different copies (a large save is compressed between the read and the write)
+        lock: browserLock(`ayra-migration-freeze:${scope.space}`),
       });
       if (out.kind === "ignored") return;
       if (out.kind === "retry" && out.state) learnRefusedState({ ok: false, error: "session_stale", state: out.state, account: scope.account }, scope);
@@ -817,6 +845,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     if (!isLoaded || !loadedSpace?.startsWith("account:")) return;
     if (economy.mode === "migration_pending" || economy.mode === "cloud_active") void sendDeviceSnapshot();
   }, [economy.mode, isLoaded, loadedSpace, sendDeviceSnapshot]);
+
+
 
   useEffect(() => {
     if (!isLoaded || !serverEconomyOn() || !loadedSpace?.startsWith("account:")) return;

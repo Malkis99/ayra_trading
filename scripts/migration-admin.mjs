@@ -18,6 +18,9 @@
 //   decide     <user> <snapshot> <pending_review|accepted|rejected|needs_evidence> [--xp N --coins N] --actor A --reason R
 //   activate   <user> <reconciliation id> --actor A [--level-gap-ack TEXT]   (after the window closed)
 //   activate-new <user> --actor A --reason R                  a genuinely new account: no snapshot, no history at all
+//   decide-achievement <user> <id> <legacy_accepted|rejected|pending_review> --actor A --reason R   (Q4.6; never a verified one)
+//   transfer-achievements <user> --actor A                    an account activated before 0020: its achievements, once
+//   purge <user> --actor A --reason R                         snapshots of an activated account, 90 days after, nothing open
 //
 // Confirmation: typed at the prompt, or --confirm <user> (the same account id) for a scripted run.
 // The connection string is never printed or logged. Never point it at Production before the owner's written approval.
@@ -86,6 +89,9 @@ async function show(db, user) {
       result->'proposed'->>'confirmedXp' AS confirmed_xp, result->'proposed'->>'confirmedCoins' AS confirmed_coins,
       jsonb_array_length(result->'conflicts') AS conflicts
     FROM public.game_reconciliations WHERE user_id = $1 ORDER BY id`, [user])).rows);
+  console.log("\nServer achievements:");
+  table((await db.query(`SELECT achievement_id, status, source, array_length(claimed_by, 1) AS devices, decided_by, reason
+    FROM public.game_achievements WHERE user_id = $1 ORDER BY achievement_id`, [user]).catch(() => ({ rows: [] }))).rows);
   console.log("\nDecision log:");
   table((await db.query(`SELECT at, actor, db_user, action, details FROM public.game_migration_audit WHERE user_id = $1 ORDER BY id`, [user])).rows
     .map((r) => ({ ...r, details: JSON.stringify(r.details).slice(0, 160) })));
@@ -105,12 +111,14 @@ async function computePreview(db, user) {
   const server = (await db.query("SELECT public.game_mig_reconcile($1) AS r", [user])).rows[0].r;
   const agree = (await db.query("SELECT $1::jsonb = $2::jsonb AS eq", [JSON.stringify(r), JSON.stringify(server)])).rows[0].eq;
   const differs = agree ? [] : Object.keys(server).filter((k) => JSON.stringify(server[k]) !== JSON.stringify(r[k]));
+  // Q4.6: the achievements the activation would record (the database's plan, from the same snapshots; pays nothing)
+  const plan = (await db.query("SELECT public.game_mig_achievement_plan($1, public.game_mig_reconcile($1), NULL) AS p", [user])).rows[0].p;
   const journal = (await db.query("SELECT public.game_mig_journal_days($1, $2) AS d", [user, tz])).rows[0].d || {};
   const dayCounts = Object.fromEntries(Object.entries(journal).map(([d, c]) => [d, Object.entries(c).filter(([k]) => k !== "imported").reduce((a, [, n]) => a + Number(n), 0)]));
-  return { tz, r, journal, dayCounts, agree, differs };
+  return { tz, r, journal, dayCounts, agree, differs, plan };
 }
 
-function printPreview({ tz, r, journal, dayCounts, agree, differs }) {
+function printPreview({ tz, r, journal, dayCounts, agree, differs, plan }) {
   console.log(`Time zone of the account: ${tz}. Algorithm ${r.algorithm}.`);
   console.log(agree ? "The database computed the SAME result on its own (two independent implementations agree)."
     : `THE DATABASE COMPUTED ANOTHER RESULT (${differs.join(", ")}): it will not be saved — report this, do not work around it.`);
@@ -131,13 +139,18 @@ function printPreview({ tz, r, journal, dayCounts, agree, differs }) {
   const p = r.proposed;
   console.log(`\nProposed from proven events only: ${p.confirmedXp} XP → level ${p.level}; ${p.confirmedCoins} Coins.`);
   console.log(`Original (highest device): level ${p.originalLevel}, ${p.originalCoins} Coins.${p.levelGap ? `  LEVEL GAP ${p.levelGap}: activation needs --level-gap-ack or an accepted remainder.` : ""}`);
-  console.log(`Achievements on the devices (kept in the snapshots; not on the server before Q4.6): ${r.achievements.join(", ") || "none"}`);
+  console.log(`Achievements on the devices: ${r.achievements.join(", ") || "none"}`);
+  console.log("\nAchievements the activation will record on the server (each id once; none of them pays XP or Coins):");
+  table((plan.items || []).map((i) => ({ id: i.id, status: i.status, source: i.source, devices: i.claimedBy.length, detail: JSON.stringify(i.detail), evidence: JSON.stringify(i.evidence).slice(0, 80) })));
+  if ((plan.unknown || []).length) console.log(`  Never recorded (unknown or broken ids, kept in the snapshots): ${plan.unknown.map((u) => `${u.where}.${u.key}`).join(", ")}`);
+  console.log("  (level3 is shown without the accepted remainder here; the activation decides it with the final XP)");
 }
 
 async function main() {
   const { pos, opt } = parseArgs(process.argv.slice(2));
   const [cmd, user, ...rest] = pos;
-  if (!cmd || !["show", "open", "window", "reconcile", "decide", "activate", "activate-new"].includes(cmd)) die("command: show | open | window | reconcile | decide | activate | activate-new");
+  const COMMANDS = ["show", "open", "window", "reconcile", "decide", "activate", "activate-new", "decide-achievement", "transfer-achievements", "purge"];
+  if (!cmd || !COMMANDS.includes(cmd)) die(`command: ${COMMANDS.join(" | ")}`);
   if (!user || !UUID_RE.test(user)) die("<user> must be the account id (UUID)");
   const db = await connect();
   try {
@@ -157,6 +170,29 @@ async function main() {
       const reason = need(opt.reason, "--reason");
       await confirm(user, opt, `Extend the intake window to ${until.toISOString()}. Reason: ${reason}`);
       const v = (await db.query("SELECT public.game_mig_extend_window($1, $2, $3, $4) AS v", [user, until.toISOString(), actor, reason])).rows[0].v;
+      return console.log(JSON.stringify(v));
+    }
+    if (cmd === "decide-achievement") {
+      const [id, status] = rest;
+      if (!id || !/^[A-Za-z0-9:-]{1,60}$/.test(id)) die("<id> must be an achievement id (see show)");
+      if (!["legacy_accepted", "rejected", "pending_review"].includes(status)) die("status: legacy_accepted | rejected | pending_review");
+      const actor = need(opt.actor, "--actor");
+      const reason = need(opt.reason, "--reason");
+      await confirm(user, opt, `Achievement ${id}: ${status}. Reason: ${reason}`);
+      const v = (await db.query("SELECT public.game_mig_decide_achievement($1, $2, $3, $4, $5) AS v", [user, id, status, actor, reason])).rows[0].v;
+      return console.log(JSON.stringify(v));
+    }
+    if (cmd === "transfer-achievements") {
+      const actor = need(opt.actor, "--actor");
+      await confirm(user, opt, "Transfer the achievements of this activated account (from its snapshots and reconciliation), once.");
+      const v = (await db.query("SELECT public.game_mig_transfer_achievements($1, $2) AS v", [user, actor])).rows[0].v;
+      return console.log(JSON.stringify(v));
+    }
+    if (cmd === "purge") {
+      const actor = need(opt.actor, "--actor");
+      const reason = need(opt.reason, "--reason");
+      await confirm(user, opt, "PURGE the accepted snapshots of this activated account (90 days after the activation; late snapshots are kept). This cannot be undone.");
+      const v = (await db.query("SELECT public.game_mig_purge_snapshots($1, $2, $3) AS v", [user, actor, reason])).rows[0].v;
       return console.log(JSON.stringify(v));
     }
     if (cmd === "activate-new") {
@@ -198,7 +234,8 @@ async function main() {
       await confirm(user, opt, `ACTIVATE the server economy for this account from reconciliation ${id} (${rec.status}): ${rec.p.confirmedXp} XP / ${rec.p.confirmedCoins} Coins proven + the accepted remainder. This cannot be undone.`);
       const v = (await db.query("SELECT public.game_mig_activate($1, $2, $3, $4) AS v", [user, id, actor, opt["level-gap-ack"] ?? null])).rows[0].v;
       if (v.refused) die(`${v.refused}: nothing was credited, the account stays in migration_pending (the refusal is in the decision log)`);
-      if (v.achievements_transferred === false && !v.replay) console.log("Note: achievements stay on the devices and in the snapshots until Q4.6 — the transfer is not complete for the person yet.");
+      if (v.achievements_transferred === false && !v.replay) console.log("Note: achievements are not on the server yet (database without 0020) — the transfer is not complete for the person.");
+      if (v.achievements_transferred === true) console.log(`Achievements recorded on the server: ${JSON.stringify(v.achievements?.counts ?? {})}`);
       return console.log(JSON.stringify(v));
     }
   } catch (e) {

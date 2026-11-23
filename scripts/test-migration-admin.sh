@@ -26,7 +26,7 @@ close_window() { q "SET ROLE game_economy_owner; INSERT INTO public.game_migrati
 
 psql -X -q -d postgres -c "DROP DATABASE IF EXISTS $DB" -c "CREATE DATABASE $DB" >/dev/null || { echo "FAIL cannot create the test database"; exit 2; }
 psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase/tests/stub/supabase_stub.sql >/dev/null || { echo "FAIL stub"; exit 2; }
-for f in 0001_init 0002_profile_defaults 0003_nickname_cooldown 0004_journal_sync 0014_game_economy 0015_game_days 0016_game_day_api 0018_game_economy_sessions 0019_game_migration_import; do
+for f in 0001_init 0002_profile_defaults 0003_nickname_cooldown 0004_journal_sync 0014_game_economy 0015_game_days 0016_game_day_api 0018_game_economy_sessions 0019_game_migration_import 0020_game_achievements; do
   psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f "supabase/migrations/$f.sql" >/dev/null || { echo "FAIL migration $f"; exit 2; }
 done
 U=00000000-0000-0000-0000-0000001ad001
@@ -49,7 +49,7 @@ imp() { q "SELECT public.game_import_snapshot('$U', gen_random_uuid(), floor(ext
 A=10000000-0000-4000-8000-0000001ad00a
 B=10000000-0000-4000-8000-0000001ad00b
 imp "$A" 20000000-0000-4000-8000-0000001ad00a '{"level":2,"xp":5,"coins":57,"history":[{"questId":"q_bias","xp":40,"coins":10,"completedAt":"2026-10-27"},{"questId":"q_reflect","xp":40,"coins":10,"completedAt":"2026-10-28"}],"firstActions":{"trade":"2026-10-27T15:00:00Z","note":"2026-10-27T15:10:00Z"},"dailyStats":{"2026-10-27":{"xpGained":55},"2026-10-28":{"xpGained":40}},"achievements":{"firstTrade":true}}' >/dev/null
-imp "$B" 20000000-0000-4000-8000-0000001ad00b '{"level":2,"xp":10,"coins":50,"history":[{"questId":"q_bias","xp":40,"coins":10,"completedAt":"2026-10-27"},{"questId":"q_reflect","xp":30,"coins":10,"completedAt":"2026-10-28"},{"questId":"q_walk","xp":10,"coins":5,"completedAt":"2026-10-29"}],"firstActions":{"trade":"2026-10-28T10:00:00Z"}}' >/dev/null
+imp "$B" 20000000-0000-4000-8000-0000001ad00b '{"level":2,"xp":10,"coins":50,"history":[{"questId":"q_bias","xp":40,"coins":10,"completedAt":"2026-10-27"},{"questId":"q_reflect","xp":30,"coins":10,"completedAt":"2026-10-28"},{"questId":"q_walk","xp":10,"coins":5,"completedAt":"2026-10-29"}],"firstActions":{"trade":"2026-10-28T10:00:00Z"},"achievements":{"author":true}}' >/dev/null
 q "INSERT INTO public.journal_notes (user_id, id, data, client_updated_at) VALUES ('$U', 'n1', '{\"id\":\"n1\",\"createdAt\":\"2026-10-27T12:00:00Z\"}', now());" >/dev/null
 
 # the preview: proven events once across devices, the conflict, a candidate per device, the Journal evidence — and the
@@ -120,14 +120,25 @@ st=$(q "SELECT state FROM public.game_accounts WHERE user_id = '$U'")
 prof=$(q "SELECT xp_total || '/' || coins || '/' || level FROM public.game_profile WHERE user_id = '$U'")
 legacy=$(q "SELECT count(*) FROM public.game_ledger WHERE user_id = '$U' AND idempotency_key LIKE 'legacy:%'")
 # proven: q_bias 40/10, q_reflect 30/10 (smaller), q_walk 10/5, first:trade 20/20, first:note 10/5 = 110 XP / 50 Coins; + 15/12
-[ "$st" = cloud_active ] && [ "$prof" = "125/62/2" ] && [ "$legacy" = 1 ] && echo "$out" | grep -q "achievements stay on the devices" \
-  && ok "T9: activated: 110 XP / 50 Coins proven + 15 / 12 accepted = 125 / 62, level 2; achievements not yet transferred (Q4.6)" || bad "T9: $out / $st / $prof / $legacy"
+[ "$st" = cloud_active ] && [ "$prof" = "125/62/2" ] && [ "$legacy" = 1 ] && echo "$out" | grep -q "Achievements recorded on the server" \
+  && ok "T9: activated: 110 XP / 50 Coins proven + 15 / 12 accepted = 125 / 62, level 2; achievements recorded in the same transaction" || bad "T9: $out / $st / $prof / $legacy"
 out=$(tool show "$U")
 echo "$out" | grep -q "activated" && echo "$out" | grep -q "legacy_decided" && echo "$out" | grep -q "transition" && echo "$out" | grep -q "reconciliation_refused" \
   && ok "T10: the decision log shows every step with its author, the refusals included" || bad "T10: $out"
 out=$(tool activate "$U" "$REC" --actor owner --confirm "$U")
 [ "$(q "SELECT count(*) FROM public.game_ledger WHERE user_id = '$U'")" = 6 ] && echo "$out" | grep -q '"replay": *true\|"replay":true' \
   && ok "T11: a second activation is a replay; the ledger unchanged (6 rows)" || bad "T11: $out"
+
+# Q4.6: the achievements came with the activation — proven ones verified, the device-only one waits for a person
+ach=$(q "SELECT string_agg(achievement_id || '=' || status, ',' ORDER BY achievement_id) FROM public.game_achievements WHERE user_id = '$U'")
+xp_after=$(q "SELECT xp_total || '/' || coins FROM public.game_profile WHERE user_id = '$U'")
+[ "$ach" = "author=pending_review,firstTrade=verified" ] && [ "$xp_after" = "125/62" ]   && ok "T13a: firstTrade verified by the first-action event, author (device only) waits for review; XP and Coins unchanged" || bad "T13a: $ach / $xp_after"
+out=$(tool decide-achievement "$U" firstTrade rejected --actor owner --reason "x" --confirm "$U")
+echo "$out" | grep -q game_mig_achievement_verified && ok "T13b: a proven achievement is never changed by hand" || bad "T13b: $out"
+out=$(tool decide-achievement "$U" author legacy_accepted --actor owner --reason "the user showed the post" --confirm "$U")
+[ "$(q "SELECT status FROM public.game_achievements WHERE user_id = '$U' AND achievement_id = 'author'")" = legacy_accepted ]   && [ "$(q "SELECT count(*) FROM public.game_migration_audit WHERE user_id = '$U' AND action = 'achievement_decided'")" = 1 ]   && ok "T13c: a device-only achievement accepted by a person, with a reason, audited" || bad "T13c: $out"
+out=$(tool purge "$U" --actor owner --reason "retention" --confirm "$U")
+echo "$out" | grep -q game_mig_retention_not_reached && [ "$(q "SELECT count(*) FROM public.game_imports WHERE user_id = '$U'")" = 3 ]   && ok "T14: a purge before 90 days after the activation is refused; nothing deleted" || bad "T14: $out"
 
 # accounts without snapshots: never a transfer with an empty reconciliation; a new account only on its own path
 N1=00000000-0000-0000-0000-0000001ad0a1
@@ -155,7 +166,7 @@ psql -X -q -d postgres -c "DROP DATABASE IF EXISTS $DB" >/dev/null
 
 # the two implementations side by side on a fresh database (fixtures, the owner's cases, generated saves)
 psql -X -q -d postgres -c "CREATE DATABASE $DB" >/dev/null && psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase/tests/stub/supabase_stub.sql >/dev/null
-for f in 0001_init 0002_profile_defaults 0003_nickname_cooldown 0004_journal_sync 0014_game_economy 0015_game_days 0016_game_day_api 0018_game_economy_sessions 0019_game_migration_import; do
+for f in 0001_init 0002_profile_defaults 0003_nickname_cooldown 0004_journal_sync 0014_game_economy 0015_game_days 0016_game_day_api 0018_game_economy_sessions 0019_game_migration_import 0020_game_achievements; do
   psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f "supabase/migrations/$f.sql" >/dev/null || { echo "FAIL migration $f"; exit 2; }
 done
 node --no-warnings scripts/test-reconcile-twins.mjs || FAILED=1

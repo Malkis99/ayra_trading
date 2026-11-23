@@ -2867,6 +2867,7 @@ export const en: Dictionary = {
           transferLate: "This device's progress arrived after the transfer intake closed. It is kept and will be reviewed separately — it is not added automatically.",
           achievementsOnDevice: "Achievements are still kept on this device. Moving them to the server is the next step; until then they may not show on another device.",
           transferTooLarge: "This device's save is too large to send automatically. It was not deleted; please contact support.",
+          transferUnsupported: "This browser cannot compress a large save for sending. It was not deleted: update the browser and the copy will be sent by itself.",
         },
       },
       missionSource: {
@@ -3706,6 +3707,10 @@ export const en: Dictionary = {
       progress: "{done} of {total} earned",
       unlocked: "Earned",
       howTo: "How to earn",
+      serverSource: "Achievements are kept on the server. This device's records are kept as an archive.",
+      legacyAccepted: "Moved from the device",
+      pendingReview: "Moved, waiting for review",
+      rejected: "Not confirmed in the transfer",
     },
     settingsV2: {
       postsSection: "My posts",

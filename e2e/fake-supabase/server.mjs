@@ -56,6 +56,7 @@ export function createFakeSupabase() {
   const economies = new Map(); // user id -> { state, game_sync, opening_mode, day }
   const economyCalls = []; // { fn, user, args } — what the routes asked (never a time or a day)
   const imports = new Map(); // "user:snapshot" -> { user, snapshot, install, md5, status, content } (0019 stand-in)
+  const achievements = new Map(); // user -> { transferred, items } (0020 stand-in: what an activation recorded)
   const SERVICE_KEY = "fake-service-key";
   const FAKE_MODE_MISSIONS = { trading: ["q_bias", "q_riskcheck", "q_reflect"], study: ["m_observation", "m_backtest", "m_lesson"], recovery: ["m_day_state", "m_mistake", "m_plan_tomorrow"] };
   let journalWriteFailuresLeft = 0; // next N journal writes fail with 500 (server trouble)
@@ -279,6 +280,13 @@ export function createFakeSupabase() {
     if (path === "/__test/imports") {
       const user = usersByEmail.get(url.searchParams.get("email"));
       return send(200, user ? [...imports.values()].filter((r) => r.user === user.id) : []);
+    }
+    // 0020 stand-in: the achievements an activation recorded for an account (POST sets them, GET reads them)
+    if (path === "/__test/achievements") {
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      if (!user) return send(404, { error: "no user" });
+      if (req.method === "POST") achievements.set(user.id, await readBody(req));
+      return send(200, achievements.get(user.id) || null);
     }
     if (path === "/__test/economy-calls") {
       if (url.searchParams.get("reset")) economyCalls.length = 0;
@@ -858,6 +866,13 @@ export function createFakeSupabase() {
         const row = { user: body.p_user, snapshot: body.p_snapshot, install: body.p_install, md5, status, content: body.p_content, received_at: new Date().toISOString() };
         imports.set(key, row);
         return send(200, { status, replay: false, received_at: row.received_at });
+      }
+      // 0020 game_achievements_for_session(): a fresh token; the account's own achievements, for cloud_active only
+      if (fn === "game_achievements_for_session") {
+        if (!sessionCheck().fresh) return send(400, { code: "42501", message: "game_session_stale" });
+        if (econ.state !== "cloud_active") return send(200, { state: econ.state || "local", transferred: false, achievements: [] });
+        const a = achievements.get(body.p_user);
+        return send(200, { state: "cloud_active", transferred: !!a?.transferred, achievements: a?.items || [] });
       }
       if (econ.state !== "cloud_active") return refuse("game_account_not_active");
       if (fn === "game_day_today") return send(200, today);
