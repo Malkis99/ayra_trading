@@ -5,13 +5,14 @@ import { useApp } from "@/lib/context";
 import { AppStorage } from "@/lib/storage";
 import { focusStorage, subscribeFocus } from "@/lib/storage/market-focus";
 import { captureMarketAccount } from "@/lib/market/account-scope";
-import { alertsOf, dueAlerts, type FocusAlertKind, type FocusAlerts } from "@/lib/market/focus-notifications";
+import { alertsOf, dueAlerts, ALERT_GRACE, type FocusAlertKind, type FocusAlerts } from "@/lib/market/focus-notifications";
 import { parseFocus } from "@/lib/market/market-focus";
 import { instrumentName, type InstrumentId } from "@/lib/market/instruments";
 import { readMarketSettings } from "@/lib/market/settings-store";
 import { notificationRepository } from "@/lib/notifications/repository";
 import { inQuietHours, shouldStore } from "@/lib/notifications/preferences";
 import { defaultSettings } from "@/lib/notifications/types";
+import { catalogFromPreference, type FocusCatalog } from "@/lib/market/focus-catalog";
 import { Button } from "@/components/ui";
 
 /** Visible-page local cues only; never inserts into Inbox or requests browser permission. */
@@ -30,7 +31,7 @@ export function MarketFocusNotifications({ space, id, ids, customSession = false
     setConfig(null); setFailed(false); setBusy(false); setDraft(null);
     setMessages(old => old.filter(message => idsKey.split(",").includes(message.id)));
     const saves = saveSequence;
-    let live = true, running = false, again = false;
+    let live = true, running = false, again = false, policyGeneration = 0, visibleSince = document.hidden ? Infinity : Date.now();
     const scope = captureMarketAccount(() => AppStorage.getUserId());
     const current = () => live && scope.current() && (space === "guest" ? scope.userId === null : space === `account:${scope.userId}`);
     const refresh = async () => {
@@ -51,17 +52,23 @@ export function MarketFocusNotifications({ space, id, ids, customSession = false
           try { const key = (raw as { instrumentId?: string })?.instrumentId; if (!idsKey.split(",").includes(key ?? "")) return []; const entry = parseFocus(raw, space, key as InstrumentId); alertsOf(entry); return [entry]; } catch { return []; }
         });
         const now = Date.now(), hours = readMarketSettings().sessions;
-        const candidates = entries.flatMap(entry => dueAlerts(entry, now, hours).map(alert => ({ entry, alert })));
-        if (!candidates.length) return;
+        let catalog: FocusCatalog | undefined, catalogFailed = false;
+        try { catalog = catalogFromPreference(snapshot.preferences,space); } catch { catalogFailed = true; }
+        const candidates = entries.flatMap(entry => dueAlerts(entry, now, hours,catalog,()=>{catalogFailed=true;}).filter(alert => !alert.custom || alert.at >= visibleSince).map(alert => ({ entry, alert })));
+        if (!candidates.length) { if (catalogFailed && canDeliver()) setPaused(true); return; }
         // Fail closed: a missing account policy is not permission to ignore a master pause.
+        const policyVersion = policyGeneration;
         const policy = space === "guest" ? { settings: defaultSettings(), preferences: [] } : await notificationRepository.settings(space.slice(8), "UTC");
         if (!canDeliver()) return;
-        let denied = false;
+        let denied = catalogFailed;
         for (const { entry, alert } of candidates) {
           if (!canDeliver()) break;
+          if (alert.custom && (alert.at < visibleSince || policyVersion !== policyGeneration)) continue;
           const type = alert.kind === "session" ? "session_open" : `focus_${alert.kind}`;
           if (inQuietHours(policy.settings, new Date()) || !shouldStore(type, policy.settings, policy.preferences, 3, [entry.instrumentId])) { denied = true; continue; }
           if (await focusStorage.claimAlert(space, entry.instrumentId, alert, epoch, hours)) {
+            if (alert.custom && !await focusStorage.currentCustomAlert(space,entry.instrumentId,alert,epoch)) continue;
+            if (alert.custom && (Date.now() < alert.at || Date.now()-alert.at >= ALERT_GRACE || alert.at < visibleSince || policyVersion !== policyGeneration)) continue;
             if (canDeliver()) setMessages(old => [...old, { kind: alert.kind, id: entry.instrumentId }].slice(-Math.max(1, idsKey.split(",").length * 3)));
           }
         }
@@ -71,11 +78,13 @@ export function MarketFocusNotifications({ space, id, ids, customSession = false
     };
     const notice = subscribeFocus(event => { if (event.spaceId !== space) return; if (event.instrumentId === null) { ticket.current = null; ++saveSequence.current; setMessages([]); setConfig(null); setFailed(true); return; } void refresh(); void check(); });
     const visible = () => { void refresh(); void check(); };
+    const visibility = () => { visibleSince = document.hidden ? Infinity : Date.now(); visible(); };
+    const changedPolicy = () => { ++policyGeneration; visible(); };
     void focusStorage.epoch(space).then(value => { if (current()) { ticket.current = value; void refresh(); void check(); } }, () => { if (current()) setFailed(true); });
     const timer = window.setInterval(() => { void check(); }, 20_000);
-    window.addEventListener("focus", visible); document.addEventListener("visibilitychange", visible);
-    window.addEventListener("ayra:notifications-changed", visible);
-    return () => { live = false; scope.dispose(); ++saves.current; notice(); clearInterval(timer); window.removeEventListener("focus", visible); document.removeEventListener("visibilitychange", visible); window.removeEventListener("ayra:notifications-changed", visible); };
+    window.addEventListener("focus", visible); document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("ayra:notifications-changed", changedPolicy);
+    return () => { live = false; scope.dispose(); ++saves.current; notice(); clearInterval(timer); window.removeEventListener("focus", visible); document.removeEventListener("visibilitychange", visibility); window.removeEventListener("ayra:notifications-changed", changedPolicy); };
   }, [space, id, idsKey]);
   const save = async (values: { completion?: boolean; session?: boolean; lead?: number; reminder?: number | null }) => {
     if (!config || busy || ticket.current === null) return;
@@ -97,11 +106,11 @@ export function MarketFocusNotifications({ space, id, ids, customSession = false
       <p className="my-2 text-xs text-mu">{t.local}</p>
       <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs">
         <label className="flex min-h-[44px] items-center gap-2"><input type="checkbox" checked={draft?.completion ?? config?.completion ?? false} disabled={disabled} onChange={e => void save({ completion: e.target.checked })} />{t.enableCompletion}</label>
-        <label className="flex min-h-[44px] items-center gap-2"><input type="checkbox" checked={!customSession && (draft?.session ?? config?.session ?? false)} disabled={disabled || customSession} onChange={e => void save({ session: e.target.checked })} />{t.enableSession}</label>
-        <label className="flex min-h-[44px] items-center gap-2">{t.lead}<select className="rounded border border-pri bg-bg p-2" disabled={disabled || customSession} value={config?.lead ?? 5} onChange={e => void save({ lead: Number(e.target.value) })}>{[0, 5, 15].map(n => <option key={n} value={n}>{n}</option>)}</select></label>
+        {!customSession && <><label className="flex min-h-[44px] items-center gap-2"><input type="checkbox" checked={draft?.session ?? config?.session ?? false} disabled={disabled} onChange={e => void save({ session: e.target.checked })} />{t.enableSession}</label>
+        <label className="flex min-h-[44px] items-center gap-2">{t.lead}<select className="rounded border border-pri bg-bg p-2" disabled={disabled} value={config?.lead ?? 5} onChange={e => void save({ lead: Number(e.target.value) })}>{[0, 5, 15].map(n => <option key={n} value={n}>{n}</option>)}</select></label></>}
       </div>
-      <p className="my-2 text-xs text-mu">{t.sessionHint}</p>
-      {customSession && <p role="status" className="my-2 text-xs text-vi">{dict.market.focus.catalog.sessionDisabled}</p>}
+      {!customSession && <p className="my-2 text-xs text-mu">{t.sessionHint}</p>}
+      {customSession && <p role="status" className="my-2 text-xs text-vi">{dict.market.focus.customSession.managed}</p>}
       <div className="flex flex-wrap items-end gap-2"><label className="min-w-0 flex-1 text-xs">{t.reminderLabel}<input className="mt-1 min-h-[44px] w-full min-w-0 rounded border border-pri bg-bg px-3" type="datetime-local" value={reminder} onChange={e => setReminder(e.target.value)} disabled={disabled} /></label>
         <Button size="sm" disabled={disabled || !Number.isFinite(at) || at <= Date.now()} onClick={() => void save({ reminder: at })}>{t.setReminder}</Button>
         {config?.reminder && <Button size="sm" variant="ghost" disabled={disabled} onClick={() => void save({ reminder: null })}>{t.cancelReminder}</Button>}

@@ -4,6 +4,7 @@ import type { InstrumentId } from "@/lib/market/instruments";
 import { alertsOf, claimAlert, recordCompletion, type FocusAlert } from "@/lib/market/focus-notifications";
 import type { SessionSettings } from "@/lib/market/sessions";
 import { FOCUS_CATALOG_NOTICE, catalogFromPreference, catalogSnapshot, patchCatalog, type CatalogCommand, type CatalogSnapshot } from "@/lib/market/focus-catalog";
+import { customAlertCurrent, armCustomSelection } from "@/lib/market/custom-session-alerts";
 
 export const FOCUS_DATABASE = "ayra_market_focus_v1";
 const EVENT = "ayra-market-focus-change", CHANNEL = "ayra-market-focus-local";
@@ -105,7 +106,9 @@ export class FocusStorage {
         const catalog = catalogFromPreference(preference, space), item = catalog.items.find(value => value.id === patch.id);
         if (!item || item.deleted || item.kind !== patch.custom || item.revision !== patch.catalogRevision) throw new FocusDataError("conflict");
       }
-      return { entry: recordCompletion(entry, patchFocus(entry, patch), patch, Date.now()), write: true };
+      const now=Date.now(), changed=patchFocus(entry,patch);
+      const selected="custom" in patch && patch.custom === "session" ? armCustomSelection(entry,changed,now) : changed;
+      return { entry: recordCompletion(entry, selected, patch, now), write: true };
     }, epoch, "custom" in patch, current)).entry;
   }
   async catalog(space: string): Promise<CatalogSnapshot> { const snapshot = await this.exportSpace(space); return catalogSnapshot(snapshot.preferences, snapshot.entries, space); }
@@ -148,10 +151,13 @@ export class FocusStorage {
     }, epoch)).entry;
   }
   async claimAlert(space: string, id: InstrumentId, alert: FocusAlert, epoch: number, hours?: SessionSettings) {
-    return (await this.change(space, id, entry => {
-      const next = claimAlert(entry, alert, Date.now(), hours);
+    return (await this.change(space, id, (entry, preference) => {
+      const next = claimAlert(entry, alert, Date.now(), hours, alert.custom ? catalogFromPreference(preference,space) : undefined);
       return { entry: next ?? entry, write: next !== null };
-    }, epoch)).write;
+    }, epoch, !!alert.custom)).write;
+  }
+  async currentCustomAlert(space: string, id: InstrumentId, alert: FocusAlert, epoch: number) {
+    return this.transaction(space,"entries",[space,id],false,(raw,_store,preference) => !!alert.custom && customAlertCurrent(parseFocus(raw,space,id),catalogFromPreference(preference,space),alert.custom),epoch,true);
   }
   async reset(space: string, id: InstrumentId, revision: number, epoch?: number, current?: () => boolean) {
     const result = await this.change(space, id, entry => entry.revision === revision ? { entry: clearedFocus(entry), write: true } : { entry, write: false }, epoch, false, current);

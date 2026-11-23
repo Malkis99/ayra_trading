@@ -1,5 +1,9 @@
 # WATCH-2D — Custom Market Focus: реализация
 
+Следующий этап WATCH-2E добавляет явно включаемые Custom Session Reminders. См.
+[отдельный отчёт о времени и совместимости](watchlist-custom-session-reminders.md).
+Описанный ниже OFF отражает состояние WATCH-2D до этого расширения.
+
 22 ноября 2026. Draft PR #217; merge и production deployment не выполнялись.
 
 ## Что работает

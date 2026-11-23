@@ -65,7 +65,7 @@ test("two tabs preserve drafts and reject delete when a new reference appeared",
 test("custom overnight session stays local with reminders disabled; standard London still fires after V3 conversion",async({browser})=>{
   const {page}=await marketGuest(browser,390);try{
     await page.clock.install({time:new Date("2026-03-30T06:54:00Z")});await open(page);await pick(page,"session","Лондон");const alerts=page.getByTestId("focus-alerts");await alerts.locator("summary").click();await alerts.getByRole("checkbox").nth(1).check();await expect(alerts).toContainText("Настройки сохранены на этом устройстве");
-    await create(page,"session","Night focus","ru",{start:"23:00",end:"02:00",zone:"Europe/London"});expect(JSON.stringify((await rows(page)).preference)).toContain("Europe/London");await pick(page,"session","Night focus");await expect(alerts.getByRole("checkbox").nth(1)).toBeDisabled();await expect(alerts.getByRole("checkbox").nth(1)).not.toBeChecked();await page.clock.fastForward(70_000);await expect(page.getByTestId("focus-alert-message")).toHaveCount(0);
+    await create(page,"session","Night focus","ru",{start:"23:00",end:"02:00",zone:"Europe/London"});expect(JSON.stringify((await rows(page)).preference)).toContain("Europe/London");await pick(page,"session","Night focus");await expect(alerts.getByRole("checkbox")).toHaveCount(1);await page.clock.fastForward(70_000);await expect(page.getByTestId("focus-alert-message")).toHaveCount(0);
     await pick(page,"session","Лондон");await expect(alerts.getByRole("checkbox").nth(1)).toBeEnabled();await page.clock.fastForward(20_000);await expect(page.getByTestId("focus-alert-message")).toContainText("Выбранная сессия");
   }finally{await page.context().close();}
 });
