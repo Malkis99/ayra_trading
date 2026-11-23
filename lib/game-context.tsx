@@ -63,9 +63,10 @@ import { deviceRewardService, type RewardService } from "@/lib/reward-service";
 import { generateDaySet, type DayMode, type WeekChallenge } from "@/lib/quest-engine";
 import { ECONOMY_MODE_KEY, deviceRewardsAllowed, economyBasis, laterMode, readStickyMode, refusesReward, rememberMode, resolveEconomyMode, serverEconomyOn, type EconomyBasis, type EconomyMode, type SessionEconomy } from "./economy-mode";
 import { useOptionalAuth } from "@/lib/auth/auth-context";
-import { onSessionStale, serverDay, type DayCall, type ServerDayStatus } from "./server-day-client";
+import { callDayApi, onSessionStale, serverDay, type DayCall, type ServerDayStatus } from "./server-day-client";
 import { answerBelongs, requestScopeOf, type RequestScope, type ScopeNow } from "./economy-scope";
 import { readUpload, transferViewOf, uploadSnapshotOnce, type TransferView } from "./migration/snapshot-upload";
+import { readAchievements, type ServerAchievement } from "./server-achievements";
 import { mirrorServerDay } from "./server-day-mirror";
 import type { WeekSnapshot } from "@/lib/day-snapshots";
 import type { PQNoteField, PQResult, PQStartInput } from "@/lib/personal-quests";
@@ -235,6 +236,11 @@ export interface EconomyView {
   noticeReason?: string;
   /** Q4.5-4: what happened to this device's progress in the transfer (null: nothing to say). */
   transfer?: TransferView;
+  /**
+   * Q4.6: the account's achievements on the server (cloud_active only; undefined: not known yet). Once the transfer
+   * recorded them they are the source the profile shows; the device's own flags stay as an archive.
+   */
+  achievements?: { transferred: boolean; items: ServerAchievement[] };
 }
 
 export interface QuestCompletion {
@@ -805,6 +811,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         now: new Date(),
         uuid: () => crypto.randomUUID(),
         belongs: (s, account) => answerBelongs(s, account, scopeNow()),
+        // Q4.6: two tabs never freeze two different copies (a large save is compressed between the read and the write)
+        lock: browserLock(`ayra-migration-freeze:${scope.space}`),
       });
       if (out.kind === "ignored") return;
       if (out.kind === "retry" && out.state) learnRefusedState({ ok: false, error: "session_stale", state: out.state, account: scope.account }, scope);
@@ -818,6 +826,28 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     if (economy.mode === "migration_pending" || economy.mode === "cloud_active") void sendDeviceSnapshot();
   }, [economy.mode, isLoaded, loadedSpace, sendDeviceSnapshot]);
 
+  /**
+   * Q4.6: on the server economy the account's achievements are read from the server (read only — nothing here can
+   * unlock one). An answer is applied only to the account and space it was asked for.
+   */
+  const refreshServerAchievements = useCallback(async () => {
+    if (!serverEconomyOn() || economyRef.current.mode !== "cloud_active") return;
+    const scope = requestScope();
+    if (!scope) return;
+    const r = await callDayApi("/api/game/achievements", "GET", undefined, fetch, undefined, undefined, scope);
+    if (!r.ok) {
+      if (stillIn(scope)) learnRefusedState(r, scope);
+      return;
+    }
+    if (!belongs(scope, r)) return;
+    const a = readAchievements(r.body);
+    if (a && a.state === "cloud_active") setEconomyView({ achievements: { transferred: a.transferred, items: a.achievements } });
+  }, [belongs, learnRefusedState, requestScope, setEconomyView, stillIn]);
+  useEffect(() => {
+    if (!isLoaded || !loadedSpace?.startsWith("account:")) return;
+    if (economy.mode === "cloud_active") void refreshServerAchievements();
+  }, [economy.mode, isLoaded, loadedSpace, refreshServerAchievements]);
+
   useEffect(() => {
     if (!isLoaded || !serverEconomyOn() || !loadedSpace?.startsWith("account:")) return;
     void refreshServerDay();
@@ -825,6 +855,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       if (document.visibilityState === "visible") {
         void refreshServerDay();
         void sendDeviceSnapshot();
+        void refreshServerAchievements();
       }
     };
     window.addEventListener("focus", onFocus);
@@ -833,7 +864,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onFocus);
     };
-  }, [isLoaded, loadedSpace, refreshServerDay, sendDeviceSnapshot]);
+  }, [isLoaded, loadedSpace, refreshServerAchievements, refreshServerDay, sendDeviceSnapshot]);
 
   // QH-6.6: accepting a mission gives nothing; it only marks the mission as taken for today (Q4.4: on the server day for
   // an account on the server economy — the device shows the server's answer)

@@ -19,8 +19,8 @@ export function EconomyNotice() {
   if (economy.mode === "migration_scheduled") lines.push({ key: "mode", text: e.scheduled, icon: "cloud" });
   if (economy.mode === "migration_pending") lines.push({ key: "mode", text: e.pending, icon: "pause" });
   if (economy.mode === "cloud_active") lines.push({ key: "mode", text: economy.gameSync ? e.cloudOn : e.cloudPaused, icon: economy.gameSync ? "cloud" : "pause" });
-  // Q4.5-4: achievements are not on the server before Q4.6 — the transfer is not complete for the person yet
-  if (economy.mode === "cloud_active") lines.push({ key: "achievements", text: e.achievementsOnDevice, icon: "cloud" });
+  // Q4.5-4/Q4.6: until the server has recorded the achievements the transfer is not complete for the person
+  if (economy.mode === "cloud_active" && !economy.achievements?.transferred) lines.push({ key: "achievements", text: e.achievementsOnDevice, icon: "cloud" });
   if (economy.notice === "rewardsPaused" && !deviceRewardsAllowed(economy.mode)) lines.push({ key: "notice", text: e.rewardsPaused, icon: "pause" });
   if (economy.notice === "offline") lines.push({ key: "notice", text: e.offline, icon: "offline" });
   // Q4.5-4: this device's progress in the transfer
@@ -28,6 +28,7 @@ export function EconomyNotice() {
   if (economy.transfer === "sent") lines.push({ key: "transfer", text: e.transferSent, icon: "cloud" });
   if (economy.transfer === "late") lines.push({ key: "transfer", text: e.transferLate, icon: "pause" });
   if (economy.transfer === "tooLarge") lines.push({ key: "transfer", text: e.transferTooLarge, icon: "pause" });
+  if (economy.transfer === "unsupported") lines.push({ key: "transfer", text: e.transferUnsupported, icon: "pause" });
   if (economy.notice === "serverRefused") lines.push({ key: "notice", text: formatString(e.serverRefused, { reason: economy.noticeReason || "" }), icon: "pause" });
   if (lines.length === 0) return null;
   return (

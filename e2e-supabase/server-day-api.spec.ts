@@ -133,7 +133,7 @@ test.describe("Q4.4 server game day API (fake Supabase)", () => {
     // Q4.5-2: the claims of the verified token go only to the session functions (never a device time: p_iat is the
     // token's issue time, checked against the database's state time)
     const sessionArgs = ["p_session", "p_iat", "p_claim"];
-    const sessionFns = ["game_session_check", "game_apply_reward_for_session", "game_import_snapshot"];
+    const sessionFns = ["game_session_check", "game_apply_reward_for_session", "game_import_snapshot", "game_achievements_for_session"];
     // Q4.5-4: the device's frozen snapshot goes to quarantine as it came (0019) — it decides nothing, credits nothing
     const snapshotArgs = ["p_snapshot", "p_install", "p_schema", "p_content"];
     expect(calls.flatMap((c) => c.args.filter((a) => !allowed.includes(a) && !(sessionFns.includes(c.fn) && sessionArgs.includes(a))
