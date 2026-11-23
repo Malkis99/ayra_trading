@@ -89,6 +89,13 @@ scope, видимость, срок и generation настроек уведом�
 быть подавлено; receipt не откатывается. Это **at-most-once, не exactly-once**: падение после
 commit и до отрисовки может потерять сообщение. Квитанция не означает серверную доставку.
 
+Custom cue хранит candidate metadata и в памяти очереди. Истёкшая cue не открывается
+после dismiss другого сообщения. Очередь повторно проверяет каталог/refs/revisions;
+edit/delete, master-policy change и скрытие страницы удаляют устаревшие Custom cue,
+сохраняя receipts. Legacy completion/manual/standard-session сообщения не меняют поведения.
+Пять component regression cases проверяют очередь за completion: expiry, delete, edit,
+pause и hide; completion при этом остаётся видимым. Исходное падение воспроизведено до фикса.
+
 Прежний grace — менее 60 секунд после due, но новый runtime visibility barrier дополнительно
 запрещает catch-up, если Custom due был до открытия/возвращения видимой страницы. Время устройства
 и фоновые ограничения браузера влияют на доставку; точность в секундах не обещается.

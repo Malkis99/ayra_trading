@@ -31,7 +31,7 @@ test("two real tabs claim the same custom cycle once and rename cannot produce a
     await a.clock.fastForward(301000); // Playwright clock is context-wide: this advances both tabs once.
     await expect.poll(async()=>await a.getByTestId("focus-alert-message").count()+await b.getByTestId("focus-alert-message").count()).toBe(1);
     await a.getByRole("button",{name:"Edit: Custom session",exact:true}).click();await a.getByTestId("focus-catalog-name").fill("Renamed session");await a.getByTestId("focus-catalog-save").click();await expect(b.getByTestId("market-focus-session")).toContainText("Renamed session");
-    for(const page of [a,b])if(await page.getByTestId("focus-alert-message").count())await page.getByTestId("focus-alert-message").getByRole("button",{name:"Dismiss"}).click();
+    await expect(a.getByTestId("focus-alert-message")).toHaveCount(0);await expect(b.getByTestId("focus-alert-message")).toHaveCount(0);
     await a.clock.fastForward(20000);await expect(a.getByTestId("focus-alert-message")).toHaveCount(0);await expect(b.getByTestId("focus-alert-message")).toHaveCount(0);
   }finally{await ctx.close();}
 });

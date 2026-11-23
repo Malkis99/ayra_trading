@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { en } from "@/lib/i18n/dictionaries/en";
 import { emptyFocus, patchFocus } from "@/lib/market/market-focus";
 import { defaultSessionReminder } from "@/lib/market/custom-session-time";
+import { recordCustomClaim } from "@/lib/market/custom-session-alerts";
 import { alertsOf } from "@/lib/market/focus-notifications";
 import { defaultSettings } from "@/lib/notifications/types";
 import { AppStorage } from "@/lib/storage";
@@ -73,4 +74,20 @@ it("a changed master policy fences an already pending permissive response",async
   await customMount();const pending=deferred<typeof policy>();mock.settings.mockReturnValueOnce(pending.promise).mockResolvedValue({settings:{...defaultSettings(),all_disabled:true},preferences:[]});await tickCustom();await waitFor(()=>expect(mock.settings).toHaveBeenCalled());
   await act(async()=>{fireEvent(window,new Event("ayra:notifications-changed"));pending.resolve(policy);await pending.promise;});
   await waitFor(()=>expect(screen.getByText(en.market.focus.alerts.paused)).toBeTruthy());expect(mock.claimAlert).not.toHaveBeenCalled();
+});
+it.each(["expiry","delete","edit","pause","hide"])("does not reveal a queued custom cue after %s; the legacy completion remains visible",async reason=>{
+  await customMount();const snapshot=await mock.exportSpace(),entry=snapshot.entries[0];
+  entry.checklist.items=entry.checklist.items.map((item:{checked:boolean})=>({...item,checked:true}));entry.localAlerts={...alertsOf(entry),completion:true,completionEvent:{at:customDue,revision:1}};
+  mock.claimAlert.mockImplementation(async(_space:string,_id:string,alert:{kind:string;token:number;custom?:Parameters<typeof recordCustomClaim>[1]})=>{
+    if(alert.custom){if(entry.customSessionReceipts)return false;Object.assign(entry,recordCustomClaim(entry,alert.custom));return true;}
+    if(alert.kind==="completion" && !entry.localAlerts.seenCompletion){entry.localAlerts.seenCompletion=alert.token;return true;}return false;
+  });
+  await tickCustom();await waitFor(()=>expect(mock.currentCustomAlert).toHaveBeenCalled());expect(screen.getByTestId("focus-alert-message").textContent).toContain(en.market.focus.alerts.completion);
+  if(reason==="expiry")vi.setSystemTime(customDue+60001);
+  if(reason==="delete")snapshot.preferences.customCatalog.items[0].deleted=true;
+  if(reason==="edit")snapshot.preferences.customCatalog.items[0].revision++;
+  if(reason==="pause"){mock.settings.mockResolvedValue({settings:{...defaultSettings(),all_disabled:true},preferences:[]});await act(async()=>{fireEvent(window,new Event("ayra:notifications-changed"));});}
+  if(reason==="hide"){vi.spyOn(document,"hidden","get").mockReturnValue(true);await act(async()=>{fireEvent(document,new Event("visibilitychange"));});vi.spyOn(document,"hidden","get").mockReturnValue(false);await act(async()=>{fireEvent(document,new Event("visibilitychange"));});}
+  await act(async()=>{fireEvent.focus(window);});expect(screen.getByTestId("focus-alert-message").textContent).toContain(en.market.focus.alerts.completion);fireEvent.click(screen.getByRole("button",{name:en.market.focus.alerts.dismiss}));
+  expect(screen.queryByTestId("focus-alert-message")).toBeNull();
 });
