@@ -5,9 +5,10 @@ import { signIn } from "../e2e/helpers/auth";
 const FAKE_SUPABASE = "http://127.0.0.1:54329";
 
 // Q4.5-2: the server decides whether a session is fresh for the economy (0018 game_session_check: the session exists,
-// the mark in its token is the account's state now, issued after the change). A state change in the fake stand-in is
-// what game_economy_transition() does: state, its time and the session mark together. Nothing here pays anything:
-// the mission award is disabled and outside «local» the device gives nothing.
+// the mark in its token is the account's state now, issued after the change). The fake auth server stands in for the
+// Custom Access Token Hook: every token it issues carries the account's state now as the top-level «ayra_economy» claim;
+// a state change is only the state and its time (game_economy_transition). Nothing here pays anything: the mission award
+// is disabled and outside «local» the device gives nothing.
 
 const api = (page: Page, path: string) =>
   page.evaluate(async (p) => {
@@ -55,6 +56,7 @@ test.describe("Q4.5-2 stale sessions (fake Supabase with the 0014–0018 stand-i
   });
   test.afterEach(async ({ request }) => {
     await request.get(`${FAKE_SUPABASE}/__test/economy-installed?on=0`);
+    await request.get(`${FAKE_SUPABASE}/__test/hook?mode=on`);
   });
 
   test("a token from before the change is refused (session_stale + the state); the app refreshes once and goes on fresh", async ({ page, request }) => {
@@ -76,22 +78,26 @@ test.describe("Q4.5-2 stale sessions (fake Supabase with the 0014–0018 stand-i
     expect(await page.evaluate((u) => localStorage.getItem(`ayra:${u}:ayra_economy_mode`), userId)).toBe("cloud_active");
   });
 
-  test("the refresh is impossible (the session was ended): no loop, the state from the refusal still stops device rewards", async ({ page, request }) => {
-    const { email, userId } = await account(page, request);
-    await setState(request, email, "migration_pending");
-    // the session ends at the auth server (as the transition with «end sessions» does): refresh refused
-    await request.get(`${FAKE_SUPABASE}/__test/end-sessions?email=${encodeURIComponent(email)}`);
-    const before = await live(request, email);
-    expect(before.live).toBe(0);
-    await openQuests(page);
-    await expect(notice(page)).toHaveAttribute("data-mode", "migration_pending");
-    expect(await page.evaluate((u) => localStorage.getItem(`ayra:${u}:ayra_economy_mode`), userId)).toBe("migration_pending");
-    const g = await game(page, userId);
-    await page.waitForTimeout(1500);
-    const after = await live(request, email);
-    expect(after.refreshes).toBe(before.refreshes); // a refused refresh is not counted and not repeated
-    expect((await game(page, userId)).coins).toBe(g.coins);
-  });
+  for (const mode of ["unavailable", "error"] as const) {
+    test(`the hook ${mode === "unavailable" ? "cannot read the state" : "cannot be run"}: the server refuses every economy request, the device keeps the state from the refusal and gives nothing`, async ({ page, request }) => {
+      const { email, userId } = await account(page, request);
+      await setState(request, email, "migration_pending");
+      await request.get(`${FAKE_SUPABASE}/__test/hook?mode=${mode}`);
+      const before = await game(page, userId);
+      await openQuests(page);
+      // no token with the current mark can be had: stale whatever the app does, never fresh
+      expect((await api(page, "/api/game/day/status")).body).toMatchObject({ error: "session_stale", state: "migration_pending" });
+      await expect(notice(page)).toHaveAttribute("data-mode", "migration_pending");
+      expect(await page.evaluate((u) => localStorage.getItem(`ayra:${u}:ayra_economy_mode`), userId)).toBe("migration_pending");
+      await page.waitForTimeout(1500);
+      const after = await game(page, userId);
+      expect([after.xp, after.coins]).toEqual([before.xp, before.coins]);
+      // the hook works again: the next token carries the state, the server answers
+      await request.get(`${FAKE_SUPABASE}/__test/hook?mode=on`);
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await expect.poll(async () => (await api(page, "/api/game/day/status")).status, { timeout: 30_000 }).toBe(200);
+    });
+  }
 
   test("two tabs: one refresh serves both; both see the server's state and every request after it is fresh", async ({ page, request, context }) => {
     const { email } = await account(page, request);

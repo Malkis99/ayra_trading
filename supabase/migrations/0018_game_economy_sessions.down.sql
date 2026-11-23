@@ -1,6 +1,8 @@
 -- AYRA Trading — rollback of 0018 (Q4.5-2). Restores the 0014 state model, entry points and award access.
 -- Refuses while an account is «migration_scheduled» (0014 has no such state): nothing is changed then.
--- The marks already written to auth.users stay (they only make a client stricter, Q4.5-1); docs section 9.
+-- Deletes no ledger row, projection, claim or state: XP, Coins and the history stay (docs section 9).
+-- Switch the Custom Access Token Hook OFF in the project first (docs section 8): with the hook function gone the auth
+-- server could not issue tokens while the hook is still on.
 
 BEGIN;
 
@@ -11,11 +13,13 @@ BEGIN
   END IF;
 END $$;
 
+-- the owner of the restored functions needs CREATE on public while they are handed over (taken back at the end)
+GRANT CREATE ON SCHEMA public TO game_economy_owner;
+
 DROP FUNCTION IF EXISTS public.game_apply_reward_for_session(UUID, UUID, BIGINT, TEXT, TEXT, TEXT, JSONB);
 DROP FUNCTION IF EXISTS public.game_session_check(UUID, UUID, BIGINT, TEXT);
-DROP FUNCTION IF EXISTS public.game_economy_transition(UUID, TEXT, TEXT, BOOLEAN);
-DROP FUNCTION IF EXISTS public.game_auth_session_alive(UUID, UUID);
-DROP FUNCTION IF EXISTS public.game_auth_mark(UUID, TEXT, BOOLEAN);
+DROP FUNCTION IF EXISTS public.game_access_token_hook(JSONB);
+DROP FUNCTION IF EXISTS public.game_economy_transition(UUID, TEXT, TEXT);
 
 ALTER TABLE public.game_accounts DROP CONSTRAINT IF EXISTS game_accounts_state_check;
 ALTER TABLE public.game_accounts ADD CONSTRAINT game_accounts_state_check CHECK (state IN ('local', 'migration_pending', 'cloud_active'));
@@ -72,11 +76,8 @@ ALTER FUNCTION public.game_activate_cloud(UUID, TEXT) OWNER TO game_economy_owne
 
 GRANT EXECUTE ON FUNCTION public.game_apply_reward(UUID, TEXT, TEXT, JSONB) TO service_role;
 
-DROP POLICY IF EXISTS game_accounts_marker_read ON public.game_accounts;
-REVOKE ALL ON public.game_accounts FROM game_auth_marker;
-REVOKE ALL ON auth.users, auth.sessions, auth.refresh_tokens FROM game_auth_marker;
-REVOKE USAGE ON SCHEMA auth FROM game_auth_marker;
-REVOKE USAGE ON SCHEMA public FROM game_auth_marker;
-DROP ROLE IF EXISTS game_auth_marker;
+-- (USAGE on public for supabase_auth_admin is left as it was: Supabase grants it itself)
+
+REVOKE CREATE ON SCHEMA public FROM game_economy_owner;
 
 COMMIT;

@@ -7,13 +7,13 @@ import { metadataWrite } from "./watchlist-meta.mjs";
 
 const b64url = (buf) => Buffer.from(buf).toString("base64url");
 
-function makeJwt(user, sessionId) {
+function makeJwt(user, sessionId, hookClaims = {}) {
   const now = Math.floor(Date.now() / 1000);
   const header = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   // like the real auth server: the session id, and app_metadata as it is at the moment of issue (Q4.5-2 reads the mark)
   const payload = b64url(
     JSON.stringify({ sub: user.id, email: user.email, role: "authenticated", aud: "authenticated", iat: now, exp: now + 3600,
-      session_id: sessionId, app_metadata: user.app_metadata || {} })
+      session_id: sessionId, app_metadata: user.app_metadata || {}, ...hookClaims })
   );
   const sig = crypto.createHmac("sha256", "fake-e2e-secret").update(`${header}.${payload}`).digest("base64url");
   return `${header}.${payload}.${sig}`;
@@ -47,6 +47,10 @@ export function createFakeSupabase() {
   const myDays = new Map(); // user id -> game_my_day() payload (0015 server day)
   // 0014–0016 stand-in for the day API routes: off = «migrations not applied» (as on the real Supabase today)
   let economyInstalled = false;
+  // Q4.5-2 stand-in for the Custom Access Token Hook (0018 game_access_token_hook): «on» adds the account's state now as the
+  // top-level «ayra_economy» claim of every token; «unavailable» = the hook could not read the state (no mark + status);
+  // «off» = the hook is not configured (no mark); «error» = the auth server cannot run the hook (tokens are refused)
+  let hookMode = "on";
   const economies = new Map(); // user id -> { state, game_sync, opening_mode, day }
   const economyCalls = []; // { fn, user, args } — what the routes asked (never a time or a day)
   const SERVICE_KEY = "fake-service-key";
@@ -125,9 +129,15 @@ export function createFakeSupabase() {
     return user;
   }
 
+  function hookClaimsOf(user) {
+    if (hookMode === "off") return {};
+    if (hookMode === "unavailable") return { ayra_economy_status: "unavailable" };
+    return { ayra_economy: (economies.get(user.id) || {}).state || "local" };
+  }
+
   function issueSession(user, sessionId = crypto.randomUUID()) {
     liveSessions.set(sessionId, user.id);
-    const access_token = makeJwt(user, sessionId);
+    const access_token = makeJwt(user, sessionId, hookClaimsOf(user));
     const refresh_token = b64url(crypto.randomBytes(16));
     sessionIdOf.set(refresh_token, sessionId);
     sessionIdOf.set(access_token, sessionId);
@@ -251,24 +261,11 @@ export function createFakeSupabase() {
       if (!user) return send(404, { error: "no user" });
       const old = economies.get(user.id) || {};
       const state = url.searchParams.get("state") || old.state || "local";
-      // as game_economy_transition() (0018): a new state, its time and the session mark change together
+      // as game_economy_transition() (0018): the state and its time, in the database only; tokens issued from now on carry
+      // it (the hook), tokens issued before keep their old mark until they expire
       const changed = state !== (old.state || "local");
       economies.set(user.id, { ...old, state, changedAt: changed ? Date.now() : old.changedAt, game_sync: url.searchParams.get("sync") === "1", opening_mode: url.searchParams.get("mode") || old.opening_mode });
-      if (changed) {
-        const { ayra_economy: _old, ...rest } = user.app_metadata || {};
-        user.app_metadata = state === "local" ? rest : { ...rest, ayra_economy: state };
-      }
       return send(200, { ok: true, userId: user.id });
-    }
-    if (path === "/__test/end-sessions") {
-      // as game_economy_transition(…, revoke = true): every auth session and refresh token of the user ends (an access
-      // token already issued stays valid until it expires — like the real server)
-      const user = usersByEmail.get(url.searchParams.get("email"));
-      if (user) {
-        for (const [sid, uid] of [...liveSessions]) if (uid === user.id) liveSessions.delete(sid);
-        for (const rt of sessionsByUser.get(user.id) || []) tokens.delete(rt);
-      }
-      return send(200, {});
     }
     if (path === "/__test/live-sessions") {
       // the user's live auth sessions (auth.sessions) — e2e checks that a sign-out ends one and a sign-in makes a new one
@@ -432,15 +429,19 @@ export function createFakeSupabase() {
       return send(200, { app_metadata: user?.app_metadata ?? null });
     }
     if (path === "/__test/app-economy") {
-      // Q4.5-1: stands in for the server's mark (Q4.5-2 SQL on raw_app_meta_data.ayra_economy); the session sees it after
-      // a sign-in, a token refresh or a user read (/auth/v1/user), like the real auth server
+      // Q4.5-1/Q4.5-2: the account's state as the hook reads it (game_accounts) — the session sees it in the next token
+      // (a sign-in or a refresh), like the real auth server with the Custom Access Token Hook
       const user = usersByEmail.get(url.searchParams.get("email"));
-      const state = url.searchParams.get("state");
+      const state = url.searchParams.get("state") || "local";
       if (user) {
-        const { ayra_economy: _old, ...rest } = user.app_metadata || {};
-        user.app_metadata = state ? { ...rest, ayra_economy: state } : rest;
+        const old = economies.get(user.id) || { game_sync: false };
+        economies.set(user.id, { ...old, state, changedAt: state !== (old.state || "local") ? Date.now() : old.changedAt });
       }
-      return send(200, { app_metadata: user?.app_metadata ?? null });
+      return send(200, { state: user ? economies.get(user.id).state : null });
+    }
+    if (path === "/__test/hook") {
+      hookMode = url.searchParams.get("mode") || "on";
+      return send(200, { hookMode });
     }
     if (path === "/__test/clear-password") {
       // stands in for an account made by the e-mail code before passwords existed
@@ -460,6 +461,7 @@ export function createFakeSupabase() {
     }
     if (path === "/auth/v1/token" && req.method === "POST") {
       const body = await readBody(req);
+      if (hookMode === "error") return send(500, { code: "unexpected_failure", msg: "Error running hook URI: pg-functions://postgres/public/game_access_token_hook" });
       const grant = url.searchParams.get("grant_type");
       if (grant === "pkce") {
         const pending = pendingCodes.get(body.auth_code);
@@ -491,7 +493,7 @@ export function createFakeSupabase() {
         const sid = sessionIdOf.get(body.refresh_token);
         if (!user || !sid || !liveSessions.has(sid)) return send(400, { error: "invalid_grant" });
         refreshCount.set(user.id, (refreshCount.get(user.id) || 0) + 1);
-        return send(200, issueSession(user, sid)); // a refresh keeps its session (and brings the app_metadata of now)
+        return send(200, issueSession(user, sid)); // a refresh keeps its session (and the hook puts the state of now)
       }
       return send(400, { error: "unsupported_grant_type" });
     }
@@ -515,6 +517,9 @@ export function createFakeSupabase() {
     }
     if (path === "/auth/v1/user") {
       const user = userFromAuthHeader(req);
+      // like GoTrue: the token of an ended session is refused even before its exp
+      const sid = sessionIdOf.get((req.headers.authorization || "").replace(/^Bearer\s+/i, ""));
+      if (user && sid && !liveSessions.has(sid)) return send(403, { code: 403, error_code: "session_not_found", msg: "Session from session_id claim in JWT does not exist" });
       return user ? send(200, user) : send(401, { error: "not authenticated" });
     }
     if (path === "/auth/v1/logout") {
@@ -814,11 +819,11 @@ export function createFakeSupabase() {
           missions: econ.day.core.map((m) => ({ id: m, assigned: econ.day.mode !== "rest", accepted: m in econ.day.accepted, paid: econ.day.paid.includes(m), passed: econ.day.passed.includes(m) })) };
       };
       const day = () => econ.day;
-      // 0018 game_session_check(): the session still exists, the token's mark is the state now, issued after the change
+      // 0018 game_session_check(): the token names its session, its mark is the state now, issued after the change
       const sessionCheck = () => {
         const state = econ.state || "local";
         let reason = null;
-        if (typeof body.p_session !== "string" || liveSessions.get(body.p_session) !== body.p_user) reason = "session_revoked";
+        if (typeof body.p_session !== "string" || !body.p_session) reason = "session_revoked";
         else if ((body.p_claim || "local") !== state) reason = "mark_changed";
         else if (state !== "local" && econ.changedAt && (typeof body.p_iat !== "number" || body.p_iat < Math.floor(econ.changedAt / 1000))) reason = "issued_before_change";
         return { state, fresh: reason === null, reason };

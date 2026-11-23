@@ -3,13 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 
 /**
- * Q4.5-1: the load-time getUser answer is applied by AuthProvider only while the session it was started for is still
- * the current one. The answer is held back here and released after a sign-out, another account's sign-in, or a new
+ * Q4.5-1: the load-time answer of the auth server (Q4.5-2: a token refresh — the mark lives only in tokens issued by the
+ * Custom Access Token Hook) is applied by AuthProvider only while the session it was started for is still the current one. The answer is held back here and released after a sign-out, another account's sign-in, or a new
  * sign-in of the same account — it must then change neither the user flags nor the session's economy reading.
  */
 
-type FakeUser = { id: string; email: string; user_metadata: Record<string, unknown>; app_metadata: Record<string, unknown> };
-type FakeSession = { access_token: string; expires_at: number; user: FakeUser };
+// «economy» is what the hook would put in the next token (never in the user's app_metadata)
+type FakeUser = { id: string; email: string; user_metadata: Record<string, unknown>; app_metadata: Record<string, unknown>; economy?: string };
+type FakeSession = { access_token: string; expires_at: number; user: FakeUser; session_id?: string | null };
 type AuthCallback = (event: string, session: FakeSession | null) => void;
 
 const A = "00000000-0000-0000-0000-0000000000a1";
@@ -18,7 +19,9 @@ const B = "00000000-0000-0000-0000-0000000000b2";
 const fake = vi.hoisted(() => ({
   stored: null as unknown,
   pendingGetUser: null as null | ((u: unknown) => void),
+  startedFor: null as null | string, // the session id the load-time refresh was started for
   listener: null as null | ((event: string, session: unknown) => void),
+  issued: (() => null) as (u: never) => unknown,
 }));
 
 vi.mock("@/lib/supabase/config", async (orig) => ({ ...(await orig<typeof import("@/lib/supabase/config")>()), isE2EMockEnabled: () => false }));
@@ -27,7 +30,11 @@ vi.mock("@/lib/supabase/browser", () => {
   const client = {
     auth: {
       getSession: async () => ({ data: { session: fake.stored } }),
-      getUser: () => new Promise((resolve) => { fake.pendingGetUser = (u) => resolve({ data: { user: u }, error: null }); }),
+      // the load-time refresh is held; released with the user the auth server holds now (and a token for that session)
+      refreshSession: () => new Promise((resolve) => {
+        fake.startedFor = (fake.stored as { session_id?: string } | null)?.session_id ?? null;
+        fake.pendingGetUser = (u) => resolve({ data: { session: fake.issued(u as never), user: u }, error: null });
+      }),
       onAuthStateChange: (cb: (event: string, session: unknown) => void) => {
         fake.listener = cb;
         return { data: { subscription: { unsubscribe: () => {} } } };
@@ -43,7 +50,9 @@ import { AppProvider } from "@/lib/context";
 import { AuthProvider, useAuth } from "@/lib/auth/auth-context";
 
 const b64 = (o: unknown) => btoa(JSON.stringify(o)).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
-const token = (sub: string, sessionId: string | null) => `${b64({ alg: "HS256" })}.${b64({ sub, ...(sessionId ? { session_id: sessionId } : {}) })}.sig`;
+// as the auth server issues it: the hook's top-level «ayra_economy» claim
+const token = (sub: string, sessionId: string | null, economy?: string) =>
+  `${b64({ alg: "HS256" })}.${b64({ sub, ...(sessionId ? { session_id: sessionId } : {}), ...(economy ? { ayra_economy: economy } : {}) })}.sig`;
 const NOW_S = Math.floor(Date.now() / 1000);
 
 function user(id: string, flags: { owner?: boolean; password?: boolean; economy?: string } = {}): FakeUser {
@@ -51,10 +60,14 @@ function user(id: string, flags: { owner?: boolean; password?: boolean; economy?
     id,
     email: `${id.slice(-2)}@example.com`,
     user_metadata: flags.password ? { has_password: true } : {},
-    app_metadata: { ...(flags.owner ? { ayra_role: "owner" } : {}), ...(flags.economy ? { ayra_economy: flags.economy } : {}) },
+    app_metadata: { ...(flags.owner ? { ayra_role: "owner" } : {}) },
+    ...(flags.economy ? { economy: flags.economy } : {}),
   };
 }
-const session = (u: FakeUser, sessionId: string | null, expiresIn = 3600): FakeSession => ({ access_token: token(u.id, sessionId), expires_at: NOW_S + expiresIn, user: u });
+const session = (u: FakeUser, sessionId: string | null, expiresIn = 3600): FakeSession =>
+  ({ access_token: token(u.id, sessionId, u.economy), expires_at: NOW_S + expiresIn, user: u, session_id: sessionId } as FakeSession);
+// the token the held refresh brings: same session (a refresh keeps it), the state as the hook reads it now
+fake.issued = (u: FakeUser) => ({ access_token: token(u.id, fake.startedFor, u.economy), expires_at: NOW_S + 3600, user: u });
 
 function Probe() {
   const { user: u, sessionEconomy: e } = useAuth();
@@ -75,7 +88,7 @@ async function load(initial: FakeSession) {
       </AuthProvider>
     </AppProvider>
   );
-  await waitFor(() => expect(fake.pendingGetUser).not.toBeNull()); // getSession applied, getUser started and held
+  await waitFor(() => expect(fake.pendingGetUser).not.toBeNull()); // getSession applied, the refresh started and held
   await waitFor(() => expect(screen.getByTestId("user").textContent).toBe(`${initial.user.id.slice(-2)} owner=false password=false`));
 }
 const emit = (event: string, s: FakeSession | null) => act(() => { fake.stored = s; fake.listener?.(event, s); });
@@ -86,6 +99,7 @@ beforeEach(() => {
   localStorage.clear();
   fake.stored = null;
   fake.pendingGetUser = null;
+  fake.startedFor = null;
   fake.listener = null;
 });
 afterEach(() => cleanup());

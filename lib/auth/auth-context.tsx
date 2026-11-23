@@ -322,21 +322,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (session?.user) {
             const u = toAuthUser(session.user);
             // every reading is joined to what is known (an older one never takes a mark back: mergeSessionEconomy)
-            setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(session.user, "cached", session.expires_at)));
+            setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(session, "cached")));
             updateToAuthenticated(u, true);
-            // The stored session may hold old user data (a password set on another device, the owner role just given):
-            // refresh only these flags from the server
+            // The stored session may hold an old token (an economy mark given after it was issued — the mark lives only in
+            // tokens, Q4.5-2) and old user data (a password set on another device, the owner role just given): one refresh
+            // at load brings a token the auth server issues now (its hook reads the state) and the user as it is now
             supabase.auth
-              .getUser()
+              .refreshSession()
               .then(({ data }) => {
+                const issued = data.session;
                 // An answer for a session that is no longer the current one (a sign-out, another account, a new sign-in of
                 // the same account) changes nothing: neither the user flags nor the economy reading.
-                if (!isMounted || !data.user || data.user.id !== session.user.id || !authGenerationRef.current.isCurrent(generation)) return;
-                // the economy mark as the auth server holds it now (a mark given after this token was issued shows here);
-                // joinVerifiedReading also keeps it to the same account
-                const verifiedUser = data.user;
-                setSessionEconomy((prev) => joinVerifiedReading(prev, sessionEconomyOf(verifiedUser, "verified", session.expires_at)));
-                const fresh = toAuthUser(data.user);
+                if (!isMounted || !issued?.user || issued.user.id !== session.user.id || !authGenerationRef.current.isCurrent(generation)) return;
+                // the mark of the token just issued; joinVerifiedReading also keeps it to the same account
+                setSessionEconomy((prev) => joinVerifiedReading(prev, sessionEconomyOf(issued, "verified")));
+                const fresh = toAuthUser(issued.user);
                 setUser((prev) =>
                   prev && prev.id === fresh.id && (prev.hasPassword !== fresh.hasPassword || prev.isOwner !== fresh.isOwner)
                     ? { ...prev, hasPassword: fresh.hasPassword, isOwner: fresh.isOwner }
@@ -358,7 +358,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (session?.user) {
             const u = toAuthUser(session.user);
             const fresh = event === "TOKEN_REFRESHED" || event === "SIGNED_IN" || event === "USER_UPDATED";
-            setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(session.user, fresh ? "verified" : "cached", session.expires_at)));
+            setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(session, fresh ? "verified" : "cached")));
             updateToAuthenticated(u);
           } else {
             setSessionEconomy(null);
@@ -399,7 +399,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               if (session?.user) {
                 authGenerationRef.current.observe(session);
                 const u = toAuthUser(session.user);
-                setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(session.user, "cached", session.expires_at)));
+                setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(session, "cached")));
                 setUser(u);
                 loadProfile(session.user.id);
                 setAuthState("authenticated");

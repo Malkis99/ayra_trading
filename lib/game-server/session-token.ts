@@ -14,7 +14,7 @@ export interface SessionToken {
   sessionId: string | null;
   /** `iat` — when the token was issued, in seconds */
   iat: number | null;
-  /** `app_metadata.ayra_economy` — the economy mark the token carries (written only by the server, 0018), or null */
+  /** `ayra_economy` — the top-level claim the Custom Access Token Hook adds (0018): the state when the token was issued */
   claim: EconomyMode | null;
 }
 
@@ -28,12 +28,12 @@ export function sessionTokenOf(accessToken: string | null | undefined): SessionT
   if (!part) return EMPTY;
   try {
     const c = JSON.parse(Buffer.from(part, "base64url").toString("utf8")) as Record<string, unknown>;
-    const meta = c.app_metadata && typeof c.app_metadata === "object" ? (c.app_metadata as Record<string, unknown>) : {};
     return {
       sub: typeof c.sub === "string" ? c.sub : null,
       sessionId: typeof c.session_id === "string" && UUID_RE.test(c.session_id) ? c.session_id : null,
       iat: typeof c.iat === "number" && Number.isSafeInteger(c.iat) && c.iat > 0 ? c.iat : null,
-      claim: typeof meta.ayra_economy === "string" && STAGES.includes(meta.ayra_economy) ? (meta.ayra_economy as EconomyMode) : null,
+      // only the hook's top-level claim; app_metadata can be written by other means and is never read for the economy
+      claim: typeof c.ayra_economy === "string" && STAGES.includes(c.ayra_economy) ? (c.ayra_economy as EconomyMode) : null,
     };
   } catch {
     return EMPTY;

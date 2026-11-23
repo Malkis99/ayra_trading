@@ -63,7 +63,7 @@ import { deviceRewardService, type RewardService } from "@/lib/reward-service";
 import { generateDaySet, type DayMode, type WeekChallenge } from "@/lib/quest-engine";
 import { ECONOMY_MODE_KEY, deviceRewardsAllowed, economyBasis, laterMode, readStickyMode, refusesReward, rememberMode, resolveEconomyMode, serverEconomyOn, type EconomyBasis, type EconomyMode, type SessionEconomy } from "./economy-mode";
 import { useOptionalAuth } from "@/lib/auth/auth-context";
-import { serverDay, type DayCall, type ServerDayStatus } from "./server-day-client";
+import { onSessionStale, serverDay, type DayCall, type ServerDayStatus } from "./server-day-client";
 import { mirrorServerDay } from "./server-day-mirror";
 import type { WeekSnapshot } from "@/lib/day-snapshots";
 import type { PQNoteField, PQResult, PQStartInput } from "@/lib/personal-quests";
@@ -693,6 +693,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     },
     [setEconomyView]
   );
+  // the state from a session_stale refusal is kept at once, before the app tries to refresh its session (Q4.5-2)
+  useEffect(() => {
+    onSessionStale((state) => learnRefusedState({ ok: false, error: "session_stale", state }));
+    return () => onSessionStale(null);
+  }, [learnRefusedState]);
   const noteServerRefusal = useCallback(
     (r: DayCall) => {
       if (r.ok) return;

@@ -9,14 +9,18 @@ const jwt = (claims: Record<string, unknown>) => `${b64({ alg: "HS256" })}.${b64
 
 describe("Q4.5-2 the claims read from a verified access token", () => {
   it("reads sub, session_id, iat and the economy mark", () => {
-    expect(sessionTokenOf(jwt({ sub: A, session_id: SID, iat: 1_763_600_000, app_metadata: { provider: "email", ayra_economy: "migration_pending" } }))).toEqual({
+    expect(sessionTokenOf(jwt({ sub: A, session_id: SID, iat: 1_763_600_000, app_metadata: { provider: "email" }, ayra_economy: "migration_pending" }))).toEqual({
       sub: A, sessionId: SID, iat: 1_763_600_000, claim: "migration_pending",
     });
   });
 
   it("no mark is null (an account never moved); an unknown mark is null, never a stage", () => {
     expect(sessionTokenOf(jwt({ sub: A, session_id: SID, iat: 1, app_metadata: { provider: "email" } })).claim).toBeNull();
-    expect(sessionTokenOf(jwt({ sub: A, app_metadata: { ayra_economy: "admin" } })).claim).toBeNull();
+    expect(sessionTokenOf(jwt({ sub: A, ayra_economy: "admin" })).claim).toBeNull();
+    // the hook's top-level claim only: a mark in app_metadata (writable by other means) is never the economy's
+    expect(sessionTokenOf(jwt({ sub: A, app_metadata: { ayra_economy: "cloud_active" } })).claim).toBeNull();
+    // the hook could not read the state: no mark (the database then refuses the session for a non-local account)
+    expect(sessionTokenOf(jwt({ sub: A, ayra_economy_status: "unavailable" })).claim).toBeNull();
     expect(sessionTokenOf(jwt({ sub: A, app_metadata: "cloud_active" })).claim).toBeNull();
   });
 
@@ -45,7 +49,7 @@ describe("Q4.5-2 the economy request's user", () => {
   });
 
   it("the auth server verifies exactly the session's token; its claims come with the user", async () => {
-    const token = jwt({ sub: A, session_id: SID, iat: 7, app_metadata: { ayra_economy: "cloud_active" } });
+    const token = jwt({ sub: A, session_id: SID, iat: 7, ayra_economy: "cloud_active" });
     const seen: string[] = [];
     expect(await verifiedSessionUser(client(token, { id: A }, seen))).toEqual({ id: A, token: { sub: A, sessionId: SID, iat: 7, claim: "cloud_active" } });
     expect(seen).toEqual([token]);
@@ -57,8 +61,8 @@ describe("Q4.5-2 the economy request's user", () => {
   });
 
   it("one request uses one token: a refresh while the request runs never mixes the verified token with another's claims", async () => {
-    const t1 = jwt({ sub: A, session_id: SID, iat: 1, app_metadata: { ayra_economy: "migration_pending" } });
-    const t2 = jwt({ sub: A, session_id: SID, iat: 2, app_metadata: { ayra_economy: "cloud_active" } });
+    const t1 = jwt({ sub: A, session_id: SID, iat: 1, ayra_economy: "migration_pending" });
+    const t2 = jwt({ sub: A, session_id: SID, iat: 2, ayra_economy: "cloud_active" });
     const seen: string[] = [];
     let reads = 0;
     const refreshing = {

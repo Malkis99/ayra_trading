@@ -69,4 +69,20 @@ describe("Q4.5-2 the app on session_stale: one refresh, one repeat, never a loop
     expect(r).toEqual({ ok: false, error: "network" });
     expect(refresh).not.toHaveBeenCalled();
   });
+
+  it("the state from the refusal reaches the game BEFORE the refresh is tried (a slow or failing auth server delays nothing)", async () => {
+    const order: string[] = [];
+    const refresh = async () => { order.push("refresh"); return false; };
+    await callDayApi("/api/game/day/status", "GET", undefined, fetchOf(STALE).impl, refresh, (st) => order.push("state:" + st));
+    expect(order).toEqual(["state:migration_pending", "refresh"]);
+  });
+
+  it("other refusals and a stale answer without a state tell the game nothing", async () => {
+    const heard: string[] = [];
+    for (const answer of [[401, { error: "not_signed_in" }], [401, { error: "session_stale" }], [503, { error: "server_error" }]] as Array<[number, Record<string, unknown>]>) {
+      await callDayApi("/api/game/day/status", "GET", undefined, fetchOf(answer).impl, async () => false, (st) => heard.push(st));
+    }
+    expect(heard).toEqual([]);
+  });
 });
+

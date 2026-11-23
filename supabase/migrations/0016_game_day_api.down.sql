@@ -2,6 +2,8 @@
 -- removes the trading days, the extras catalog, the first-seen trace and the API helpers. 0015, 0014 and the Journal
 -- tables (with their rows) stay.
 BEGIN;
+-- the owner of the new objects needs CREATE on public while they are handed over (Supabase; taken back at the end)
+GRANT CREATE ON SCHEMA public TO game_economy_owner;
 
 DO $$
 DECLARE f TEXT;
@@ -159,4 +161,7 @@ BEGIN
   GRANT EXECUTE ON FUNCTION public.game_day_set_mode(uuid,text) TO service_role;
 END $$;
 
+
+-- CREATE on public was needed only to hand the objects over (Supabase): never left behind
+REVOKE CREATE ON SCHEMA public FROM game_economy_owner;
 COMMIT;

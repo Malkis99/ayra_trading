@@ -43,16 +43,32 @@ const STATES: readonly string[] = ["local", "migration_scheduled", "migration_pe
 
 /** Refreshes the app's session (a new token from the auth server). True when a new session was issued. */
 export type SessionRefresher = () => Promise<boolean>;
+/** PLACEHOLDER: how long a refresh may take before it counts as failed (the auth client retries a failing server). */
+export const SESSION_REFRESH_TIMEOUT_MS = 10_000;
 export const refreshAppSession: SessionRefresher = async () => {
   const supabase = createSupabaseBrowserClient();
   if (!supabase) return false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const { data, error } = await supabase.auth.refreshSession();
-    return !error && !!data.session;
+    const timeout = new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), SESSION_REFRESH_TIMEOUT_MS); });
+    const refreshed = supabase.auth.refreshSession().then(({ data, error }) => !error && !!data.session, () => false);
+    return await Promise.race([refreshed, timeout]);
   } catch {
     return false;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 };
+
+/**
+ * Who learns the account's state from a `session_stale` refusal AT ONCE — before any refresh is tried, so a device
+ * stops its local rewards even while the auth server is slow or failing (set by the game, lib/game-context.tsx).
+ */
+type StaleListener = (state: EconomyMode) => void;
+let staleListener: StaleListener | null = null;
+export function onSessionStale(listener: StaleListener | null): void {
+  staleListener = listener;
+}
 
 const TIMEOUT_MS = 10_000;
 
@@ -83,9 +99,16 @@ async function once(path: string, method: "GET" | "POST", body: unknown, fetchIm
 }
 
 /** One request; on `session_stale` one session refresh and one repeat (the refused request changed nothing). */
-export async function callDayApi(path: string, method: "GET" | "POST", body?: unknown, fetchImpl: typeof fetch = fetch, refresh: SessionRefresher = refreshAppSession): Promise<DayCall> {
+export async function callDayApi(path: string, method: "GET" | "POST", body?: unknown, fetchImpl: typeof fetch = fetch, refresh: SessionRefresher = refreshAppSession, listener: StaleListener | null = staleListener): Promise<DayCall> {
   const first = await once(path, method, body, fetchImpl);
   if (first.ok || first.error !== "session_stale") return first;
+  if (first.state && listener) {
+    try {
+      listener(first.state);
+    } catch {
+      /* the listener's failure never changes the answer */
+    }
+  }
   if (!(await refresh())) return first;
   const again = await once(path, method, body, fetchImpl);
   // still stale after a fresh session (or another failure): keep what the first refusal said about the account

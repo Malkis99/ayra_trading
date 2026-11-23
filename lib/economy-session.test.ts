@@ -18,7 +18,8 @@ import {
   type SessionEconomy,
 } from "./economy-mode";
 
-// Q4.5-1: the account's session carries the server's economy mark (app_metadata.ayra_economy). The mode in force is
+// Q4.5-1: the account's session carries the server's economy mark (Q4.5-2: the top-level «ayra_economy» claim the Custom
+// Access Token Hook adds to every token; app_metadata is never read for it). The mode in force is
 // the latest of the device record, the session and the server — never backwards; no mark is not a proof of «local».
 
 const A = "00000000-0000-0000-0000-00000000e0a1";
@@ -27,7 +28,7 @@ const NOW = Date.parse("2026-11-20T10:00:00Z");
 const session = (claim: EconomyMode | null, over: Partial<SessionEconomy> = {}): SessionEconomy => ({ userId: A, claim, source: "verified", expiresAt: NOW + 3_600_000, ...over });
 
 describe("Q4.5-1 the session's mark", () => {
-  it("reads only known modes from app_metadata; anything else is no mark", () => {
+  it("reads only known modes from the token's claims; anything else is no mark", () => {
     expect(claimOf({ ayra_economy: "cloud_active" })).toBe("cloud_active");
     expect(claimOf({ ayra_economy: "migration_scheduled" })).toBe("migration_scheduled");
     expect(claimOf({ ayra_economy: "CLOUD_ACTIVE" })).toBeNull();
@@ -36,11 +37,28 @@ describe("Q4.5-1 the session's mark", () => {
     expect(claimOf(null)).toBeNull();
   });
 
-  it("keeps the account, the source and the token's expiry", () => {
-    expect(sessionEconomyOf({ id: A, app_metadata: { ayra_economy: "migration_pending" } }, "cached", 1_800_000_000)).toEqual({
-      userId: A, claim: "migration_pending", source: "cached", expiresAt: 1_800_000_000_000,
-    });
+  const b64 = (o: unknown) => btoa(JSON.stringify(o)).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+  const token = (claims: Record<string, unknown>) => `${b64({ alg: "HS256" })}.${b64(claims)}.sig`;
+
+  it("the mark, the expiry and the account come from the session's own token", () => {
+    const s = { access_token: token({ sub: A, exp: 1_800_000_000, ayra_economy: "migration_pending" }), expires_at: 1_700_000_000, user: { id: A } };
+    expect(sessionEconomyOf(s, "cached")).toEqual({ userId: A, claim: "migration_pending", source: "cached", expiresAt: 1_800_000_000_000 });
     expect(sessionEconomyOf(null, "verified")).toBeNull();
+    expect(sessionEconomyOf({ access_token: s.access_token, user: null }, "verified")).toBeNull();
+  });
+
+  it("Q4.5-2: only the hook's top-level claim is a mark — never app_metadata (of the token or of the user)", () => {
+    const s = { access_token: token({ sub: A, app_metadata: { ayra_economy: "cloud_active" } }), user: { id: A, app_metadata: { ayra_economy: "cloud_active" } } };
+    expect(sessionEconomyOf(s, "verified")?.claim).toBeNull();
+    // the hook could not read the state: no mark, which proves nothing (and the server refuses such a session)
+    expect(sessionEconomyOf({ access_token: token({ sub: A, ayra_economy_status: "unavailable" }), user: { id: A } }, "verified")?.claim).toBeNull();
+  });
+
+  it("a token of another account gives no mark (a session never borrows another account's token); an unreadable token neither", () => {
+    expect(sessionEconomyOf({ access_token: token({ sub: B, ayra_economy: "cloud_active" }), expires_at: 1_700_000_000, user: { id: A } }, "verified")).toEqual({
+      userId: A, claim: null, source: "verified", expiresAt: 1_700_000_000_000,
+    });
+    for (const t of [null, "", "abc", "a.%%%.c", "a.bm90IGpzb24.c"]) expect(sessionEconomyOf({ access_token: t, user: { id: A } }, "cached")?.claim).toBeNull();
   });
 });
 
