@@ -69,7 +69,8 @@ test.describe("Q4.4 server game day API (fake Supabase)", () => {
 
   test("the real Supabase today (0014–0016 not applied): the API says so, the device economy works exactly as before", async ({ page, request }) => {
     const { userId } = await setUp(page, request, { installed: false });
-    expect(await api(page, "/api/game/day/status")).toEqual({ status: 503, body: { error: "server_economy_unavailable" } });
+    // Q4.5-2: every answer names the verified user it was given for (the app binds answers to it)
+    expect(await api(page, "/api/game/day/status")).toEqual({ status: 503, body: { error: "server_economy_unavailable", account: userId } });
     await openQuests(page);
     await expect(page.getByTestId("economy-notice")).toHaveCount(0);
     const card = page.getByTestId("quest-card-m_lesson");
@@ -129,7 +130,12 @@ test.describe("Q4.4 server game day API (fake Supabase)", () => {
     const calls = (await (await request.get(`${FAKE_SUPABASE}/__test/economy-calls`)).json()) as Array<{ fn: string; user: string; args: string[] }>;
     expect(calls.every((c) => c.user === userId)).toBe(true);
     const allowed = ["p_bonus", "p_mission", "p_mode", "p_from", "p_to", "p_days", "p_day"];
-    expect(calls.flatMap((c) => c.args).filter((a) => !allowed.includes(a))).toEqual([]);
+    // Q4.5-2: the claims of the verified token go only to the two session functions (never a device time: p_iat is the
+    // token's issue time, checked against the database's state time)
+    const sessionArgs = ["p_session", "p_iat", "p_claim"];
+    const sessionFns = ["game_session_check", "game_apply_reward_for_session"];
+    expect(calls.flatMap((c) => c.args.filter((a) => !allowed.includes(a) && !(sessionFns.includes(c.fn) && sessionArgs.includes(a))).map((a) => `${c.fn}:${a}`))).toEqual([]);
+    expect(calls.some((c) => c.fn === "game_session_check")).toBe(true);
     // the one day the routes pass is the server's own (to read the Journal for the mission check), never the client's
     expect(calls.filter((c) => c.args.includes("p_day")).map((c) => c.fn)).toEqual(calls.filter((c) => c.fn === "game_journal_for_check").map((c) => c.fn));
   });
@@ -157,15 +163,15 @@ test.describe("Q4.4 server game day API (fake Supabase)", () => {
   });
 
   test("refusals: no session, another account's id, a forged mode, time or day, another site", async ({ page, request }) => {
-    await setUp(page, request, { installed: true, state: "cloud_active", sync: false, mode: "study" });
+    const { userId } = await setUp(page, request, { installed: true, state: "cloud_active", sync: false, mode: "study" });
     await openQuests(page);
     expect((await request.get(`${APP}/api/game/day/status`)).status()).toBe(401);
     expect((await request.post(`${APP}/api/game/day/accept`, { headers: { origin: APP }, data: { mission: "m_lesson" } })).status()).toBe(401);
     for (const body of [{ mission: "m_lesson", user_id: "00000000-0000-0000-0000-000000000bad" }, { mission: "m_lesson", day: "2030-01-01" }, { mission: "m_lesson", now: "2030-01-01T00:00:00Z" }]) {
-      expect(await api(page, "/api/game/day/accept", body)).toEqual({ status: 400, body: { error: "bad_request" } });
+      expect(await api(page, "/api/game/day/accept", body)).toEqual({ status: 400, body: { error: "bad_request", account: userId } }); // the session's own id, never the one sent
     }
-    expect(await api(page, "/api/game/day/open", { extras: [], mode: "recovery" })).toEqual({ status: 400, body: { error: "bad_request" } });
+    expect(await api(page, "/api/game/day/open", { extras: [], mode: "recovery" })).toEqual({ status: 400, body: { error: "bad_request", account: userId } }); // the session's own id, never the one sent
     expect((await request.post(`${APP}/api/game/day/accept`, { headers: { origin: "https://evil.example" }, data: { mission: "m_lesson" } })).status()).toBe(403);
-    expect(await api(page, "/api/game/missions/verify", { mission: "m_lesson", xp: 400 })).toEqual({ status: 400, body: { error: "bad_request" } });
+    expect(await api(page, "/api/game/missions/verify", { mission: "m_lesson", xp: 400 })).toEqual({ status: 400, body: { error: "bad_request", account: userId } }); // the session's own id, never the one sent
   });
 });

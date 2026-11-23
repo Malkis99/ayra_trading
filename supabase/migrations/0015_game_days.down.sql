@@ -1,6 +1,8 @@
 -- AYRA Trading — rollback of 0015 (server game day). Restores the 0014 award exactly as 0014 defined it, removes the
 -- day tables, the day functions, the diagnostics and the two added columns. 0014 and everything before stay.
 BEGIN;
+-- the owner of the new objects needs CREATE on public while they are handed over (Supabase; taken back at the end)
+GRANT CREATE ON SCHEMA public TO game_economy_owner;
 
 DO $$
 DECLARE f TEXT;
@@ -197,4 +199,7 @@ ALTER FUNCTION public.game_apply_reward(UUID, TEXT, TEXT, JSONB) OWNER TO game_e
 REVOKE ALL ON FUNCTION public.game_apply_reward(UUID, TEXT, TEXT, JSONB) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.game_apply_reward(UUID, TEXT, TEXT, JSONB) TO service_role;
 
+
+-- CREATE on public was needed only to hand the objects over (Supabase): never left behind
+REVOKE CREATE ON SCHEMA public FROM game_economy_owner;
 COMMIT;

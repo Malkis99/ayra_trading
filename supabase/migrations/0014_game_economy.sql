@@ -35,8 +35,11 @@ BEGIN
   END IF;
 END $$;
 -- the role running the migration may hand objects over to it (needed on a non-superuser admin such as Supabase postgres)
-GRANT game_economy_owner TO CURRENT_USER;
+-- by NAME: on Supabase (supautils) «GRANT … TO CURRENT_USER» crashes the server process (found in Q4.5-2, docs/q4-5-2 section 7)
+DO $$ BEGIN EXECUTE format('GRANT game_economy_owner TO %I', current_user); END $$;
 GRANT USAGE ON SCHEMA public TO game_economy_owner;
+-- the owner of the new objects needs CREATE on public while they are handed over (Supabase; taken back at the end)
+GRANT CREATE ON SCHEMA public TO game_economy_owner;
 
 ALTER TABLE public.user_features ADD COLUMN IF NOT EXISTS game_sync BOOLEAN NOT NULL DEFAULT FALSE;
 
@@ -563,4 +566,7 @@ GRANT EXECUTE ON FUNCTION public.game_day_for(UUID, TIMESTAMPTZ) TO service_role
 REVOKE ALL ON FUNCTION public.game_account_status() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.game_account_status() TO authenticated;
 
+
+-- CREATE on public was needed only to hand the objects over (Supabase): never left behind
+REVOKE CREATE ON SCHEMA public FROM game_economy_owner;
 COMMIT;

@@ -9,7 +9,7 @@ import { authTabChannel } from "./tab-channel";
 import { AuthGeneration } from "./auth-generation";
 import { spaceTabChannel } from "./space-channel";
 import { AppStorage, GUEST_SPACE_ID } from "@/lib/storage";
-import { joinVerifiedReading, mergeSessionEconomy, sessionEconomyOf, type SessionEconomy } from "@/lib/economy-mode";
+import { SESSION_MARK_MAX_AGE_S, joinVerifiedReading, mergeSessionEconomy, sessionEconomyOf, tokenClaims, type SessionEconomy } from "@/lib/economy-mode";
 import {
   getMockState,
   setMockState,
@@ -106,6 +106,11 @@ interface AuthContextType {
    * with where it came from and when the token expires. null when signed out or with the e2e auth mock.
    */
   sessionEconomy: SessionEconomy | null;
+  /**
+   * Q4.5-2: the auth session generation (lib/auth/auth-generation.ts) — it changes on a sign-out, another account's
+   * sign-in and a new sign-in of the same account. The game binds every economy request to it (lib/economy-scope.ts).
+   */
+  authGeneration: number;
   guestDismissed: boolean;
   setGuestDismissed: (val: boolean) => void;
   lateSignInNotice: boolean;
@@ -150,6 +155,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loadingTimedOut, setLoadingTimedOut] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [sessionEconomy, setSessionEconomy] = useState<SessionEconomy | null>(null);
+  const [authGeneration, setAuthGeneration] = useState(0);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [profileStatus, setProfileStatus] = useState<ProfileStatus>("idle");
   const [profileError, setProfileError] = useState<ProfileLoadError | null>(null);
@@ -161,6 +167,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const prevAuthStateRef = useRef<AuthState>("loading");
   // which sign-in a late answer belongs to (a sign-out, another account or a new session of the same one ends it)
   const authGenerationRef = useRef(new AuthGeneration());
+  const observeSession = useCallback((session: Parameters<AuthGeneration["observe"]>[0]) => {
+    const generation = authGenerationRef.current.observe(session);
+    setAuthGeneration(generation);
+    return generation;
+  }, []);
 
   const envInfo = getSupabaseEnv();
   const mockMode = isE2EMockEnabled();
@@ -318,25 +329,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // 1. Initial session check (getInitialSession)
         supabase.auth.getSession().then(({ data: { session } }) => {
           if (!isMounted) return;
-          const generation = authGenerationRef.current.observe(session);
+          const generation = observeSession(session);
           if (session?.user) {
             const u = toAuthUser(session.user);
             // every reading is joined to what is known (an older one never takes a mark back: mergeSessionEconomy)
-            setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(session.user, "cached", session.expires_at)));
+            setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(session, "cached")));
             updateToAuthenticated(u, true);
-            // The stored session may hold old user data (a password set on another device, the owner role just given):
-            // refresh only these flags from the server
-            supabase.auth
-              .getUser()
-              .then(({ data }) => {
+            // The stored session may hold old user data (a password set on another device, the owner role just given) and,
+            // when its token is old, an old economy mark (the mark lives only in tokens, Q4.5-2). A token older than
+            // SESSION_MARK_MAX_AGE_S is refreshed: the auth server issues one now (its hook reads the state). A younger one
+            // is verified as it is (getUser with exactly this token) — its mark is at most that old.
+            const iat = tokenClaims(session.access_token)?.iat;
+            const old = typeof iat !== "number" || Date.now() / 1000 - iat > SESSION_MARK_MAX_AGE_S;
+            const answer: Promise<{ session: typeof session | null }> = old
+              ? supabase.auth.refreshSession().then(({ data }) => ({ session: data.session }))
+              : supabase.auth.getUser(session.access_token).then(({ data }) => ({ session: data.user ? { ...session, user: data.user } : null }));
+            answer
+              .then(({ session: issued }) => {
                 // An answer for a session that is no longer the current one (a sign-out, another account, a new sign-in of
                 // the same account) changes nothing: neither the user flags nor the economy reading.
-                if (!isMounted || !data.user || data.user.id !== session.user.id || !authGenerationRef.current.isCurrent(generation)) return;
-                // the economy mark as the auth server holds it now (a mark given after this token was issued shows here);
-                // joinVerifiedReading also keeps it to the same account
-                const verifiedUser = data.user;
-                setSessionEconomy((prev) => joinVerifiedReading(prev, sessionEconomyOf(verifiedUser, "verified", session.expires_at)));
-                const fresh = toAuthUser(data.user);
+                if (!isMounted || !issued?.user || issued.user.id !== session.user.id || !authGenerationRef.current.isCurrent(generation)) return;
+                // the mark of the token the auth server just verified or issued; joinVerifiedReading keeps it to the same account
+                setSessionEconomy((prev) => joinVerifiedReading(prev, sessionEconomyOf(issued, "verified")));
+                const fresh = toAuthUser(issued.user);
                 setUser((prev) =>
                   prev && prev.id === fresh.id && (prev.hasPassword !== fresh.hasPassword || prev.isOwner !== fresh.isOwner)
                     ? { ...prev, hasPassword: fresh.hasPassword, isOwner: fresh.isOwner }
@@ -354,11 +369,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           data: { subscription },
         } = supabase.auth.onAuthStateChange((event, session) => {
           if (!isMounted) return;
-          authGenerationRef.current.observe(session);
+          observeSession(session);
           if (session?.user) {
             const u = toAuthUser(session.user);
             const fresh = event === "TOKEN_REFRESHED" || event === "SIGNED_IN" || event === "USER_UPDATED";
-            setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(session.user, fresh ? "verified" : "cached", session.expires_at)));
+            setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(session, fresh ? "verified" : "cached")));
             updateToAuthenticated(u);
           } else {
             setSessionEconomy(null);
@@ -378,7 +393,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isMounted = false;
       clearTimeout(timer);
     };
-  }, [mockMode, loadProfile, explicitGuestChosen]);
+  }, [mockMode, loadProfile, explicitGuestChosen, observeSession]);
 
   // Subscribe to cross-tab auth state changes
   useEffect(() => {
@@ -397,9 +412,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (supabase) {
             supabase.auth.getSession().then(({ data: { session } }) => {
               if (session?.user) {
-                authGenerationRef.current.observe(session);
+                observeSession(session);
                 const u = toAuthUser(session.user);
-                setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(session.user, "cached", session.expires_at)));
+                setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(session, "cached")));
                 setUser(u);
                 loadProfile(session.user.id);
                 setAuthState("authenticated");
@@ -408,7 +423,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
       } else if (msg.type === "AUTH_SIGNED_OUT") {
-        authGenerationRef.current.observe(null);
+        observeSession(null);
         setSessionEconomy(null);
         setUser(null);
         setProfile(null);
@@ -417,7 +432,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => unsubscribe();
-  }, [mockMode, loadProfile]);
+  }, [mockMode, loadProfile, observeSession]);
 
   const authRedirectUrl = () => {
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
@@ -699,7 +714,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await AppStorage.flushSpace(oldSpaceId);
 
     authTabChannel.broadcast("AUTH_SIGNED_OUT");
-    authGenerationRef.current.observe(null);
+    observeSession(null);
 
     if (mockMode) {
       setMockState(null, null);
@@ -714,7 +729,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const supabase = createSupabaseBrowserClient();
     if (supabase) {
-      await supabase.auth.signOut();
+      // owner decision 2026-11-23: «Выйти» ends THIS device's session only; other devices stay signed in
+      await supabase.auth.signOut({ scope: "local" });
     }
     setUser(null);
     setProfile(null);
@@ -876,6 +892,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isConfigured: envInfo.isConfigured || mockMode,
         isPublicVisitor: authState === "guest" && (envInfo.isConfigured || mockMode) && !guestDismissed,
         sessionEconomy,
+        authGeneration,
         guestDismissed,
         setGuestDismissed,
         lateSignInNotice,

@@ -17,7 +17,7 @@ import { CURRENT_JOURNAL_SCHEMA_VERSION } from "@/lib/journal/repository";
 import { dayKeyInZone } from "@/lib/day-key";
 import { candidateSources, explainMission, isMissionId, type MissionId } from "@/lib/missions";
 import { dayStamp, serverZone, sourceRow, toMissionData, type CloudJournal, type CloudRow, type ShadowTable } from "@/lib/missions-shadow";
-import { gate, readJson, refusalOf, reply, type ApiHttp, type DayApiDeps } from "./day-api";
+import { forAccount, gate, readJson, refusalOf, reply, sessionGate, type ApiHttp, type DayApiDeps, type SessionUser } from "./day-api";
 
 export const missionPayoutsEnabled = () => process.env.AYRA_SERVER_MISSION_PAYOUTS === "1";
 export const VERIFY_MAX_ROWS = 5000;
@@ -66,8 +66,14 @@ export interface VerifyDeps extends DayApiDeps {
 
 /** The mission check (and, only when payouts are on, the award). */
 export async function handleMissionVerify(req: Request, deps: VerifyDeps): Promise<ApiHttp> {
-  const g = await gate(req, deps, false);
-  if ("refused" in g) return g.refused;
+  const g0 = await gate(req, deps, false);
+  if ("refused" in g0) return g0.refused;
+  // Q4.5-2: every answer names the verified user it was given for (the app applies it only to that account)
+  return forAccount(await verifyFor(req, deps, g0.user), g0.user.id);
+}
+
+async function verifyFor(req: Request, deps: VerifyDeps, user0: SessionUser): Promise<ApiHttp> {
+  const g = { user: user0 };
   const json = await readJson(req, 512);
   if (!json.ok) return json.http;
   const b = json.body as Record<string, unknown>;
@@ -77,6 +83,10 @@ export async function handleMissionVerify(req: Request, deps: VerifyDeps): Promi
   const mission = b.mission as MissionId;
   const user = g.user.id;
   try {
+    // 0. Q4.5-2: a session older than the account's state (or ended) gets nothing, not even the check
+    const stale = await sessionGate(deps, g.user);
+    if (stale) return stale;
+
     // 1. the server day
     const st = await deps.rpc("game_day_status", { p_user: user });
     if (st.error) {
@@ -131,7 +141,11 @@ export async function handleMissionVerify(req: Request, deps: VerifyDeps): Promi
       const at = sourceRow(src)!;
       const row = rowOf(src)!;
       const evidence = [{ table: at.table as ShadowTable, id: at.id, version: row.client_updated_at, fp: row.fp }];
-      const a = await deps.rpc("game_apply_reward", { p_user: user, p_kind: "mission", p_item: mission, p_evidence: evidence });
+      // only through the session-checked award (0018): the database re-checks the session with the account row held
+      const t = g.user.token;
+      const a = await deps.rpc("game_apply_reward_for_session", {
+        p_user: user, p_session: t.sessionId, p_iat: t.iat, p_claim: t.claim, p_kind: "mission", p_item: mission, p_evidence: evidence,
+      });
       if (!a.error) return reply(200, { paid: true, confirmed: true, result: a.data as Record<string, unknown> });
       const r = refusalOf(a.error);
       if (r.reason === "source_used") continue; // that record paid another mission today: try the next one

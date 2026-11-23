@@ -7,11 +7,14 @@ import { metadataWrite } from "./watchlist-meta.mjs";
 
 const b64url = (buf) => Buffer.from(buf).toString("base64url");
 
-function makeJwt(user) {
+function makeJwt(user, sessionId, hookClaims = {}, ageSec = 0) {
   const now = Math.floor(Date.now() / 1000);
+  const iat = now - ageSec;
   const header = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+  // like the real auth server: the session id, and app_metadata as it is at the moment of issue (Q4.5-2 reads the mark)
   const payload = b64url(
-    JSON.stringify({ sub: user.id, email: user.email, role: "authenticated", aud: "authenticated", iat: now, exp: now + 3600 })
+    JSON.stringify({ sub: user.id, email: user.email, role: "authenticated", aud: "authenticated", iat, exp: now + 3600,
+      session_id: sessionId, app_metadata: user.app_metadata || {}, ...hookClaims })
   );
   const sig = crypto.createHmac("sha256", "fake-e2e-secret").update(`${header}.${payload}`).digest("base64url");
   return `${header}.${payload}.${sig}`;
@@ -30,6 +33,9 @@ export function createFakeSupabase() {
   let emailLimit = null; // "limit" | "soon": the next letters are refused like Supabase does (429)
   const sessionsByUser = new Map(); // user id -> Set of refresh tokens (for logout scope=others)
   const refreshOf = new Map(); // access token -> its refresh token
+  const sessionIdOf = new Map(); // refresh token -> its auth session id (kept across refreshes, like the real server)
+  const liveSessions = new Map(); // auth session id -> user id (auth.sessions); a sign-out ends it
+  const refreshCount = new Map(); // user id -> token refreshes (Q4.5-2 e2e: one refresh on session_stale, never a loop)
   const takenNicknames = new Set(["taken_nick", "admin"]);
   let createProfileRows = true; // false = handle_new_user trigger absent (new users get no profiles row)
   let profilesTableMissing = false; // true = migration 0001 not applied (PostgREST 404 PGRST205)
@@ -42,6 +48,11 @@ export function createFakeSupabase() {
   const myDays = new Map(); // user id -> game_my_day() payload (0015 server day)
   // 0014–0016 stand-in for the day API routes: off = «migrations not applied» (as on the real Supabase today)
   let economyInstalled = false;
+  // Q4.5-2 stand-in for the Custom Access Token Hook (0018 game_access_token_hook): «on» adds the account's state now as the
+  // top-level «ayra_economy» claim of every token; «unavailable» = the hook could not read the state (no mark + status);
+  // «off» = the hook is not configured (no mark); «error» = the auth server cannot run the hook (tokens are refused)
+  let hookMode = "on";
+  const tokenAgeByEmail = new Map(); // e-mail (lower case) -> seconds: tokens issued «that long ago» (a device whose token is old)
   const economies = new Map(); // user id -> { state, game_sync, opening_mode, day }
   const economyCalls = []; // { fn, user, args } — what the routes asked (never a time or a day)
   const SERVICE_KEY = "fake-service-key";
@@ -120,9 +131,18 @@ export function createFakeSupabase() {
     return user;
   }
 
-  function issueSession(user) {
-    const access_token = makeJwt(user);
+  function hookClaimsOf(user) {
+    if (hookMode === "off") return {};
+    if (hookMode === "unavailable") return { ayra_economy_status: "unavailable" };
+    return { ayra_economy: (economies.get(user.id) || {}).state || "local" };
+  }
+
+  function issueSession(user, sessionId = crypto.randomUUID()) {
+    liveSessions.set(sessionId, user.id);
+    const access_token = makeJwt(user, sessionId, hookClaimsOf(user), tokenAgeByEmail.get(String(user.email).toLowerCase()) || 0);
     const refresh_token = b64url(crypto.randomBytes(16));
+    sessionIdOf.set(refresh_token, sessionId);
+    sessionIdOf.set(access_token, sessionId);
     tokens.set(access_token, user.id);
     tokens.set(refresh_token, user.id);
     if (!sessionsByUser.has(user.id)) sessionsByUser.set(user.id, new Set());
@@ -242,8 +262,17 @@ export function createFakeSupabase() {
       const user = usersByEmail.get(url.searchParams.get("email"));
       if (!user) return send(404, { error: "no user" });
       const old = economies.get(user.id) || {};
-      economies.set(user.id, { ...old, state: url.searchParams.get("state") || old.state || "local", game_sync: url.searchParams.get("sync") === "1", opening_mode: url.searchParams.get("mode") || old.opening_mode });
+      const state = url.searchParams.get("state") || old.state || "local";
+      // as game_economy_transition() (0018): the state and its time, in the database only; tokens issued from now on carry
+      // it (the hook), tokens issued before keep their old mark until they expire
+      const changed = state !== (old.state || "local");
+      economies.set(user.id, { ...old, state, changedAt: changed ? Date.now() : old.changedAt, game_sync: url.searchParams.get("sync") === "1", opening_mode: url.searchParams.get("mode") || old.opening_mode });
       return send(200, { ok: true, userId: user.id });
+    }
+    if (path === "/__test/live-sessions") {
+      // the user's live auth sessions (auth.sessions) — e2e checks that a sign-out ends one and a sign-in makes a new one
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      return send(200, { live: user ? [...liveSessions.values()].filter((id) => id === user.id).length : 0, refreshes: user ? refreshCount.get(user.id) || 0 : 0 });
     }
     if (path === "/__test/economy-calls") {
       if (url.searchParams.get("reset")) economyCalls.length = 0;
@@ -402,15 +431,23 @@ export function createFakeSupabase() {
       return send(200, { app_metadata: user?.app_metadata ?? null });
     }
     if (path === "/__test/app-economy") {
-      // Q4.5-1: stands in for the server's mark (Q4.5-2 SQL on raw_app_meta_data.ayra_economy); the session sees it after
-      // a sign-in, a token refresh or a user read (/auth/v1/user), like the real auth server
+      // Q4.5-1/Q4.5-2: the account's state as the hook reads it (game_accounts) — the session sees it in the next token
+      // (a sign-in or a refresh), like the real auth server with the Custom Access Token Hook
       const user = usersByEmail.get(url.searchParams.get("email"));
-      const state = url.searchParams.get("state");
+      const state = url.searchParams.get("state") || "local";
       if (user) {
-        const { ayra_economy: _old, ...rest } = user.app_metadata || {};
-        user.app_metadata = state ? { ...rest, ayra_economy: state } : rest;
+        const old = economies.get(user.id) || { game_sync: false };
+        economies.set(user.id, { ...old, state, changedAt: state !== (old.state || "local") ? Date.now() : old.changedAt });
       }
-      return send(200, { app_metadata: user?.app_metadata ?? null });
+      return send(200, { state: user ? economies.get(user.id).state : null });
+    }
+    if (path === "/__test/token-age") {
+      tokenAgeByEmail.set(String(url.searchParams.get("email")).toLowerCase(), Number(url.searchParams.get("seconds")) || 0);
+      return send(200, {});
+    }
+    if (path === "/__test/hook") {
+      hookMode = url.searchParams.get("mode") || "on";
+      return send(200, { hookMode });
     }
     if (path === "/__test/clear-password") {
       // stands in for an account made by the e-mail code before passwords existed
@@ -430,6 +467,7 @@ export function createFakeSupabase() {
     }
     if (path === "/auth/v1/token" && req.method === "POST") {
       const body = await readBody(req);
+      if (hookMode === "error") return send(500, { code: "unexpected_failure", msg: "Error running hook URI: pg-functions://postgres/public/game_access_token_hook" });
       const grant = url.searchParams.get("grant_type");
       if (grant === "pkce") {
         const pending = pendingCodes.get(body.auth_code);
@@ -458,7 +496,10 @@ export function createFakeSupabase() {
       if (grant === "refresh_token") {
         const id = tokens.get(body.refresh_token);
         const user = id && [...usersByEmail.values()].find((u) => u.id === id);
-        return user ? send(200, issueSession(user)) : send(400, { error: "invalid_grant" });
+        const sid = sessionIdOf.get(body.refresh_token);
+        if (!user || !sid || !liveSessions.has(sid)) return send(400, { error: "invalid_grant" });
+        refreshCount.set(user.id, (refreshCount.get(user.id) || 0) + 1);
+        return send(200, issueSession(user, sid)); // a refresh keeps its session (and the hook puts the state of now)
       }
       return send(400, { error: "unsupported_grant_type" });
     }
@@ -482,6 +523,11 @@ export function createFakeSupabase() {
     }
     if (path === "/auth/v1/user") {
       const user = userFromAuthHeader(req);
+      // like GoTrue: the token of an ended session is refused even before its exp (403 session_not_found; supabase-js then
+      // signs that device out). «Выйти» ends only its own session (scope local, owner decision 2026-11-23), so another
+      // device of the account is never touched by it.
+      const sid = sessionIdOf.get((req.headers.authorization || "").replace(/^Bearer\s+/i, ""));
+      if (user && sid && !liveSessions.has(sid)) return send(403, { code: 403, error_code: "session_not_found", msg: "Session from session_id claim in JWT does not exist" });
       return user ? send(200, user) : send(401, { error: "not authenticated" });
     }
     if (path === "/auth/v1/logout") {
@@ -489,6 +535,11 @@ export function createFakeSupabase() {
       logouts.push(scope);
       const access = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
       const userId = tokens.get(access);
+      // the auth sessions this sign-out ends (auth.sessions): its own, or every one of the user (global)
+      const own = sessionIdOf.get(access);
+      if (userId && scope === "global") for (const [sid, uid] of [...liveSessions]) if (uid === userId) liveSessions.delete(sid);
+      if (userId && scope === "local" && own) liveSessions.delete(own);
+      if (userId && scope === "others") for (const [sid, uid] of [...liveSessions]) if (uid === userId && sid !== own) liveSessions.delete(sid);
       if (userId && scope === "others") {
         // keep the caller's own session, end every other refresh token of this user
         const all = [...(sessionsByUser.get(userId) || [])];
@@ -776,6 +827,17 @@ export function createFakeSupabase() {
           missions: econ.day.core.map((m) => ({ id: m, assigned: econ.day.mode !== "rest", accepted: m in econ.day.accepted, paid: econ.day.paid.includes(m), passed: econ.day.passed.includes(m) })) };
       };
       const day = () => econ.day;
+      // 0018 game_session_check(): the token names its session, its mark is the state now, issued after the change
+      const sessionCheck = () => {
+        const state = econ.state || "local";
+        let reason = null;
+        if (typeof body.p_session !== "string" || !body.p_session) reason = "session_revoked";
+        else if ((body.p_claim || "local") !== state) reason = "mark_changed";
+        else if (state !== "local" && econ.changedAt && (typeof body.p_iat !== "number" || body.p_iat < Math.floor(econ.changedAt / 1000))) reason = "issued_before_change";
+        return { state, fresh: reason === null, reason };
+      };
+      if (fn === "game_session_check") return send(200, sessionCheck());
+      if (fn === "game_apply_reward_for_session" && !sessionCheck().fresh) return send(400, { code: "42501", message: "game_session_stale" });
       if (fn === "game_day_status") return send(200, statusOf());
       if (econ.state !== "cloud_active") return refuse("game_account_not_active");
       if (fn === "game_day_today") return send(200, today);
@@ -822,7 +884,9 @@ export function createFakeSupabase() {
         return send(200, { notes, trades, plans: rows("journal_day_plans"), rows: notes.length + trades.length });
       }
       // the mission award kind is disabled (0014, never switched on): the database refuses every award
-      if (fn === "game_apply_reward") return refuse("game_kind_disabled");
+      // (0018: only through the session-checked award; the bare one is not the server's any more)
+      if (fn === "game_apply_reward_for_session") return refuse("game_kind_disabled");
+      if (fn === "game_apply_reward") return send(401, { code: "42501", message: "permission denied for function game_apply_reward" });
       return send(404, { code: "PGRST202", message: `Could not find the function public.${fn}` });
     }
     if (path === "/rest/v1/rpc/game_my_day") {

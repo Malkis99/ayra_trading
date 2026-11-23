@@ -63,7 +63,8 @@ import { deviceRewardService, type RewardService } from "@/lib/reward-service";
 import { generateDaySet, type DayMode, type WeekChallenge } from "@/lib/quest-engine";
 import { ECONOMY_MODE_KEY, deviceRewardsAllowed, economyBasis, laterMode, readStickyMode, refusesReward, rememberMode, resolveEconomyMode, serverEconomyOn, type EconomyBasis, type EconomyMode, type SessionEconomy } from "./economy-mode";
 import { useOptionalAuth } from "@/lib/auth/auth-context";
-import { serverDay, type DayCall, type ServerDayStatus } from "./server-day-client";
+import { onSessionStale, serverDay, type DayCall, type ServerDayStatus } from "./server-day-client";
+import { answerBelongs, requestScopeOf, type RequestScope, type ScopeNow } from "./economy-scope";
 import { mirrorServerDay } from "./server-day-mirror";
 import type { WeekSnapshot } from "@/lib/day-snapshots";
 import type { PQNoteField, PQResult, PQStartInput } from "@/lib/personal-quests";
@@ -315,6 +316,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   // Q4.5-1: the session's economy mark (app_metadata.ayra_economy, written only by the server)
   const auth = useOptionalAuth();
   const sessionEconomy = auth?.sessionEconomy ?? null;
+  // Q4.5-2: the auth session generation, read at the moment a request is made and when its answer arrives
+  const authGenerationRef = React.useRef(auth?.authGeneration ?? 0);
+  authGenerationRef.current = auth?.authGeneration ?? 0;
   const sessionEconomyRef = React.useRef<SessionEconomy | null>(sessionEconomy);
   sessionEconomyRef.current = sessionEconomy;
   /** Recomputes the mode of the loaded space from every source (never backwards) and keeps a mark on the device. */
@@ -332,6 +336,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   // Space the in-memory state was loaded from. State is never written into any other space.
   const loadedSpaceRef = React.useRef<string | null>(null);
+  // Q4.5-2: how many times a space was loaded — a server answer made before a reload never belongs to what is loaded now
+  const spaceGenerationRef = React.useRef(0);
   const storeRef = React.useRef<GameStore<GameState> | null>(null);
 
   const showState = useCallback((next: GameState) => {
@@ -387,6 +393,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     try {
       const spaceId = AppStorage.getActiveSpaceId();
       loadedSpaceRef.current = spaceId;
+      spaceGenerationRef.current += 1;
       storeRef.current = makeStore(spaceId);
       const saved = AppStorage.getItem(STORAGE_KEY);
       storeRef.current.noteLoaded(saved);
@@ -664,6 +671,26 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     update((prev) => recordJournalTrades(prev, firstTradeDay, new Date()));
   }, [update]);
 
+  /**
+   * Q4.5-2: every economy request is made for a scope (lib/economy-scope.ts) and its answer is applied only while the
+   * device is still in that scope AND the server names that same account. A late answer for A never touches B, a guest,
+   * or A signed in again with a new session.
+   */
+  const scopeNow = useCallback(
+    (): ScopeNow => ({
+      activeSpace: AppStorage.getActiveSpaceId(),
+      loadedSpace: loadedSpaceRef.current,
+      spaceGeneration: spaceGenerationRef.current,
+      authGeneration: authGenerationRef.current,
+    }),
+    []
+  );
+  const requestScope = useCallback(() => requestScopeOf(scopeNow()), [scopeNow]);
+  /** The device is still where the request was made (notices may be shown; nothing about an account yet). */
+  const stillIn = useCallback((scope: RequestScope | null) => !!scope && answerBelongs(scope, scope.account, scopeNow()), [scopeNow]);
+  /** The answer is about this very account and the device is still in its scope. */
+  const belongs = useCallback((scope: RequestScope | null, r: DayCall) => answerBelongs(scope, r.account, scopeNow()), [scopeNow]);
+
   // Q4.4: the server's answer about the account — the mode (forward only) and, for «cloud_active», its game day
   const applyServerStatus = useCallback(
     (st: ServerDayStatus | null) => {
@@ -679,43 +706,78 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     },
     [setEconomyView, showState]
   );
+  /**
+   * Q4.5-2: a refused session (`session_stale`) still tells the account's state, read by the server from the database
+   * for this very user. The device keeps it, only forward (rememberMode), on the loaded account space only.
+   */
+  const learnRefusedState = useCallback(
+    (r: DayCall, scope: RequestScope | null) => {
+      if (r.ok || !r.state || !scope || !belongs(scope, r)) return;
+      const mode = rememberMode(laterMode(economyRef.current.mode, r.state), scope.space);
+      if (mode !== economyRef.current.mode) setEconomyView({ mode });
+    },
+    [belongs, setEconomyView]
+  );
+  // the state from a session_stale refusal is kept at once, before the app tries to refresh its session (Q4.5-2) —
+  // only for the account and scope the request was made for
+  useEffect(() => {
+    onSessionStale((state, account, scope) => learnRefusedState({ ok: false, error: "session_stale", state, account }, scope));
+    return () => onSessionStale(null);
+  }, [learnRefusedState]);
   const noteServerRefusal = useCallback(
-    (r: DayCall) => {
-      if (r.ok) return;
+    (r: DayCall, scope: RequestScope | null) => {
+      if (r.ok || !stillIn(scope)) return; // an answer for another scope shows nothing here
+      learnRefusedState(r, scope);
       if (r.error === "network") setEconomyView({ notice: "offline", noticeReason: undefined });
       else setEconomyView({ notice: "serverRefused", noticeReason: r.error });
     },
-    [setEconomyView]
+    [learnRefusedState, setEconomyView, stillIn]
   );
   const runCloud = useCallback(
-    async (call: Promise<DayCall>): Promise<DayCall> => {
+    async (call: Promise<DayCall>, scope: RequestScope | null): Promise<DayCall> => {
       const r = await call;
       if (r.ok) {
+        if (!belongs(scope, r)) return r; // a late answer for another account or scope changes nothing
         applyServerStatus(r.status);
         setEconomyView({ notice: null, noticeReason: undefined });
-      } else noteServerRefusal(r);
+      } else noteServerRefusal(r, scope);
       return r;
     },
-    [applyServerStatus, noteServerRefusal, setEconomyView]
+    [applyServerStatus, belongs, noteServerRefusal, setEconomyView]
+  );
+  /** A server call made for the account loaded now (none outside an account space). */
+  const cloud = useCallback(
+    (make: (scope: RequestScope) => Promise<DayCall>): Promise<DayCall> => {
+      const scope = requestScope();
+      if (!scope) return Promise.resolve({ ok: false, error: "no_account" });
+      return runCloud(make(scope), scope);
+    },
+    [requestScope, runCloud]
   );
   const onCloud = () => economyRef.current.mode === "cloud_active";
 
   const refreshServerDay = useCallback(async () => {
-    if (!serverEconomyOn() || !AppStorage.getActiveSpaceId().startsWith("account:")) return;
-    const r = await serverDay.status();
+    if (!serverEconomyOn()) return;
+    const scope = requestScope();
+    if (!scope) return;
+    const r = await serverDay.status(scope);
     if (!r.ok) {
-      // 404 = the feature is off; 503 = the server economy is not installed: the device keeps what it knows
+      // 404 = the feature is off; 503 = the server economy is not installed: the device keeps what it knows;
+      // 401 session_stale after a failed refresh: the account's state from the refusal is kept (Q4.5-2) — for its scope
+      if (!stillIn(scope)) return;
+      learnRefusedState(r, scope);
       if (r.error === "network") setEconomyView({ notice: "offline", noticeReason: undefined });
       return;
     }
+    if (!belongs(scope, r)) return;
     const st = r.status;
     applyServerStatus(st);
     if (st && st.state === "cloud_active" && !st.day && st.game_day && st.opening_mode) {
       // the server opens the day in the mode of the saved trading days; the app offers the extras of that mode
       const extras = generateDaySet(gameStateRef.current, st.game_day, st.opening_mode).bonus.slice(0, 2);
-      await runCloud(serverDay.open(extras));
+      await runCloud(serverDay.open(extras, scope), scope);
     }
-  }, [applyServerStatus, runCloud, setEconomyView]);
+  }, [applyServerStatus, belongs, learnRefusedState, requestScope, runCloud, setEconomyView, stillIn]);
 
   useEffect(() => {
     if (!isLoaded || !serverEconomyOn() || !loadedSpace?.startsWith("account:")) return;
@@ -736,7 +798,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const acceptMissionCb = useCallback(
     (id: string) => {
       if (onCloud()) {
-        void runCloud(serverDay.accept(id));
+        void cloud((scope) => serverDay.accept(id, scope));
         return true;
       }
       return applySync((s) => {
@@ -744,7 +806,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         return { state: res.state, result: res.ok };
       }, false);
     },
-    [applySync, runCloud]
+    [applySync, cloud]
   );
 
   // QH-6.6: «Verify» — the same claim as every mission payment, on the freshest saved state, one tab at a time
@@ -757,8 +819,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       if (!deviceRewardsAllowed(mode)) {
         const nothing = { paid: false, xp: 0, coins: 0, leveledUp: false, saveFailed: false };
         if (mode !== "cloud_active" || !economyRef.current.gameSync) return { ...nothing, failure: { reason: "rewardsPaused" } as VerifyFailure };
-        const r = await serverDay.verify(id);
+        const scope = requestScope();
+        if (!scope) return { ...nothing, failure: { reason: "serverUnavailable" } as VerifyFailure };
+        const r = await serverDay.verify(id, scope);
         void refreshServerDay();
+        // an answer for another account or scope (a switch while it travelled) says nothing about this one
+        if (!stillIn(scope) || (r.account !== undefined && r.account !== scope.account) || (r.ok && !belongs(scope, r))) {
+          return { ...nothing, failure: { reason: "serverUnavailable" } as VerifyFailure };
+        }
         if (!r.ok) {
           const map: Record<string, VerifyFailure["reason"]> = { mission_not_accepted: "notAccepted", day_cap: "dayFull", source_used: "sourceUsed", sync_paused: "rewardsPaused", mission_not_assigned: "notAvailable", day_not_open: "notAvailable", account_not_active: "rewardsPaused" };
           return { ...nothing, failure: { reason: map[r.error] ?? "serverUnavailable" } as VerifyFailure };
@@ -787,7 +855,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       const { shadow: _shadow, ...rest } = out;
       return rest;
     },
-    [applyLocked, refreshServerDay]
+    [applyLocked, belongs, refreshServerDay, requestScope, stillIn]
   );
 
   // A quest ticked by the person (Quests, Home). Quests the app checks itself close only by themselves; a
@@ -831,7 +899,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       if (onCloud()) {
         // the server composes the slots; the app offers the extras of the new mode (the server checks them)
         const extras = mode === "rest" ? undefined : modeSetPreview(gameStateRef.current, mode, new Date()).bonus.slice(0, 2);
-        const r = await runCloud(serverDay.mode(mode, extras));
+        const r = await cloud((scope) => serverDay.mode(mode, extras, scope));
         return r.ok ? { ok: true } : { ok: false, reason: "notSaved" };
       }
       return applyLocked(
@@ -842,16 +910,16 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         { ok: false, reason: "notSaved" as const }
       );
     },
-    [applyLocked, runCloud]
+    [applyLocked, cloud]
   );
 
   const setTradingDays = useCallback(
     (days: number[]) => {
       // on the server economy the server keeps them too (from the next game day)
-      if (onCloud()) void runCloud(serverDay.tradingDays(days));
+      if (onCloud()) void cloud((scope) => serverDay.tradingDays(days, scope));
       return update((prev) => setTradingDaysLogic(prev, days));
     },
-    [update, runCloud]
+    [update, cloud]
   );
 
   const fixWeekChallenge = useCallback(
@@ -939,11 +1007,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const passQuest = useCallback((questId: string) => {
     // a mission of the server day is put off on the server; an extra stays a device mark
     if (onCloud() && isMissionId(questId)) {
-      void runCloud(serverDay.pass(questId));
+      void cloud((scope) => serverDay.pass(questId, scope));
       return;
     }
     update((prev) => passQuestLogic(prev, questId, new Date()));
-  }, [update, runCloud]);
+  }, [update, cloud]);
 
   const replaceQuest = useCallback(
     async (questId: string, shownQuestIds: string[]): Promise<{ success: boolean; replacementId?: string; reason?: ReplaceQuestFailure | "notSaved" }> => {
@@ -951,7 +1019,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         // the app picks the replacement by its own rules (lib/quests.ts pickReplacement); the server checks it
         const local = replaceQuestLogic(gameStateRef.current, questId, shownQuestIds, new Date());
         if (!local.success || !local.replacementId) return { success: false, reason: local.reason };
-        const r = await runCloud(serverDay.replace(questId, local.replacementId));
+        const r = await cloud((scope) => serverDay.replace(questId, local.replacementId!, scope));
         if (r.ok) return { success: true, replacementId: local.replacementId };
         return { success: false, reason: r.error === "replacement_limit" ? "limit" : r.error === "network" ? "notSaved" : "notReplaceable" };
       }
@@ -960,7 +1028,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         return { state: res.success ? res.state : s, result: { success: res.success, replacementId: res.replacementId, reason: res.reason as ReplaceQuestFailure | "notSaved" | undefined } };
       }, { success: false, replacementId: undefined, reason: "notSaved" as const });
     },
-    [applyLocked, runCloud]
+    [applyLocked, cloud]
   );
 
   const toggleRestDay = useCallback(() => {

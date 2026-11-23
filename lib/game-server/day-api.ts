@@ -7,6 +7,7 @@
  * Errors are codes; the database's own messages never leave the server. Kept apart from Next.js for the tests.
  */
 import type { RateLimiter } from "./rate-limit";
+import type { SessionToken } from "./session-token";
 
 /** The switch: off unless the owner sets it (the routes answer 404 and the app keeps its local economy). */
 export const serverEconomyEnabled = () => process.env.NEXT_PUBLIC_AYRA_SERVER_ECONOMY === "1";
@@ -24,9 +25,15 @@ export interface RpcError {
 }
 export type Rpc = (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: RpcError | null }>;
 
+/** The verified user and the claims of the very token the auth server accepted (Q4.5-2: session_id, iat, the mark). */
+export interface SessionUser {
+  id: string;
+  token: SessionToken;
+}
+
 export interface DayApiDeps {
   enabled: boolean;
-  getUser(): Promise<{ id: string } | null>;
+  getUser(): Promise<SessionUser | null>;
   /** Calls a database function with the service role (the user id is added by the handler, never by the client). */
   rpc: Rpc;
   limiter: RateLimiter;
@@ -68,6 +75,8 @@ export const REFUSALS: Record<string, number> = {
   game_source_used: 409,
   game_day_cap: 409,
   game_unknown_mission: 400,
+  // Q4.5-2: the award's own session check refused (the session is older than the account's state, or ended)
+  game_session_stale: 401,
 };
 
 /** A database error as a code: a known refusal, «the server economy is not installed», or a bare server error. */
@@ -123,7 +132,7 @@ const FN: Record<Exclude<DayAction, "status">, string> = {
 };
 
 /** Common gate: switch, method, origin, content type, session, rate limit. Returns the user or a refusal. */
-export async function gate(req: Request, deps: Pick<DayApiDeps, "enabled" | "getUser" | "limiter" | "now" | "origin">, allowGet: boolean): Promise<{ user: { id: string } } | { refused: ApiHttp }> {
+export async function gate(req: Request, deps: Pick<DayApiDeps, "enabled" | "getUser" | "limiter" | "now" | "origin">, allowGet: boolean): Promise<{ user: SessionUser } | { refused: ApiHttp }> {
   if (!deps.enabled) return { refused: reply(404, { error: "server_economy_disabled" }) };
   const isGet = req.method === "GET";
   if (!(req.method === "POST" || (allowGet && isGet))) return { refused: reply(405, { error: "method_not_allowed" }, { Allow: allowGet ? "GET, POST" : "POST" }) };
@@ -132,7 +141,7 @@ export async function gate(req: Request, deps: Pick<DayApiDeps, "enabled" | "get
     if (!origin || !deps.origin || origin !== deps.origin) return { refused: reply(403, { error: "cross_origin" }) };
     if (!(req.headers.get("content-type") || "").toLowerCase().startsWith("application/json")) return { refused: reply(415, { error: "bad_content_type" }) };
   }
-  let user: { id: string } | null = null;
+  let user: SessionUser | null = null;
   try {
     user = await deps.getUser();
   } catch {
@@ -142,6 +151,32 @@ export async function gate(req: Request, deps: Pick<DayApiDeps, "enabled" | "get
   const limit = deps.limiter.take(user.id, deps.now().getTime());
   if (!limit.ok) return { refused: reply(429, { error: "rate_limited" }, { "Retry-After": String(limit.retryAfterSec) }) };
   return { user };
+}
+
+const STATES = ["local", "migration_scheduled", "migration_pending", "cloud_active"];
+const STALE_REASONS = ["session_revoked", "mark_changed", "issued_before_change"];
+
+/**
+ * Q4.5-2 — is the session fresh for the economy? The database answers (game_session_check, 0018): the session still
+ * exists, the mark in its token is the account's state now, and it was issued no earlier than the last change. A stale
+ * session gets 401 `session_stale` with the account's state (the person's own, from the database), and the app refreshes
+ * its session. Nothing else is done for a stale session.
+ */
+export async function sessionGate(deps: Pick<DayApiDeps, "rpc">, user: SessionUser): Promise<ApiHttp | null> {
+  const t = user.token;
+  if (t.sub !== user.id) return reply(401, { error: "session_stale", reason: "session_revoked" });
+  const { data, error } = await deps.rpc("game_session_check", { p_user: user.id, p_session: t.sessionId, p_iat: t.iat, p_claim: t.claim });
+  if (error) {
+    const r = refusalOf(error);
+    return reply(r.status, { error: r.reason });
+  }
+  const v = (data ?? {}) as { fresh?: unknown; state?: unknown; reason?: unknown };
+  if (v.fresh === true) return null;
+  return reply(401, {
+    error: "session_stale",
+    ...(typeof v.state === "string" && STATES.includes(v.state) ? { state: v.state } : {}),
+    ...(typeof v.reason === "string" && STALE_REASONS.includes(v.reason) ? { reason: v.reason } : {}),
+  });
 }
 
 export async function readJson(req: Request, maxBytes: number): Promise<{ ok: true; body: unknown } | { ok: false; http: ApiHttp }> {
@@ -163,25 +198,40 @@ async function status(deps: DayApiDeps, userId: string): Promise<ApiHttp> {
   return reply(200, { status: data as Record<string, unknown> });
 }
 
+/**
+ * Q4.5-2: every answer given to a verified user names that user (`account`): the app applies an answer only to the
+ * account it was asked for (lib/economy-scope.ts) — never to whoever is signed in when it arrives.
+ */
+export const forAccount = (out: ApiHttp, account: string): ApiHttp => ({ ...out, body: { ...out.body, account } });
+
 /** One request of the day API. */
 export async function handleDayApi(req: Request, action: string, deps: DayApiDeps): Promise<ApiHttp> {
   if (!(DAY_ACTIONS as readonly string[]).includes(action)) return reply(404, { error: "unknown_action" });
   const a = action as DayAction;
   const g = await gate(req, deps, a === "status");
   if ("refused" in g) return g.refused;
+  return forAccount(await dayAction(req, a, deps, g.user), g.user.id);
+}
+
+async function dayAction(req: Request, a: DayAction, deps: DayApiDeps, user: SessionUser): Promise<ApiHttp> {
+  const g = { user };
   if (a === "status") {
     if (req.method !== "GET") return reply(405, { error: "method_not_allowed" }, { Allow: "GET" });
     try {
-      return await status(deps, g.user.id);
+      // Q4.5-2: a stale session learns its state from the refusal, nothing else
+      return (await sessionGate(deps, g.user)) ?? (await status(deps, g.user.id));
     } catch {
       return reply(503, { error: "server_error" });
     }
   }
+  // a malformed body never reaches the database (not even the session check)
   const json = await readJson(req, DAY_API_MAX_BODY_BYTES);
   if (!json.ok) return json.http;
   const parsed = parseDayBody(a, json.body);
   if (!parsed.ok) return reply(400, { error: "bad_request" });
   try {
+    const stale = await sessionGate(deps, g.user);
+    if (stale) return stale;
     // the user is the session's, always; added here after the body was checked
     const { data, error } = await deps.rpc(FN[a], { p_user: g.user.id, ...parsed.args });
     if (error) {

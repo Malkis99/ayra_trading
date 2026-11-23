@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { DAY_API_RATE, serverEconomyEnabled } from "@/lib/game-server/day-api";
 import { handleMissionVerify, missionPayoutsEnabled } from "@/lib/game-server/mission-verify";
 import { createRateLimiter } from "@/lib/game-server/rate-limit";
+import { verifiedSessionUser } from "@/lib/game-server/session-user";
 
 /**
  * Q4.4 server mission check: POST { mission } (docs/q4-4-server-day-api.md, section 5). The user only from the verified
@@ -33,10 +34,8 @@ async function handle(req: Request) {
   const out = await handleMissionVerify(req, {
     enabled,
     payoutsEnabled: missionPayoutsEnabled(),
-    async getUser() {
-      const { data, error } = await session!.auth.getUser();
-      return !error && data.user ? { id: data.user.id } : null;
-    },
+    // the verified user and the claims of that very token (Q4.5-2: the database decides if the session is fresh)
+    getUser: () => verifiedSessionUser(session!),
     async rpc(fn, args) {
       const { data, error } = await service!.rpc(fn, args);
       return { data, error: error ? { code: error.code, message: error.message } : null };

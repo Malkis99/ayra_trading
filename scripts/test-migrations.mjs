@@ -1,7 +1,7 @@
 // Runs supabase/migrations against an in-memory Postgres (PGlite) with a minimal Supabase auth stub,
 // then the SQL tests in supabase/tests. PGlite is a dev dependency (runs in CI too):
 //   node scripts/test-migrations.mjs
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { installBaseline, readSql, runMetaChecks, seed, snapshot } from "./watchlist-meta-sql-checks.mjs";
 const repo = fileURLToPath(new URL("..", import.meta.url));
@@ -15,8 +15,15 @@ try {
 const read = (p) => readFileSync(`${repo}${p}`, "utf8").replace(/CREATE EXTENSION IF NOT EXISTS "uuid-ossp";/, "");
 const STUB = `
   CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;
+  -- the auth server's own role (Supabase): it runs the Custom Access Token Hook of 0018
+  CREATE ROLE supabase_auth_admin NOLOGIN NOINHERIT;
   CREATE SCHEMA auth;
-  CREATE TABLE auth.users (id uuid PRIMARY KEY, email text);
+  CREATE TABLE auth.users (id uuid PRIMARY KEY, email text, raw_app_meta_data jsonb DEFAULT '{}'::jsonb);
+  -- as in Supabase Auth (the columns 0018 uses): the app_metadata of the user, sessions and refresh tokens
+  CREATE TABLE IF NOT EXISTS auth.sessions (id uuid PRIMARY KEY, user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    created_at timestamptz DEFAULT now(), not_after timestamptz);
+  CREATE TABLE IF NOT EXISTS auth.refresh_tokens (id bigserial PRIMARY KEY, token varchar(255), user_id varchar(255),
+    revoked boolean DEFAULT false, session_id uuid REFERENCES auth.sessions(id) ON DELETE CASCADE);
   -- same as Supabase: the user id comes from the JWT claim set for the request (NULL when signed out)
   CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$
     SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
@@ -495,4 +502,61 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   try { await db.exec(read("supabase/tests/game_days.sql")); ok("P: 0015 tests pass after the 0016 rollback"); }
   catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`P: 0015 tests after rollback: ${e.message}`); }
   await db.close();
+}
+
+// Q. 0018: server economy safety (Q4.5-2) on top of 0014–0016 — applied twice; transitions, the mark in auth.users,
+//    sessions, freshness, awards only through the session check; the 0015/0016 tests still pass with it; nothing
+//    switched on; rollback refuses while an account is scheduled, otherwise restores the 0014 model
+{
+  const base = ["0001_init", "0002_profile_defaults", "0003_nickname_cooldown", "0004_journal_sync", "0014_game_economy", "0015_game_days", "0016_game_day_api"];
+  const db = await fresh();
+  for (const f of base) await db.exec(read(`supabase/migrations/${f}.sql`));
+  await db.exec(read("supabase/migrations/0018_game_economy_sessions.sql"));
+  await db.exec(read("supabase/migrations/0018_game_economy_sessions.sql")); ok("Q: 0018 applied twice");
+  try { await db.exec(read("supabase/tests/game_economy_sessions.sql")); ok("Q: tests/game_economy_sessions.sql passed"); }
+  catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`Q: test script: ${e.message}`); }
+  const left = (await db.query(`SELECT (SELECT count(*) FROM public.game_accounts)::int + (SELECT count(*) FROM auth.sessions)::int AS n`)).rows[0].n;
+  left === 0 ? ok("Q: test rolled back (no rows left)") : fail("Q: rows left after test");
+  // (tests/game_days.sql targets the 0015 signatures that 0016 replaced — it runs only after the 0016 rollback, block P)
+  try { await db.exec(read("supabase/tests/game_day_api.sql")); ok("Q: tests/game_day_api.sql (0016, with the 0015 day) pass with 0018"); }
+  catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`Q: game_day_api with 0018: ${e.message}`); }
+  const cr = (await db.query(`SELECT has_schema_privilege('game_economy_owner', 'public', 'CREATE') AS x`)).rows[0].x;
+  cr === false ? ok("Q: after 0014–0016 and 0018 (each twice) the owner keeps no CREATE on public") : fail("Q: CREATE on public left to the owner");
+  const on = (await db.query(`SELECT (SELECT count(*) FROM public.game_award_kinds WHERE enabled)::int AS kinds,
+    (SELECT count(*) FROM public.game_accounts WHERE state <> 'local')::int AS moved,
+    (SELECT count(*) FROM auth.users WHERE raw_app_meta_data ? 'ayra_economy')::int AS marked`)).rows[0];
+  on.kinds === 0 && on.moved === 0 && on.marked === 0 ? ok("Q: nothing switched on (no kind, no account moved, no mark)") : fail(`Q: switched on ${JSON.stringify(on)}`);
+  // rollback: refused while an account is scheduled (0014 has no such state), nothing changed then
+  await db.exec(`INSERT INTO auth.users (id, email) VALUES ('00000000-0000-0000-0000-0000000e5a90', 'sched@x');
+    SELECT public.game_economy_transition('00000000-0000-0000-0000-0000000e5a90', 'local', 'migration_scheduled');`);
+  let refused = false;
+  try { await db.exec(read("supabase/migrations/0018_game_economy_sessions.down.sql")); } catch { refused = true; await db.exec("ROLLBACK").catch(() => {}); }
+  const still = (await db.query(`SELECT count(*)::int n FROM pg_proc WHERE proname = 'game_economy_transition'`)).rows[0].n;
+  refused && still === 1 ? ok("Q: rollback refused while an account is scheduled; nothing changed") : fail(`Q: rollback with a scheduled account refused=${refused} fn=${still}`);
+  await db.exec(`DELETE FROM auth.users WHERE id = '00000000-0000-0000-0000-0000000e5a90'`);
+  await db.exec(`INSERT INTO auth.users (id, email) VALUES ('00000000-0000-0000-0000-0000000e5a91', 'keep@x');
+    SELECT public.game_economy_transition('00000000-0000-0000-0000-0000000e5a91', 'local', 'migration_pending');`);
+  await db.exec(read("supabase/migrations/0018_game_economy_sessions.down.sql"));
+  const keptState = (await db.query(`SELECT state FROM public.game_accounts WHERE user_id = '00000000-0000-0000-0000-0000000e5a91'`)).rows[0];
+  keptState && keptState.state === "migration_pending" ? ok("Q: rollback keeps every account's state (no destructive step)") : fail(`Q: rollback state ${JSON.stringify(keptState)}`);
+  await db.exec(`DELETE FROM auth.users WHERE id = '00000000-0000-0000-0000-0000000e5a91'`);
+  const gone = (await db.query(`SELECT count(*)::int n FROM pg_proc WHERE proname IN ('game_economy_transition','game_session_check','game_apply_reward_for_session','game_access_token_hook','game_state_rank')`)).rows[0].n;
+  const after = (await db.query(`SELECT has_column_privilege('game_economy_owner', 'auth.sessions', 'user_id', 'SELECT') AS sess,
+    has_schema_privilege('game_economy_owner', 'public', 'CREATE') AS cr,
+    has_function_privilege('service_role', 'public.game_apply_reward(uuid,text,text,jsonb)', 'EXECUTE') AS award`)).rows[0];
+  const kept = (await db.query(`SELECT count(*)::int n FROM public.game_accounts`)).rows[0].n;
+  gone === 0 && !after.sess && !after.cr && after.award === true
+    ? ok("Q: rollback removes 0018 (hook, check, transition), the read on auth.sessions and CREATE; restores the 0014 award access")
+    : fail(`Q: rollback fns ${gone} ${JSON.stringify(after)} kept ${kept}`);
+  try { await db.exec(read("supabase/tests/game_day_api.sql")); ok("Q: 0016 tests pass after the 0018 rollback (0014 entry points restored)"); }
+  catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`Q: 0016 tests after rollback: ${e.message}`); }
+  await db.close();
+}
+
+// S. Supabase compatibility (found on the official supabase/postgres image, Q4.5-2): «GRANT <role> TO CURRENT_USER»
+//    crashes the server process there (supautils, signal 11) — role grants must name the role (format(... %I, current_user))
+{
+  const dir = `${repo}supabase/migrations/`;
+  const bad = readdirSync(dir).filter((f) => f.endsWith(".sql")).filter((f) => /GRANT\s+[a-z_"][\w"]*\s+TO\s+CURRENT_USER/i.test(readFileSync(dir + f, "utf8").replace(/--.*$/gm, "")));
+  bad.length === 0 ? ok("S: no «GRANT <role> TO CURRENT_USER» in any migration (it crashes Supabase's server process)") : fail(`S: GRANT … TO CURRENT_USER in ${bad.join(", ")}`);
 }

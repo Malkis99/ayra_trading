@@ -4,6 +4,7 @@ import { cleanApiKey, cleanSupabaseUrl } from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { DAY_API_RATE, handleDayApi, serverEconomyEnabled } from "@/lib/game-server/day-api";
 import { createRateLimiter } from "@/lib/game-server/rate-limit";
+import { verifiedSessionUser } from "@/lib/game-server/session-user";
 
 /**
  * Q4.4 server game day API (docs/q4-4-server-day-api.md):
@@ -13,7 +14,8 @@ import { createRateLimiter } from "@/lib/game-server/rate-limit";
  *   POST /api/game/day/accept | pass     { mission }
  *   POST /api/game/day/replace           { from, to }
  *   POST /api/game/day/trading-days      { days }              — applies from the next game day
- * The user comes only from the verified session (cookies → auth.getUser on the server); the database functions run with
+ * The user comes only from the verified session (cookies → auth.getUser on the server); every request first asks the
+ * database whether that session is still fresh for the economy (Q4.5-2, 401 session_stale). The database functions run with
  * the service key and server time. Off unless NEXT_PUBLIC_AYRA_SERVER_ECONOMY=1 (404); they serve only accounts the
  * owner moved to the server economy (cloud_active) — none today.
  */
@@ -37,10 +39,8 @@ async function handle(req: Request, { params }: { params: { action: string } }) 
   const service = enabled ? createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } }) : null;
   const out = await handleDayApi(req, params.action, {
     enabled,
-    async getUser() {
-      const { data, error } = await session!.auth.getUser();
-      return !error && data.user ? { id: data.user.id } : null;
-    },
+    // the verified user and the claims of that very token (Q4.5-2: the database decides if the session is fresh)
+    getUser: () => verifiedSessionUser(session!),
     async rpc(fn, args) {
       const { data, error } = await service!.rpc(fn, args);
       return { data, error: error ? { code: error.code, message: error.message } : null };

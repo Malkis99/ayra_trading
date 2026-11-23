@@ -29,7 +29,12 @@ import type { GameState } from "./game";
 
 export type EconomyMode = "local" | "migration_scheduled" | "migration_pending" | "cloud_active";
 export const ECONOMY_MODE_KEY = "ayra_economy_mode";
-/** The `app_metadata` key the server writes (Q4.5-2). */
+/**
+ * The top-level access token claim the server's Custom Access Token Hook adds to every token it issues (Q4.5-2,
+ * 0018 game_access_token_hook): the account's state when the token was issued. A top-level claim, not `app_metadata`:
+ * the auth server sets no top-level claim of its own, so it can only come from the hook (`app_metadata` can be written
+ * by other means and is NOT read for the economy).
+ */
 export const ECONOMY_CLAIM_KEY = "ayra_economy";
 const ORDER: Record<EconomyMode, number> = { local: 0, migration_scheduled: 1, migration_pending: 2, cloud_active: 3 };
 
@@ -83,27 +88,58 @@ export function refusesReward(prev: GameState, next: GameState, ...known: Econom
 export interface SessionEconomy {
   /** The account the session belongs to (a mark is applied only to that account's space). */
   userId: string;
-  /** `app_metadata.ayra_economy` when it holds a known mode; null when there is none (NOT a proof of «local»). */
+  /** The token's `ayra_economy` claim when it holds a known mode; null when there is none (NOT a proof of «local»). */
   claim: EconomyMode | null;
-  /** «verified»: the user record came from the auth server just now (getUser, a refresh); «cached»: the stored session. */
+  /**
+   * «verified»: the auth server issued this very token just now (a refresh, a sign-in); «cached»: the stored session.
+   * Reading the token's claims here is NOT a check of its signature — only the auth server checks that. The mark can only
+   * make the device stricter, so an unverified mark is still safe to apply; an unverified «no mark» proves nothing.
+   */
   source: "verified" | "cached";
   /** When the access token expires (ms), or null when unknown. */
   expiresAt: number | null;
 }
 
-/** The mark in `app_metadata` (anything else — missing, unknown words, wrong types — is «no mark»). */
-export function claimOf(appMetadata: Record<string, unknown> | null | undefined): EconomyMode | null {
-  const v = appMetadata?.[ECONOMY_CLAIM_KEY];
+/**
+ * PLACEHOLDER: a stored token older than this (seconds since its `iat`) is refreshed when the app loads, so that a mark
+ * given after it was issued arrives (the mark lives only in tokens). A younger one is only verified (no refresh: a refresh
+ * on every load made tabs wait for each other's refresh lock, and signed a device out at once after a sign-out elsewhere).
+ */
+export const SESSION_MARK_MAX_AGE_S = 600;
+
+/** The mark in a token's claims (anything else — missing, unknown words, wrong types — is «no mark»). */
+export function claimOf(claims: Record<string, unknown> | null | undefined): EconomyMode | null {
+  const v = claims?.[ECONOMY_CLAIM_KEY];
   return isEconomyMode(v) ? v : null;
 }
 
+/** The claims of an access token, read without checking it (null when it is not a readable JWT). */
+export function tokenClaims(accessToken: string | null | undefined): Record<string, unknown> | null {
+  const part = typeof accessToken === "string" ? accessToken.split(".")[1] : undefined;
+  if (!part) return null;
+  try {
+    const json = atob(part.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(part.length / 4) * 4, "="));
+    const claims = JSON.parse(json) as unknown;
+    return claims && typeof claims === "object" && !Array.isArray(claims) ? (claims as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What a session says about the economy: the mark of ITS access token, the token's own expiry, the session's account.
+ * A token whose subject is not the session's account gives no mark (a session never borrows another account's token).
+ */
 export function sessionEconomyOf(
-  user: { id: string; app_metadata?: Record<string, unknown> | null } | null | undefined,
-  source: SessionEconomy["source"],
-  expiresAtSec?: number | null
+  session: { access_token?: string | null; expires_at?: number | null; user?: { id: string } | null } | null | undefined,
+  source: SessionEconomy["source"]
 ): SessionEconomy | null {
-  if (!user?.id) return null;
-  return { userId: user.id, claim: claimOf(user.app_metadata), source, expiresAt: typeof expiresAtSec === "number" ? expiresAtSec * 1000 : null };
+  const userId = session?.user?.id;
+  if (!userId) return null;
+  const claims = tokenClaims(session?.access_token);
+  const own = claims !== null && claims.sub === userId;
+  const exp = own && typeof claims.exp === "number" ? claims.exp : session?.expires_at;
+  return { userId, claim: own ? claimOf(claims) : null, source, expiresAt: typeof exp === "number" ? exp * 1000 : null };
 }
 
 /**

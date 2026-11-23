@@ -17,6 +17,8 @@
 -- Idempotent: safe to run twice.
 
 BEGIN;
+-- the owner of the new objects needs CREATE on public while they are handed over (Supabase; taken back at the end)
+GRANT CREATE ON SCHEMA public TO game_economy_owner;
 
 --------------------------------------------------------------------------------
 -- 1. Settings, the day cursor, tables
@@ -742,4 +744,7 @@ CREATE POLICY game_days_select_own ON public.game_days FOR SELECT TO authenticat
 DROP POLICY IF EXISTS game_source_claims_select_own ON public.game_source_claims;
 CREATE POLICY game_source_claims_select_own ON public.game_source_claims FOR SELECT TO authenticated USING ((SELECT auth.uid()) = user_id);
 
+
+-- CREATE on public was needed only to hand the objects over (Supabase): never left behind
+REVOKE CREATE ON SCHEMA public FROM game_economy_owner;
 COMMIT;

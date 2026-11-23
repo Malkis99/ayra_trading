@@ -15,6 +15,8 @@
 -- Idempotent: safe to run twice.
 
 BEGIN;
+-- the owner of the new objects needs CREATE on public while they are handed over (Supabase; taken back at the end)
+GRANT CREATE ON SCHEMA public TO game_economy_owner;
 
 --------------------------------------------------------------------------------
 -- 1. Trading days on the server (0 = Monday … 6 = Sunday, lib/quest-engine.ts ALL_DAYS)
@@ -381,4 +383,7 @@ ALTER TABLE public.game_extra_quests ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.game_extra_quests FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT ON public.game_extra_quests TO service_role;
 
+
+-- CREATE on public was needed only to hand the objects over (Supabase): never left behind
+REVOKE CREATE ON SCHEMA public FROM game_economy_owner;
 COMMIT;
