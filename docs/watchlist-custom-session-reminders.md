@@ -138,3 +138,11 @@ gap London, fold New York, A→B→Guest→A и RU/EN × 360/390/768/1024/1440. 
 общие на browser context, поэтому второй сдвиг делал кандидат просроченным. Теперь один
 общий сдвиг запускает проверки обеих страниц; строгое условие одного сообщения сохранено.
 Новый schedule-компонент явно импортирует React для classic JSX runtime Vitest.
+
+В первом GitHub check `45121527119` новый component test не дождался запроса policy
+(1643 unit PASS / 1 failed / 1 existing skip). Обнаружен фактор недетерминизма: реальные
+Node BroadcastChannel передают сообщения между Vitest worker threads, включая параллельные
+AuthProvider-тесты с тем же именем канала. Отдельная worker-проверка подтвердила передачу.
+Unit fixture теперь использует управляемый channel с реальным account guard, явными A→B→Guest→A
+сигналами и проверкой cleanup подписок. Производственные Auth/channel не менялись; настоящие
+вкладки и account switching остаются в Chromium E2E. Проверки не ослаблены, таймауты не увеличены.

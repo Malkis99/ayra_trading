@@ -10,10 +10,16 @@ import { AppStorage } from "@/lib/storage";
 import { spaceTabChannel } from "@/lib/auth/space-channel";
 import { MarketFocusNotifications } from "./MarketFocusNotifications";
 
-const mock = vi.hoisted(() => ({ epoch: vi.fn(), read: vi.fn(), exportSpace: vi.fn(), claimAlert: vi.fn(), currentCustomAlert:vi.fn(), settings: vi.fn(), notice: undefined as undefined | ((event: {spaceId:string;instrumentId:string|null}) => void) }));
+const mock = vi.hoisted(() => ({ epoch: vi.fn(), read: vi.fn(), exportSpace: vi.fn(), claimAlert: vi.fn(), currentCustomAlert:vi.fn(), settings: vi.fn(), notice: undefined as undefined | ((event: {spaceId:string;instrumentId:string|null}) => void), scopeListeners:new Set<(message:{fromSpaceId:string;toSpaceId:string})=>void>() }));
 vi.mock("@/lib/context", () => ({ useApp: () => ({ dict: en }) }));
 vi.mock("@/lib/storage/market-focus", () => ({ focusStorage: mock, subscribeFocus: (fn: typeof mock.notice) => { mock.notice = fn; return () => { mock.notice = undefined; }; } }));
 vi.mock("@/lib/notifications/repository", () => ({ notificationRepository: { settings: mock.settings } }));
+// Node BroadcastChannel crosses Vitest worker threads, unlike isolated browser contexts.
+// Keep the real account guard, but drive its channel explicitly inside this unit fixture.
+vi.mock("@/lib/auth/space-channel",()=>({spaceTabChannel:{
+  subscribe:(handler:(message:{fromSpaceId:string;toSpaceId:string})=>void)=>{mock.scopeListeners.add(handler);return()=>{mock.scopeListeners.delete(handler);};},
+  notifyLocal:(fromSpaceId:string,toSpaceId:string)=>{for(const handler of mock.scopeListeners)handler({fromSpaceId,toSpaceId});},
+}}));
 const A="00000000-0000-4000-8000-000000000001",B="00000000-0000-4000-8000-000000000002",space=`account:${A}`;
 const policy = { settings: defaultSettings(), preferences: [] };
 function deferred<T>() { let resolve!: (value:T)=>void; const promise=new Promise<T>(r=>{resolve=r;});return {promise,resolve}; }
@@ -22,7 +28,7 @@ beforeEach(()=>{
   const entry=emptyFocus(space,"eurusd");entry.revision=1;entry.checklist.items=entry.checklist.items.map(i=>({...i,checked:true}));entry.localAlerts={...alertsOf(entry),completion:true,enabledAt:Date.now()-100,completionEvent:{at:Date.now(),revision:1}};
   mock.epoch.mockResolvedValue(0);mock.read.mockResolvedValue(entry);mock.exportSpace.mockResolvedValue({entries:[entry]});mock.settings.mockResolvedValue(policy);mock.claimAlert.mockResolvedValue(true);
 });
-afterEach(()=>{cleanup();AppStorage.setUserId(null);vi.restoreAllMocks();vi.useRealTimers();});
+afterEach(()=>{cleanup();expect(mock.scopeListeners.size).toBe(0);AppStorage.setUserId(null);vi.restoreAllMocks();vi.useRealTimers();});
 const mount=()=>render(<MarketFocusNotifications space={space} id="eurusd" ids={["eurusd"]}/>);
 it("never delivers or claims a late policy response after A → B → A",async()=>{
   const pending=deferred<typeof policy>();mock.settings.mockReturnValue(pending.promise);mount();await waitFor(()=>expect(mock.settings).toHaveBeenCalledTimes(1));
