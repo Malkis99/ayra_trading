@@ -71,7 +71,7 @@ it("preserves unknown fields, rejects newer catalogs without changing them, and 
   const {name,a}=setup(),item=await create(a),snapshot=await a.exportSpace(A),pref=snapshot.preferences as Record<string,unknown>;
   const catalog=catalogFromPreference(pref,A);await put(name,"preferences",{...pref,opaque:"keep",customCatalog:{...catalog,extra:true,items:[{...item,future:{keep:true}}]}});
   await a.changeCatalog(A,"gold",{update:item.id,itemRevision:1,label:"New name"},0);expect((await a.catalog(A)).catalog).toMatchObject({extra:true,items:[{future:{keep:true}}]});
-  const preserved=await a.exportSpace(A);await put(name,"preferences",{...(preserved.preferences as object),customCatalog:{version:2,items:[],unknown:true}});await expect(create(a,A,"poi",5)).rejects.toMatchObject({kind:"unsupported"});await a.patch(A,"gold",{field:"direction",value:"neutral"});expect((await a.exportSpace(A)).preferences).toMatchObject({customCatalog:{version:2,unknown:true}});
+  const preserved=await a.exportSpace(A);await put(name,"preferences",{...(preserved.preferences as object),customCatalog:{version:3,items:[],unknown:true}});await expect(create(a,A,"poi",5)).rejects.toMatchObject({kind:"unsupported"});await a.patch(A,"gold",{field:"direction",value:"neutral"});expect((await a.exportSpace(A)).preferences).toMatchObject({customCatalog:{version:3,unknown:true}});
 });
 it("enforces 30 active items per kind atomically and counts 160 Unicode code points, not UTF-16 units",async()=>{
   const {a,b}=setup();const results=await Promise.allSettled(Array.from({length:31},(_,i)=>create(i%2?a:b,A,"poi",i+1)));expect(results.filter(r=>r.status==="fulfilled")).toHaveLength(30);expect((await a.catalog(A)).catalog.items).toHaveLength(30);
