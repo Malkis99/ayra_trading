@@ -523,10 +523,11 @@ export function createFakeSupabase() {
     }
     if (path === "/auth/v1/user") {
       const user = userFromAuthHeader(req);
-      // (the real GoTrue refuses an ended session's token with 403 session_not_found, and supabase-js then signs that
-      //  device out — checked on the official local stack, docs/q4-5-2 section 6. Not modelled here: an existing e2e
-      //  (journal-day-in-life, step 20) expects a device to stay signed in after a global sign-out elsewhere — an open
-      //  owner question about the sign-out scope)
+      // like GoTrue: the token of an ended session is refused even before its exp (403 session_not_found; supabase-js then
+      // signs that device out). «Выйти» ends only its own session (scope local, owner decision 2026-11-23), so another
+      // device of the account is never touched by it.
+      const sid = sessionIdOf.get((req.headers.authorization || "").replace(/^Bearer\s+/i, ""));
+      if (user && sid && !liveSessions.has(sid)) return send(403, { code: 403, error_code: "session_not_found", msg: "Session from session_id claim in JWT does not exist" });
       return user ? send(200, user) : send(401, { error: "not authenticated" });
     }
     if (path === "/auth/v1/logout") {

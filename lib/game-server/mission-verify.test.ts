@@ -171,3 +171,12 @@ describe("Q4.5-2 mission verify — only a fresh session, and the award only thr
     expect(r).toMatchObject({ status: 401, body: { error: "session_stale" } });
   });
 });
+
+describe("Q4.5-2 the mission check names the verified user", () => {
+  it("every answer carries account = the session's user (checked, refused, stale)", async () => {
+    expect((await verify(deps())).body.account).toBe(A);
+    expect((await verify(deps({ st: status({ state: "local", day: null }) }))).body.account).toBe(A);
+    expect((await verify(deps({ session: { fresh: false, state: "cloud_active" } }))).body).toMatchObject({ error: "session_stale", account: A });
+  });
+});
+

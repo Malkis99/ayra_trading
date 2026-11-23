@@ -65,7 +65,7 @@ test.describe("Q4.5-2 stale sessions (fake Supabase with the 0014–0018 stand-i
     // the account is moved while this page holds a token without the mark
     await setState(request, email, "cloud_active");
     const stale = await api(page, "/api/game/day/status");
-    expect(stale).toEqual({ status: 401, body: { error: "session_stale", state: "cloud_active", reason: "mark_changed" } });
+    expect(stale).toEqual({ status: 401, body: { error: "session_stale", state: "cloud_active", reason: "mark_changed", account: userId } });
     expect((await economyCalls(request)).filter((c) => c.fn !== "game_session_check" && c.fn !== "game_day_status")).toEqual([]); // nothing done
     const before = await live(request, email);
     await openQuests(page);

@@ -69,7 +69,8 @@ test.describe("Q4.4 server game day API (fake Supabase)", () => {
 
   test("the real Supabase today (0014–0016 not applied): the API says so, the device economy works exactly as before", async ({ page, request }) => {
     const { userId } = await setUp(page, request, { installed: false });
-    expect(await api(page, "/api/game/day/status")).toEqual({ status: 503, body: { error: "server_economy_unavailable" } });
+    // Q4.5-2: every answer names the verified user it was given for (the app binds answers to it)
+    expect(await api(page, "/api/game/day/status")).toEqual({ status: 503, body: { error: "server_economy_unavailable", account: userId } });
     await openQuests(page);
     await expect(page.getByTestId("economy-notice")).toHaveCount(0);
     const card = page.getByTestId("quest-card-m_lesson");
@@ -162,15 +163,15 @@ test.describe("Q4.4 server game day API (fake Supabase)", () => {
   });
 
   test("refusals: no session, another account's id, a forged mode, time or day, another site", async ({ page, request }) => {
-    await setUp(page, request, { installed: true, state: "cloud_active", sync: false, mode: "study" });
+    const { userId } = await setUp(page, request, { installed: true, state: "cloud_active", sync: false, mode: "study" });
     await openQuests(page);
     expect((await request.get(`${APP}/api/game/day/status`)).status()).toBe(401);
     expect((await request.post(`${APP}/api/game/day/accept`, { headers: { origin: APP }, data: { mission: "m_lesson" } })).status()).toBe(401);
     for (const body of [{ mission: "m_lesson", user_id: "00000000-0000-0000-0000-000000000bad" }, { mission: "m_lesson", day: "2030-01-01" }, { mission: "m_lesson", now: "2030-01-01T00:00:00Z" }]) {
-      expect(await api(page, "/api/game/day/accept", body)).toEqual({ status: 400, body: { error: "bad_request" } });
+      expect(await api(page, "/api/game/day/accept", body)).toEqual({ status: 400, body: { error: "bad_request", account: userId } }); // the session's own id, never the one sent
     }
-    expect(await api(page, "/api/game/day/open", { extras: [], mode: "recovery" })).toEqual({ status: 400, body: { error: "bad_request" } });
+    expect(await api(page, "/api/game/day/open", { extras: [], mode: "recovery" })).toEqual({ status: 400, body: { error: "bad_request", account: userId } }); // the session's own id, never the one sent
     expect((await request.post(`${APP}/api/game/day/accept`, { headers: { origin: "https://evil.example" }, data: { mission: "m_lesson" } })).status()).toBe(403);
-    expect(await api(page, "/api/game/missions/verify", { mission: "m_lesson", xp: 400 })).toEqual({ status: 400, body: { error: "bad_request" } });
+    expect(await api(page, "/api/game/missions/verify", { mission: "m_lesson", xp: 400 })).toEqual({ status: 400, body: { error: "bad_request", account: userId } }); // the session's own id, never the one sent
   });
 });

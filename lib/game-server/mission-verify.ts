@@ -17,7 +17,7 @@ import { CURRENT_JOURNAL_SCHEMA_VERSION } from "@/lib/journal/repository";
 import { dayKeyInZone } from "@/lib/day-key";
 import { candidateSources, explainMission, isMissionId, type MissionId } from "@/lib/missions";
 import { dayStamp, serverZone, sourceRow, toMissionData, type CloudJournal, type CloudRow, type ShadowTable } from "@/lib/missions-shadow";
-import { gate, readJson, refusalOf, reply, sessionGate, type ApiHttp, type DayApiDeps } from "./day-api";
+import { forAccount, gate, readJson, refusalOf, reply, sessionGate, type ApiHttp, type DayApiDeps, type SessionUser } from "./day-api";
 
 export const missionPayoutsEnabled = () => process.env.AYRA_SERVER_MISSION_PAYOUTS === "1";
 export const VERIFY_MAX_ROWS = 5000;
@@ -66,8 +66,14 @@ export interface VerifyDeps extends DayApiDeps {
 
 /** The mission check (and, only when payouts are on, the award). */
 export async function handleMissionVerify(req: Request, deps: VerifyDeps): Promise<ApiHttp> {
-  const g = await gate(req, deps, false);
-  if ("refused" in g) return g.refused;
+  const g0 = await gate(req, deps, false);
+  if ("refused" in g0) return g0.refused;
+  // Q4.5-2: every answer names the verified user it was given for (the app applies it only to that account)
+  return forAccount(await verifyFor(req, deps, g0.user), g0.user.id);
+}
+
+async function verifyFor(req: Request, deps: VerifyDeps, user0: SessionUser): Promise<ApiHttp> {
+  const g = { user: user0 };
   const json = await readJson(req, 512);
   if (!json.ok) return json.http;
   const b = json.body as Record<string, unknown>;

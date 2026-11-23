@@ -123,7 +123,13 @@ describe("Q4.4 day API — refusals are codes", () => {
     expect(leak).toMatchObject({ status: 503, body: { error: "server_error" } });
     const down = await handleDayApi(post("accept", { mission: "q_bias" }), "accept", deps({ rpc: async () => { throw new Error("ECONNRESET 10.0.0.5"); } }));
     expect(down).toMatchObject({ status: 503, body: { error: "server_error" } });
-    for (const r of [leak, down]) for (const s of ["db.internal", "10.0.0.5", "permission", A]) expect(JSON.stringify(r)).not.toContain(s);
+    // Q4.5-2: the body is exactly the bare code and the requester's OWN id as `account` (the app binds answers to it);
+    // the id appears nowhere else, and no database message, address or detail gets out
+    for (const r of [leak, down]) {
+      expect(r.body).toEqual({ error: "server_error", account: A });
+      const { account: _own, ...rest } = r.body;
+      for (const s of ["db.internal", "10.0.0.5", "permission", A]) expect(JSON.stringify({ ...r, body: rest })).not.toContain(s);
+    }
   });
 });
 
@@ -168,7 +174,7 @@ describe("Q4.5-2 day API — the session must be fresh for the economy (the data
     for (const answer of [null, {}, { fresh: "true" }, { fresh: 1 }, { fresh: false, state: "admin", reason: "<script>" }]) {
       const r = await handleDayApi(get(), "status", deps({ rpc: staleRpc([], answer) }));
       expect(r.status).toBe(401);
-      expect(r.body).toEqual({ error: "session_stale" });
+      expect(r.body).toEqual({ error: "session_stale", account: A });
     }
   });
 
@@ -197,3 +203,17 @@ describe("Q4.5-2 day API — the session must be fresh for the economy (the data
     expect(calls).toEqual(["game_session_check"]);
   });
 });
+
+describe("Q4.5-2 every answer names the verified user it was given for (the app binds answers to it)", () => {
+  it("status, a change, and a session_stale refusal all carry account = the session's user", async () => {
+    expect((await handleDayApi(get(), "status", deps())).body.account).toBe(A);
+    expect((await handleDayApi(post("accept", { mission: "q_bias" }), "accept", deps())).body.account).toBe(A);
+    const stale = await handleDayApi(get(), "status", deps({ rpc: async (fn) => ({ data: fn === "game_session_check" ? { fresh: false, state: "cloud_active" } : STATUS, error: null }) }));
+    expect(stale.body).toMatchObject({ error: "session_stale", account: A });
+    expect((await handleDayApi(get(), "status", deps({ getUser: async () => ({ id: B, token: { ...TOKEN_A, sub: B } }) }))).body.account).toBe(B);
+  });
+  it("no verified user (no session): no account is named", async () => {
+    expect((await handleDayApi(get(), "status", deps({ getUser: async () => null }))).body).toEqual({ error: "not_signed_in" });
+  });
+});
+

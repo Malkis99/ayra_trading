@@ -198,12 +198,23 @@ async function status(deps: DayApiDeps, userId: string): Promise<ApiHttp> {
   return reply(200, { status: data as Record<string, unknown> });
 }
 
+/**
+ * Q4.5-2: every answer given to a verified user names that user (`account`): the app applies an answer only to the
+ * account it was asked for (lib/economy-scope.ts) — never to whoever is signed in when it arrives.
+ */
+export const forAccount = (out: ApiHttp, account: string): ApiHttp => ({ ...out, body: { ...out.body, account } });
+
 /** One request of the day API. */
 export async function handleDayApi(req: Request, action: string, deps: DayApiDeps): Promise<ApiHttp> {
   if (!(DAY_ACTIONS as readonly string[]).includes(action)) return reply(404, { error: "unknown_action" });
   const a = action as DayAction;
   const g = await gate(req, deps, a === "status");
   if ("refused" in g) return g.refused;
+  return forAccount(await dayAction(req, a, deps, g.user), g.user.id);
+}
+
+async function dayAction(req: Request, a: DayAction, deps: DayApiDeps, user: SessionUser): Promise<ApiHttp> {
+  const g = { user };
   if (a === "status") {
     if (req.method !== "GET") return reply(405, { error: "method_not_allowed" }, { Allow: "GET" });
     try {

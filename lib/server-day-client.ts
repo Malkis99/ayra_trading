@@ -8,6 +8,7 @@
  * the refusal (the person's own, from the database), so the device still learns it.
  */
 import type { EconomyMode } from "./economy-mode";
+import type { RequestScope } from "./economy-scope";
 import { createSupabaseBrowserClient } from "./supabase/browser";
 export interface ServerDayRow {
   game_day: string;
@@ -35,9 +36,13 @@ export interface ServerDayStatus {
   day_full?: boolean;
 }
 
+/**
+ * An answer of the server. `account` is the user the server answered for (it reads the user from the verified token,
+ * Q4.5-2): the game applies an answer only to that account's scope (lib/economy-scope.ts).
+ */
 export type DayCall =
-  | { ok: true; status: ServerDayStatus | null; body: Record<string, unknown> }
-  | { ok: false; error: string; httpStatus?: number; state?: EconomyMode };
+  | { ok: true; status: ServerDayStatus | null; body: Record<string, unknown>; account?: string }
+  | { ok: false; error: string; httpStatus?: number; state?: EconomyMode; account?: string };
 
 const STATES: readonly string[] = ["local", "migration_scheduled", "migration_pending", "cloud_active"];
 
@@ -64,7 +69,7 @@ export const refreshAppSession: SessionRefresher = async () => {
  * Who learns the account's state from a `session_stale` refusal AT ONCE — before any refresh is tried, so a device
  * stops its local rewards even while the auth server is slow or failing (set by the game, lib/game-context.tsx).
  */
-type StaleListener = (state: EconomyMode) => void;
+type StaleListener = (state: EconomyMode, answeredAccount: string | undefined, scope: RequestScope | null) => void;
 let staleListener: StaleListener | null = null;
 export function onSessionStale(listener: StaleListener | null): void {
   staleListener = listener;
@@ -85,12 +90,13 @@ async function once(path: string, method: "GET" | "POST", body: unknown, fetchIm
       signal: ctrl?.signal,
     });
     const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    const account = typeof json.account === "string" && json.account ? { account: json.account } : {};
     if (!res.ok) {
       const state = typeof json.state === "string" && STATES.includes(json.state) ? (json.state as EconomyMode) : undefined;
-      return { ok: false, error: typeof json.error === "string" ? json.error : "bad_response", httpStatus: res.status, ...(state ? { state } : {}) };
+      return { ok: false, error: typeof json.error === "string" ? json.error : "bad_response", httpStatus: res.status, ...(state ? { state } : {}), ...account };
     }
     const status = json.status && typeof json.status === "object" ? (json.status as ServerDayStatus) : null;
-    return { ok: true, status, body: json };
+    return { ok: true, status, body: json, ...account };
   } catch {
     return { ok: false, error: "network" };
   } finally {
@@ -98,31 +104,36 @@ async function once(path: string, method: "GET" | "POST", body: unknown, fetchIm
   }
 }
 
-/** One request; on `session_stale` one session refresh and one repeat (the refused request changed nothing). */
-export async function callDayApi(path: string, method: "GET" | "POST", body?: unknown, fetchImpl: typeof fetch = fetch, refresh: SessionRefresher = refreshAppSession, listener: StaleListener | null = staleListener): Promise<DayCall> {
+/**
+ * One request made for `scope` (the account it was sent for); on `session_stale` one session refresh and one repeat (the
+ * refused request changed nothing). The listener hears the refusal with the account the server named and that scope —
+ * it decides whether the answer still belongs anywhere (lib/economy-scope.ts).
+ */
+export async function callDayApi(path: string, method: "GET" | "POST", body?: unknown, fetchImpl: typeof fetch = fetch, refresh: SessionRefresher = refreshAppSession, listener: StaleListener | null = staleListener, scope: RequestScope | null = null): Promise<DayCall> {
   const first = await once(path, method, body, fetchImpl);
   if (first.ok || first.error !== "session_stale") return first;
   if (first.state && listener) {
     try {
-      listener(first.state);
+      listener(first.state, first.account, scope);
     } catch {
       /* the listener's failure never changes the answer */
     }
   }
   if (!(await refresh())) return first;
   const again = await once(path, method, body, fetchImpl);
-  // still stale after a fresh session (or another failure): keep what the first refusal said about the account
-  return !again.ok && !again.state && first.state ? { ...again, state: first.state } : again;
+  // still stale after a fresh session: keep what the first refusal said — only about the same account
+  return !again.ok && !again.state && first.state && again.account === first.account ? { ...again, state: first.state } : again;
 }
-const call = (path: string, method: "GET" | "POST", body?: unknown, fetchImpl?: typeof fetch) => callDayApi(path, method, body, fetchImpl);
 
+/** The calls of the game: each made for the scope (account) it names; `f` replaces fetch in tests. */
 export const serverDay = {
-  status: (f?: typeof fetch) => call("/api/game/day/status", "GET", undefined, f),
-  open: (extras: string[], f?: typeof fetch) => call("/api/game/day/open", "POST", { extras }, f),
-  mode: (mode: string, extras: string[] | undefined, f?: typeof fetch) => call("/api/game/day/mode", "POST", extras ? { mode, extras } : { mode }, f),
-  accept: (mission: string, f?: typeof fetch) => call("/api/game/day/accept", "POST", { mission }, f),
-  pass: (mission: string, f?: typeof fetch) => call("/api/game/day/pass", "POST", { mission }, f),
-  replace: (from: string, to: string, f?: typeof fetch) => call("/api/game/day/replace", "POST", { from, to }, f),
-  tradingDays: (days: number[], f?: typeof fetch) => call("/api/game/day/trading-days", "POST", { days }, f),
-  verify: (mission: string, f?: typeof fetch) => call("/api/game/missions/verify", "POST", { mission }, f),
+  status: (scope: RequestScope | null, f?: typeof fetch) => callDayApi("/api/game/day/status", "GET", undefined, f, undefined, undefined, scope),
+  open: (extras: string[], scope: RequestScope | null, f?: typeof fetch) => callDayApi("/api/game/day/open", "POST", { extras }, f, undefined, undefined, scope),
+  mode: (mode: string, extras: string[] | undefined, scope: RequestScope | null, f?: typeof fetch) =>
+    callDayApi("/api/game/day/mode", "POST", extras ? { mode, extras } : { mode }, f, undefined, undefined, scope),
+  accept: (mission: string, scope: RequestScope | null, f?: typeof fetch) => callDayApi("/api/game/day/accept", "POST", { mission }, f, undefined, undefined, scope),
+  pass: (mission: string, scope: RequestScope | null, f?: typeof fetch) => callDayApi("/api/game/day/pass", "POST", { mission }, f, undefined, undefined, scope),
+  replace: (from: string, to: string, scope: RequestScope | null, f?: typeof fetch) => callDayApi("/api/game/day/replace", "POST", { from, to }, f, undefined, undefined, scope),
+  tradingDays: (days: number[], scope: RequestScope | null, f?: typeof fetch) => callDayApi("/api/game/day/trading-days", "POST", { days }, f, undefined, undefined, scope),
+  verify: (mission: string, scope: RequestScope | null, f?: typeof fetch) => callDayApi("/api/game/missions/verify", "POST", { mission }, f, undefined, undefined, scope),
 };
