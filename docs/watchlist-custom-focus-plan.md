@@ -1,5 +1,9 @@
 # WATCH-2D — проект Custom Market Focus и барьер совместимости
 
+Продолжение WATCH-2E: [проверенная модель Custom Session Reminders](watchlist-custom-session-reminders.md).
+Исходные ограничения уведомлений ниже относятся к WATCH-2D; новый opt-in, catalog V2 и receipts
+описаны отдельно, без изменения IndexedDB V2 и record-level V3.
+
 22 ноября 2026. **Владелец одобрил record-level V3 при сохранении IndexedDB V2;
 реализация включена в Draft PR #217 для ревью.** Изначальный барьер совместимости
 исследован ниже; выбранный контракт и его ограничения утверждены отдельно.

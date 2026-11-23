@@ -1,5 +1,7 @@
 import { FocusDataError, systemFocusValue, type FocusEntry, type FocusPatch } from "./market-focus";
 import { occurrences, sessionDefs, type SessionSettings } from "./sessions";
+import type { FocusCatalog } from "./focus-catalog";
+import { dueCustomSession, recordCustomClaim, type CustomSessionToken } from "./custom-session-alerts";
 
 /** Local delivery only. UTC instants are derived from the existing AYRA session calendar. */
 export type FocusAlertKind = "completion" | "session" | "reminder";
@@ -9,7 +11,7 @@ export interface FocusAlerts {
   completionEvent: { at: number; revision: number } | null;
   seenCompletion: number; seenSession: number; seenReminder: number;
 }
-export type FocusAlert = { kind: FocusAlertKind; at: number; token: number };
+export type FocusAlert = { kind: FocusAlertKind; at: number; token: number; custom?: CustomSessionToken };
 export const ALERT_GRACE = 60_000;
 const instant = (value: number) => Number.isSafeInteger(value) && value >= 0 && Number.isFinite(new Date(value).getTime());
 export function alertsOf(entry: FocusEntry): FocusAlerts {
@@ -34,7 +36,7 @@ export function recordCompletion(before: FocusEntry, after: FocusEntry, patch: F
   }
   return { ...after, localAlerts: { ...alerts, completionEvent: { at: now, revision: before.revision + 1 } } };
 }
-export function dueAlerts(entry: FocusEntry, now: number, hours?: SessionSettings): FocusAlert[] {
+export function dueAlerts(entry: FocusEntry, now: number, hours?: SessionSettings, catalog?: FocusCatalog, customError?: () => void): FocusAlert[] {
   const a = alertsOf(entry), out: FocusAlert[] = [];
   const recent = (at: number) => at >= a.enabledAt && at <= now && now - at < ALERT_GRACE;
   if (a.completion && allChecked(entry) && a.completionEvent && a.completionEvent.revision > a.seenCompletion && recent(a.completionEvent.at)) out.push({ kind: "completion", at: a.completionEvent.at, token: a.completionEvent.revision });
@@ -47,10 +49,12 @@ export function dueAlerts(entry: FocusEntry, now: number, hours?: SessionSetting
       if (o.start > a.seenSession && recent(at)) out.push({ kind: "session", at, token: o.start });
     }
   }
+  if (catalog) { try { out.push(...dueCustomSession(entry,catalog,now,ALERT_GRACE)); } catch { customError?.(); /* Fail closed only for the custom rule. */ } }
   return out;
 }
-export function claimAlert(entry: FocusEntry, candidate: FocusAlert, now: number, hours?: SessionSettings): FocusEntry | null {
-  if (!dueAlerts(entry, now, hours).some(a => a.kind === candidate.kind && a.token === candidate.token)) return null;
+export function claimAlert(entry: FocusEntry, candidate: FocusAlert, now: number, hours?: SessionSettings, catalog?: FocusCatalog): FocusEntry | null {
+  if (!dueAlerts(entry, now, hours,catalog).some(a => a.kind === candidate.kind && a.token === candidate.token && a.at === candidate.at && JSON.stringify(a.custom) === JSON.stringify(candidate.custom))) return null;
+  if (candidate.custom) return recordCustomClaim(entry,candidate.custom);
   const a = alertsOf(entry);
   return { ...entry, localAlerts: { ...a, [candidate.kind === "completion" ? "seenCompletion" : candidate.kind === "session" ? "seenSession" : "seenReminder"]: candidate.token } };
 }
