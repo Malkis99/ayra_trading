@@ -7,12 +7,13 @@ import { metadataWrite } from "./watchlist-meta.mjs";
 
 const b64url = (buf) => Buffer.from(buf).toString("base64url");
 
-function makeJwt(user, sessionId, hookClaims = {}) {
+function makeJwt(user, sessionId, hookClaims = {}, ageSec = 0) {
   const now = Math.floor(Date.now() / 1000);
+  const iat = now - ageSec;
   const header = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   // like the real auth server: the session id, and app_metadata as it is at the moment of issue (Q4.5-2 reads the mark)
   const payload = b64url(
-    JSON.stringify({ sub: user.id, email: user.email, role: "authenticated", aud: "authenticated", iat: now, exp: now + 3600,
+    JSON.stringify({ sub: user.id, email: user.email, role: "authenticated", aud: "authenticated", iat, exp: now + 3600,
       session_id: sessionId, app_metadata: user.app_metadata || {}, ...hookClaims })
   );
   const sig = crypto.createHmac("sha256", "fake-e2e-secret").update(`${header}.${payload}`).digest("base64url");
@@ -51,6 +52,7 @@ export function createFakeSupabase() {
   // top-level «ayra_economy» claim of every token; «unavailable» = the hook could not read the state (no mark + status);
   // «off» = the hook is not configured (no mark); «error» = the auth server cannot run the hook (tokens are refused)
   let hookMode = "on";
+  const tokenAgeByEmail = new Map(); // e-mail (lower case) -> seconds: tokens issued «that long ago» (a device whose token is old)
   const economies = new Map(); // user id -> { state, game_sync, opening_mode, day }
   const economyCalls = []; // { fn, user, args } — what the routes asked (never a time or a day)
   const SERVICE_KEY = "fake-service-key";
@@ -137,7 +139,7 @@ export function createFakeSupabase() {
 
   function issueSession(user, sessionId = crypto.randomUUID()) {
     liveSessions.set(sessionId, user.id);
-    const access_token = makeJwt(user, sessionId, hookClaimsOf(user));
+    const access_token = makeJwt(user, sessionId, hookClaimsOf(user), tokenAgeByEmail.get(String(user.email).toLowerCase()) || 0);
     const refresh_token = b64url(crypto.randomBytes(16));
     sessionIdOf.set(refresh_token, sessionId);
     sessionIdOf.set(access_token, sessionId);
@@ -439,6 +441,10 @@ export function createFakeSupabase() {
       }
       return send(200, { state: user ? economies.get(user.id).state : null });
     }
+    if (path === "/__test/token-age") {
+      tokenAgeByEmail.set(String(url.searchParams.get("email")).toLowerCase(), Number(url.searchParams.get("seconds")) || 0);
+      return send(200, {});
+    }
     if (path === "/__test/hook") {
       hookMode = url.searchParams.get("mode") || "on";
       return send(200, { hookMode });
@@ -517,9 +523,10 @@ export function createFakeSupabase() {
     }
     if (path === "/auth/v1/user") {
       const user = userFromAuthHeader(req);
-      // like GoTrue: the token of an ended session is refused even before its exp
-      const sid = sessionIdOf.get((req.headers.authorization || "").replace(/^Bearer\s+/i, ""));
-      if (user && sid && !liveSessions.has(sid)) return send(403, { code: 403, error_code: "session_not_found", msg: "Session from session_id claim in JWT does not exist" });
+      // (the real GoTrue refuses an ended session's token with 403 session_not_found, and supabase-js then signs that
+      //  device out — checked on the official local stack, docs/q4-5-2 section 6. Not modelled here: an existing e2e
+      //  (journal-day-in-life, step 20) expects a device to stay signed in after a global sign-out elsewhere — an open
+      //  owner question about the sign-out scope)
       return user ? send(200, user) : send(401, { error: "not authenticated" });
     }
     if (path === "/auth/v1/logout") {

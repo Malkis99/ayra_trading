@@ -100,6 +100,13 @@ export interface SessionEconomy {
   expiresAt: number | null;
 }
 
+/**
+ * PLACEHOLDER: a stored token older than this (seconds since its `iat`) is refreshed when the app loads, so that a mark
+ * given after it was issued arrives (the mark lives only in tokens). A younger one is only verified (no refresh: a refresh
+ * on every load made tabs wait for each other's refresh lock, and signed a device out at once after a sign-out elsewhere).
+ */
+export const SESSION_MARK_MAX_AGE_S = 600;
+
 /** The mark in a token's claims (anything else — missing, unknown words, wrong types — is «no mark»). */
 export function claimOf(claims: Record<string, unknown> | null | undefined): EconomyMode | null {
   const v = claims?.[ECONOMY_CLAIM_KEY];

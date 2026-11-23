@@ -19,6 +19,9 @@ const mark = (request: APIRequestContext, email: string, state: string | null) =
 
 async function newAccount(page: Page, request: APIRequestContext) {
   const email = `Mark_${Date.now()}_${Math.round(Math.random() * 1e4)}@example.com`;
+  // Q4.5-2: the mark lives in tokens; these devices hold a token issued long ago (older than SESSION_MARK_MAX_AGE_S), so
+  // a mark given after it arrives with the refresh the app makes when it loads
+  await request.get(`${FAKE_SUPABASE}/__test/token-age?email=${encodeURIComponent(email)}&seconds=900`);
   await signIn(page, email);
   await completeOnboarding(page, `Mrk${Date.now() % 100000}`);
   const userId = (await (await request.get(`${FAKE_SUPABASE}/__test/profile?email=${encodeURIComponent(email)}`)).json()).id as string;

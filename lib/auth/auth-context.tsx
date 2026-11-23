@@ -9,7 +9,7 @@ import { authTabChannel } from "./tab-channel";
 import { AuthGeneration } from "./auth-generation";
 import { spaceTabChannel } from "./space-channel";
 import { AppStorage, GUEST_SPACE_ID } from "@/lib/storage";
-import { joinVerifiedReading, mergeSessionEconomy, sessionEconomyOf, type SessionEconomy } from "@/lib/economy-mode";
+import { SESSION_MARK_MAX_AGE_S, joinVerifiedReading, mergeSessionEconomy, sessionEconomyOf, tokenClaims, type SessionEconomy } from "@/lib/economy-mode";
 import {
   getMockState,
   setMockState,
@@ -324,17 +324,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             // every reading is joined to what is known (an older one never takes a mark back: mergeSessionEconomy)
             setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(session, "cached")));
             updateToAuthenticated(u, true);
-            // The stored session may hold an old token (an economy mark given after it was issued — the mark lives only in
-            // tokens, Q4.5-2) and old user data (a password set on another device, the owner role just given): one refresh
-            // at load brings a token the auth server issues now (its hook reads the state) and the user as it is now
-            supabase.auth
-              .refreshSession()
-              .then(({ data }) => {
-                const issued = data.session;
+            // The stored session may hold old user data (a password set on another device, the owner role just given) and,
+            // when its token is old, an old economy mark (the mark lives only in tokens, Q4.5-2). A token older than
+            // SESSION_MARK_MAX_AGE_S is refreshed: the auth server issues one now (its hook reads the state). A younger one
+            // is verified as it is (getUser with exactly this token) — its mark is at most that old.
+            const iat = tokenClaims(session.access_token)?.iat;
+            const old = typeof iat !== "number" || Date.now() / 1000 - iat > SESSION_MARK_MAX_AGE_S;
+            const answer: Promise<{ session: typeof session | null }> = old
+              ? supabase.auth.refreshSession().then(({ data }) => ({ session: data.session }))
+              : supabase.auth.getUser(session.access_token).then(({ data }) => ({ session: data.user ? { ...session, user: data.user } : null }));
+            answer
+              .then(({ session: issued }) => {
                 // An answer for a session that is no longer the current one (a sign-out, another account, a new sign-in of
                 // the same account) changes nothing: neither the user flags nor the economy reading.
                 if (!isMounted || !issued?.user || issued.user.id !== session.user.id || !authGenerationRef.current.isCurrent(generation)) return;
-                // the mark of the token just issued; joinVerifiedReading also keeps it to the same account
+                // the mark of the token the auth server just verified or issued; joinVerifiedReading keeps it to the same account
                 setSessionEconomy((prev) => joinVerifiedReading(prev, sessionEconomyOf(issued, "verified")));
                 const fresh = toAuthUser(issued.user);
                 setUser((prev) =>

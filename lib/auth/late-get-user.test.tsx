@@ -22,6 +22,8 @@ const fake = vi.hoisted(() => ({
   startedFor: null as null | string, // the session id the load-time refresh was started for
   listener: null as null | ((event: string, session: unknown) => void),
   issued: (() => null) as (u: never) => unknown,
+  verified: [] as string[],
+  refreshes: 0,
 }));
 
 vi.mock("@/lib/supabase/config", async (orig) => ({ ...(await orig<typeof import("@/lib/supabase/config")>()), isE2EMockEnabled: () => false }));
@@ -30,8 +32,11 @@ vi.mock("@/lib/supabase/browser", () => {
   const client = {
     auth: {
       getSession: async () => ({ data: { session: fake.stored } }),
-      // the load-time refresh is held; released with the user the auth server holds now (and a token for that session)
+      // a young token is only verified (getUser with it): counted, answered at once
+      getUser: async (jwt?: string) => { fake.verified.push(jwt ?? "<none>"); return { data: { user: (fake.stored as { user?: unknown } | null)?.user ?? null }, error: null }; },
+      // the load-time refresh of an old token is held; released with the user the auth server holds now (and a token for that session)
       refreshSession: () => new Promise((resolve) => {
+        fake.refreshes += 1;
         fake.startedFor = (fake.stored as { session_id?: string } | null)?.session_id ?? null;
         fake.pendingGetUser = (u) => resolve({ data: { session: fake.issued(u as never), user: u }, error: null });
       }),
@@ -100,6 +105,8 @@ beforeEach(() => {
   fake.stored = null;
   fake.pendingGetUser = null;
   fake.startedFor = null;
+  fake.verified = [];
+  fake.refreshes = 0;
   fake.listener = null;
 });
 afterEach(() => cleanup());
@@ -159,4 +166,15 @@ describe("Q4.5-1 a late getUser answer is applied only to the session it was sta
     await releaseGetUser(user(A, { owner: true, economy: "cloud_active" }));
     expect(shown()).toEqual({ user: "a1 owner=false password=false", economy: "a1 - verified" });
   });
+
+  it("Q4.5-2: a young token is verified as it is (getUser with exactly it), never refreshed at load; its mark is read", async () => {
+    const youngToken = `${b64({ alg: "HS256" })}.${b64({ sub: A, session_id: "s1", iat: NOW_S - 5, ayra_economy: "migration_pending" })}.sig`;
+    const young = { access_token: youngToken, expires_at: NOW_S + 3600, user: user(A), session_id: "s1" } as FakeSession;
+    fake.stored = young;
+    render(<AppProvider initialLang="ru"><AuthProvider><Probe /></AuthProvider></AppProvider>);
+    await waitFor(() => expect(shown().economy).toBe("a1 migration_pending verified"));
+    expect(fake.verified).toEqual([young.access_token]);
+    expect(fake.refreshes).toBe(0);
+  });
 });
+
