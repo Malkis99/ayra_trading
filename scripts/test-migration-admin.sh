@@ -26,7 +26,7 @@ close_window() { q "SET ROLE game_economy_owner; INSERT INTO public.game_migrati
 
 psql -X -q -d postgres -c "DROP DATABASE IF EXISTS $DB" -c "CREATE DATABASE $DB" >/dev/null || { echo "FAIL cannot create the test database"; exit 2; }
 psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase/tests/stub/supabase_stub.sql >/dev/null || { echo "FAIL stub"; exit 2; }
-for f in 0001_init 0002_profile_defaults 0003_nickname_cooldown 0004_journal_sync 0014_game_economy 0015_game_days 0016_game_day_api 0018_game_economy_sessions 0019_game_migration_import 0020_game_achievements 0021_game_achievement_proof; do
+for f in 0001_init 0002_profile_defaults 0003_nickname_cooldown 0004_journal_sync 0014_game_economy 0015_game_days 0016_game_day_api 0018_game_economy_sessions 0019_game_migration_import 0020_game_achievements 0021_game_achievement_proof 0022_game_achievement_bulk_review; do
   psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f "supabase/migrations/$f.sql" >/dev/null || { echo "FAIL migration $f"; exit 2; }
 done
 U=00000000-0000-0000-0000-0000001ad001
@@ -141,6 +141,33 @@ out=$(tool decide-achievement "$U" author legacy_accepted --actor owner --reason
 out=$(tool purge "$U" --actor owner --reason "retention" --confirm "$U")
 echo "$out" | grep -q game_mig_retention_not_reached && [ "$(q "SELECT count(*) FROM public.game_imports WHERE user_id = '$U'")" = 3 ]   && ok "T14: a purge before 90 days after the activation is refused; nothing deleted" || bad "T14: $out"
 
+# Q4.7-Б3: the preview and the bulk decision of one account (firstTrade pending, author decided in T13c, firstQuest verified)
+rows() { q "SELECT md5(string_agg(achievement_id || status || COALESCE(reason, ''), ',' ORDER BY achievement_id)) FROM public.game_achievements WHERE user_id = '$U'"; }
+r0=$(rows)
+out=$(tool achievements-review "$U")
+echo "$out" | grep -q "Acceptable in bulk now (pending_review, devices agree): firstTrade" && echo "$out" | grep -q "why not proven" && [ "$(rows)" = "$r0" ] \
+  && ok "T15a: the review lists every achievement with its rule and evidence; only firstTrade is acceptable; nothing changed" || bad "T15a: $out"
+out=$(tool achievements-accept "$U" --ids firstTrade --actor owner --reason "the user showed the trade quest on a call" --confirm 00000000-0000-0000-0000-000000000000 --confirm-ids firstTrade)
+echo "$out" | grep -q "does not match" && [ "$(rows)" = "$r0" ] && ok "T15b: a wrong account confirmation changes nothing" || bad "T15b: $out"
+out=$(tool achievements-accept "$U" --ids firstTrade --actor owner --reason "the user showed the trade quest on a call" --confirm "$U" --confirm-ids author)
+echo "$out" | grep -q "confirmed list differs" && [ "$(rows)" = "$r0" ] && ok "T15c: a confirmed list different from --ids changes nothing" || bad "T15c: $out"
+out=$(tool achievements-accept "$U" --ids firstTrade --actor owner --reason "short" --confirm "$U" --confirm-ids firstTrade)
+echo "$out" | grep -q game_mig_reason_required && [ "$(rows)" = "$r0" ] && ok "T15d: a one-word reason is refused by the database" || bad "T15d: $out"
+out=$(tool achievements-accept "$U" --ids firstTrade,firstQuest --actor owner --reason "the user showed the trade quest on a call" --confirm "$U" --confirm-ids firstQuest,firstTrade)
+echo "$out" | grep -q game_mig_achievement_verified && [ "$(rows)" = "$r0" ] && ok "T15e: a list with a verified one: refused as a whole, nothing accepted" || bad "T15e: $out"
+OP=40000000-0000-4000-8000-0000001ad0b3
+out=$(tool achievements-accept "$U" --ids firstTrade --actor owner --reason "the user showed the trade quest on a call" --operation "$OP" --confirm "$U" --confirm-ids firstTrade)
+xp_b3=$(q "SELECT xp_total || '/' || coins FROM public.game_profile WHERE user_id = '$U'")
+[ "$(q "SELECT status FROM public.game_achievements WHERE user_id = '$U' AND achievement_id = 'firstTrade'")" = legacy_accepted ] && echo "$out" | grep -q '"replay": *false' \
+  && [ "$xp_b3" = "125/62" ] && ok "T15f: firstTrade accepted in one operation; XP and Coins unchanged (125/62)" || bad "T15f: $out / $xp_b3"
+logs=$(q "SELECT count(*) FROM public.game_migration_audit WHERE user_id = '$U' AND details ->> 'operation' = '$OP'")
+out=$(tool achievements-accept "$U" --ids firstTrade --actor owner --reason "the user showed the trade quest on a call" --operation "$OP" --confirm "$U" --confirm-ids firstTrade)
+echo "$out" | grep -q '"replay": *true' && [ "$logs" = 2 ] && [ "$(q "SELECT count(*) FROM public.game_migration_audit WHERE user_id = '$U' AND details ->> 'operation' = '$OP'")" = 2 ] \
+  && ok "T15g: a rerun with the same operation is a replay; the log keeps one entry for the operation and one for the achievement" || bad "T15g: $out / $logs"
+out=$(tool achievements-accept "$U" --ids firstTrade --actor owner --reason "another reason under the same operation" --operation "$OP" --confirm "$U" --confirm-ids firstTrade)
+echo "$out" | grep -q "was another request" && [ "$(q "SELECT count(*) FROM public.game_migration_audit WHERE user_id = '$U' AND details ->> 'operation' = '$OP'")" = 2 ] \
+  && ok "T15h: the same operation with another reason: refused, nothing logged" || bad "T15h: $out"
+
 # accounts without snapshots: never a transfer with an empty reconciliation; a new account only on its own path
 N1=00000000-0000-0000-0000-0000001ad0a1
 N2=00000000-0000-0000-0000-0000001ad0a2
@@ -167,7 +194,7 @@ psql -X -q -d postgres -c "DROP DATABASE IF EXISTS $DB" >/dev/null
 
 # the two implementations side by side on a fresh database (fixtures, the owner's cases, generated saves)
 psql -X -q -d postgres -c "CREATE DATABASE $DB" >/dev/null && psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase/tests/stub/supabase_stub.sql >/dev/null
-for f in 0001_init 0002_profile_defaults 0003_nickname_cooldown 0004_journal_sync 0014_game_economy 0015_game_days 0016_game_day_api 0018_game_economy_sessions 0019_game_migration_import 0020_game_achievements 0021_game_achievement_proof; do
+for f in 0001_init 0002_profile_defaults 0003_nickname_cooldown 0004_journal_sync 0014_game_economy 0015_game_days 0016_game_day_api 0018_game_economy_sessions 0019_game_migration_import 0020_game_achievements 0021_game_achievement_proof 0022_game_achievement_bulk_review; do
   psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f "supabase/migrations/$f.sql" >/dev/null || { echo "FAIL migration $f"; exit 2; }
 done
 node --no-warnings scripts/test-reconcile-twins.mjs || FAILED=1
