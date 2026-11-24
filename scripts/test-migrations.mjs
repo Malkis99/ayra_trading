@@ -690,6 +690,45 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   await db.close();
 }
 
+// V. 0022: the bulk review of one account's unproven achievements (Q4.7-Б3) on top of 0021 — applied twice; its tests;
+//    the 0021, 0020, 0019 and 0018 tests still pass with it; only the owner's tool calls it; rollback removes the functions
+//    and keeps every decision (the 0021 tests pass again)
+{
+  const base = ["0001_init", "0002_profile_defaults", "0003_nickname_cooldown", "0004_journal_sync", "0014_game_economy", "0015_game_days", "0016_game_day_api",
+    "0018_game_economy_sessions", "0019_game_migration_import", "0020_game_achievements", "0021_game_achievement_proof"];
+  const db = await fresh();
+  for (const f of base) await db.exec(read(`supabase/migrations/${f}.sql`));
+  await db.exec(read("supabase/migrations/0022_game_achievement_bulk_review.sql"));
+  await db.exec(read("supabase/migrations/0022_game_achievement_bulk_review.sql")); ok("V: 0022 applied twice");
+  for (const t of ["game_achievement_bulk_review", "game_achievement_proof", "game_achievements", "game_migration_import", "game_economy_sessions"]) {
+    try { await db.exec(read(`supabase/tests/${t}.sql`)); ok(`V: tests/${t}.sql pass with 0022`); }
+    catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`V: ${t} with 0022: ${e.message}`); }
+  }
+  const left = (await db.query("SELECT (SELECT count(*) FROM public.game_achievements)::int + (SELECT count(*) FROM public.game_migration_audit)::int AS n")).rows[0].n;
+  left === 0 ? ok("V: tests rolled back (no rows left)") : fail("V: rows left after tests");
+  const st = (await db.query(`SELECT has_schema_privilege('game_economy_owner', 'public', 'CREATE') AS cr,
+    (SELECT count(*) FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) r, unnest(ARRAY['public.game_mig_achievement_review(uuid)',
+      'public.game_mig_bulk_accept_achievements(uuid,bigint,jsonb,uuid,text,text)']) f WHERE has_function_privilege(r, f, 'EXECUTE'))::int AS api,
+    has_function_privilege('game_migration_admin', 'public.game_mig_bulk_accept_achievements(uuid,bigint,jsonb,uuid,text,text)', 'EXECUTE') AS admin`)).rows[0];
+  !st.cr && st.api === 0 && st.admin ? ok("V: no CREATE left; no API role calls the review; the owner's tool does") : fail(`V: state ${JSON.stringify(st)}`);
+  // a decision taken with 0022 stays after its rollback (it is an ordinary legacy_accepted row with its log)
+  await db.exec(`INSERT INTO auth.users (id, email) VALUES ('00000000-0000-0000-0000-00000022f001', 'keep@x');
+    SET LOCAL ROLE game_economy_owner;
+    INSERT INTO public.game_achievements (user_id, achievement_id, family, status, source, claimed_by, idempotency_key, decided_by, decided_at, reason)
+      VALUES ('00000000-0000-0000-0000-00000022f001', 'author', 'profile', 'legacy_accepted', 'device_flag', '{x}', 'ach:author', 'owner', now(), 'kept');
+    RESET ROLE;`);
+  await db.exec(read("supabase/migrations/0022_game_achievement_bulk_review.down.sql"));
+  const after = (await db.query(`SELECT to_regprocedure('public.game_mig_bulk_accept_achievements(uuid,bigint,jsonb,uuid,text,text)') IS NULL
+      AND to_regprocedure('public.game_mig_achievement_review(uuid)') IS NULL AS gone,
+    (SELECT count(*) FROM public.game_achievements WHERE status = 'legacy_accepted')::int AS kept`)).rows[0];
+  after.gone && after.kept === 1 ? ok("V: rollback removes the review and keeps every decision") : fail(`V: rollback ${JSON.stringify(after)}`);
+  await db.exec(`DELETE FROM auth.users WHERE id = '00000000-0000-0000-0000-00000022f001';
+    SET LOCAL ROLE game_economy_owner; DELETE FROM public.game_deletion_log; RESET ROLE;`);
+  try { await db.exec(read("supabase/tests/game_achievement_proof.sql")); ok("V: 0021 tests pass after the 0022 rollback"); }
+  catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`V: 0021 tests after rollback: ${e.message}`); }
+  await db.close();
+}
+
 // S. Supabase compatibility (found on the official supabase/postgres image, Q4.5-2): «GRANT <role> TO CURRENT_USER»
 //    crashes the server process there (supautils, signal 11) — role grants must name the role (format(... %I, current_user))
 {

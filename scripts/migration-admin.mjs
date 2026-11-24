@@ -21,9 +21,16 @@
 //   decide-achievement <user> <id> <legacy_accepted|rejected|pending_review> --actor A --reason R   (Q4.6; never a verified one)
 //   transfer-achievements <user> --actor A                    an account activated before 0020: its achievements, once
 //   purge <user> --actor A --reason R                         snapshots of an activated account, 90 days after, nothing open
+//   achievements-review <user>                               (Q4.7-Б3) read only: every server achievement of the account, its rule,
+//                                                            evidence, the snapshots that claimed it, conflicts, decisions, versions
+//   achievements-accept <user> --ids a,b,… --actor A --reason R [--operation <uuid>] [--confirm-ids a,b,…]
+//                                                            pending_review → legacy_accepted for exactly the listed ones, after the full
+//                                                            preview; the account id AND the list are confirmed; one transaction; a rerun
+//                                                            with the same --operation is a replay (nothing changes twice)
 //
 // Confirmation: typed at the prompt, or --confirm <user> (the same account id) for a scripted run.
 // The connection string is never printed or logged. Never point it at Production before the owner's written approval.
+import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline/promises";
 import pg from "pg";
 import { journalEvidence, reconcile } from "../lib/migration/reconcile.ts";
@@ -97,6 +104,39 @@ async function show(db, user) {
     .map((r) => ({ ...r, details: JSON.stringify(r.details).slice(0, 160) })));
 }
 
+/** Q4.7-Б3: the database's review of the account's achievements (read only), printed in full. */
+async function reviewAchievements(db, user) {
+  const v = (await db.query("SELECT public.game_mig_achievement_review($1) AS v", [user])).rows[0].v;
+  console.log(`Account: ${v.account}\nState: ${v.state}`);
+  console.log(`Reconciliation: ${v.reconciliation ? `#${v.reconciliation.id}, achievements recorded ${v.reconciliation.achievementsTransferredAt ?? "NOT YET"}` : "none activated"}`);
+  console.log(`Decisions possible: ${v.decidable ? "yes" : `NO (${v.notDecidableBecause})`}`);
+  if (v.plan) {
+    console.log("\nNot recorded yet — what the activation WOULD record (information only, nothing can be decided on it):");
+    table((v.plan.items || []).map((i) => ({ id: i.id, status: i.status, source: i.source, devices: i.claimedBy.length })));
+  }
+  const rows = v.items.map((i) => ({
+    id: i.id,
+    status: i.status,
+    source: i.source,
+    conflict: i.conflict.length ? `DEVICES DISAGREE: ${i.conflict.join(" / ")}` : "",
+    decided: i.decidedBy ? `${i.decidedBy}: ${String(i.reason).slice(0, 40)}` : "",
+  }));
+  console.log("\nServer achievements:");
+  table(rows);
+  for (const i of v.items.filter((x) => x.status !== "verified")) {
+    console.log(`\n— ${i.id} (${i.family}, ${i.status}, rules ${i.rulesVersion})`);
+    console.log(`  rule: ${i.rule}`);
+    console.log(`  why not proven: proof «${i.proof ?? i.family}», source «${i.source}»; evidence ${JSON.stringify(i.evidence)}`);
+    console.log(`  recorded detail: ${JSON.stringify(i.detail)}`);
+    for (const c of i.claimedBy) {
+      console.log(`  claimed by snapshot ${c.snapshot}: ${c.present ? `${c.status}, received ${c.receivedAt}, ${JSON.stringify(c.claimed)}` : "(snapshot purged)"}`);
+    }
+    if (i.conflict.length) console.log(`  DEVICES DISAGREE (${i.conflict.join(" / ")}): not acceptable in bulk — nothing is chosen for the person`);
+  }
+  console.log(`\nAcceptable in bulk now (pending_review, devices agree): ${v.acceptable.length ? v.acceptable.join(", ") : "(none)"}`);
+  return v;
+}
+
 async function computePreview(db, user) {
   const tz = (await db.query("SELECT public.game_mig_timezone($1) AS tz", [user])).rows[0]?.tz || "UTC";
   const snaps = (await db.query(`SELECT snapshot_id, install_id, received_at, content, content_md5 FROM public.game_imports
@@ -149,7 +189,8 @@ function printPreview({ tz, r, journal, dayCounts, agree, differs, plan }) {
 async function main() {
   const { pos, opt } = parseArgs(process.argv.slice(2));
   const [cmd, user, ...rest] = pos;
-  const COMMANDS = ["show", "open", "window", "reconcile", "decide", "activate", "activate-new", "decide-achievement", "transfer-achievements", "purge"];
+  const COMMANDS = ["show", "open", "window", "reconcile", "decide", "activate", "activate-new", "decide-achievement", "transfer-achievements", "purge",
+    "achievements-review", "achievements-accept"];
   if (!cmd || !COMMANDS.includes(cmd)) die(`command: ${COMMANDS.join(" | ")}`);
   if (!user || !UUID_RE.test(user)) die("<user> must be the account id (UUID)");
   const db = await connect();
@@ -187,6 +228,43 @@ async function main() {
       await confirm(user, opt, "Transfer the achievements of this activated account (from its snapshots and reconciliation), once.");
       const v = (await db.query("SELECT public.game_mig_transfer_achievements($1, $2) AS v", [user, actor])).rows[0].v;
       return console.log(JSON.stringify(v));
+    }
+    if (cmd === "achievements-review") {
+      await reviewAchievements(db, user);
+      return;
+    }
+    if (cmd === "achievements-accept") {
+      // the list is the person's: never «all pending»; anything not listed stays as it is
+      const ids = need(opt.ids, "--ids").split(",").map((x) => x.trim()).filter(Boolean);
+      if (!ids.length || new Set(ids).size !== ids.length || ids.some((x) => !/^[A-Za-z0-9:-]{1,60}$/.test(x))) die("--ids: a comma-separated list of distinct achievement ids (see achievements-review)");
+      const actor = need(opt.actor, "--actor");
+      const reason = need(opt.reason, "--reason");
+      const operation = opt.operation ?? randomUUID();
+      if (!UUID_RE.test(operation)) die("--operation must be a UUID (the id of an earlier run to repeat it safely)");
+      const v = await reviewAchievements(db, user);
+      if (!v.decidable) die(`no decision is possible on this account now (${v.notDecidableBecause}): nothing done`);
+      const byId = new Map(v.items.map((i) => [i.id, i]));
+      const items = ids.map((id) => {
+        const i = byId.get(id);
+        if (!i) die(`${id}: the account has no such server achievement: nothing done`);
+        return { id, version: i.version };
+      });
+      console.log(`\nOperation ${operation} — the exact changes (one transaction; any refusal changes nothing):`);
+      table(ids.map((id) => ({ id, from: byId.get(id).status, to: "legacy_accepted" })));
+      console.log(`Reason: ${reason}\n(rerun with --operation ${operation} to repeat this exact decision safely)`);
+      await confirm(user, opt, `ACCEPT ${ids.length} achievement(s) of this account as legacy_accepted (never verified; no XP or Coins).`);
+      // the exact set, typed again
+      let typed = opt["confirm-ids"];
+      if (typed === undefined) {
+        const rl = createInterface({ input: process.stdin, output: process.stdout });
+        typed = await rl.question("Type the same list of achievement ids (comma-separated) to confirm: ");
+        rl.close();
+      }
+      const typedSet = String(typed).split(",").map((x) => x.trim()).filter(Boolean).sort();
+      if (typedSet.join(",") !== [...ids].sort().join(",")) die("the confirmed list differs from --ids: nothing done");
+      const out = (await db.query("SELECT public.game_mig_bulk_accept_achievements($1, $2, $3::jsonb, $4, $5, $6) AS v",
+        [user, v.reconciliation.id, JSON.stringify(items), operation, actor, reason])).rows[0].v;
+      return console.log(JSON.stringify(out));
     }
     if (cmd === "purge") {
       const actor = need(opt.actor, "--actor");
