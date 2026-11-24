@@ -45,7 +45,7 @@ export const STANDARD_CHECKLIST_KEYS = [
 
 export function TradingPlanTab() {
   const { dict, lang, showToast } = useApp();
-  const { gameState, gameDay, checkAndClosePlanQuests } = useGame();
+  const { gameState, gameDay, checkAndClosePlanQuests, recordPlanAchievements } = useGame();
   const {
     plans,
     weekPlans,
@@ -147,6 +147,23 @@ export function TradingPlanTab() {
   // Save status: 'saved' | 'saving' | 'idle'
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "idle">("saved");
 
+  // Every day plan of the Journal as it is now (read from timers and the unmount flush, so never a stale copy)
+  const plansRef = useRef(plans);
+  plansRef.current = plans;
+  /**
+   * Saves the day plan, closes its quests as before and checks the day-plan achievements (firstPlan, firstReview, plans7)
+   * with every day plan — the saved one included: their rule needs the Journal's plans, which were never passed (Q4.7).
+   */
+  const savePlanAndCheck = useCallback(
+    (plan: TradingPlan) => {
+      // the saved copy carries the time of the first save (catalog 3: «made today»)
+      const saved = saveTradingPlan(plan);
+      checkAndClosePlanQuests(saved, trades);
+      recordPlanAchievements([saved, ...plansRef.current.filter((p) => p.date !== saved.date)]);
+    },
+    [saveTradingPlan, checkAndClosePlanQuests, recordPlanAchievements, trades]
+  );
+
   // References for debounce timers and pending flush
   const daySaveTimer = useRef<NodeJS.Timeout | null>(null);
   const weekSaveTimer = useRef<NodeJS.Timeout | null>(null);
@@ -157,8 +174,7 @@ export function TradingPlanTab() {
   useEffect(() => {
     // Flush pending day plan first if switching days
     if (pendingDayPlanRef.current) {
-      // the saved copy carries the time of the first save (catalog 3: «made today»)
-      checkAndClosePlanQuests(saveTradingPlan(pendingDayPlanRef.current), trades);
+      savePlanAndCheck(pendingDayPlanRef.current);
       pendingDayPlanRef.current = null;
     }
 
@@ -205,15 +221,14 @@ export function TradingPlanTab() {
   // Flush on unmount & window unload
   const flushPending = useCallback(() => {
     if (pendingDayPlanRef.current) {
-      // the saved copy carries the time of the first save (catalog 3: «made today»)
-      checkAndClosePlanQuests(saveTradingPlan(pendingDayPlanRef.current), trades);
+      savePlanAndCheck(pendingDayPlanRef.current);
       pendingDayPlanRef.current = null;
     }
     if (pendingWeekPlanRef.current) {
       saveWeekPlan(pendingWeekPlanRef.current);
       pendingWeekPlanRef.current = null;
     }
-  }, [saveTradingPlan, saveWeekPlan, checkAndClosePlanQuests, trades]);
+  }, [savePlanAndCheck, saveWeekPlan]);
 
   useEffect(() => {
     const handleBeforeUnload = () => {
@@ -241,8 +256,7 @@ export function TradingPlanTab() {
         if (daySaveTimer.current) clearTimeout(daySaveTimer.current);
         daySaveTimer.current = setTimeout(() => {
           if (pendingDayPlanRef.current) {
-            // the saved copy carries the time of the first save (catalog 3: «made today»)
-            checkAndClosePlanQuests(saveTradingPlan(pendingDayPlanRef.current), trades);
+            savePlanAndCheck(pendingDayPlanRef.current);
             pendingDayPlanRef.current = null;
             setSaveStatus("saved");
           }
@@ -251,7 +265,7 @@ export function TradingPlanTab() {
         return updatedWithTs;
       });
     },
-    [saveTradingPlan, checkAndClosePlanQuests, trades]
+    [savePlanAndCheck]
   );
 
   // Trigger week plan auto-save with ~500ms debounce

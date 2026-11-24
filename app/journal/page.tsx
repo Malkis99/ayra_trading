@@ -36,7 +36,6 @@ import { getLocalDateString } from "@/lib/date-utils";
 import { PropRulesModal } from "@/components/journal/PropRulesModal";
 import { PropRulesCard } from "@/components/journal/PropRulesCard";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { recordPropRulesSaved } from "@/lib/game";
 import { calculatePropMetrics, resolvePrimaryPropAccount } from "@/lib/journal/prop";
 import { evaluatePropToastAlert } from "@/lib/journal/prop-toast";
 import { AppStorage } from "@/lib/storage";
@@ -48,7 +47,7 @@ const KPI_PERIOD_KEY = "ayra_journal_kpi_period";
 
 export default function JournalPage() {
   const { dict, lang, showToast, setAddTradeModalOpen, openNoteModal } = useApp();
-  const { gameState, recordNoTrade } = useGame();
+  const { gameState, recordNoTrade, recordPropRulesSaved } = useGame();
   const {
     accounts,
     trades,
@@ -202,7 +201,8 @@ export default function JournalPage() {
   // Save Prop Rules from modal
   const handleSavePropRules = (updatedAccount: Account) => {
     saveAccount(updatedAccount);
-    const { newlyUnlocked } = recordPropRulesSaved(gameState);
+    // kept in this account's save (Q4.7: before, the achievement was only shown and never saved)
+    const newlyUnlocked = recordPropRulesSaved();
     if (newlyUnlocked.includes("firstPropRules")) {
       showToast(dict.profile.achievements.firstPropRules);
     } else {
