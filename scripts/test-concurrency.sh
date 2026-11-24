@@ -606,10 +606,10 @@ ach=$(q "SELECT string_agg(achievement_id || '=' || status || '/' || source || '
 psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase/migrations/0022_game_achievement_bulk_review.sql >/dev/null 2>"$TMP/m22.err" \
   && ok "O0: migration 0022 on PostgreSQL" || bad "O0: migration 0022: $(cat "$TMP/m22.err")"
 bulk_save='{"level":1,"xp":0,"coins":0,"achievements":{"author":true,"plans7":true,"firstPlan":true}}'
-for n in 10 11 12 13; do
+for n in 10 11 12 13 14 15; do
   q "INSERT INTO auth.users (id, email) VALUES ('$(m $n)', 'm$n@example.com');
      SELECT public.game_economy_transition('$(m $n)', 'local', 'migration_pending');" >/dev/null
-  q "$(imp "$(m $n)" "$(snap $((n + 82)))" "$(inst $((n + 82)))" "$bulk_save")" >/dev/null  # snapshots 92–95 (10–19 belong to L3)
+  q "$(imp "$(m $n)" "$(snap $((n + 82)))" "$(inst $((n + 82)))" "$bulk_save")" >/dev/null  # snapshots 92–97 (10–19 belong to L3)
   admin_prep "$(m $n)" || bad "O: owner's preparation of m$n"
   q "SET ROLE game_migration_admin; SELECT public.game_mig_activate('$(m $n)', (SELECT id FROM public.game_reconciliations WHERE user_id = '$(m $n)' AND status = 'draft'), 'ci', 'test');" >/dev/null
 done
@@ -652,15 +652,37 @@ left=$(q "SELECT (SELECT count(*) FROM public.game_achievements WHERE user_id = 
   && ok "O3: deletion racing 4 bulk decisions → deleted, no deadlock; refused ones: no account / stale; nothing left" \
   || bad "O3: left=$left out=$(cat "$TMP"/out/*.out | tr '\n' ' ') errs=$(cat "$TMP"/out/*.err)"
 
-# O4. A bulk decision racing a single decision on one of its achievements: one of them wins, never a part of the list
+# O4. A bulk decision racing a single decision on one of its achievements (the same policy, the same account lock): exactly
+# one of them decides author; the other is refused; never a part of the bulk list
 it=$(items_for "$(m 13)" "author,firstPlan"); rc=$(rec_of "$(m 13)")
 { bulk "$(m 13)" "$rc" "$it" "$(op 40)"
   echo "RESET ROLE; SET ROLE game_migration_admin; SELECT public.game_mig_decide_achievement('$(m 13)', 'author', 'rejected', 'ci', 'no post was ever made') ->> 'status';"; } | parallel
 st=$(statuses "$(m 13)")
-{ [ "$st" = "author=rejected,firstPlan=pending_review,plans7=pending_review" ] && [ "$(count_out false)" = 0 ] && [ "$(count_err game_mig_achievement_rejected)" = 1 ]; } \
-  || { [ "$(count_out false)" = 1 ] && [ "$(count_out rejected)" = 1 ] && [ "$st" = "author=rejected,firstPlan=legacy_accepted,plans7=pending_review" ]; } \
-  && ok "O4: bulk racing a single decision → either the single one first and the bulk refused whole ($st), or the bulk first then the single one changes author" \
+{ [ "$st" = "author=rejected,firstPlan=pending_review,plans7=pending_review" ] && [ "$(count_out false)" = 0 ] && [ "$(count_out rejected)" = 1 ] \
+    && [ "$(count_err game_mig_achievement_rejected)" = 1 ]; } \
+  || { [ "$st" = "author=legacy_accepted,firstPlan=legacy_accepted,plans7=pending_review" ] && [ "$(count_out false)" = 1 ] && [ "$(count_out rejected)" = 0 ] \
+    && [ "$(count_err game_mig_achievement_decided)" = 1 ]; } \
+  && ok "O4: bulk racing a single decision on author → one decides it, the other is refused whole ($st)" \
   || bad "O4: st=$st out=$(cat "$TMP"/out/*.out | tr '\n' ' ') errs=$(cat "$TMP"/out/*.err)"
+
+# O5. One operation id sent at once with two different requests (another reason): exactly one is done; the others are
+# refused as another request, or replayed when they are the same request — never two decisions under one id
+it=$(items_for "$(m 14)" "author,plans7"); rc=$(rec_of "$(m 14)")
+{ for k in 1 2 3; do bulk "$(m 14)" "$rc" "$it" "$(op 50)"; done
+  for k in 1 2; do echo "RESET ROLE; SET ROLE game_migration_admin; SELECT public.game_mig_bulk_accept_achievements('$(m 14)', $rc, '$it'::jsonb, '$(op 50)', 'ci', 'another reason for the same id') ->> 'replay';"; done; } | parallel
+summ=$(summaries "$(m 14)"); dec=$(q "SELECT count(*) FROM public.game_migration_audit WHERE user_id = '$(m 14)' AND action = 'achievement_decided'")
+[ "$summ" = 1 ] && [ "$dec" = 2 ] && [ "$(count_out false)" = 1 ] && [ $(( $(count_out true) + $(count_err game_mig_operation_mismatch) )) = 4 ] \
+  && [ "$(other_errors game_mig_operation_mismatch)" = 0 ] \
+  && ok "O5: one operation id, two different requests at once → one decision; the rest replays or refused as another request" \
+  || bad "O5: summaries=$summ decided=$dec false=$(count_out false) true=$(count_out true) errs=$(cat "$TMP"/out/*.err)"
+
+# O6. The account is deleted while single decisions run (they now take the user row first, like the bulk): no deadlock
+{ echo "RESET ROLE; DELETE FROM auth.users WHERE id = '$(m 15)';"
+  for id in author plans7 firstPlan; do echo "RESET ROLE; SET ROLE game_migration_admin; SELECT public.game_mig_decide_achievement('$(m 15)', '$id', 'legacy_accepted', 'ci', 'the user showed it on a call') ->> 'status';"; done; } | parallel
+left=$(q "SELECT (SELECT count(*) FROM public.game_achievements WHERE user_id = '$(m 15)') + (SELECT count(*) FROM public.game_migration_audit WHERE user_id = '$(m 15)')")
+[ "$left" = 0 ] && [ "$(count_err deadlock)" = 0 ] && [ "$(other_errors 'game_mig_no_such_account|game_mig_no_such_achievement|game_mig_review_stale')" = 0 ] \
+  && ok "O6: deletion racing 3 single decisions → deleted, no deadlock; nothing left" \
+  || bad "O6: left=$left out=$(cat "$TMP"/out/*.out | tr '\n' ' ') errs=$(cat "$TMP"/out/*.err)"
 
 psql -X -q -d postgres -c "DROP DATABASE IF EXISTS $DB" >/dev/null
 rm -rf "$TMP"

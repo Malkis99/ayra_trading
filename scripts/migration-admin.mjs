@@ -18,7 +18,8 @@
 //   decide     <user> <snapshot> <pending_review|accepted|rejected|needs_evidence> [--xp N --coins N] --actor A --reason R
 //   activate   <user> <reconciliation id> --actor A [--level-gap-ack TEXT]   (after the window closed)
 //   activate-new <user> --actor A --reason R                  a genuinely new account: no snapshot, no history at all
-//   decide-achievement <user> <id> <legacy_accepted|rejected|pending_review> --actor A --reason R   (Q4.6; never a verified one)
+//   decide-achievement <user> <id> <legacy_accepted|rejected> --actor A --reason R   (only a pending_review one, never verified, never
+//                                                            legacy_accepted when the devices disagree — the database's policy, 0022)
 //   transfer-achievements <user> --actor A                    an account activated before 0020: its achievements, once
 //   purge <user> --actor A --reason R                         snapshots of an activated account, 90 days after, nothing open
 //   achievements-review <user>                               (Q4.7-Б3) read only: every server achievement of the account, its rule,
@@ -216,7 +217,7 @@ async function main() {
     if (cmd === "decide-achievement") {
       const [id, status] = rest;
       if (!id || !/^[A-Za-z0-9:-]{1,60}$/.test(id)) die("<id> must be an achievement id (see show)");
-      if (!["legacy_accepted", "rejected", "pending_review"].includes(status)) die("status: legacy_accepted | rejected | pending_review");
+      if (!["legacy_accepted", "rejected"].includes(status)) die("status: legacy_accepted | rejected (only a pending_review achievement; re-reviewing a rejected one is not this command)");
       const actor = need(opt.actor, "--actor");
       const reason = need(opt.reason, "--reason");
       await confirm(user, opt, `Achievement ${id}: ${status}. Reason: ${reason}`);
@@ -241,6 +242,19 @@ async function main() {
       const reason = need(opt.reason, "--reason");
       const operation = opt.operation ?? randomUUID();
       if (!UUID_RE.test(operation)) die("--operation must be a UUID (the id of an earlier run to repeat it safely)");
+      // a retry of an operation that was done: the stored request is sent again exactly (the rows changed since — their
+      // versions too — so a new preview would be another request); the database decides whether it is a replay
+      const stored = opt.operation ? (await db.query("SELECT public.game_mig_bulk_operation($1) AS v", [operation])).rows[0].v : null;
+      if (stored) {
+        if (stored.account !== user || stored.actor !== actor || stored.reason !== reason
+            || [...stored.items.map((i) => i.id)].sort().join(",") !== [...ids].sort().join(",")) {
+          die(`operation ${operation} was another request (${stored.account}, ${stored.items.map((i) => i.id).join(",")}, by ${stored.actor}): use a new operation id`);
+        }
+        console.log(`Operation ${operation} was recorded at ${stored.at}: sending exactly the same request again (a retry changes nothing twice).`);
+        const again = (await db.query("SELECT public.game_mig_bulk_accept_achievements($1, $2, $3::jsonb, $4, $5, $6) AS v",
+          [user, stored.reconciliation, JSON.stringify(stored.items), operation, actor, reason])).rows[0].v;
+        return console.log(JSON.stringify(again));
+      }
       const v = await reviewAchievements(db, user);
       if (!v.decidable) die(`no decision is possible on this account now (${v.notDecidableBecause}): nothing done`);
       const byId = new Map(v.items.map((i) => [i.id, i]));

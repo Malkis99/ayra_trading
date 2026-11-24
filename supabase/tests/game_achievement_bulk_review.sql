@@ -261,6 +261,142 @@ BEGIN
   END IF;
   IF pg_temp.money(c_k1) <> v_money THEN RAISE EXCEPTION 'B3j: no XP or Coins moved'; END IF;
 END $$;
+--------------------------------------------------------------------------------
+-- B6. The single command (0020's game_mig_decide_achievement, redefined) follows the same policy: no way around the bulk rules
+--------------------------------------------------------------------------------
+DO $$
+DECLARE
+  c_k1 CONSTANT UUID := '00000000-0000-0000-0000-00000022c001';
+  v_rows TEXT := pg_temp.rows(c_k1);
+  v_money TEXT := pg_temp.money(c_k1);
+  v_audit BIGINT := (SELECT count(*) FROM public.game_migration_audit WHERE user_id = c_k1);
+  e TEXT;
+  q TEXT := 'SELECT public.game_mig_decide_achievement(%L, %L, %L, %L, %L)';
+  c_why CONSTANT TEXT := 'the user showed it on a call';
+BEGIN
+  -- state after B3: firstScreenshot rejected, author decided, category:trading and week:2026-11-09 disputed, firstQuest verified
+  e := pg_temp.err(format(q, c_k1, 'firstScreenshot', 'legacy_accepted', 'owner', c_why));
+  IF e NOT LIKE '%game_mig_achievement_rejected%' THEN RAISE EXCEPTION 'B6a: a rejected one is never accepted by the single command: %', e; END IF;
+  e := pg_temp.err(format(q, c_k1, 'firstScreenshot', 'rejected', 'owner', c_why));
+  IF e NOT LIKE '%game_mig_achievement_rejected%' THEN RAISE EXCEPTION 'B6b: nor decided again: %', e; END IF;
+  e := pg_temp.err(format(q, c_k1, 'category:trading', 'legacy_accepted', 'owner', c_why));
+  IF e NOT LIKE '%game_mig_achievement_conflict%' THEN RAISE EXCEPTION 'B6c: ranks the devices disagree on: %', e; END IF;
+  e := pg_temp.err(format(q, c_k1, 'week:2026-11-09', 'legacy_accepted', 'owner', c_why));
+  IF e NOT LIKE '%game_mig_achievement_conflict%' THEN RAISE EXCEPTION 'B6d: bosses the devices disagree on: %', e; END IF;
+  e := pg_temp.err(format(q, c_k1, 'author', 'rejected', 'owner', c_why));
+  IF e NOT LIKE '%game_mig_achievement_decided%' THEN RAISE EXCEPTION 'B6e: a decided one never changes again: %', e; END IF;
+  e := pg_temp.err(format(q, c_k1, 'author', 'pending_review', 'owner', c_why));
+  IF e NOT LIKE '%game_bad_request%' THEN RAISE EXCEPTION 'B6f: never back to pending_review: %', e; END IF;
+  e := pg_temp.err(format(q, c_k1, 'firstPlan', 'verified', 'owner', c_why));
+  IF e NOT LIKE '%game_bad_request%' THEN RAISE EXCEPTION 'B6g: never verified by hand: %', e; END IF;
+  e := pg_temp.err(format(q, c_k1, 'firstPlan', 'legacy_accepted', 'owner', 'short'));
+  IF e NOT LIKE '%game_mig_reason_required%' THEN RAISE EXCEPTION 'B6h: a reason of 10 characters, as for the bulk: %', e; END IF;
+  e := pg_temp.err(format(q, c_k1, 'firstQuest', 'legacy_accepted', 'owner', c_why));
+  IF e NOT LIKE '%game_mig_achievement_verified%' THEN RAISE EXCEPTION 'B6i: verified never changes: %', e; END IF;
+  e := pg_temp.err(format(q, c_k1, 'firstQuest', 'rejected', 'owner', c_why));
+  IF e NOT LIKE '%game_mig_achievement_verified%' THEN RAISE EXCEPTION 'B6j: verified never rejected: %', e; END IF;
+  e := pg_temp.err(format(q, c_k1, 'nonsense', 'rejected', 'owner', c_why));
+  IF e NOT LIKE '%game_mig_no_such_achievement%' THEN RAISE EXCEPTION 'B6k: an unknown id: %', e; END IF;
+  IF pg_temp.rows(c_k1) <> v_rows OR (SELECT count(*) FROM public.game_migration_audit WHERE user_id = c_k1) <> v_audit THEN
+    RAISE EXCEPTION 'B6l: every refusal changed nothing and logged nothing';
+  END IF;
+  -- what the policy allows, as before: a pending one accepted; a disputed one rejected (that chooses no value)
+  PERFORM public.game_mig_decide_achievement(c_k1, 'firstPlan', 'legacy_accepted', 'owner', c_why);
+  PERFORM public.game_mig_decide_achievement(c_k1, 'week:2026-11-09', 'rejected', 'owner', 'the devices disagree; no proof of either boss');
+  IF pg_temp.st(c_k1, 'firstPlan') <> 'legacy_accepted' OR pg_temp.st(c_k1, 'week:2026-11-09') <> 'rejected'
+     OR (SELECT count(*) FROM public.game_migration_audit WHERE user_id = c_k1 AND action = 'achievement_decided' AND details ->> 'achievement' IN ('firstPlan', 'week:2026-11-09')
+           AND details ? 'reviewedVersion') <> 2 THEN
+    RAISE EXCEPTION 'B6m: allowed single decisions, audited';
+  END IF;
+  -- the bulk path refuses the rejected one too
+  e := pg_temp.err(format('SELECT public.game_mig_bulk_accept_achievements(%L, %s, %L::jsonb, %L, %L, %L)', c_k1,
+    (SELECT id FROM public.game_reconciliations WHERE user_id = c_k1 AND status = 'activated'), pg_temp.req(pg_temp.review(c_k1), ARRAY['week:2026-11-09']),
+    '30000000-0000-0000-0000-00000022c0b8', 'owner', c_why));
+  IF e NOT LIKE '%game_mig_achievement_rejected%' THEN RAISE EXCEPTION 'B6n: bulk, a rejected one: %', e; END IF;
+  IF pg_temp.money(c_k1) <> v_money THEN RAISE EXCEPTION 'B6o: no XP or Coins moved'; END IF;
+END $$;
+
+--------------------------------------------------------------------------------
+-- B7. One operation id = one request (account, reconciliation, achievements and versions, author, reason)
+--------------------------------------------------------------------------------
+DO $$
+DECLARE
+  c_k1 CONSTANT UUID := '00000000-0000-0000-0000-00000022c001';
+  c_k2 CONSTANT UUID := '00000000-0000-0000-0000-00000022c002';
+  v_rec2 BIGINT := (SELECT id FROM public.game_reconciliations WHERE user_id = c_k2 AND status = 'activated');
+  v_rec1 BIGINT := (SELECT id FROM public.game_reconciliations WHERE user_id = c_k1 AND status = 'activated');
+  p JSONB := pg_temp.review(c_k2);
+  v_req JSONB := pg_temp.req(p, ARRAY['author']);
+  v JSONB;
+  e TEXT;
+  v_audit BIGINT;
+  v_rows TEXT;
+  q TEXT := 'SELECT public.game_mig_bulk_accept_achievements(%L, %s, %L::jsonb, %L, %L, %L)';
+  c_op CONSTANT TEXT := '30000000-0000-0000-0000-00000022c0b9';
+  c_why CONSTANT TEXT := 'the user showed the post on a call';
+BEGIN
+  v := public.game_mig_bulk_accept_achievements(c_k2, v_rec2, v_req, c_op::uuid, 'owner', c_why);
+  IF (v ->> 'replay')::boolean OR pg_temp.st(c_k2, 'author') <> 'legacy_accepted' THEN RAISE EXCEPTION 'B7a: setup: %', v; END IF;
+  v_audit := (SELECT count(*) FROM public.game_migration_audit);
+  v_rows := pg_temp.rows(c_k2);
+  -- the same id with anything different: refused, nothing changes
+  e := pg_temp.err(format(q, c_k2, v_rec2 + 1000, v_req, c_op, 'owner', c_why));
+  IF e NOT LIKE '%game_mig_operation_mismatch%' THEN RAISE EXCEPTION 'B7b: another reconciliation: %', e; END IF;
+  e := pg_temp.err(format(q, c_k2, v_rec2, v_req, c_op, 'someone else', c_why));
+  IF e NOT LIKE '%game_mig_operation_mismatch%' THEN RAISE EXCEPTION 'B7c: another author: %', e; END IF;
+  e := pg_temp.err(format(q, c_k2, v_rec2, v_req, c_op, 'owner', c_why || ' (edited)'));
+  IF e NOT LIKE '%game_mig_operation_mismatch%' THEN RAISE EXCEPTION 'B7d: another reason: %', e; END IF;
+  e := pg_temp.err(format(q, c_k2, v_rec2, pg_temp.req(pg_temp.review(c_k2), ARRAY['author']), c_op, 'owner', c_why));
+  IF e NOT LIKE '%game_mig_operation_mismatch%' THEN RAISE EXCEPTION 'B7e: other versions (a new preview): %', e; END IF;
+  e := pg_temp.err(format(q, c_k2, v_rec2, pg_temp.req(p, ARRAY['author', 'plans7']), c_op, 'owner', c_why));
+  IF e NOT LIKE '%game_mig_operation_mismatch%' THEN RAISE EXCEPTION 'B7f: another list: %', e; END IF;
+  e := pg_temp.err(format(q, c_k1, v_rec1, pg_temp.req(pg_temp.review(c_k1), ARRAY['category:trading']), c_op, 'owner', c_why));
+  IF e NOT LIKE '%game_mig_operation_mismatch%' THEN RAISE EXCEPTION 'B7g: another account: %', e; END IF;
+  -- the same request again (a retry after a lost answer): a replay, though the row has changed since
+  v := public.game_mig_bulk_accept_achievements(c_k2, v_rec2, v_req, c_op::uuid, 'owner', c_why);
+  IF NOT (v ->> 'replay')::boolean OR v -> 'accepted' <> '["author"]'::jsonb THEN RAISE EXCEPTION 'B7h: the exact replay: %', v; END IF;
+  -- the author is compared as it was confirmed (spaces around it do not make another request)
+  v := public.game_mig_bulk_accept_achievements(c_k2, v_rec2, v_req, c_op::uuid, '  owner ', c_why);
+  IF NOT (v ->> 'replay')::boolean THEN RAISE EXCEPTION 'B7i: the same author: %', v; END IF;
+  IF (SELECT count(*) FROM public.game_migration_audit) <> v_audit OR pg_temp.rows(c_k2) <> v_rows THEN
+    RAISE EXCEPTION 'B7j: neither a refusal nor a replay wrote anything';
+  END IF;
+  IF (SELECT details ->> 'request' FROM public.game_migration_audit WHERE action = 'achievements_bulk_accepted' AND details ->> 'operation' = c_op) !~ '^[0-9a-f]{32}$' THEN
+    RAISE EXCEPTION 'B7k: the request''s fingerprint is kept with the operation';
+  END IF;
+  -- the tool's retry: the stored request, sent again as it is (a new preview would be another request) → a replay
+  v := public.game_mig_bulk_operation(c_op::uuid);
+  IF v ->> 'account' <> c_k2::text OR (v ->> 'reconciliation')::bigint <> v_rec2 OR v -> 'items' <> v_req OR v ->> 'actor' <> 'owner' OR v ->> 'reason' <> c_why THEN
+    RAISE EXCEPTION 'B7l: the stored request: %', v;
+  END IF;
+  IF NOT (public.game_mig_bulk_accept_achievements((v ->> 'account')::uuid, (v ->> 'reconciliation')::bigint, v -> 'items', c_op::uuid, v ->> 'actor', v ->> 'reason') ->> 'replay')::boolean
+     OR public.game_mig_bulk_operation('30000000-0000-0000-0000-0000000000ff') IS NOT NULL THEN
+    RAISE EXCEPTION 'B7m: the stored request replays; an unknown id has none';
+  END IF;
+END $$;
+
+--------------------------------------------------------------------------------
+-- B8. Verified through every path the owner's tool has: never changed
+--------------------------------------------------------------------------------
+DO $$
+DECLARE
+  c_k1 CONSTANT UUID := '00000000-0000-0000-0000-00000022c001';
+  v_before JSONB := (SELECT to_jsonb(a) FROM public.game_achievements a WHERE a.user_id = c_k1 AND a.achievement_id = 'firstQuest');
+  v JSONB;
+BEGIN
+  -- the internal helpers are not the tool's to call
+  IF pg_temp.err($q$SELECT public.game_mig_record_achievements('00000000-0000-0000-0000-00000022c001', 1, '{"items":[{"id":"author","family":"profile","status":"verified","source":"device_flag","detail":{},"evidence":{},"claimedBy":["x"]}]}')$q$) NOT LIKE '%permission denied%'
+     OR pg_temp.err($q$SELECT public.game_mig_achievement_refusal(a, 'legacy_accepted') FROM public.game_achievements a LIMIT 1$q$) NOT LIKE '%permission denied%'
+     OR pg_temp.err($q$SELECT public.game_mig_audit('x', 'achievement_decided', NULL, '{}')$q$) NOT LIKE '%permission denied%' THEN
+    RAISE EXCEPTION 'B8a: the internal functions are not callable by the tool';
+  END IF;
+  -- the transfer of an activated account: a replay (it never rewrites a recorded row)
+  v := public.game_mig_transfer_achievements(c_k1, 'owner');
+  IF NOT (v ->> 'replay')::boolean THEN RAISE EXCEPTION 'B8b: the transfer of an activated account is a replay: %', v; END IF;
+  IF (SELECT to_jsonb(a) FROM public.game_achievements a WHERE a.user_id = c_k1 AND a.achievement_id = 'firstQuest') <> v_before THEN
+    RAISE EXCEPTION 'B8c: verified untouched by every path';
+  END IF;
+END $$;
 RESET ROLE;
 
 --------------------------------------------------------------------------------
@@ -273,6 +409,9 @@ BEGIN
   FOREACH r IN ARRAY ARRAY['anon', 'authenticated', 'service_role'] LOOP
     IF has_function_privilege(r, 'public.game_mig_bulk_accept_achievements(uuid,bigint,jsonb,uuid,text,text)', 'EXECUTE')
        OR has_function_privilege(r, 'public.game_mig_achievement_review(uuid)', 'EXECUTE')
+       OR has_function_privilege(r, 'public.game_mig_bulk_operation(uuid)', 'EXECUTE')
+       OR has_function_privilege(r, 'public.game_mig_decide_achievement(uuid,text,text,text,text)', 'EXECUTE')
+       OR has_function_privilege(r, 'public.game_mig_achievement_refusal(public.game_achievements,text)', 'EXECUTE')
        OR has_function_privilege(r, 'public.game_mig_achievement_version(public.game_achievements)', 'EXECUTE') THEN
       RAISE EXCEPTION 'B4: % can call the review', r;
     END IF;

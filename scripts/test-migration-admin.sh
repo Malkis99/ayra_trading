@@ -164,6 +164,9 @@ logs=$(q "SELECT count(*) FROM public.game_migration_audit WHERE user_id = '$U' 
 out=$(tool achievements-accept "$U" --ids firstTrade --actor owner --reason "the user showed the trade quest on a call" --operation "$OP" --confirm "$U" --confirm-ids firstTrade)
 echo "$out" | grep -q '"replay": *true' && [ "$logs" = 2 ] && [ "$(q "SELECT count(*) FROM public.game_migration_audit WHERE user_id = '$U' AND details ->> 'operation' = '$OP'")" = 2 ] \
   && ok "T15g: a rerun with the same operation is a replay; the log keeps one entry for the operation and one for the achievement" || bad "T15g: $out / $logs"
+out=$(tool achievements-accept "$U" --ids firstTrade --actor owner --reason "another reason under the same operation" --operation "$OP" --confirm "$U" --confirm-ids firstTrade)
+echo "$out" | grep -q "was another request" && [ "$(q "SELECT count(*) FROM public.game_migration_audit WHERE user_id = '$U' AND details ->> 'operation' = '$OP'")" = 2 ] \
+  && ok "T15h: the same operation with another reason: refused, nothing logged" || bad "T15h: $out"
 
 # accounts without snapshots: never a transfer with an empty reconciliation; a new account only on its own path
 N1=00000000-0000-0000-0000-0000001ad0a1
