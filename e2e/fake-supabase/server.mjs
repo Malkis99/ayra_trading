@@ -7,14 +7,14 @@ import { metadataWrite } from "./watchlist-meta.mjs";
 
 const b64url = (buf) => Buffer.from(buf).toString("base64url");
 
-function makeJwt(user, sessionId, hookClaims = {}, ageSec = 0) {
+function makeJwt(user, sessionId, hookClaims = {}, ageSec = 0, authAt = null) {
   const now = Math.floor(Date.now() / 1000);
   const iat = now - ageSec;
   const header = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   // like the real auth server: the session id, and app_metadata as it is at the moment of issue (Q4.5-2 reads the mark)
   const payload = b64url(
     JSON.stringify({ sub: user.id, email: user.email, role: "authenticated", aud: "authenticated", iat, exp: now + 3600,
-      session_id: sessionId, app_metadata: user.app_metadata || {}, ...hookClaims })
+      session_id: sessionId, app_metadata: user.app_metadata || {}, amr: [{ method: "password", timestamp: authAt ?? iat }], ...hookClaims })
   );
   const sig = crypto.createHmac("sha256", "fake-e2e-secret").update(`${header}.${payload}`).digest("base64url");
   return `${header}.${payload}.${sig}`;
@@ -52,6 +52,13 @@ export function createFakeSupabase() {
   // top-level «ayra_economy» claim of every token; «unavailable» = the hook could not read the state (no mark + status);
   // «off» = the hook is not configured (no mark); «error» = the auth server cannot run the hook (tokens are refused)
   let hookMode = "on";
+  const authAgeByEmail = new Map(); // e-mail (lower case) -> seconds: new sign-ins of it count as made «that long ago»
+  const sessionAuthAt = new Map(); // auth session id -> when it signed in (seconds): the token's amr timestamp
+  // Q4.7-Б1 (0023 stand-in): accounts being deleted — user id -> { state, attempts, listed: Set<path>, counted, lastError }
+  const deletions = new Map();
+  const deletionStats = { requests: 0, retries: 0, accounts_deleted: 0, files_deleted: 0 };
+  let storageDeleteFailLeft = 0; // the service key's next N file removals fail (the Storage API answers without them)
+  const deletedUsers = []; // ids the admin API deleted
   const tokenAgeByEmail = new Map(); // e-mail (lower case) -> seconds: tokens issued «that long ago» (a device whose token is old)
   const economies = new Map(); // user id -> { state, game_sync, opening_mode, day }
   const economyCalls = []; // { fn, user, args } — what the routes asked (never a time or a day)
@@ -141,7 +148,9 @@ export function createFakeSupabase() {
 
   function issueSession(user, sessionId = crypto.randomUUID()) {
     liveSessions.set(sessionId, user.id);
-    const access_token = makeJwt(user, sessionId, hookClaimsOf(user), tokenAgeByEmail.get(String(user.email).toLowerCase()) || 0);
+    // the sign-in's time stays with its session (a refresh keeps it, like GoTrue's amr)
+    if (!sessionAuthAt.has(sessionId)) sessionAuthAt.set(sessionId, Math.floor(Date.now() / 1000) - (authAgeByEmail.get(String(user.email).toLowerCase()) || 0));
+    const access_token = makeJwt(user, sessionId, hookClaimsOf(user), tokenAgeByEmail.get(String(user.email).toLowerCase()) || 0, sessionAuthAt.get(sessionId));
     const refresh_token = b64url(crypto.randomBytes(16));
     sessionIdOf.set(refresh_token, sessionId);
     sessionIdOf.set(access_token, sessionId);
@@ -351,8 +360,35 @@ export function createFakeSupabase() {
       const user = usersByEmail.get(url.searchParams.get("email"));
       if (!user) return send(404, { error: "no user" });
       const bytes = await readRaw(req);
-      storageFiles.set(`${user.id}/${url.searchParams.get("name")}`, { bytes, mime: req.headers["content-type"] || "image/webp", created_at: new Date().toISOString() });
+      storageFiles.set(`${user.id}/${url.searchParams.get("name")}`, { bytes, mime: req.headers["content-type"] || "image/webp", owner: user.id, created_at: new Date().toISOString() });
       return send(200, { ok: true });
+    }
+    if (path === "/__test/storage-plant" && req.method === "POST") {
+      // an object at any path with any owner (a file in someone's folder that they did not upload)
+      const owner = usersByEmail.get(url.searchParams.get("owner"));
+      storageFiles.set(url.searchParams.get("path"), { bytes: Buffer.from("x"), mime: "image/webp", owner: owner ? owner.id : null, created_at: new Date().toISOString() });
+      return send(200, { ok: true });
+    }
+    if (path === "/__test/storage-fail-delete") {
+      storageDeleteFailLeft = Number(url.searchParams.get("n") || 0);
+      return send(200, { storageDeleteFailLeft });
+    }
+    if (path === "/__test/auth-age") {
+      authAgeByEmail.set(String(url.searchParams.get("email")).toLowerCase(), Number(url.searchParams.get("seconds")) || 0);
+      return send(200, { ok: true });
+    }
+    if (path === "/__test/session-auth-age") {
+      // the person signed in «that long ago» (every live session of the account)
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      const sec = Number(url.searchParams.get("seconds") || 0);
+      for (const [sid, uid] of liveSessions) if (user && uid === user.id) sessionAuthAt.set(sid, Math.floor(Date.now() / 1000) - sec);
+      return send(200, { ok: true });
+    }
+    if (path === "/__test/account-deletion") {
+      const user = usersByEmail.get(url.searchParams.get("email"));
+      const d = user && deletions.get(user.id);
+      return send(200, { exists: !!user, deletion: d ? { state: d.state, listed: d.listed.size, attempts: d.attempts, lastError: d.lastError } : null,
+        deletedUsers: [...deletedUsers], stats: { ...deletionStats } });
     }
     if (path === "/__test/profile") {
       const user = usersByEmail.get(url.searchParams.get("email"));
@@ -681,7 +717,7 @@ export function createFakeSupabase() {
         return send(200, rows);
       }
       if (req.method === "POST") {
-        if (!cloudFlags.get(user.id)) return send(403, { code: "42501", message: "new row violates row-level security policy" });
+        if (!cloudFlags.get(user.id) || deletions.has(user.id)) return send(403, { code: "42501", message: "new row violates row-level security policy" });
         if (journalWriteDelayMs > 0) await new Promise((r) => setTimeout(r, journalWriteDelayMs));
         if (journalWriteFailuresLeft > 0) {
           journalWriteFailuresLeft--;
@@ -767,11 +803,11 @@ export function createFakeSupabase() {
       // INSERT rule: own folder, a plain name, the cloud flag, the 200 MB limit
       const ok =
         new RegExp(`^${user.id}/[A-Za-z0-9_-]{1,64}\\.(webp|png|jpg)$`).test(objectPath) &&
-        cloudFlags.get(user.id) === true &&
+        cloudFlags.get(user.id) === true && !deletions.has(user.id) &&
         usedInFolder(user.id) + bytes.length <= attachmentQuota;
       if (!ok) return send(400, { statusCode: "403", error: "Unauthorized", message: "new row violates row-level security policy" });
       if (storageFiles.has(objectPath)) return send(400, { statusCode: "409", error: "Duplicate", message: "The resource already exists" });
-      storageFiles.set(objectPath, { bytes, mime, created_at: new Date().toISOString() });
+      storageFiles.set(objectPath, { bytes, mime, owner: user.id, created_at: new Date().toISOString() });
       return send(200, { Key: `${BUCKET}/${objectPath}`, Id: crypto.randomUUID() });
     }
     if (path === `/storage/v1/object/list/${BUCKET}` && req.method === "POST") {
@@ -788,6 +824,18 @@ export function createFakeSupabase() {
         .slice(offset, offset + limit)
         .map(([p, f]) => ({ name: p.slice(user.id.length + 1), id: p, created_at: f.created_at, updated_at: f.created_at, metadata: { size: f.bytes.length, mimetype: f.mime } }));
       return send(200, items);
+    }
+    if (path === `/storage/v1/object/${BUCKET}` && req.method === "DELETE" && (req.headers.authorization || "") === `Bearer ${SERVICE_KEY}`) {
+      const body = await readBody(req);
+      const removed = [];
+      for (const p of Array.isArray(body.prefixes) ? body.prefixes : []) {
+        if (storageDeleteFailLeft > 0) { storageDeleteFailLeft--; continue; } // the Storage API could not remove this one
+        if (!storageFiles.has(p)) continue;
+        storageFiles.delete(p);
+        storageLog.push(`delete:${p}`);
+        removed.push({ name: p });
+      }
+      return send(200, removed);
     }
     if (path === `/storage/v1/object/${BUCKET}` && req.method === "DELETE") {
       // DELETE rule of 0005: own folder; the row deleted 30+ days ago (server time), or no row and the file 24+ hours old.
@@ -923,6 +971,65 @@ export function createFakeSupabase() {
       if (fn === "game_apply_reward_for_session") return refuse("game_kind_disabled");
       if (fn === "game_apply_reward") return send(401, { code: "42501", message: "permission denied for function game_apply_reward" });
       return send(404, { code: "PGRST202", message: `Could not find the function public.${fn}` });
+    }
+    if (path.startsWith("/rest/v1/rpc/account_deletion_")) {
+      const fn = path.slice("/rest/v1/rpc/".length);
+      if ((req.headers.authorization || "") !== `Bearer ${SERVICE_KEY}`) return send(401, { code: "42501", message: "permission denied for function " + fn });
+      const body = await readBody(req);
+      const uid = String(body.p_user || "");
+      const exists = [...usersByEmail.values()].some((u) => u.id === uid);
+      const d = deletions.get(uid);
+      const owned = () => [...storageFiles.entries()].filter(([p, f]) => p.startsWith(`${uid}/`) && f.owner === uid).map(([p]) => p);
+      const foreign = () => [...storageFiles.entries()].some(([p, f]) => (p.startsWith(`${uid}/`) && f.owner !== uid) || (f.owner === uid && !p.startsWith(`${uid}/`)));
+      const status = () => {
+        const x = deletions.get(uid);
+        return x ? { state: x.state, attempts: x.attempts, lastError: x.lastError, listed: x.listed.size, gone: [...x.listed].filter((k) => !storageFiles.has(k)).length } : { state: null };
+      };
+      const raise = (code) => send(400, { code: "22023", message: code, details: null, hint: null });
+      if (fn === "account_deletion_status") return send(200, status());
+      if (fn === "account_deletion_begin") {
+        if (!exists) return raise("account_deletion_no_user");
+        if (!d) { deletions.set(uid, { state: "requested", attempts: 0, listed: new Set(), counted: false, lastError: null }); deletionStats.requests++; }
+        else { d.attempts++; deletionStats.retries++; }
+        return send(200, { ...status(), new: !d });
+      }
+      if (!d) return raise("account_deletion_not_requested");
+      if (fn === "account_deletion_manifest") {
+        if (foreign()) return raise("account_deletion_foreign_object");
+        for (const k of owned()) d.listed.add(k);
+        d.state = "files_listed";
+        d.lastError = null;
+        const pending = [...d.listed].filter((k) => storageFiles.has(k)).sort();
+        return send(200, { ...status(), pending: pending.slice(0, 1000).map((name) => ({ bucket: BUCKET, name })), pendingCount: pending.length });
+      }
+      if (fn === "account_deletion_failed") { d.lastError = /^[a-z_]{1,60}$/.test(String(body.p_code)) ? body.p_code : "unknown"; return send(200, null); }
+      if (fn === "account_deletion_ready") {
+        if ([...storageFiles.entries()].some(([p, f]) => p.startsWith(`${uid}/`) || f.owner === uid)) return raise("account_deletion_files_left");
+        if (!d.counted) { deletionStats.accounts_deleted++; deletionStats.files_deleted += d.listed.size; d.counted = true; }
+        d.state = "files_deleted";
+        return send(200, status());
+      }
+      return send(404, { code: "PGRST202", message: `Could not find the function public.${fn}` });
+    }
+    if (path.startsWith("/auth/v1/admin/users/") && req.method === "DELETE") {
+      if ((req.headers.authorization || "") !== `Bearer ${SERVICE_KEY}`) return send(401, { code: 401, msg: "This endpoint requires a valid service_role key" });
+      const uid = path.slice("/auth/v1/admin/users/".length);
+      const user = [...usersByEmail.values()].find((u) => u.id === uid);
+      if (!user) return send(404, { code: 404, error_code: "user_not_found", msg: "User not found" });
+      // like ON DELETE CASCADE from auth.users: the account and everything of it (files are the procedure's job, before)
+      usersByEmail.delete(user.email);
+      profiles.delete(uid);
+      passwords.delete(uid);
+      cloudFlags.delete(uid);
+      economies.delete(uid);
+      achievements.delete(uid);
+      deletions.delete(uid);
+      for (const [k, r] of [...journalRows]) if (r.user_id === uid) journalRows.delete(k);
+      for (const [k, v] of [...imports]) if (v.user === uid) imports.delete(k);
+      for (const [t, id] of [...tokens]) if (id === uid) tokens.delete(t);
+      for (const [sid, id] of [...liveSessions]) if (id === uid) liveSessions.delete(sid);
+      deletedUsers.push(uid);
+      return send(200, {});
     }
     if (path === "/rest/v1/rpc/game_my_day") {
       const user = userFromAuthHeader(req);

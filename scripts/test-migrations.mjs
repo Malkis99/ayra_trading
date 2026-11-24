@@ -35,12 +35,12 @@ const STORAGE_STUB = `
   CREATE TABLE storage.buckets (id text PRIMARY KEY, name text NOT NULL, public boolean DEFAULT false,
     file_size_limit bigint, allowed_mime_types text[], created_at timestamptz DEFAULT now());
   CREATE TABLE storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text REFERENCES storage.buckets(id),
-    name text NOT NULL, owner uuid, metadata jsonb, created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(),
+    name text NOT NULL, owner uuid, owner_id text, metadata jsonb, created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(),
     UNIQUE (bucket_id, name));
   ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
   CREATE FUNCTION storage.foldername(name text) RETURNS text[] LANGUAGE sql IMMUTABLE AS $$
     SELECT (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1) - 1] $$;
-  GRANT USAGE ON SCHEMA storage TO anon, authenticated;
+  GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role;
   GRANT SELECT ON storage.buckets TO anon, authenticated;
   GRANT ALL ON storage.objects TO anon, authenticated;`;
 async function fresh() { const db = new PGlite(); await db.exec(STUB); await db.exec(STORAGE_STUB); return db; }
@@ -726,6 +726,46 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
     SET LOCAL ROLE game_economy_owner; DELETE FROM public.game_deletion_log; RESET ROLE;`);
   try { await db.exec(read("supabase/tests/game_achievement_proof.sql")); ok("V: 0021 tests pass after the 0022 rollback"); }
   catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`V: 0021 tests after rollback: ${e.message}`); }
+  await db.close();
+}
+
+// W. 0023: deleting one's own account, files included (Q4.7-Б1) on top of 0001–0005 and 0014–0022 — applied twice; its
+//    tests; the journal and screenshot rules of 0004/0005 still pass with it (cloud_sync_enabled is redefined); only the
+//    service role calls it; rollback refused while a deletion is unfinished, otherwise restores 0004's cloud_sync_enabled
+{
+  const base = ["0001_init", "0002_profile_defaults", "0003_nickname_cooldown", "0004_journal_sync", "0005_journal_attachments", "0014_game_economy",
+    "0015_game_days", "0016_game_day_api", "0018_game_economy_sessions", "0019_game_migration_import", "0020_game_achievements",
+    "0021_game_achievement_proof", "0022_game_achievement_bulk_review"];
+  const db = await fresh();
+  for (const f of base) await db.exec(read(`supabase/migrations/${f}.sql`));
+  await db.exec(read("supabase/migrations/0023_account_deletion.sql"));
+  await db.exec(read("supabase/migrations/0023_account_deletion.sql")); ok("W: 0023 applied twice");
+  for (const t of ["account_deletion", "journal_sync_rls", "journal_attachments_rls", "game_achievement_bulk_review"]) {
+    try { await db.exec(read(`supabase/tests/${t}.sql`)); ok(`W: tests/${t}.sql pass with 0023`); }
+    catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`W: ${t} with 0023: ${e.message}`); }
+  }
+  const st = (await db.query(`SELECT
+    (SELECT count(*) FROM unnest(ARRAY['anon', 'authenticated']) r, unnest(ARRAY['public.account_deletion_begin(uuid)', 'public.account_deletion_manifest(uuid)',
+      'public.account_deletion_ready(uuid)', 'public.account_deletion_status(uuid)', 'public.account_deletion_failed(uuid,text)']) f
+      WHERE has_function_privilege(r, f, 'EXECUTE'))::int AS api,
+    has_function_privilege('service_role', 'public.account_deletion_manifest(uuid)', 'EXECUTE') AS route,
+    (SELECT count(*) FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) r, unnest(ARRAY['public.account_deletions', 'public.account_deletion_objects',
+      'public.account_deletion_stats']) t WHERE has_table_privilege(r, t, 'SELECT') OR has_table_privilege(r, t, 'INSERT'))::int AS tables`)).rows[0];
+  st.api === 0 && st.route && st.tables === 0 ? ok("W: only the route (service role) calls the steps; no API role reads or writes the tables") : fail(`W: state ${JSON.stringify(st)}`);
+  await db.exec(`INSERT INTO auth.users (id, email) VALUES ('00000000-0000-0000-0000-00000023f001', 'keep@x');
+    INSERT INTO public.account_deletions (user_id) VALUES ('00000000-0000-0000-0000-00000023f001');`);
+  let refused = false;
+  try { await db.exec(read("supabase/migrations/0023_account_deletion.down.sql")); } catch { refused = true; await db.exec("ROLLBACK").catch(() => {}); }
+  refused ? ok("W: rollback refused while a deletion is unfinished") : fail("W: rollback ran with an unfinished deletion");
+  await db.exec("DELETE FROM auth.users WHERE id = '00000000-0000-0000-0000-00000023f001'");
+  await db.exec(read("supabase/migrations/0023_account_deletion.down.sql"));
+  const after = (await db.query(`SELECT to_regclass('public.account_deletions') IS NULL AND to_regprocedure('public.account_deletion_begin(uuid)') IS NULL AS gone,
+    position('account_deletions' IN pg_get_functiondef('public.cloud_sync_enabled()'::regprocedure)) = 0 AS restored`)).rows[0];
+  after.gone && after.restored ? ok("W: rollback removes 0023 and restores 0004's cloud_sync_enabled") : fail(`W: rollback ${JSON.stringify(after)}`);
+  for (const t of ["journal_sync_rls", "journal_attachments_rls"]) {
+    try { await db.exec(read(`supabase/tests/${t}.sql`)); ok(`W: tests/${t}.sql pass after the 0023 rollback`); }
+    catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`W: ${t} after rollback: ${e.message}`); }
+  }
   await db.close();
 }
 

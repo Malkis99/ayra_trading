@@ -684,6 +684,68 @@ left=$(q "SELECT (SELECT count(*) FROM public.game_achievements WHERE user_id = 
   && ok "O6: deletion racing 3 single decisions → deleted, no deadlock; nothing left" \
   || bad "O6: left=$left out=$(cat "$TMP"/out/*.out | tr '\n' ' ') errs=$(cat "$TMP"/out/*.err)"
 
+# P. 0023 (Q4.7-Б1): deleting one's own account, files included — with the storage stand-in and the bucket of 0005
+psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase/tests/stub/storage_stub.sql >/dev/null 2>"$TMP/st.err" \
+  && psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase/migrations/0005_journal_attachments.sql >/dev/null 2>>"$TMP/st.err" \
+  && psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase/migrations/0023_account_deletion.sql >/dev/null 2>>"$TMP/st.err" \
+  && ok "P0: storage stand-in, 0005 and 0023 on PostgreSQL" || bad "P0: $(cat "$TMP/st.err")"
+d() { printf '00000000-0000-0000-0000-00000023e0%02d' "$1"; }
+for n in 1 2 3 4; do
+  q "INSERT INTO auth.users (id, email) VALUES ('$(d $n)', 'd$n@example.com');
+     INSERT INTO public.user_features (user_id, cloud_sync) VALUES ('$(d $n)', TRUE) ON CONFLICT (user_id) DO UPDATE SET cloud_sync = TRUE;
+     INSERT INTO storage.objects (bucket_id, name, owner_id, metadata)
+       SELECT 'journal-attachments', '$(d $n)/f' || i || '.webp', '$(d $n)', '{\"size\": 10, \"mimetype\": \"image/webp\"}' FROM generate_series(1, 50) i;" >/dev/null
+done
+svc() { echo "RESET ROLE; SET ROLE service_role; SELECT public.$1('$2') ->> '${3:-state}';"; }
+files_left() { q "SELECT count(*) FROM storage.objects WHERE bucket_id = 'journal-attachments' AND name LIKE '$1/%'"; }
+# the Storage API removes what the manifest lists (as the route does), until the list is empty
+drain() {
+  local i
+  for i in 1 2 3 4 5; do
+    q "SET ROLE service_role; SELECT public.account_deletion_manifest('$1');" >/dev/null || return 1
+    [ "$(q "SELECT count(*) FROM public.account_deletion_objects WHERE user_id = '$1' AND gone_at IS NULL")" = 0 ] && return 0
+    q "DELETE FROM storage.objects o USING public.account_deletion_objects a WHERE a.user_id = '$1' AND a.gone_at IS NULL AND o.bucket_id = a.bucket_id AND o.name = a.name" >/dev/null
+  done
+}
+
+# P1. The same request five times at once (a double click, two devices): one request, four repeats
+for k in 1 2 3 4 5; do svc account_deletion_begin "$(d 1)" new; done | parallel
+[ "$(q "SELECT count(*) FROM public.account_deletions WHERE user_id = '$(d 1)'")" = 1 ] && [ "$(count_out true)" = 1 ] && [ "$(count_out false)" = 4 ] \
+  && [ "$(q "SELECT attempts FROM public.account_deletions WHERE user_id = '$(d 1)'")" = 4 ] \
+  && ok "P1: 5 requests at once → 1 deletion, 4 repeats counted" || bad "P1: true=$(count_out true) false=$(count_out false) errs=$(cat "$TMP"/out/*.err)"
+
+# P2. Five manifests at once: every file listed once; then removed, ready, and the auth user deleted: nothing left
+for k in 1 2 3 4 5; do svc account_deletion_manifest "$(d 1)" pendingCount; done | parallel
+[ "$(q "SELECT count(*) FROM public.account_deletion_objects WHERE user_id = '$(d 1)'")" = 50 ] && [ "$(count_out 50)" = 5 ] \
+  && ok "P2: 5 manifests at once → 50 files listed once, every answer the same" || bad "P2: out=$(cat "$TMP"/out/*.out | tr '\n' ' ') errs=$(cat "$TMP"/out/*.err)"
+drain "$(d 1)" && q "SET ROLE service_role; SELECT public.account_deletion_ready('$(d 1)');" >/dev/null && q "DELETE FROM auth.users WHERE id = '$(d 1)'" >/dev/null
+[ "$(files_left "$(d 1)")" = 0 ] && [ "$(q "SELECT count(*) FROM public.account_deletions WHERE user_id = '$(d 1)'")" = 0 ] \
+  && ok "P2b: removed, ready, auth user deleted → no file, no request left" || bad "P2b: files=$(files_left "$(d 1)")"
+
+# P3. Uploads racing the request: each lands before it (listed, then removed) or is refused; none is left behind
+up() { echo "RESET ROLE; SET ROLE authenticated; SELECT set_config('request.jwt.claim.sub', '$1', false);
+  INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('journal-attachments', '$1/race$2.webp', '$1', '{\"size\": 10, \"mimetype\": \"image/webp\"}') RETURNING 'uploaded';"; }
+{ svc account_deletion_begin "$(d 2)" new; for k in 1 2 3 4 5 6; do up "$(d 2)" "$k" | tr '\n' ' '; echo; done; } | parallel
+uploaded=$(count_out uploaded); refused=$(count_err "row-level security")
+drain "$(d 2)" && q "SET ROLE service_role; SELECT public.account_deletion_ready('$(d 2)');" >/dev/null
+late=$(psql -X -q -At -d "$DB" -c "SET ROLE authenticated;" -c "SELECT set_config('request.jwt.claim.sub', '$(d 2)', false);" \
+  -c "INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('journal-attachments', '$(d 2)/late.webp', '$(d 2)', '{\"size\": 10, \"mimetype\": \"image/webp\"}');" 2>&1 | grep -c "row-level security")
+[ $((uploaded + refused)) = 6 ] && [ "$(files_left "$(d 2)")" = 0 ] && [ "$late" = 1 ] && [ "$(other_errors 'row-level security')" = 0 ] \
+  && ok "P3: request racing 6 uploads → $uploaded landed before (listed, removed), $refused refused; an upload after it is refused; nothing left" \
+  || bad "P3: uploaded=$uploaded refused=$refused left=$(files_left "$(d 2)") late=$late errs=$(cat "$TMP"/out/*.err)"
+
+# P4. The auth user deleted while manifests run: never a deadlock; nothing of the account is left
+q "SET ROLE service_role; SELECT public.account_deletion_begin('$(d 3)');" >/dev/null
+{ echo "RESET ROLE; DELETE FROM auth.users WHERE id = '$(d 3)';"; for k in 1 2 3; do svc account_deletion_manifest "$(d 3)" pendingCount; done; } | parallel
+[ "$(count_err deadlock)" = 0 ] && [ "$(q "SELECT count(*) FROM public.account_deletions WHERE user_id = '$(d 3)'")" = 0 ] \
+  && [ "$(q "SELECT count(*) FROM auth.users WHERE id = '$(d 3)'")" = 0 ] && [ "$(other_errors 'account_deletion_not_requested')" = 0 ] \
+  && ok "P4: auth user deleted racing 3 manifests → no deadlock; the request gone with the account" \
+  || bad "P4: errs=$(cat "$TMP"/out/*.err)"
+
+# P5. An account that asked for nothing is never touched
+[ "$(files_left "$(d 4)")" = 50 ] && [ "$(q "SELECT count(*) FROM public.account_deletions WHERE user_id = '$(d 4)'")" = 0 ] \
+  && ok "P5: an account that asked for nothing keeps its 50 files" || bad "P5: files=$(files_left "$(d 4)")"
+
 psql -X -q -d postgres -c "DROP DATABASE IF EXISTS $DB" >/dev/null
 rm -rf "$TMP"
 [ "$FAILED" = 0 ] && echo "ALL CONCURRENCY TESTS PASSED" || echo "SOME CONCURRENCY TESTS FAILED"
