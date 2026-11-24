@@ -607,6 +607,22 @@ export function recordPropRulesSaved(state: GameState): {
   };
 }
 
+/** Achievement ids that turned on from `before` to `after` (checkAchievements also lists some that were already on). */
+export function unlockedBetween(before: GameState, after: GameState): string[] {
+  return Object.keys(after.achievements).filter((id) => after.achievements[id] && !before.achievements[id]);
+}
+
+/**
+ * The day-plan achievements (firstPlan, firstReview, plans7) by their own rule in checkAchievements, with the Journal's
+ * day plans as they are now (the one just saved included). Nothing is paid: achievements give no XP or Coins. The state
+ * comes back unchanged when no achievement turned on.
+ */
+export function recordPlanAchievements(state: GameState, allPlans: any[]): { state: GameState; newlyUnlocked: string[] } {
+  const { state: next } = checkAchievements(state, allPlans, []);
+  const newlyUnlocked = unlockedBetween(state, next);
+  return newlyUnlocked.length > 0 ? { state: next, newlyUnlocked } : { state, newlyUnlocked: [] };
+}
+
 export interface PropDisciplineRewardResult {
   state: GameState;
   xpAwarded: number;

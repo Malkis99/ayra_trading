@@ -29,6 +29,9 @@ import {
   recordLoggedTrade,
   recordNoTradeEntry,
   evaluatePlanQuestClosure,
+  recordPlanAchievements,
+  recordPropRulesSaved as recordPropRulesSavedLogic,
+  unlockedBetween,
   recordNoteSaved as recordNoteSavedLogic,
   recordScreenshotAdded,
   setDayMode as setDayModeLogic,
@@ -173,6 +176,13 @@ interface GameContextType {
     allPlans?: any[],
     allNotes?: any[]
   ) => { closedQuests: string[]; xpAwarded: number; newlyUnlocked: string[] };
+  /**
+   * Q4.7: the day-plan achievements (firstPlan, firstReview, plans7) after a plan is saved, with every day plan of the
+   * Journal (the saved one included). Saved in this account's space; returns the ids that turned on (none: nothing written).
+   */
+  recordPlanAchievements: (allPlans: any[]) => string[];
+  /** Q4.7: firstPropRules after prop rules are saved — kept in this account's save (before, it was only shown). */
+  recordPropRulesSaved: () => string[];
   setFrame: (frame: number) => void;
   setTitle: (title: number) => void;
   setBackground: (bg: number) => void;
@@ -1212,6 +1222,25 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     [applySync]
   );
 
+  // achievements only: written only when one turned on (the same rules as before; nothing is paid)
+  const recordPlanAchievementsCb = useCallback(
+    (allPlans: any[]): string[] =>
+      applySync((s) => {
+        const res = recordPlanAchievements(s, allPlans);
+        return res.newlyUnlocked.length > 0 ? { state: res.state, result: res.newlyUnlocked } : { state: s, result: [] as string[] };
+      }, [] as string[]),
+    [applySync]
+  );
+  const recordPropRulesSavedCb = useCallback(
+    (): string[] =>
+      applySync((s) => {
+        const res = recordPropRulesSavedLogic(s);
+        const turnedOn = unlockedBetween(s, res.state);
+        return turnedOn.length > 0 ? { state: res.state, result: turnedOn } : { state: s, result: [] as string[] };
+      }, [] as string[]),
+    [applySync]
+  );
+
   const recordNoTrade = useCallback((entry: any, allNoTrades: any[]) => {
     return applySync((s) => {
       const res = recordNoTradeEntry(s, entry, allNoTrades, new Date());
@@ -1340,6 +1369,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         recordNoteSaved,
         recordScreenshot,
         checkAndClosePlanQuests,
+        recordPlanAchievements: recordPlanAchievementsCb,
+        recordPropRulesSaved: recordPropRulesSavedCb,
         setFrame,
         setTitle,
         setBackground,
