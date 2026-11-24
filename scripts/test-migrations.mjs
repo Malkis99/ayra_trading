@@ -644,6 +644,52 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   await db.close();
 }
 
+// U. 0021: what proves an achievement (Q4.7-B2) on top of 0020 — applied twice; its tests; the 0020, 0019 and 0018 tests
+//    still pass with it; the plan only for the owner's tool; rollback refused once an achievement was recorded under its
+//    rules, otherwise restores 0020 (whose tests pass again with 0020's expectations)
+{
+  const base = ["0001_init", "0002_profile_defaults", "0003_nickname_cooldown", "0004_journal_sync", "0014_game_economy", "0015_game_days", "0016_game_day_api",
+    "0018_game_economy_sessions", "0019_game_migration_import", "0020_game_achievements"];
+  const db = await fresh();
+  for (const f of base) await db.exec(read(`supabase/migrations/${f}.sql`));
+  await db.exec(read("supabase/migrations/0021_game_achievement_proof.sql"));
+  await db.exec(read("supabase/migrations/0021_game_achievement_proof.sql")); ok("U: 0021 applied twice");
+  for (const t of ["game_achievement_proof", "game_achievements", "game_migration_import", "game_economy_sessions"]) {
+    try { await db.exec(read(`supabase/tests/${t}.sql`)); ok(`U: tests/${t}.sql pass with 0021`); }
+    catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`U: ${t} with 0021: ${e.message}`); }
+  }
+  const left = (await db.query("SELECT (SELECT count(*) FROM public.game_achievements)::int + (SELECT count(*) FROM public.game_imports)::int AS n")).rows[0].n;
+  left === 0 ? ok("U: tests rolled back (no rows left)") : fail("U: rows left after tests");
+  const st = (await db.query(`SELECT has_schema_privilege('game_economy_owner', 'public', 'CREATE') AS cr,
+    (SELECT count(*) FROM unnest(ARRAY['anon', 'authenticated', 'service_role']) r
+      WHERE has_function_privilege(r, 'public.game_mig_achievement_plan(uuid,jsonb,bigint)', 'EXECUTE'))::int AS api,
+    has_function_privilege('game_migration_admin', 'public.game_mig_achievement_plan(uuid,jsonb,bigint)', 'EXECUTE') AS admin,
+    (SELECT pg_get_userbyid(proowner) FROM pg_proc WHERE oid = 'public.game_mig_achievement_plan(uuid,jsonb,bigint)'::regprocedure) AS owner`)).rows[0];
+  !st.cr && st.api === 0 && st.admin && st.owner === "game_economy_owner"
+    ? ok("U: no CREATE left; the plan only for the owner's tool, owned by the economy owner") : fail(`U: state ${JSON.stringify(st)}`);
+  await db.exec(`INSERT INTO auth.users (id, email) VALUES ('00000000-0000-0000-0000-00000021f001', 'keep@x');
+    SET LOCAL ROLE game_economy_owner;
+    INSERT INTO public.game_achievements (user_id, achievement_id, family, status, source, claimed_by, idempotency_key)
+      VALUES ('00000000-0000-0000-0000-00000021f001', 'firstPlan', 'profile', 'pending_review', 'device_flag', '{x}', 'ach:firstPlan');
+    RESET ROLE;`);
+  let refused = false;
+  try { await db.exec(read("supabase/migrations/0021_game_achievement_proof.down.sql")); } catch { refused = true; await db.exec("ROLLBACK").catch(() => {}); }
+  const kept = (await db.query("SELECT rules_version FROM public.game_achievements")).rows;
+  refused && kept.length === 1 && kept[0].rules_version === "q4.7"
+    ? ok("U: rollback refused once an achievement was recorded under the q4.7 rules; it is kept") : fail(`U: rollback refused=${refused} kept=${JSON.stringify(kept)}`);
+  // (its deletion is counted in the anonymous deletion log, which outlives a rollback of 0021: cleared so the 0020 tests
+  //  below count only their own deletions)
+  await db.exec(`DELETE FROM auth.users WHERE id = '00000000-0000-0000-0000-00000021f001';
+    SET LOCAL ROLE game_economy_owner; DELETE FROM public.game_deletion_log; RESET ROLE;`);
+  await db.exec(read("supabase/migrations/0021_game_achievement_proof.down.sql"));
+  const after = (await db.query(`SELECT (SELECT proof FROM public.game_achievement_catalog WHERE id = 'stylist') AS stylist,
+    (SELECT column_default FROM information_schema.columns WHERE table_name = 'game_achievements' AND column_name = 'rules_version') AS def`)).rows[0];
+  after.stylist === "game_rule" && /q4\.6/.test(after.def) ? ok("U: rollback restores 0020's catalog and rules version") : fail(`U: rollback ${JSON.stringify(after)}`);
+  try { await db.exec(read("supabase/tests/game_achievements.sql")); ok("U: 0020 tests pass after the 0021 rollback"); }
+  catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`U: 0020 tests after rollback: ${e.message}`); }
+  await db.close();
+}
+
 // S. Supabase compatibility (found on the official supabase/postgres image, Q4.5-2): «GRANT <role> TO CURRENT_USER»
 //    crashes the server process there (supautils, signal 11) — role grants must name the role (format(... %I, current_user))
 {

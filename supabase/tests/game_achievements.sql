@@ -99,11 +99,19 @@ BEGIN
      <> '["author","category:trading","firstNote","firstPlan","firstQuest","firstTrade","level3","plans7","propDisciplined5","streakDay","stylist","week:2026-11-09"]'::jsonb THEN
     RAISE EXCEPTION 'AC1: the union of the devices, each id once: %', p -> 'items';
   END IF;
+  -- 0021 (Q4.7-B2, applied on top in later tests): firstPlan is never proven by a Journal plan (the device never checked one)
+  -- and stylist only by a worn item in a snapshot (none here) — both wait for a person; everything else as in 0020
   IF (SELECT jsonb_agg(i ->> 'id' || '=' || (i ->> 'status') || '/' || (i ->> 'source') ORDER BY i ->> 'id' COLLATE "C") FROM jsonb_array_elements(p -> 'items') i)
-     <> '["author=pending_review/device_flag","category:trading=verified/reconciled_event","firstNote=verified/reconciled_event",
+     <> (CASE WHEN EXISTS (SELECT 1 FROM public.game_achievement_catalog WHERE id = 'stylist' AND proof = 'snapshot_record') THEN
+     '["author=pending_review/device_flag","category:trading=verified/reconciled_event","firstNote=verified/reconciled_event",
+          "firstPlan=pending_review/device_flag","firstQuest=verified/reconciled_event","firstTrade=verified/reconciled_event",
+          "level3=verified/confirmed_level","plans7=pending_review/device_flag","propDisciplined5=pending_review/device_flag",
+          "streakDay=verified/reconciled_event","stylist=pending_review/device_flag","week:2026-11-09=pending_review/device_flag"]'::jsonb
+     ELSE
+     '["author=pending_review/device_flag","category:trading=verified/reconciled_event","firstNote=verified/reconciled_event",
           "firstPlan=verified/journal_record","firstQuest=verified/reconciled_event","firstTrade=verified/reconciled_event",
           "level3=verified/confirmed_level","plans7=pending_review/device_flag","propDisciplined5=pending_review/device_flag",
-          "streakDay=verified/reconciled_event","stylist=verified/game_rule","week:2026-11-09=pending_review/device_flag"]'::jsonb THEN
+          "streakDay=verified/reconciled_event","stylist=verified/game_rule","week:2026-11-09=pending_review/device_flag"]'::jsonb END) THEN
     RAISE EXCEPTION 'AC2: what is proven and how, what only the device says: %', p -> 'items';
   END IF;
   -- the same achievement on two devices: one item naming both snapshots
