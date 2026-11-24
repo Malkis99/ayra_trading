@@ -233,7 +233,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const loadProfile = useCallback(
-    async (userId: string) => {
+    // stillCurrent: whether the sign-in this read was started for is still the current one (a late answer after a
+    // sign-out or another sign-in changes nothing)
+    async (userId: string, stillCurrent: () => boolean = () => true) => {
       if (mockMode) {
         const { profile: mProfile } = getMockState();
         setProfile(mProfile);
@@ -242,6 +244,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       const fail = (err: ProfileLoadError) => {
+        if (!stillCurrent()) return null;
         setProfileError(err);
         setProfileStatus((s) => (s === "loaded" ? s : "error"));
         return null;
@@ -254,6 +257,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         // No row is a normal state (new account, nickname not chosen yet), not an error.
         const { data, error, status } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
+        if (!stillCurrent()) return null;
         if (error) return fail({ status: status ?? null, code: error.code ?? null, message: error.message ?? "" });
         setProfileError(null);
         if (!data) {
@@ -283,11 +287,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }, 1500);
 
-    const updateToAuthenticated = async (u: AuthUser, initialSessionOrChange = false) => {
+    // generation: the session this sign-in was seen in (observeSession). The profile read is awaited; if the session ended
+    // meanwhile (a sign-out, another account, a new sign-in), its answer must not bring the account back: a late
+    // "authenticated" after the sign-out left the app signed in with no user (no redirect to /login, the old profile shown).
+    const updateToAuthenticated = async (u: AuthUser, generation?: number) => {
+      const current = () => generation === undefined || authGenerationRef.current.isCurrent(generation);
       setUser(u);
-      const loadedProfile = await loadProfile(u.id);
+      const loadedProfile = await loadProfile(u.id, current);
 
-      if (!isMounted) return;
+      if (!isMounted || !current()) return;
 
       const wasLoading = prevAuthStateRef.current === "loading";
       const wasGuest = prevAuthStateRef.current === "guest";
@@ -334,7 +342,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const u = toAuthUser(session.user);
             // every reading is joined to what is known (an older one never takes a mark back: mergeSessionEconomy)
             setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(session, "cached")));
-            updateToAuthenticated(u, true);
+            updateToAuthenticated(u, generation);
             // The stored session may hold old user data (a password set on another device, the owner role just given) and,
             // when its token is old, an old economy mark (the mark lives only in tokens, Q4.5-2). A token older than
             // SESSION_MARK_MAX_AGE_S is refreshed: the auth server issues one now (its hook reads the state). A younger one
@@ -369,12 +377,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           data: { subscription },
         } = supabase.auth.onAuthStateChange((event, session) => {
           if (!isMounted) return;
-          observeSession(session);
+          const generation = observeSession(session);
           if (session?.user) {
             const u = toAuthUser(session.user);
             const fresh = event === "TOKEN_REFRESHED" || event === "SIGNED_IN" || event === "USER_UPDATED";
             setSessionEconomy((prev) => mergeSessionEconomy(prev, sessionEconomyOf(session, fresh ? "verified" : "cached")));
-            updateToAuthenticated(u);
+            updateToAuthenticated(u, generation);
           } else {
             setSessionEconomy(null);
             updateToGuest();
