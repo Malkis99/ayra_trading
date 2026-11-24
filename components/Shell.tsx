@@ -26,6 +26,7 @@ import { AuthProvider, useAuth } from "@/lib/auth/auth-context";
 import { useApp } from "@/lib/context";
 import { hasCloudNickname, postLoginRouterUrl, POST_LOGIN_ROUTER } from "@/lib/auth/routing";
 import { SpaceChangeBanner } from "./SpaceChangeBanner";
+import { DeletedAccountNotice } from "@/components/settings/DeletedAccountNotice";
 import { OwnerDiagnosticsBlock } from "@/components/OwnerDiagnosticsBlock";
 import { UserCheck } from "lucide-react";
 import { UniverseLoader } from "@/components/universe/UniverseBackdrop";
@@ -211,6 +212,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
     return (
       <>
         <SpaceChangeBanner />
+        <DeletedAccountNotice />
         {children}
         <Toast />
       </>
@@ -245,6 +247,7 @@ function ShellContent({ children }: { children: React.ReactNode }) {
 
         {/* Top Header Bar */}
         <Topbar />
+        <DeletedAccountNotice />
 
         {/* Internal Scrollable Main Content */}
         <main className="relative z-10 flex-1 overflow-y-auto p-4 md:p-6 pb-20 md:pb-6">

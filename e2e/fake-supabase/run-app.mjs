@@ -20,6 +20,7 @@ const env = {
   // Q4.4: the server day API and the switch of the economy owner are tested here (production keeps them off); the
   // fake server answers like the real Supabase without 0014–0016 unless a test installs its stand-in
   NEXT_PUBLIC_AYRA_SERVER_ECONOMY: "1",
+  NEXT_PUBLIC_AYRA_ACCOUNT_DELETION: "1",
   SUPABASE_SERVICE_ROLE_KEY: "fake-service-key",
 };
 delete env.AYRA_E2E_AUTH_MOCK;

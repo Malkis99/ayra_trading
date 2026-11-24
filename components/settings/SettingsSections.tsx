@@ -2,7 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
-import { AlertTriangle, Compass, FileText, HardDrive, KeyRound, LogIn, LogOut, Shield, Sparkles, User, UserPen } from "lucide-react";
+import { AlertTriangle, Compass, FileText, HardDrive, KeyRound, LogIn, LogOut, Shield, Sparkles, Trash2, User, UserPen } from "lucide-react";
 import { useApp } from "@/lib/context";
 import { useGame } from "@/lib/game-context";
 import { useAuth } from "@/lib/auth/auth-context";
@@ -10,6 +10,8 @@ import { defaultAttachmentRepository } from "@/lib/journal/attachments/indexeddb
 import type { AttachmentStorageEstimate } from "@/lib/journal/attachments/types";
 import type { SettingsSection } from "@/lib/settings/sections";
 import { SetPasswordDialog } from "@/components/SetPasswordDialog";
+import { DeleteAccountDialog } from "@/components/settings/DeleteAccountDialog";
+import { accountDeletionEnabled } from "@/lib/account-deletion/flag";
 import { OwnerDiagnosticsBlock } from "@/components/OwnerDiagnosticsBlock";
 import { DeviceDataCard } from "@/components/DeviceDataCard";
 import { JournalSettingsCard } from "@/components/JournalSettingsCard";
@@ -66,6 +68,19 @@ function AccountSection() {
   const { dict, lang } = useApp();
   const { user, signOut } = useAuth();
   const [passwordOpen, setPasswordOpen] = React.useState(false);
+  // Q4.7-Б1: deleting the account (on only after the owner applied 0023); an unfinished deletion is shown to continue it
+  const deletionOn = accountDeletionEnabled();
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deletionPending, setDeletionPending] = React.useState(false);
+  React.useEffect(() => {
+    if (!deletionOn || !user) return;
+    let alive = true;
+    fetch("/api/account/delete", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b: { state?: string | null } | null) => { if (alive) setDeletionPending(!!b?.state); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [deletionOn, user]);
   const [passwordSaved, setPasswordSaved] = React.useState(false);
 
   return (
@@ -117,10 +132,22 @@ function AccountSection() {
                 <span>{user.hasPassword ? dict.account.password.change : dict.account.password.create}</span>
               </button>
             </div>
-            <span className="rounded-lg border border-line bg-s1 px-2.5 py-1 text-[11px] text-mu" title="T7d">
-              {dict.account.deleteAccountSoon}
-            </span>
+            {deletionOn ? (
+              <button type="button" onClick={() => setDeleteOpen(true)} data-testid="delete-account-open"
+                className="btn-ghost inline-flex cursor-pointer items-center gap-1.5 border border-red-500/40 px-3.5 py-2 text-xs text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi">
+                <Trash2 size={14} aria-hidden="true" />
+                <span>{deletionPending ? dict.account.deletion.continue : dict.account.deletion.open}</span>
+              </button>
+            ) : (
+              <span className="rounded-lg border border-line bg-s1 px-2.5 py-1 text-[11px] text-mu" title="T7d">
+                {dict.account.deleteAccountSoon}
+              </span>
+            )}
           </div>
+          {deletionOn && deletionPending && (
+            <p className="rounded-xl border border-vi/40 bg-pri/20 p-3 text-xs text-tx" data-testid="delete-account-unfinished">{dict.account.deletion.unfinished}</p>
+          )}
+          {deletionOn && <DeleteAccountDialog isOpen={deleteOpen} onClose={() => setDeleteOpen(false)} resuming={deletionPending} />}
           <SetPasswordDialog
             isOpen={passwordOpen}
             onClose={() => setPasswordOpen(false)}
