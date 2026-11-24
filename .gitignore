@@ -8,3 +8,7 @@ next-env.d.ts
 test-results
 playwright-report
 .next-e2e-supabase
+
+# Q4.7 hosted pilot: local results and the local pilot build (never committed)
+pilot-runs/
+.next-pilot/
