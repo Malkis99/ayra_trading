@@ -584,6 +584,24 @@ late=$(q "SELECT count(*) FROM public.game_imports WHERE user_id = '$(m 8)' AND 
   && ok "M5: 0020 intake: activation racing 5 uploads → activated once; uploads late ($late) or stale ($(count_err game_session_stale)); nothing left out" \
   || bad "M5: state=$st left_out=$left_out late=$late out=$(cat "$TMP"/out/*.out | tr '\n' ' ') errs=$(cat "$TMP"/out/*.err)"
 
+# N. 0021 (Q4.7-B2): what proves an achievement — on a real PostgreSQL, applied twice; five activations at once still record
+# each id once, under the q4.7 rules: stylist proven by a worn item, firstTrade claimed with only the first-trade reward waits
+psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase/migrations/0021_game_achievement_proof.sql >/dev/null 2>"$TMP/m21.err" \
+  && psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase/migrations/0021_game_achievement_proof.sql >/dev/null 2>>"$TMP/m21.err" \
+  && ok "N0: migration 0021 on PostgreSQL (applied twice)" || bad "N0: migration 0021: $(cat "$TMP/m21.err")"
+q "INSERT INTO auth.users (id, email) VALUES ('$(m 9)', 'm9@example.com');
+   SELECT public.game_economy_transition('$(m 9)', 'local', 'migration_pending');" >/dev/null
+proof_save='{"level":1,"xp":40,"coins":10,"history":[{"questId":"q_bias","xp":40,"coins":10,"completedAt":"2026-11-01"}],"equipment":{"Верх":0},"firstActions":{"trade":"2026-11-01T09:00:00Z"},"achievements":{"firstQuest":true,"stylist":true,"firstTrade":true}}'
+for k in 90 91; do q "$(imp "$(m 9)" "$(snap $k)" "$(inst $k)" "$proof_save")" >/dev/null; done
+admin_prep "$(m 9)" || bad "N1: owner's preparation"
+rec=$(q "SELECT id FROM public.game_reconciliations WHERE user_id = '$(m 9)' AND status = 'draft'")
+for k in 1 2 3 4 5; do echo "RESET ROLE; SET ROLE game_migration_admin; SELECT public.game_mig_activate('$(m 9)', $rec, 'ci $k', NULL) ->> 'replay';"; done | parallel
+ach=$(q "SELECT string_agg(achievement_id || '=' || status || '/' || source || '/' || rules_version, ',' ORDER BY achievement_id) FROM public.game_achievements WHERE user_id = '$(m 9)'")
+[ "$(count_out false)" = 1 ] && [ "$(count_out true)" = 4 ] \
+  && [ "$ach" = "firstQuest=verified/reconciled_event/q4.7,firstTrade=pending_review/device_flag/q4.7,stylist=verified/snapshot_record/q4.7" ] \
+  && ok "N1: 5 activations at once → 1 + 4 replays; each id once under q4.7: stylist by a worn item, firstTrade (reward only) waits" \
+  || bad "N1: false=$(count_out false) true=$(count_out true) achievements=$ach errs=$(cat "$TMP"/out/*.err)"
+
 psql -X -q -d postgres -c "DROP DATABASE IF EXISTS $DB" >/dev/null
 rm -rf "$TMP"
 [ "$FAILED" = 0 ] && echo "ALL CONCURRENCY TESTS PASSED" || echo "SOME CONCURRENCY TESTS FAILED"
