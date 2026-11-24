@@ -5,12 +5,12 @@ import { PilotTargetError, describeEnv, jwtRef, parseEnvFile, resolvePilotTarget
 // Q4.7 hosted pilot: the guard that makes a wrong target unreachable (docs/q4-7-hosted-pilot-plan.md, section 3)
 const PILOT = "pilotpilotpilotpilot";
 const PROD = "prodprodprodprodprod";
-const jwt = (ref: string) => `${Buffer.from('{"alg":"HS256"}').toString("base64url")}.${Buffer.from(JSON.stringify({ ref, role: "service_role" })).toString("base64url")}.sig`;
+const jwt = (ref: string, role = "service_role") => `${Buffer.from('{"alg":"HS256"}').toString("base64url")}.${Buffer.from(JSON.stringify({ ref, role })).toString("base64url")}.sig`;
 const good = () => ({
   AYRA_PILOT_PROJECT_REF: PILOT,
   AYRA_PRODUCTION_PROJECT_REF: PROD,
   AYRA_PILOT_SUPABASE_URL: `https://${PILOT}.supabase.co`,
-  AYRA_PILOT_ANON_KEY: jwt(PILOT),
+  AYRA_PILOT_ANON_KEY: jwt(PILOT, "anon"),
   AYRA_PILOT_SERVICE_ROLE_KEY: jwt(PILOT),
   AYRA_PILOT_DB_URL: `postgresql://postgres.${PILOT}:pw@aws-0-eu-central-1.pooler.supabase.com:5432/postgres`,
   AYRA_PILOT_DB_CA_FILE: "package.json", // any existing file stands for the certificate here
@@ -49,7 +49,7 @@ describe("hosted pilot target guard", () => {
     fails({ ...good(), AYRA_PILOT_DB_URL: "postgresql://postgres.otherotherotherother:pw@aws-0-x.pooler.supabase.com:5432/postgres" }, ["x", "--target", PILOT], /DB_URL/);
     fails({ ...good(), AYRA_PILOT_DB_URL: "postgresql://postgres:pw@localhost:5432/postgres" }, ["x", "--target", PILOT], /DB_URL/);
     fails({ ...good(), AYRA_PILOT_DB_URL: good().AYRA_PILOT_DB_URL.replace(":5432/", ":6543/") }, ["x", "--target", PILOT], /transaction pooler/);
-    fails({ ...good(), AYRA_PILOT_ANON_KEY: jwt("otherotherotherother") }, ["x", "--target", PILOT], /another project/);
+    fails({ ...good(), AYRA_PILOT_ANON_KEY: jwt("otherotherotherother", "anon") }, ["x", "--target", PILOT], /another project/);
   });
 
   it("missing or malformed settings: refused, naming the setting and never a value", () => {
@@ -65,6 +65,16 @@ describe("hosted pilot target guard", () => {
     }
     expect(Object.values(describeEnv(good()))).toEqual(Array(7).fill("set"));
     fails({ ...good(), AYRA_PILOT_DB_CA_FILE: "no-such-certificate.crt" }, ["x", "--target", PILOT], /CA_FILE does not exist/);
+  });
+
+  it("keys fail closed: no ref, another format, a wrong role, the same key twice — refused", () => {
+    const noRef = `${Buffer.from('{"alg":"HS256"}').toString("base64url")}.${Buffer.from('{"role":"anon"}').toString("base64url")}.sig`;
+    fails({ ...good(), AYRA_PILOT_ANON_KEY: noRef }, ["x", "--target", PILOT], /without a project ref/);
+    fails({ ...good(), AYRA_PILOT_SERVICE_ROLE_KEY: "opaque-token-of-unknown-kind" }, ["x", "--target", PILOT], /not a supported key/);
+    fails({ ...good(), AYRA_PILOT_ANON_KEY: jwt(PILOT) }, ["x", "--target", PILOT], /wrong role/);
+    fails({ ...good(), AYRA_PILOT_ANON_KEY: "sb_secret_abcdefghijklmnopqrst" }, ["x", "--target", PILOT], /not a supported key/);
+    fails({ ...good(), AYRA_PILOT_ANON_KEY: "sb_publishable_abcdefghijklmnop", AYRA_PILOT_SERVICE_ROLE_KEY: "sb_publishable_abcdefghijklmnop" }, ["x", "--target", PILOT], /not a supported key|the same/);
+    expect(resolvePilotTarget({ ...good(), AYRA_PILOT_ANON_KEY: "sb_publishable_abcdefghijklmnop", AYRA_PILOT_SERVICE_ROLE_KEY: "sb_secret_abcdefghijklmnopqrst" }, ["x", "--target", PILOT]).ref).toBe(PILOT);
   });
 
   it("the env file and key helpers", () => {

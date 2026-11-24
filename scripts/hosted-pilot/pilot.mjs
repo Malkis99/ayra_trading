@@ -30,6 +30,10 @@ import pg from "pg";
 import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { PilotTargetError, describeEnv, loadPilotEnvFile, resolvePilotTarget } from "./env.mjs";
+import {
+  PILOT_EMAIL_RE, SECRETS_DIR, buildServeEnv, forgetSecrets, isDeletedResponse, isRetryResponse, nextEnvFiles, planCleanup,
+  readRegistry, redact, secureDir, serveEnvProblems, verifyKeysOwnership, writeSecretFile,
+} from "./lib.mjs";
 
 const BUCKET = "journal-attachments";
 const EMAIL_PREFIX = "ayra-pilot-";
@@ -39,8 +43,10 @@ const opt = (flag, dflt) => {
   const i = argv.indexOf(flag);
   return i >= 0 ? argv[i + 1] : dflt;
 };
-const WRITE_STEPS = new Set(["init-marker", "migrate", "race", "auth-after-delete", "amr", "delete", "resume", "volume", "cleanup", "rollback"]);
+const WRITE_STEPS = new Set(["init-marker", "migrate", "race", "auth-after-delete", "amr", "delete", "resume", "volume", "cleanup", "rollback", "forget-secrets"]);
 const READ_STEPS = new Set(["preflight", "check-schema", "leftovers", "serve"]);
+// never in any output: the keys, the database address, and every password / token this run holds (redact())
+const secrets = new Set();
 
 let env;
 let T;
@@ -48,6 +54,7 @@ try {
   if (!WRITE_STEPS.has(step) && !READ_STEPS.has(step)) throw new PilotTargetError(`unknown step «${step ?? ""}» (see the header of this file)`);
   env = loadPilotEnvFile();
   T = resolvePilotTarget(env, argv);
+  for (const v of [T.anonKey, T.serviceKey, T.dbUrl, env.AYRA_PILOT_DB_URL]) secrets.add(v);
   if (WRITE_STEPS.has(step) && !T.confirmed) throw new PilotTargetError(`«${step}» writes into the pilot project: add --confirm <the pilot ref>`);
 } catch (e) {
   if (e instanceof PilotTargetError) {
@@ -60,22 +67,44 @@ try {
 
 // ---------------------------------------------------------------- output
 const run = opt("--run", new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14));
+if (!/^[0-9]{14}$/.test(run)) {
+  console.error("REFUSED --run must be 14 digits (a time stamp)");
+  process.exit(2);
+}
 const outDir = path.join("pilot-runs", run);
 mkdirSync(outDir, { recursive: true });
 const results = [];
+const say = (line) => console.log(redact(line, secrets));
 function check(name, pass, detail = {}) {
   results.push({ name, pass: !!pass, ...detail });
-  console.log(`${pass ? "PASS" : "FAIL"} ${name}${Object.keys(detail).length ? " " + JSON.stringify(detail) : ""}`);
+  say(`${pass ? "PASS" : "FAIL"} ${name}${Object.keys(detail).length ? " " + JSON.stringify(detail) : ""}`);
 }
 function note(name, detail) {
   results.push({ name, note: true, ...detail });
-  console.log(`NOTE ${name} ${JSON.stringify(detail)}`);
+  say(`NOTE ${name} ${JSON.stringify(detail)}`);
 }
 function finish() {
+  let text = JSON.stringify({ step, run, at: new Date().toISOString(), results }, null, 2);
+  const clean = redact(text, secrets);
+  if (clean !== text) {
+    // a secret reached the report: it is not written, and the step fails
+    results.push({ name: "no secret in the report", pass: false });
+    text = redact(JSON.stringify({ step, run, at: new Date().toISOString(), results }, null, 2), secrets);
+    console.log("FAIL no secret in the report (redacted before writing)");
+  } else text = clean;
+  writeFileSync(path.join(outDir, `${step}.json`), text);
   const failed = results.filter((r) => r.pass === false).length;
-  writeFileSync(path.join(outDir, `${step}.json`), JSON.stringify({ step, run, at: new Date().toISOString(), results }, null, 2));
   console.log(`${failed ? "SOME CHECKS FAILED" : "ALL CHECKS PASSED"} (${step}; ${path.join(outDir, step + ".json")})`);
   process.exit(failed ? 1 : 0);
+}
+
+// every step first proves, read only, that both keys are accepted by the pilot's own gateway (and the anon key is not admin)
+if (step !== "forget-secrets") {
+  const problems = await verifyKeysOwnership(T);
+  if (problems.length) {
+    for (const pr of problems) console.error(`REFUSED ${pr}`);
+    process.exit(2);
+  }
 }
 
 // ---------------------------------------------------------------- connections
@@ -104,14 +133,24 @@ async function requireMarker(db) {
 
 // ---------------------------------------------------------------- test accounts
 function saveUser(u) {
-  const f = path.join(outDir, "users.json");
-  const list = existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : [];
-  list.push(u);
-  writeFileSync(f, JSON.stringify(list, null, 2));
+  // the registry cleanup relies on: ids and e-mails only (reports may be shared)
+  const reg = path.join(outDir, "accounts.json");
+  const list = existsSync(reg) ? JSON.parse(readFileSync(reg, "utf8")) : [];
+  list.push({ id: u.id, email: u.email, role: u.role });
+  writeFileSync(reg, JSON.stringify(list, null, 2));
+  // the passwords: a folder only this user can read, never in git (.gitignore), removed by forget-secrets
+  if (!secureDir(SECRETS_DIR)) throw new Error(`cannot restrict ${SECRETS_DIR} to this user — no test account is kept`);
+  const f = path.join(SECRETS_DIR, `${run}.accounts.secret.json`);
+  const secret = existsSync(f) ? JSON.parse(readFileSync(f, "utf8")) : [];
+  secret.push({ id: u.id, password: u.password });
+  writeSecretFile(f, JSON.stringify(secret));
+  secrets.add(u.password);
 }
 async function newUser(db, role, { cloud = true } = {}) {
   const email = `${EMAIL_PREFIX}${run}-${role}-${randomBytes(3).toString("hex")}@example.com`;
+  if (!PILOT_EMAIL_RE.test(email)) throw new Error("internal: a test e-mail outside the pilot pattern");
   const password = randomBytes(18).toString("base64url");
+  secrets.add(password);
   const { data, error } = await service().auth.admin.createUser({ email, password, email_confirm: true });
   if (error || !data.user) throw new Error(`createUser: ${JSON.stringify(errInfo(error))}`);
   const u = { id: data.user.id, email, password, role };
@@ -123,6 +162,8 @@ async function signIn(u) {
   const c = anon();
   const { data, error } = await c.auth.signInWithPassword({ email: u.email, password: u.password });
   if (error || !data.session) throw new Error(`signIn: ${JSON.stringify(errInfo(error))}`);
+  secrets.add(data.session.access_token);
+  secrets.add(data.session.refresh_token);
   return { client: c, session: data.session };
 }
 const fileBytes = (n) => {
@@ -196,9 +237,10 @@ async function deleteThroughRoute(u, { maxCalls = 10 } = {}) {
   const calls = [];
   for (let i = 0; i < maxCalls; i++) {
     const r = await callRoute(cookie, { confirm: "DELETE", password: u.password });
-    calls.push({ status: r.status, ms: r.ms, state: r.body?.state ?? null, error: r.body?.error ?? null, retry: r.body?.retry ?? null });
-    if (r.status === 200 && r.body?.deleted) break;
-    if (!(r.status === 503 && r.body?.retry)) break;
+    const deleted = isDeletedResponse(r.status, r.body);
+    calls.push({ status: r.status, ms: r.ms, deleted, state: r.body?.state ?? null, error: r.body?.error ?? null, retry: r.body?.retry ?? null });
+    if (deleted) break;
+    if (!isRetryResponse(r.status, r.body)) break;
   }
   return calls;
 }
@@ -489,6 +531,7 @@ const steps = {
     const vr = rl.data?.properties?.hashed_token ? await anon().auth.verifyOtp({ token_hash: rl.data.properties.hashed_token, type: "recovery" }) : { error: rl.error };
     cases.push(["recovery link (must NOT count)", vr.data?.session?.access_token, vr.error, false]);
 
+    for (const [, token] of cases) if (token) secrets.add(token);
     for (const [name, token, error, proven] of cases) {
       if (!token) {
         check(`amr: ${name} — a session was issued`, false, { error: errInfo(error) });
@@ -507,6 +550,7 @@ const steps = {
       const c = anon();
       const rf = await c.auth.refreshSession({ refresh_token: pw.data.session.refresh_token });
       const token = rf.data?.session?.access_token;
+      if (token) secrets.add(token);
       if (!token) check("refresh issued a token", false, { error: errInfo(rf.error) });
       else {
         note("amr after a refresh", { amr: show(token) });
@@ -536,7 +580,7 @@ const steps = {
     const stats0 = (await db.query("SELECT metric, sum(n)::int n FROM public.account_deletion_stats GROUP BY metric")).rows;
     const calls = await deleteThroughRoute(A);
     note("route calls", { calls });
-    check("the route answered «deleted»", calls.at(-1)?.status === 200, { last: calls.at(-1) });
+    check("the route answered «deleted» (200, state: deleted)", calls.at(-1)?.deleted === true, { last: calls.at(-1) });
     const l = await leftovers(db, A.id, A.email);
     note("leftovers of the deleted account", l);
     check("no Auth user, identity, session or refresh token; no AYRA row; no file", isGone(l));
@@ -583,14 +627,14 @@ const steps = {
       now: () => Date.now(),
     });
     const leftHalf = await filesOf(db, A.id);
-    check("a failure half-way answers «retry» and keeps the request", res.status === 503 && res.body?.retry === true, { status: res.status, body: res.body });
+    check("a failure half-way answers «retry» and keeps the request", isRetryResponse(res.status, res.body) && !isDeletedResponse(res.status, res.body), { status: res.status, body: res.body });
     check("about half of the files are still there; the account too", leftHalf > 0 && leftHalf < 40 && (await leftovers(db, A.id, A.email)).auth_users === 1, { files_left: leftHalf });
     const st = (await db.query("SELECT state, attempts, last_error FROM public.account_deletions WHERE user_id = $1", [A.id])).rows[0];
     note("the request after the failure", st || {});
     const cont = await deleteThroughRoute(A);
     note("continued through the route", { calls: cont });
     const l = await leftovers(db, A.id, A.email);
-    check("continued through the route: deleted, nothing left", cont.at(-1)?.status === 200 && isGone(l), l);
+    check("continued through the route: deleted, nothing left", cont.at(-1)?.deleted === true && isGone(l), l);
     await db.end();
     finish();
   },
@@ -608,7 +652,7 @@ const steps = {
     const total = calls.reduce((x, c) => x + c.ms, 0);
     note("route calls", { calls, total_ms: total });
     const l = await leftovers(db, A.id, A.email);
-    check(`${up} files deleted, nothing left`, calls.at(-1)?.status === 200 && isGone(l), l);
+    check(`${up} files deleted, nothing left`, calls.at(-1)?.deleted === true && isGone(l), l);
     check("no single call came near the Vercel limit (Hobby 300 s; alarm at 240 s)", calls.every((c) => c.ms < 240_000), { longest_ms: Math.max(...calls.map((c) => c.ms)) });
     await db.end();
     finish();
@@ -632,15 +676,19 @@ const steps = {
   async cleanup() {
     const db = await connect();
     await requireMarker(db);
-    const users = (await db.query("SELECT id::text, email FROM auth.users")).rows;
+    // the WHOLE list first (every row of auth.users, soft-deleted ones included); one account that is not a pilot test
+    // account created by this tool — and nothing at all is deleted
+    const users = (await db.query("SELECT id::text AS id, email FROM auth.users")).rows;
+    const plan = planCleanup(users, readRegistry());
+    if (!plan.ok) {
+      check("every account in the project is a pilot test account created by this tool — nothing deleted", false, { foreign_accounts: plan.foreign.length });
+      await db.end();
+      return finish();
+    }
+    check("every account in the project is a pilot test account created by this tool", true, { accounts: plan.targets.length });
     const svc = service();
     for (const u of users) {
-      if (!u.email?.startsWith(EMAIL_PREFIX) || !u.email.endsWith("@example.com")) {
-        check("only pilot test accounts in the project", false, { not_pilot: u.id });
-        continue;
-      }
-      await db.query("DELETE FROM public.account_deletion_objects WHERE user_id = $1", [u.id]).catch(() => undefined);
-      await db.query("DELETE FROM public.account_deletions WHERE user_id = $1", [u.id]).catch(() => undefined);
+      // only this account's own files (its folder or its uploads); its rows go with the auth user (foreign keys)
       for (;;) {
         const names = (await db.query("SELECT name FROM storage.objects WHERE bucket_id = $1 AND (owner_id = $2 OR (storage.foldername(name))[1] = $2) LIMIT 1000", [BUCKET, u.id])).rows.map((r) => r.name);
         if (!names.length) break;
@@ -680,26 +728,32 @@ const steps = {
     finish();
   },
 
+  async "forget-secrets"() {
+    // local only (nothing in the pilot project changes): overwrites and removes the throwaway passwords and the pilot build
+    const removed = forgetSecrets();
+    check("the pilot's local secrets are removed", true, { files: removed.length });
+    finish();
+  },
+
   async serve() {
-    for (const f of [".env", ".env.local", ".env.production", ".env.production.local"]) {
-      if (existsSync(f)) {
-        console.error(`REFUSED ${f} exists in this folder: Next would load it into the pilot app (use a clean worktree)`);
-        process.exit(2);
-      }
+    // Next loads .env* files by itself: none may be in this folder (the pilot's own .env.pilot.local is never read by Next)
+    const loaded = nextEnvFiles(readdirSync("."));
+    if (loaded.length) {
+      console.error(`REFUSED ${loaded.join(", ")} in this folder: Next would load it into the pilot app (use a clean worktree)`);
+      process.exit(2);
     }
     const port = opt("--port", "3200");
-    const appEnv = {
-      ...process.env,
-      NEXT_PUBLIC_SUPABASE_URL: T.url,
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: T.anonKey,
-      SUPABASE_SERVICE_ROLE_KEY: T.serviceKey,
-      NEXT_PUBLIC_AYRA_ACCOUNT_DELETION: "1", // only in this local process
-      NEXT_PUBLIC_AYRA_SERVER_ECONOMY: "0",
-      NEXT_PUBLIC_AYRA_MISSION_SHADOW: "0",
-      NEXT_PUBLIC_AYRA_E2E_AUTH_MOCK: "",
-      NEXT_PUBLIC_AYRA_E2E_EMAIL_OPEN: "",
-      AYRA_NEXT_DIST_DIR: ".next-pilot",
-    };
+    if (!/^[0-9]{4,5}$/.test(port)) {
+      console.error("REFUSED --port must be a number");
+      process.exit(2);
+    }
+    // the app's whole environment: system variables from an allowlist and the pilot's own — nothing else of this shell
+    const appEnv = buildServeEnv(process.env, T);
+    const problems = serveEnvProblems(appEnv, T, env.AYRA_PRODUCTION_PROJECT_REF);
+    if (problems.length) {
+      for (const pr of problems) console.error(`REFUSED ${redact(pr, secrets)}`);
+      process.exit(2);
+    }
     const runCmd = (args) => new Promise((res, rej) => {
       const p = spawn(process.platform === "win32" ? "npx.cmd" : "npx", args, { env: appEnv, stdio: "inherit", shell: process.platform === "win32" });
       p.on("exit", (c) => (c === 0 ? res() : rej(new Error(`${args.join(" ")} exited ${c}`))));

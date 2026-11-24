@@ -8,6 +8,7 @@
 //   - a key in the JWT format must carry the pilot's ref;
 //   - nothing secret is ever printed (only `set` / `missing`).
 import { readFileSync, existsSync } from "node:fs";
+import { keyFormatProblem } from "./lib.mjs";
 
 export const ENV_FILE = ".env.pilot.local";
 const REF_RE = /^[a-z0-9]{20}$/;
@@ -87,10 +88,13 @@ export function resolvePilotTarget(env, argv) {
   for (const [name, v] of [["AYRA_PILOT_SUPABASE_URL", url], ["AYRA_PILOT_DB_URL", dbUrl], ["AYRA_PILOT_ANON_KEY", anonKey], ["AYRA_PILOT_SERVICE_ROLE_KEY", serviceKey]]) {
     if (v.includes(prodRef)) throw new PilotTargetError(`${name} mentions the Production ref — refused`);
   }
-  for (const [name, k] of [["AYRA_PILOT_ANON_KEY", anonKey], ["AYRA_PILOT_SERVICE_ROLE_KEY", serviceKey]]) {
-    const r = jwtRef(k);
-    if (r !== null && r !== ref) throw new PilotTargetError(`${name} belongs to another project — refused`);
+  // fail closed: only the supported formats of the expected kind; a JWT must carry exactly this ref and role (the online
+  // proof that the pilot's own gateway accepts them follows in every step: lib.mjs verifyKeysOwnership)
+  for (const [name, k, kind] of [["AYRA_PILOT_ANON_KEY", anonKey, "anon"], ["AYRA_PILOT_SERVICE_ROLE_KEY", serviceKey, "service"]]) {
+    const problem = keyFormatProblem(name, k, kind, ref);
+    if (problem) throw new PilotTargetError(`${problem} — refused`);
   }
+  if (anonKey === serviceKey) throw new PilotTargetError("the anon key and the service key are the same — refused");
 
   const arg = (flag) => {
     const i = argv.indexOf(flag);

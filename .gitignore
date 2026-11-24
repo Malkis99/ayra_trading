@@ -11,4 +11,5 @@ playwright-report
 
 # Q4.7 hosted pilot: local results and the local pilot build (never committed)
 pilot-runs/
+.pilot-secrets/
 .next-pilot/
