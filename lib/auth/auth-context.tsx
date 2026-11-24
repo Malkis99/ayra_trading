@@ -218,10 +218,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Switches run one after another (each reads the space the previous one left), and only the latest marks its space
+  // ready: a sign-out that comes while the switch into the account still flushes must not be overtaken by it (Q4.7-Б1)
+  const switchQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const switchSeqRef = useRef(0);
   useEffect(() => {
     if (authState !== "loading") {
       const target = authState === "authenticated" && user ? `account:${user.id}` : GUEST_SPACE_ID;
-      switchSpaceTo(authState, user ? user.id : null).then(() => setReadySpaceId(target));
+      const seq = ++switchSeqRef.current;
+      switchQueueRef.current = switchQueueRef.current
+        .then(() => switchSpaceTo(authState, user ? user.id : null))
+        .catch(() => undefined)
+        .then(() => {
+          if (seq === switchSeqRef.current) setReadySpaceId(target);
+        });
     }
   }, [authState, user, switchSpaceTo]);
 
@@ -349,9 +359,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             // is verified as it is (getUser with exactly this token) — its mark is at most that old.
             const iat = tokenClaims(session.access_token)?.iat;
             const old = typeof iat !== "number" || Date.now() / 1000 - iat > SESSION_MARK_MAX_AGE_S;
+            // Q4.7-Б1: the auth server says this account no longer exists (it was deleted on another device): nothing is written
+            // into its space here again, this device signs out, and the person is offered to erase the copy kept here
+            const accountGone = (error: { code?: string; message?: string } | null) =>
+              !!error && (error.code === "user_not_found" || /sub claim in JWT does not exist/i.test(error.message || ""));
+            const markGone = () => {
+              AppStorage.markAccountDeleted(session.user.id);
+              void supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
+            };
             const answer: Promise<{ session: typeof session | null }> = old
-              ? supabase.auth.refreshSession().then(({ data }) => ({ session: data.session }))
-              : supabase.auth.getUser(session.access_token).then(({ data }) => ({ session: data.user ? { ...session, user: data.user } : null }));
+              ? supabase.auth.refreshSession().then(async ({ data, error }) => {
+                  // a refresh that fails cannot tell a deleted account from a signed-out one: ask about the token itself
+                  if (!data.session && error) {
+                    const check = await supabase.auth.getUser(session.access_token);
+                    if (!check.data.user && accountGone(check.error)) markGone();
+                  }
+                  return { session: data.session };
+                })
+              : supabase.auth.getUser(session.access_token).then(({ data, error }) => {
+                  if (!data.user && accountGone(error)) markGone();
+                  return { session: data.user ? { ...session, user: data.user } : null };
+                });
             answer
               .then(({ session: issued }) => {
                 // An answer for a session that is no longer the current one (a sign-out, another account, a new sign-in of

@@ -177,14 +177,79 @@ BEGIN
   IF (v ->> 'new')::boolean OR (v ->> 'attempts')::int <> 1 THEN RAISE EXCEPTION 'D2b: a repeat is the same request: %', v; END IF;
   RESET ROLE;
   SET LOCAL ROLE authenticated;
-  IF pg_temp.err(format($q$INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('journal-attachments', '%s/after.webp', '%s', '{"size": 100, "mimetype": "image/webp"}')$q$, c_a, c_a)) NOT LIKE '%row-level security%'
-     OR pg_temp.err(format($q$INSERT INTO public.journal_notes (user_id, id, data) VALUES ('%s', 'n3', '{"id":"n3","body":"x","createdAt":"2026-11-02T08:00:00Z"}')$q$, c_a)) NOT LIKE '%row-level security%' THEN
+  IF pg_temp.err(format($q$INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('journal-attachments', '%s/after.webp', '%s', '{"size": 100, "mimetype": "image/webp"}')$q$, c_a, c_a)) NOT LIKE '%account_deletion_in_progress%'
+     OR pg_temp.err(format($q$INSERT INTO public.journal_notes (user_id, id, data) VALUES ('%s', 'n3', '{"id":"n3","body":"x","createdAt":"2026-11-02T08:00:00Z"}')$q$, c_a)) NOT LIKE '%account_deletion_in_progress%' THEN
     RAISE EXCEPTION 'D2c: no upload and no journal write once the deletion is requested';
   END IF;
   -- another account is not closed by A's request
   PERFORM set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000023d00c', true);
   INSERT INTO public.journal_notes (user_id, id, data) VALUES ('00000000-0000-0000-0000-00000023d00c', 'n2', '{"id":"n2","body":"still mine","createdAt":"2026-11-02T08:00:00Z"}');
   RESET ROLE;
+END $$;
+
+--------------------------------------------------------------------------------
+-- D7. Every write path of an account being deleted is refused (A has its request since D2); C's work as before
+--------------------------------------------------------------------------------
+DO $$
+DECLARE
+  c_a CONSTANT UUID := '00000000-0000-0000-0000-00000023d00a';
+  c_c CONSTANT UUID := '00000000-0000-0000-0000-00000023d00c';
+  w TEXT;
+  e TEXT;
+  -- resource → its write path (as the person under RLS, a SECURITY DEFINER function, the economy's / owner's functions)
+  c_paths CONSTANT TEXT[] := ARRAY[
+    'profile (RLS update)|UPDATE public.profiles SET timezone = ''Europe/Berlin'' WHERE id = ''%s''',
+    'age group (SECURITY DEFINER)|SELECT public.set_age_group(''18-24'')',
+    'market data (RLS insert)|INSERT INTO public.market_user_data (user_id, id, data) VALUES (''%s'', ''watchlist'', ''{"id":"watchlist","updatedAt":"2026-11-02T08:00:00Z"}'')',
+    'notification settings (RLS)|INSERT INTO public.notification_settings (user_id) VALUES (''%s'')',
+    'notification preferences (RLS)|INSERT INTO public.notification_preferences (user_id, type_code, channel_code, enabled) VALUES (''%s'', ''trade_x'', ''email'', true)',
+    'journal (RLS insert)|INSERT INTO public.journal_notes (user_id, id, data) VALUES (''%s'', ''n9'', ''{"id":"n9","body":"x","createdAt":"2026-11-02T08:00:00Z"}'')',
+    'journal (RLS update)|UPDATE public.journal_notes SET data = data || ''{"updatedAt":"2026-11-03T08:00:00Z"}'' WHERE user_id = ''%s''',
+    'screenshot row (RLS)|INSERT INTO public.journal_attachments (user_id, id, data) VALUES (''%s'', ''s9'', ''{"id":"s9"}'')'];
+  c_owner CONSTANT TEXT[] := ARRAY[
+    'economy state (the economy''s function)|SELECT public.game_economy_transition(''%s'', ''migration_pending'', ''cloud_active'')',
+    'economy snapshot (the route''s function)|SELECT public.game_import_snapshot(''%s'', ''00000000-0000-0000-0000-0000000005e5'', floor(extract(epoch FROM now()))::bigint, ''migration_pending'', ''10000000-0000-0000-0000-00000023d0a9'', ''20000000-0000-0000-0000-00000023d0a9'', 1, ''{"level":1}'')',
+    'feature flag (the owner)|UPDATE public.user_features SET cloud_sync = FALSE WHERE user_id = ''%s'''];
+BEGIN
+  -- as the person (A's own session token), through the API's rules
+  PERFORM set_config('request.jwt.claim.sub', c_a::text, true);
+  FOREACH w IN ARRAY c_paths LOOP
+    SET LOCAL ROLE authenticated;
+    e := pg_temp.err(format(split_part(w, '|', 2), c_a));
+    RESET ROLE;
+    IF e NOT LIKE '%account_deletion_in_progress%' AND e NOT LIKE '%row-level security%' THEN
+      RAISE EXCEPTION 'D7: % was not refused: %', split_part(w, '|', 1), e;
+    END IF;
+  END LOOP;
+  -- the server's own paths (the economy's routes, the owner): the guard does not depend on RLS
+  FOREACH w IN ARRAY c_owner LOOP
+    e := pg_temp.err(format(split_part(w, '|', 2), c_a));
+    IF e NOT LIKE '%account_deletion_in_progress%' THEN RAISE EXCEPTION 'D7b: % was not refused: %', split_part(w, '|', 1), e; END IF;
+  END LOOP;
+  -- C is not being deleted: the same writes go through
+  PERFORM set_config('request.jwt.claim.sub', c_c::text, true);
+  SET LOCAL ROLE authenticated;
+  UPDATE public.profiles SET timezone = 'Europe/Berlin' WHERE id = c_c;
+  INSERT INTO public.market_user_data (user_id, id, data) VALUES (c_c, 'watchlist', '{"id":"watchlist","updatedAt":"2026-11-02T08:00:00Z"}');
+  RESET ROLE;
+END $$;
+
+--------------------------------------------------------------------------------
+-- D8. Every table of a person's data has the guard (a table added later without it fails here)
+--------------------------------------------------------------------------------
+DO $$
+DECLARE
+  v_missing TEXT;
+BEGIN
+  SELECT string_agg(c.table_name, ', ') INTO v_missing FROM information_schema.columns c
+  JOIN information_schema.tables tb ON tb.table_schema = c.table_schema AND tb.table_name = c.table_name AND tb.table_type = 'BASE TABLE'
+  WHERE c.table_schema = 'public' AND c.table_name NOT IN ('account_deletions', 'account_deletion_objects')
+    AND (c.column_name = 'user_id' OR (c.table_name = 'profiles' AND c.column_name = 'id'))
+    AND NOT EXISTS (SELECT 1 FROM pg_trigger g WHERE g.tgrelid = ('public.' || quote_ident(c.table_name))::regclass AND g.tgname = 'tr_' || c.table_name || '_account_deletion');
+  IF v_missing IS NOT NULL THEN RAISE EXCEPTION 'D8: tables without the deletion guard: %', v_missing; END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'storage.objects'::regclass AND tgname = 'tr_objects_account_deletion') THEN
+    RAISE EXCEPTION 'D8b: storage.objects has no deletion guard';
+  END IF;
 END $$;
 
 --------------------------------------------------------------------------------

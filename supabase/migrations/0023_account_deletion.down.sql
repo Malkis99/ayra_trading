@@ -10,6 +10,18 @@ BEGIN
   END IF;
 END $$;
 
+DO $$
+DECLARE t RECORD;
+BEGIN
+  FOR t IN SELECT tgname, tgrelid::regclass AS rel FROM pg_trigger WHERE tgname LIKE 'tr\_%\_account\_deletion' AND NOT tgisinternal LOOP
+    EXECUTE format('DROP TRIGGER IF EXISTS %I ON %s', t.tgname, t.rel);
+  END LOOP;
+END $$;
+DROP FUNCTION IF EXISTS public.account_deletion_storage_guard();
+DROP FUNCTION IF EXISTS public.account_deletion_guard();
+DROP FUNCTION IF EXISTS public.account_deleting(UUID);
+DROP FUNCTION IF EXISTS public.account_deletion_lock_key(UUID);
+
 CREATE OR REPLACE FUNCTION public.cloud_sync_enabled()
 RETURNS BOOLEAN AS $$
   SELECT COALESCE((SELECT cloud_sync FROM public.user_features WHERE user_id = auth.uid()), FALSE);

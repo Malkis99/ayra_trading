@@ -15,6 +15,15 @@
 --   4. account_deletion_ready     — no file of the account left in Storage: the anonymous counts are written once; the route
 --                                   then deletes the auth user (the cascade removes every row, this request included).
 -- Each step can be repeated after any failure; nothing is told to the person as done before step 4 succeeded.
+--
+-- Two guarantees (Q4.7-Б1 review):
+--   * no write of the account from the request on: a trigger on EVERY table of a person's data (each public table with
+--     user_id, profiles.id, storage.objects) refuses an INSERT or UPDATE of an account being deleted — whatever the path
+--     (the API under RLS, SECURITY DEFINER functions, the economy's service-role routes);
+--   * no file can appear after the list: an upload holds the account's lock (shared) from its row's check until its
+--     commit; the request and the final check take it exclusively — the request waits for an upload already in flight
+--     (whose file is then listed) and every upload after it sees the request and is refused. Rows of the other tables
+--     cannot outlive the account anyway (their foreign key to auth.users).
 -- Only the service key calls these (the route); no API role reads or writes the tables. Nothing of another account is read
 -- or changed. Idempotent: safe to run twice.
 
@@ -67,6 +76,71 @@ RETURNS BOOLEAN AS $$
      AND NOT EXISTS (SELECT 1 FROM public.account_deletions WHERE user_id = auth.uid());
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public;
 
+-- The account's deletion lock: uploads hold it shared until they commit; the request and the final check exclusively
+CREATE OR REPLACE FUNCTION public.account_deletion_lock_key(p_user UUID)
+RETURNS BIGINT AS $$ SELECT hashtextextended('account_deletion:' || p_user::text, 0) $$ LANGUAGE sql IMMUTABLE;
+
+CREATE OR REPLACE FUNCTION public.account_deleting(p_user UUID)
+RETURNS BOOLEAN AS $$ SELECT p_user IS NOT NULL AND EXISTS (SELECT 1 FROM public.account_deletions WHERE user_id = p_user) $$
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public;
+
+-- Every table of a person's data: no INSERT or UPDATE once the deletion is requested (TG_ARGV[0] = the column of the account)
+CREATE OR REPLACE FUNCTION public.account_deletion_guard()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_uid UUID;
+BEGIN
+  BEGIN
+    v_uid := (to_jsonb(NEW) ->> TG_ARGV[0])::uuid;
+  EXCEPTION WHEN invalid_text_representation THEN
+    v_uid := NULL;
+  END;
+  IF public.account_deleting(v_uid) THEN
+    RAISE EXCEPTION 'account_deletion_in_progress' USING ERRCODE = '42501', DETAIL = TG_TABLE_NAME;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+-- A file: its folder's account and its uploader (either may be the one being deleted). The shared lock is taken first and
+-- held until this upload commits; the check after it reads what is committed now (a new statement)
+CREATE OR REPLACE FUNCTION public.account_deletion_storage_guard()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_folder TEXT := (storage.foldername(NEW.name))[1];
+  v_uid UUID;
+BEGIN
+  IF NOT (NEW.bucket_id = ANY (public.account_deletion_buckets())) THEN
+    RETURN NEW;
+  END IF;
+  FOR v_uid IN SELECT DISTINCT u::uuid FROM unnest(ARRAY[v_folder, NEW.owner_id]) u
+               WHERE u ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' ORDER BY 1 LOOP
+    PERFORM pg_advisory_xact_lock_shared(public.account_deletion_lock_key(v_uid));
+    IF public.account_deleting(v_uid) THEN
+      RAISE EXCEPTION 'account_deletion_in_progress' USING ERRCODE = '42501', DETAIL = 'storage.objects';
+    END IF;
+  END LOOP;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, storage;
+
+DO $$
+DECLARE
+  t RECORD;
+BEGIN
+  FOR t IN SELECT c.table_name, c.column_name FROM information_schema.columns c
+           JOIN information_schema.tables tb ON tb.table_schema = c.table_schema AND tb.table_name = c.table_name AND tb.table_type = 'BASE TABLE'
+           WHERE c.table_schema = 'public' AND c.table_name NOT IN ('account_deletions', 'account_deletion_objects')
+             AND (c.column_name = 'user_id' OR (c.table_name = 'profiles' AND c.column_name = 'id')) LOOP
+    EXECUTE format('DROP TRIGGER IF EXISTS tr_%s_account_deletion ON public.%I', t.table_name, t.table_name);
+    EXECUTE format('CREATE TRIGGER tr_%s_account_deletion BEFORE INSERT OR UPDATE ON public.%I FOR EACH ROW EXECUTE FUNCTION public.account_deletion_guard(%L)',
+      t.table_name, t.table_name, t.column_name);
+  END LOOP;
+END $$;
+DROP TRIGGER IF EXISTS tr_objects_account_deletion ON storage.objects;
+CREATE TRIGGER tr_objects_account_deletion BEFORE INSERT OR UPDATE ON storage.objects
+  FOR EACH ROW EXECUTE FUNCTION public.account_deletion_storage_guard();
+
 --------------------------------------------------------------------------------
 -- 3. The steps (the server route only)
 --------------------------------------------------------------------------------
@@ -93,6 +167,8 @@ BEGIN
   IF p_user IS NULL OR NOT EXISTS (SELECT 1 FROM auth.users WHERE id = p_user) THEN
     RAISE EXCEPTION 'account_deletion_no_user' USING ERRCODE = '22023';
   END IF;
+  -- an upload already past its check holds the account's lock until it commits: wait for it (its file is then listed)
+  PERFORM pg_advisory_xact_lock(public.account_deletion_lock_key(p_user));
   INSERT INTO public.account_deletions (user_id) VALUES (p_user) ON CONFLICT (user_id) DO NOTHING;
   GET DIAGNOSTICS v_rows = ROW_COUNT;
   v_new := v_rows > 0;
@@ -167,6 +243,8 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'account_deletion_not_requested' USING ERRCODE = '22023';
   END IF;
+  -- no upload can be in flight (they are refused since the request); the lock makes the check wait for one that is
+  PERFORM pg_advisory_xact_lock(public.account_deletion_lock_key(p_user));
   -- every file of the account (its folder or uploaded by it), listed or not: none may be left
   SELECT count(*) INTO v_left FROM storage.objects o
   WHERE o.bucket_id = ANY (public.account_deletion_buckets())
@@ -191,6 +269,7 @@ DO $$
 DECLARE f TEXT;
 BEGIN
   FOREACH f IN ARRAY ARRAY['account_deletion_count(TEXT, BIGINT)', 'account_deletion_buckets()', 'account_deletion_status(UUID)',
+    'account_deletion_lock_key(UUID)', 'account_deleting(UUID)', 'account_deletion_guard()', 'account_deletion_storage_guard()',
     'account_deletion_begin(UUID)', 'account_deletion_manifest(UUID)', 'account_deletion_failed(UUID, TEXT)', 'account_deletion_ready(UUID)'] LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC, anon, authenticated, service_role', f);
   END LOOP;

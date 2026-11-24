@@ -17,6 +17,9 @@ export const DEVICE_KEYS = [
   "ayra_mock_accounts_v1",
   // e2e builds only: a test asks to see the Journal setup window (lib/journal/setup-window.ts)
   "ayra_e2e_setup_window",
+  // Q4.7-Б1: accounts deleted on the server whose space this device must never write again (ids only, the same ids its
+  // own keys «ayra:<id>:…» already carry; nothing else)
+  "ayra_deleted_accounts",
 ] as const;
 
 export type DeviceKey = (typeof DEVICE_KEYS)[number];

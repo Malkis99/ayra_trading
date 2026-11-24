@@ -726,11 +726,11 @@ drain "$(d 1)" && q "SET ROLE service_role; SELECT public.account_deletion_ready
 up() { echo "RESET ROLE; SET ROLE authenticated; SELECT set_config('request.jwt.claim.sub', '$1', false);
   INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('journal-attachments', '$1/race$2.webp', '$1', '{\"size\": 10, \"mimetype\": \"image/webp\"}') RETURNING 'uploaded';"; }
 { svc account_deletion_begin "$(d 2)" new; for k in 1 2 3 4 5 6; do up "$(d 2)" "$k" | tr '\n' ' '; echo; done; } | parallel
-uploaded=$(count_out uploaded); refused=$(count_err "row-level security")
+uploaded=$(count_out uploaded); refused=$(count_err account_deletion_in_progress)
 drain "$(d 2)" && q "SET ROLE service_role; SELECT public.account_deletion_ready('$(d 2)');" >/dev/null
 late=$(psql -X -q -At -d "$DB" -c "SET ROLE authenticated;" -c "SELECT set_config('request.jwt.claim.sub', '$(d 2)', false);" \
-  -c "INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('journal-attachments', '$(d 2)/late.webp', '$(d 2)', '{\"size\": 10, \"mimetype\": \"image/webp\"}');" 2>&1 | grep -c "row-level security")
-[ $((uploaded + refused)) = 6 ] && [ "$(files_left "$(d 2)")" = 0 ] && [ "$late" = 1 ] && [ "$(other_errors 'row-level security')" = 0 ] \
+  -c "INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('journal-attachments', '$(d 2)/late.webp', '$(d 2)', '{\"size\": 10, \"mimetype\": \"image/webp\"}');" 2>&1 | grep -c account_deletion_in_progress)
+[ $((uploaded + refused)) = 6 ] && [ "$(files_left "$(d 2)")" = 0 ] && [ "$late" = 1 ] && [ "$(other_errors account_deletion_in_progress)" = 0 ] \
   && ok "P3: request racing 6 uploads → $uploaded landed before (listed, removed), $refused refused; an upload after it is refused; nothing left" \
   || bad "P3: uploaded=$uploaded refused=$refused left=$(files_left "$(d 2)") late=$late errs=$(cat "$TMP"/out/*.err)"
 
@@ -745,6 +745,120 @@ q "SET ROLE service_role; SELECT public.account_deletion_begin('$(d 3)');" >/dev
 # P5. An account that asked for nothing is never touched
 [ "$(files_left "$(d 4)")" = 50 ] && [ "$(q "SELECT count(*) FROM public.account_deletions WHERE user_id = '$(d 4)'")" = 0 ] \
   && ok "P5: an account that asked for nothing keeps its 50 files" || bad "P5: files=$(files_left "$(d 4)")"
+
+# Q. The in-flight upload, deterministic (real PostgreSQL transactions; the Storage server's insert of the object row is
+# modelled as one transaction — the order the hosted Storage API uses must be checked there, docs section 7):
+#   an upload has passed its check but not committed → the deletion starts → the list is empty → ready → the auth user is
+#   deleted → the upload commits. Q0 runs this on 0023 without the account lock (the race is real: a file is left), Q1–Q3
+#   on 0023 as it is.
+qacc() { printf '00000000-0000-0000-0000-00000023f1%02d' "$1"; }
+qsetup() {
+  q "INSERT INTO auth.users (id, email) VALUES ('$1', 'q$2@example.com');
+     INSERT INTO public.user_features (user_id, cloud_sync) VALUES ('$1', TRUE) ON CONFLICT (user_id) DO UPDATE SET cloud_sync = TRUE;" >/dev/null
+}
+# The order is set by the test, never by timing: a held transaction commits only once the test opens its gate
+# (a row in q_gate; READ COMMITTED: every loop step sees it). The 60 s cap only ends a broken run, it orders nothing.
+q "CREATE TABLE IF NOT EXISTS public.q_gate (id TEXT PRIMARY KEY); GRANT SELECT ON public.q_gate TO authenticated;" >/dev/null
+qgate_wait_sql() {
+  echo "DO \$g\$ BEGIN FOR i IN 1..1200 LOOP EXIT WHEN EXISTS (SELECT 1 FROM public.q_gate WHERE id = '$1'); PERFORM pg_sleep(0.05); END LOOP; END \$g\$;"
+}
+qgate_open() { q "INSERT INTO public.q_gate (id) VALUES ('$1') ON CONFLICT DO NOTHING" >/dev/null; }
+# an upload as the person, past its check, held open until the gate «up_$2» opens (in the background)
+qupload_held() {
+  # one session, one transaction across the commands (no stdin)
+  psql -X -q -At -v ON_ERROR_STOP=1 -d "$DB" -c "BEGIN;" -c "SET LOCAL ROLE authenticated;" -c "SELECT set_config('request.jwt.claim.sub', '$1', true);" \
+    -c "INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('journal-attachments', '$1/inflight.webp', '$1', '{\"size\": 10, \"mimetype\": \"image/webp\"}');" \
+    -c "$(qgate_wait_sql "up_$2")" -c "COMMIT;" >"$TMP/up_$2.out" 2>"$TMP/up_$2.err" &
+}
+# waits until the held upload has inserted its row (its transaction is open)
+qwait_inserted() {
+  local i
+  for i in $(seq 1 100); do
+    [ "$(q "SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND query LIKE '%pg_sleep%' AND pid <> pg_backend_pid()")" -ge 1 ] && return 0
+    sleep 0.1
+  done
+  return 1
+}
+qupload_now() {
+  psql -X -q -At -d "$DB" -c "SET ROLE authenticated;" -c "SELECT set_config('request.jwt.claim.sub', '$1', false);" \
+    -c "INSERT INTO storage.objects (bucket_id, name, owner_id, metadata) VALUES ('journal-attachments', '$1/$2.webp', '$1', '{\"size\": 10, \"mimetype\": \"image/webp\"}');" 2>&1
+}
+qready_and_delete() {
+  q "SET ROLE service_role; SELECT public.account_deletion_manifest('$1') ->> 'pendingCount';" >/dev/null || return 1
+  drain "$1" || return 1
+  q "SET ROLE service_role; SELECT public.account_deletion_ready('$1') ->> 'state';" >/dev/null || return 1
+  q "DELETE FROM auth.users WHERE id = '$1'" >/dev/null
+}
+
+# Q0 (control). 0023 without the account lock: the race leaves a file behind
+grep -v "pg_advisory_xact_lock" supabase/migrations/0023_account_deletion.sql > "$TMP/0023_nolock.sql"
+psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f "$TMP/0023_nolock.sql" >/dev/null 2>"$TMP/q0.err" || bad "Q0: the control migration: $(cat "$TMP/q0.err")"
+U0=$(qacc 0); qsetup "$U0" 0
+qupload_held "$U0" 0
+qwait_inserted || bad "Q0: the upload did not start"
+q "SET ROLE service_role; SELECT public.account_deletion_begin('$U0');" >/dev/null
+q0_steps=$(qready_and_delete "$U0" && echo deleted)
+# only now, after the auth user's deletion, the upload commits
+qgate_open up_0
+wait
+q0_left=$(files_left "$U0")
+[ "$q0_steps" = deleted ] && [ "$q0_left" = 1 ] \
+  && ok "Q0 (control, no lock): the deletion finished while an upload was in flight; the upload committed after it — 1 file left (the race is real)" \
+  || bad "Q0 (control): steps=$q0_steps left=$q0_left err=$(cat "$TMP"/up_0.err)"
+q "DELETE FROM storage.objects WHERE name LIKE '$U0/%'" >/dev/null
+# 0023 as it is
+psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase/migrations/0023_account_deletion.sql >/dev/null 2>"$TMP/q0b.err" || bad "Q0b: 0023 again: $(cat "$TMP/q0b.err")"
+
+# Q1. The same order on 0023: the request cannot start while the upload is in flight (it waits for the account lock —
+# a 0.5 s lock timeout proves it is blocked, not slow); once the upload commits, its file is listed and removed
+U1=$(qacc 1); qsetup "$U1" 1
+qupload_held "$U1" 1
+qwait_inserted || bad "Q1: the upload did not start"
+blocked=$(psql -X -q -At -d "$DB" -c "SET ROLE service_role;" -c "SET lock_timeout = '500ms';" -c "SELECT public.account_deletion_begin('$U1');" 2>&1 | grep -c "lock timeout")
+[ "$(q "SELECT count(*) FROM public.account_deletions WHERE user_id = '$U1'")" = 0 ] || bad "Q1: a request exists while the upload is in flight"
+qgate_open up_1
+wait
+q "SET ROLE service_role; SELECT public.account_deletion_begin('$U1');" >/dev/null
+listed=$(q "SET ROLE service_role; SELECT public.account_deletion_manifest('$U1') ->> 'pendingCount';")
+qready_and_delete "$U1" && q1_steps=deleted
+[ "$blocked" = 1 ] && [ "$listed" = 1 ] && [ "$q1_steps" = deleted ] && [ "$(files_left "$U1")" = 0 ] \
+  && ok "Q1: an upload in flight blocks the request (lock timeout); after it commits its file is listed, removed; nothing left" \
+  || bad "Q1: blocked=$blocked listed=$listed steps=$q1_steps left=$(files_left "$U1") err=$(cat "$TMP"/up_1.err)"
+
+# Q2. An upload between the (empty) list and ready: refused; Q3. between ready and the auth user's deletion: refused;
+# and after the deletion (the old token): refused — nothing left
+U2=$(qacc 2); qsetup "$U2" 2
+q "SET ROLE service_role; SELECT public.account_deletion_begin('$U2');" >/dev/null
+empty=$(q "SET ROLE service_role; SELECT public.account_deletion_manifest('$U2') ->> 'pendingCount';")
+q2=$(qupload_now "$U2" between_list_and_ready | grep -c account_deletion_in_progress)
+q "SET ROLE service_role; SELECT public.account_deletion_ready('$U2');" >/dev/null
+q3=$(qupload_now "$U2" between_ready_and_delete | grep -c account_deletion_in_progress)
+q "DELETE FROM auth.users WHERE id = '$U2'" >/dev/null
+q3b=$(qupload_now "$U2" after_delete | grep -c "row-level security")
+[ "$empty" = 0 ] && [ "$q2" = 1 ] && [ "$q3" = 1 ] && [ "$q3b" = 1 ] && [ "$(files_left "$U2")" = 0 ] \
+  && ok "Q2–Q3: uploads between the list and ready, between ready and the deletion, and after it (old token): all refused; nothing left" \
+  || bad "Q2–Q3: empty=$empty q2=$q2 q3=$q3 after=$q3b left=$(files_left "$U2")"
+
+# Q4. The same order for another table (a journal row in flight): it cannot outlive the account (its foreign key)
+U4=$(qacc 4); qsetup "$U4" 4
+psql -X -q -At -d "$DB" -c "BEGIN;" -c "SET LOCAL ROLE authenticated;" -c "SELECT set_config('request.jwt.claim.sub', '$U4', true);" \
+  -c "INSERT INTO public.journal_notes (user_id, id, data) VALUES ('$U4', 'n1', '{\"id\":\"n1\",\"body\":\"x\",\"createdAt\":\"2026-11-02T08:00:00Z\"}');" \
+  -c "$(qgate_wait_sql up_4)" -c "COMMIT;" >"$TMP/up_4.out" 2>"$TMP/up_4.err" &
+qwait_inserted || bad "Q4: the write did not start"
+q "SET ROLE service_role; SELECT public.account_deletion_begin('$U4');" >/dev/null
+qready_and_delete "$U4" &
+# the auth user's deletion is seen waiting on the row the journal write holds; only then that write commits
+for i in $(seq 1 200); do
+  [ "$(q "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE 'DELETE FROM auth.users%'")" -ge 1 ] && break
+  sleep 0.1
+done
+q4_waiting=$(q "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE 'DELETE FROM auth.users%'")
+qgate_open up_4
+wait
+[ "$q4_waiting" -ge 1 ] || bad "Q4: the deletion was not seen waiting on the journal write"
+[ "$(q "SELECT count(*) FROM public.journal_notes WHERE user_id = '$U4'")" = 0 ] && [ "$(q "SELECT count(*) FROM auth.users WHERE id = '$U4'")" = 0 ] \
+  && ok "Q4: a journal row in flight during the deletion: none left (it commits before the cascade, or its foreign key refuses it)" \
+  || bad "Q4: rows=$(q "SELECT count(*) FROM public.journal_notes WHERE user_id = '$U4'") err=$(cat "$TMP"/up_4.err)"
 
 psql -X -q -d postgres -c "DROP DATABASE IF EXISTS $DB" >/dev/null
 rm -rf "$TMP"

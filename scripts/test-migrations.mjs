@@ -733,14 +733,15 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
 //    tests; the journal and screenshot rules of 0004/0005 still pass with it (cloud_sync_enabled is redefined); only the
 //    service role calls it; rollback refused while a deletion is unfinished, otherwise restores 0004's cloud_sync_enabled
 {
-  const base = ["0001_init", "0002_profile_defaults", "0003_nickname_cooldown", "0004_journal_sync", "0005_journal_attachments", "0014_game_economy",
+  const base = ["0001_init", "0002_profile_defaults", "0003_nickname_cooldown", "0004_journal_sync", "0005_journal_attachments", "0008_market_sync",
+    "0011_notifications", "0014_game_economy",
     "0015_game_days", "0016_game_day_api", "0018_game_economy_sessions", "0019_game_migration_import", "0020_game_achievements",
     "0021_game_achievement_proof", "0022_game_achievement_bulk_review"];
   const db = await fresh();
   for (const f of base) await db.exec(read(`supabase/migrations/${f}.sql`));
   await db.exec(read("supabase/migrations/0023_account_deletion.sql"));
   await db.exec(read("supabase/migrations/0023_account_deletion.sql")); ok("W: 0023 applied twice");
-  for (const t of ["account_deletion", "journal_sync_rls", "journal_attachments_rls", "game_achievement_bulk_review"]) {
+  for (const t of ["account_deletion", "journal_sync_rls", "journal_attachments_rls", "market_sync_rls", "notifications_rls", "game_achievement_bulk_review"]) {
     try { await db.exec(read(`supabase/tests/${t}.sql`)); ok(`W: tests/${t}.sql pass with 0023`); }
     catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`W: ${t} with 0023: ${e.message}`); }
   }
@@ -760,7 +761,8 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   await db.exec("DELETE FROM auth.users WHERE id = '00000000-0000-0000-0000-00000023f001'");
   await db.exec(read("supabase/migrations/0023_account_deletion.down.sql"));
   const after = (await db.query(`SELECT to_regclass('public.account_deletions') IS NULL AND to_regprocedure('public.account_deletion_begin(uuid)') IS NULL AS gone,
-    position('account_deletions' IN pg_get_functiondef('public.cloud_sync_enabled()'::regprocedure)) = 0 AS restored`)).rows[0];
+    position('account_deletions' IN pg_get_functiondef('public.cloud_sync_enabled()'::regprocedure)) = 0
+      AND NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname LIKE '%account_deletion%') AS restored`)).rows[0];
   after.gone && after.restored ? ok("W: rollback removes 0023 and restores 0004's cloud_sync_enabled") : fail(`W: rollback ${JSON.stringify(after)}`);
   for (const t of ["journal_sync_rls", "journal_attachments_rls"]) {
     try { await db.exec(read(`supabase/tests/${t}.sql`)); ok(`W: tests/${t}.sql pass after the 0023 rollback`); }

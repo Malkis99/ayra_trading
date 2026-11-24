@@ -1,6 +1,8 @@
 import { DEVICE_KEYS, isDeviceKey } from "./device-keys";
 
 export const GUEST_SPACE_ID = "guest";
+/** Q4.7-Б1: fired in this tab when an account is marked deleted on this device or its copy here is erased. */
+export const DELETED_ACCOUNTS_EVENT = "ayra:deleted-accounts";
 export const CURRENT_STORAGE_SCHEMA_VERSION = 1;
 export const STORAGE_SCHEMA_KEY = "ayra_storage_schema_version";
 export const HAD_SESSION_KEY = "ayra_had_session";
@@ -267,11 +269,58 @@ class AppStorageImpl {
 
     try {
       const space = this.resolveSpace(userIdOverride);
+      // Q4.7-Б1: a deleted account's space is never written again (a tab that still had it open cannot bring it back)
+      if (!space.isGuest && space.userId && this.isAccountDeleted(space.userId)) return;
       const fullKey = buildKey(space, key);
       localStorage.setItem(fullKey, value);
     } catch (e) {
       console.error(`[AppStorage] Failed to setItem for key "${key}":`, e);
     }
+  }
+
+  /** Q4.7-Б1: the accounts this device knows were deleted on the server. */
+  public deletedAccounts(): string[] {
+    if (typeof window === "undefined") return [];
+    try {
+      const list = JSON.parse(localStorage.getItem("ayra_deleted_accounts") || "[]");
+      return Array.isArray(list) ? list.filter((x): x is string => typeof x === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+
+  public isAccountDeleted(userId: string): boolean {
+    return this.deletedAccounts().includes(userId);
+  }
+
+  /** Q4.7-Б1: from now on nothing is written into this account's space on this device. */
+  public markAccountDeleted(userId: string): void {
+    if (typeof window === "undefined" || !userId) return;
+    try {
+      const list = this.deletedAccounts();
+      if (!list.includes(userId)) localStorage.setItem("ayra_deleted_accounts", JSON.stringify([...list, userId].slice(-20)));
+    } catch {
+      // storage full or blocked: the copy is still erased by the caller
+    }
+    // the mark may come after the sign-out it causes was already shown: whoever offers the copy hears it directly
+    window.dispatchEvent(new CustomEvent(DELETED_ACCOUNTS_EVENT, { detail: userId }));
+  }
+
+  /** Q4.7-Б1: deleted accounts whose copy is still on this device (to offer erasing it). */
+  public deletedAccountsWithLocalData(): string[] {
+    if (typeof window === "undefined") return [];
+    const ids = this.deletedAccounts();
+    const out: string[] = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        const id = ids.find((u) => k?.startsWith(`ayra:${u}:`));
+        if (id && !out.includes(id)) out.push(id);
+      }
+    } catch {
+      // nothing to offer
+    }
+    return out;
   }
 
   /**

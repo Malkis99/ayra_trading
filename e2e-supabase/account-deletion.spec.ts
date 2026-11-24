@@ -22,6 +22,7 @@ const putFiles = async (request: APIRequestContext, email: string, n: number) =>
 const live = async (request: APIRequestContext, email: string) =>
   ((await (await request.get(`${FAKE_SUPABASE}/__test/live-sessions?email=${encodeURIComponent(email)}`)).json()) as { live: number }).live;
 
+const accountKeys = (page: Page, userId: string) => page.evaluate((u) => Object.keys(localStorage).filter((k) => k.startsWith(`ayra:${u}:`)), userId);
 async function account(page: Page, request: APIRequestContext, prefix: string) {
   const email = `${prefix}_${Date.now()}_${Math.round(Math.random() * 1e4)}@example.com`;
   await signIn(page, email);
@@ -190,5 +191,62 @@ test.describe("Q4.7-Б1 deleting one's own account (fake Supabase)", () => {
       expect((await deletion(request, a.email)).exists).toBe(false);
       expect(await files(request, a.userId)).toEqual([]);
     }
+  });
+  test("another device of the deleted account: told on its next visit, offered to erase its copy; erased", async ({ page, request, browser }) => {
+    const a = await account(page, request, "DelOther");
+    const otherCtx = await browser.newContext();
+    const other = await otherCtx.newPage();
+    await signIn(other, a.email);
+    await other.waitForURL((u) => !u.pathname.startsWith("/login") && !u.pathname.startsWith("/auth"), { timeout: 30_000 });
+    await other.goto("/quests");
+    await expect.poll(async () => (await accountKeys(other, a.userId)).length).toBeGreaterThan(0);
+    await openDelete(page);
+    await page.getByTestId("delete-account-phrase").fill("УДАЛИТЬ");
+    await page.getByTestId("delete-account-password").fill(TEST_PASSWORD);
+    await page.getByTestId("delete-account-submit").click();
+    await page.waitForURL((u) => u.pathname === "/login", { timeout: 30_000 });
+    // the other device opens AYRA again: the auth server says the account does not exist → signed out, the copy offered
+    await other.reload();
+    await expect(other.getByTestId("deleted-account-notice")).toBeVisible({ timeout: 20_000 });
+    expect((await accountKeys(other, a.userId)).length).toBeGreaterThan(0);
+    await other.getByTestId("deleted-account-erase").click();
+    await expect(other.getByTestId("deleted-account-notice")).toHaveCount(0);
+    expect(await accountKeys(other, a.userId)).toEqual([]);
+    await otherCtx.close();
+  });
+
+  test("a second tab of the deleting device never writes the deleted account again", async ({ page, request, context }) => {
+    const a = await account(page, request, "DelTabs");
+    const tab2 = await context.newPage();
+    await tab2.goto("/quests");
+    await expect(tab2.getByTestId("missions")).toBeVisible();
+    await openDelete(page);
+    await page.getByTestId("delete-account-phrase").fill("УДАЛИТЬ");
+    await page.getByTestId("delete-account-password").fill(TEST_PASSWORD);
+    await page.getByTestId("delete-account-submit").click();
+    await page.waitForURL((u) => u.pathname === "/login", { timeout: 30_000 });
+    // the other tab saves its copy when it signs out or goes away: still nothing of the account comes back
+    await tab2.evaluate(() => window.dispatchEvent(new Event("beforeunload")));
+    await tab2.close();
+    await page.waitForTimeout(1000);
+    expect(await accountKeys(page, a.userId)).toEqual([]);
+    expect(await page.evaluate((u) => JSON.parse(localStorage.getItem("ayra_deleted_accounts") || "[]").includes(u), a.userId)).toBe(true);
+  });
+
+  test("a sign-in by another method (OAuth): the password is asked even right after it", async ({ page, request }) => {
+    const email = `DelOauth_${Date.now()}_${Math.round(Math.random() * 1e4)}@example.com`;
+    await request.get(`${FAKE_SUPABASE}/__test/auth-method?email=${encodeURIComponent(email)}&method=oauth`);
+    await signIn(page, email);
+    await completeOnboarding(page, `Dz${Date.now() % 100000}`);
+    await openDelete(page);
+    await page.getByTestId("delete-account-phrase").fill("УДАЛИТЬ");
+    await page.getByTestId("delete-account-submit").click();
+    await expect(page.getByTestId("delete-account-error")).toHaveAttribute("data-code", "reauth_required");
+    expect((await deletion(request, email)).deletion).toBeNull();
+    await page.getByTestId("delete-account-password").fill(TEST_PASSWORD);
+    await page.getByTestId("delete-account-submit").click();
+    await page.waitForURL((u) => u.pathname === "/login", { timeout: 30_000 });
+    expect((await deletion(request, email)).exists).toBe(false);
+    await request.get(`${FAKE_SUPABASE}/__test/auth-method?email=${encodeURIComponent(email)}&method=password`);
   });
 });

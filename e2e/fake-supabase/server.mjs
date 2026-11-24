@@ -7,14 +7,14 @@ import { metadataWrite } from "./watchlist-meta.mjs";
 
 const b64url = (buf) => Buffer.from(buf).toString("base64url");
 
-function makeJwt(user, sessionId, hookClaims = {}, ageSec = 0, authAt = null) {
+function makeJwt(user, sessionId, hookClaims = {}, ageSec = 0, authAt = null, authMethod = "password") {
   const now = Math.floor(Date.now() / 1000);
   const iat = now - ageSec;
   const header = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   // like the real auth server: the session id, and app_metadata as it is at the moment of issue (Q4.5-2 reads the mark)
   const payload = b64url(
     JSON.stringify({ sub: user.id, email: user.email, role: "authenticated", aud: "authenticated", iat, exp: now + 3600,
-      session_id: sessionId, app_metadata: user.app_metadata || {}, amr: [{ method: "password", timestamp: authAt ?? iat }], ...hookClaims })
+      session_id: sessionId, app_metadata: user.app_metadata || {}, amr: [{ method: authMethod, timestamp: authAt ?? iat }], ...hookClaims })
   );
   const sig = crypto.createHmac("sha256", "fake-e2e-secret").update(`${header}.${payload}`).digest("base64url");
   return `${header}.${payload}.${sig}`;
@@ -52,6 +52,7 @@ export function createFakeSupabase() {
   // top-level «ayra_economy» claim of every token; «unavailable» = the hook could not read the state (no mark + status);
   // «off» = the hook is not configured (no mark); «error» = the auth server cannot run the hook (tokens are refused)
   let hookMode = "on";
+  const authMethodByEmail = new Map(); // e-mail (lower case) -> the amr method of its sign-ins (default «password»)
   const authAgeByEmail = new Map(); // e-mail (lower case) -> seconds: new sign-ins of it count as made «that long ago»
   const sessionAuthAt = new Map(); // auth session id -> when it signed in (seconds): the token's amr timestamp
   // Q4.7-Б1 (0023 stand-in): accounts being deleted — user id -> { state, attempts, listed: Set<path>, counted, lastError }
@@ -150,7 +151,8 @@ export function createFakeSupabase() {
     liveSessions.set(sessionId, user.id);
     // the sign-in's time stays with its session (a refresh keeps it, like GoTrue's amr)
     if (!sessionAuthAt.has(sessionId)) sessionAuthAt.set(sessionId, Math.floor(Date.now() / 1000) - (authAgeByEmail.get(String(user.email).toLowerCase()) || 0));
-    const access_token = makeJwt(user, sessionId, hookClaimsOf(user), tokenAgeByEmail.get(String(user.email).toLowerCase()) || 0, sessionAuthAt.get(sessionId));
+    const access_token = makeJwt(user, sessionId, hookClaimsOf(user), tokenAgeByEmail.get(String(user.email).toLowerCase()) || 0, sessionAuthAt.get(sessionId),
+      authMethodByEmail.get(String(user.email).toLowerCase()) || "password");
     const refresh_token = b64url(crypto.randomBytes(16));
     sessionIdOf.set(refresh_token, sessionId);
     sessionIdOf.set(access_token, sessionId);
@@ -373,6 +375,10 @@ export function createFakeSupabase() {
       storageDeleteFailLeft = Number(url.searchParams.get("n") || 0);
       return send(200, { storageDeleteFailLeft });
     }
+    if (path === "/__test/auth-method") {
+      authMethodByEmail.set(String(url.searchParams.get("email")).toLowerCase(), url.searchParams.get("method") || "password");
+      return send(200, { ok: true });
+    }
     if (path === "/__test/auth-age") {
       authAgeByEmail.set(String(url.searchParams.get("email")).toLowerCase(), Number(url.searchParams.get("seconds")) || 0);
       return send(200, { ok: true });
@@ -576,6 +582,13 @@ export function createFakeSupabase() {
       // like GoTrue: the token of an ended session is refused even before its exp (403 session_not_found; supabase-js then
       // signs that device out). «Выйти» ends only its own session (scope local, owner decision 2026-11-23), so another
       // device of the account is never touched by it.
+      const bearer = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+      try {
+        const sub = JSON.parse(Buffer.from(bearer.split(".")[1] || "", "base64url").toString("utf8")).sub;
+        if (sub && deletedUsers.includes(sub)) return send(403, { code: 403, error_code: "user_not_found", msg: "User from sub claim in JWT does not exist" });
+      } catch {
+        // not a token
+      }
       const sid = sessionIdOf.get((req.headers.authorization || "").replace(/^Bearer\s+/i, ""));
       if (user && sid && !liveSessions.has(sid)) return send(403, { code: 403, error_code: "session_not_found", msg: "Session from session_id claim in JWT does not exist" });
       return user ? send(200, user) : send(401, { error: "not authenticated" });

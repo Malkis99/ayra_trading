@@ -191,10 +191,50 @@ describe("Q4.7-Б1 account deletion route", () => {
     expect(g).toEqual({ status: 200, body: { state: null } });
   });
 
-  it("the sign-in time is the newest amr timestamp of the token (a refresh keeps it)", () => {
+  it("the sign-in time: the newest amr timestamp of a proven method only — never iat (a refresh), never another method", () => {
     const tok = (claims: object) => `x.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.y`;
+    // password and e-mail code: the newest one
     expect(newestAuthTime(tok({ amr: [{ method: "password", timestamp: 100 }, { method: "otp", timestamp: 300 }], iat: 999 }))).toBe(300);
+    // registration (e-mail sign-up), a magic link
+    expect(newestAuthTime(tok({ amr: [{ method: "email/signup", timestamp: 200 }] }))).toBe(200);
+    expect(newestAuthTime(tok({ amr: [{ method: "magiclink", timestamp: 250 }] }))).toBe(250);
+    // a token refresh keeps the sign-in's amr: a fresh iat proves nothing
+    expect(newestAuthTime(tok({ amr: [{ method: "password", timestamp: 100 }], iat: 99_999 }))).toBe(100);
+    // other methods are not a proof: OAuth, SSO, a recovery link, anonymous, an unknown one
+    for (const method of ["oauth", "sso/saml", "recovery", "anonymous", "token_refresh", "web3", "invite"]) {
+      expect(newestAuthTime(tok({ amr: [{ method, timestamp: 999 }] }))).toBeNull();
+    }
+    // a proven method next to another: only the proven one counts
+    expect(newestAuthTime(tok({ amr: [{ method: "oauth", timestamp: 999 }, { method: "password", timestamp: 100 }] }))).toBe(100);
+    // no amr, a broken amr, a bad token
     expect(newestAuthTime(tok({ iat: 999 }))).toBeNull();
+    expect(newestAuthTime(tok({ amr: [{ method: "password" }], iat: 999 }))).toBeNull();
+    expect(newestAuthTime(tok({ amr: "password" }))).toBeNull();
     expect(newestAuthTime("garbage")).toBeNull();
+  });
+
+  it("an old session restored (a sign-in long ago, refreshed since): the password is required every time", async () => {
+    const w = world(filesOf(A, 1));
+    const restored = w.deps({ getUser: async () => ({ id: A, email: "a@example.com", authAt: NOW / 1000 - 7 * 86400 }) });
+    expect((await handleAccountDeletion(post(ok), restored)).body).toMatchObject({ error: "reauth_required" });
+    // a repeated call is asked again (nothing is remembered between calls)
+    expect((await handleAccountDeletion(post(ok), restored)).body).toMatchObject({ error: "reauth_required" });
+    expect(w.calls).toEqual([]);
+  });
+
+  it("no proven sign-in time (another method, no amr): only the password", async () => {
+    const w = world(filesOf(A, 1));
+    const other = w.deps({ getUser: async () => ({ id: A, email: "a@example.com", authAt: null }) });
+    expect((await handleAccountDeletion(post(ok), other)).body).toMatchObject({ error: "reauth_required" });
+    expect((await handleAccountDeletion(post({ ...ok, password: "right-password" }), other)).body).toEqual({ state: "deleted" });
+  });
+
+  it("a continued deletion asks again for the word and the proof", async () => {
+    const w = world(filesOf(A, 2));
+    w.failFiles(2);
+    expect((await handleAccountDeletion(post(ok), w.deps())).body).toMatchObject({ error: "storage_error" });
+    const stale = w.deps({ getUser: async () => ({ id: A, email: "a@example.com", authAt: NOW / 1000 - REAUTH_MAX_AGE_S - 5 }) });
+    expect((await handleAccountDeletion(post(ok), stale)).body).toMatchObject({ error: "reauth_required" });
+    expect((await handleAccountDeletion(post({ confirm: "no" }), w.deps())).body).toMatchObject({ error: "confirm_required" });
   });
 });

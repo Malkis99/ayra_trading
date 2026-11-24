@@ -4237,6 +4237,10 @@ export const en: Dictionary = {
       continue: "Continue the deletion",
       retry: "Retry",
       left: "Files left: {n}",
+      otherDevice: "The account that was open on this device has been deleted. Its copy (Journal, game, screenshots) is still kept in this browser.",
+      eraseCopy: "Erase the copy",
+      keepCopy: "Not now",
+      backups: "The database backups the cloud service makes are kept for a limited time and then deleted automatically; your account cannot be restored from them. The period is stated in the Privacy Policy.",
       errors: {
         confirm_required: "Type the confirmation word.",
         reauth_required: "Confirm it is you: enter your password or sign in again.",

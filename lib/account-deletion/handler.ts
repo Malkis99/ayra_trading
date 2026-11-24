@@ -61,15 +61,26 @@ export interface DeletionResult {
 export { accountDeletionEnabled } from "./flag";
 
 /**
- * When the person last signed in: the newest `amr` timestamp of an access token the auth server has JUST verified (a
- * refresh keeps the sign-in's time; `iat` would not). Seconds, or null when the token has none.
+ * The sign-in methods whose `amr` time proves the person themselves just proved who they are to the auth server: the
+ * password, or a code / link sent to their e-mail (the ways AYRA signs people in). Any other method (OAuth, SSO, a
+ * recovery link, an anonymous session, one the auth server adds later) is not taken as a recent proof: the password is
+ * asked instead. A token refresh is not a sign-in (it keeps the sign-in's `amr`).
+ */
+export const PROVEN_AUTH_METHODS = ["password", "otp", "magiclink", "email/signup"] as const;
+
+/**
+ * When the person last proved who they are: the newest `amr` timestamp of a proven method (above) in an access token
+ * the auth server has JUST verified. Seconds, or null when there is none (no `amr`, only other methods, a bad token).
  */
 export function newestAuthTime(accessToken: string | null | undefined): number | null {
   const part = accessToken?.split(".")[1];
   if (!part) return null;
   try {
-    const claims = JSON.parse(Buffer.from(part, "base64url").toString("utf8")) as { amr?: Array<{ timestamp?: unknown }> };
-    const times = (Array.isArray(claims.amr) ? claims.amr : []).map((a) => a?.timestamp).filter((t): t is number => typeof t === "number" && Number.isFinite(t));
+    const claims = JSON.parse(Buffer.from(part, "base64url").toString("utf8")) as { amr?: Array<{ method?: unknown; timestamp?: unknown }> };
+    const times = (Array.isArray(claims.amr) ? claims.amr : [])
+      .filter((a) => typeof a?.method === "string" && (PROVEN_AUTH_METHODS as readonly string[]).includes(a.method))
+      .map((a) => a.timestamp)
+      .filter((t): t is number => typeof t === "number" && Number.isFinite(t));
     return times.length ? Math.max(...times) : null;
   } catch {
     return null;

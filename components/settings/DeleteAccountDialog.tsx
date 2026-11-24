@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useApp } from "@/lib/context";
 import { useAuth } from "@/lib/auth/auth-context";
 import { AppStorage } from "@/lib/storage";
+import { deleteAccountDeviceData } from "@/lib/storage/profile-transfer";
 import { Button, Modal } from "@/components/ui";
 import { PasswordInput } from "@/components/ui/forms";
 
@@ -53,9 +54,11 @@ export function DeleteAccountDialog({ isOpen, onClose, resuming = false }: Props
       const body = (await res.json().catch(() => ({}))) as { state?: string; error?: string; listed?: number; gone?: number };
       if (res.ok && body.state === "deleted") {
         const userId = user.id;
-        // signed out first (it writes this tab's copy back), then this device's copy of the account erased
+        // no tab of this device writes the account again; signed out; then this device's copy erased (journal, game,
+        // screenshots in the browser's database, Focus)
+        AppStorage.markAccountDeleted(userId);
         await signOut().catch(() => undefined);
-        AppStorage.clear(userId);
+        await deleteAccountDeviceData(userId).catch(() => AppStorage.clear(userId));
         showToast(t.done);
         router.replace("/login");
         return;
@@ -86,6 +89,7 @@ export function DeleteAccountDialog({ isOpen, onClose, resuming = false }: Props
         </div>
         <p className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">{t.irreversible}</p>
         <p className="text-[11px] text-mu">{t.devices}</p>
+        <p className="text-[11px] text-mu" data-testid="delete-account-backups">{t.backups}</p>
 
         <label className="block space-y-1 text-xs">
           <span className="text-mu">{t.typeLabel}</span>
