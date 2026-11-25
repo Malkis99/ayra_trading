@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { createRateLimiter } from "@/lib/game-server/rate-limit";
-import { MAX_ROUNDS, REAUTH_MAX_AGE_S, handleAccountDeletion, newestAuthTime, type DeletionDeps } from "./handler";
+import { MAX_ROUNDS, handleAccountDeletion, type DeletionDeps } from "./handler";
 
-// Q4.7-Б1: the route's logic over an in-memory stand-in of the database's steps (0023) and of Storage. The stand-in keeps
-// the same rules: a file is the account's when it is in its folder AND uploaded by it; «gone» is what Storage no longer has.
+// Q4.7-Б1: the route's logic over an in-memory stand-in of the database's steps (0023, 0024) and of Storage and Auth. The
+// stand-in keeps the same rules: a file is the account's when it is in its folder AND uploaded by it; «gone» is what Storage
+// no longer has; a challenge lives 10 minutes, opens again at most once a minute, allows 5 tries and is spent once; an
+// e-mail code is single-use at the auth server and belongs to one account.
 
 const NOW = Date.UTC(2026, 10, 24, 12, 0, 0);
 const A = "00000000-0000-0000-0000-0000000000aa";
@@ -15,6 +17,12 @@ function world(files: File[], opts: { userExists?: boolean } = {}) {
   const requests = new Map<string, { state: string; listed: Set<string>; counted: boolean; lastError: string | null }>();
   let userExists = opts.userExists ?? true;
   const calls: string[] = [];
+  let clock = NOW;
+  const challenges = new Map<string, { issuedAt: number; expiresAt: number; tries: number; used: boolean }>();
+  // the auth server: the live code of each e-mail (single-use) and the account it belongs to
+  const codes = new Map<string, { code: string; userId: string }>();
+  const accounts: Record<string, string> = { "a@example.com": A, "b@example.com": B };
+  let codeNo = 100000;
   const owned = (u: string) => [...storage.values()].filter((f) => f.name.startsWith(`${u}/`) && f.owner === u);
   const foreign = (u: string) => [...storage.values()].some((f) => (f.name.startsWith(`${u}/`) && f.owner !== u) || (f.owner === u && !f.name.startsWith(`${u}/`)));
   const st = (u: string) => {
@@ -26,6 +34,27 @@ function world(files: File[], opts: { userExists?: boolean } = {}) {
     calls.push(fn);
     const r = requests.get(u);
     if (fn === "account_deletion_status") return { data: st(u), error: null };
+    if (fn === "account_deletion_challenge_issue") {
+      const c = challenges.get(u);
+      if (c && c.issuedAt > clock - 60_000) return { data: null, error: { message: "account_deletion_challenge_too_soon" } };
+      challenges.set(u, { issuedAt: clock, expiresAt: clock + 600_000, tries: 0, used: false });
+      return { data: { expiresInSec: 600, maxTries: 5 }, error: null };
+    }
+    if (fn === "account_deletion_challenge_try") {
+      const c = challenges.get(u);
+      if (!c) return { data: { ok: false, reason: "none" }, error: null };
+      if (c.used) return { data: { ok: false, reason: "used" }, error: null };
+      if (c.expiresAt <= clock) return { data: { ok: false, reason: "expired" }, error: null };
+      if (c.tries >= 5) return { data: { ok: false, reason: "too_many" }, error: null };
+      c.tries++;
+      return { data: { ok: true, tryNo: c.tries }, error: null };
+    }
+    if (fn === "account_deletion_challenge_use") {
+      const c = challenges.get(u);
+      if (!c || c.used || c.expiresAt <= clock) return { data: false, error: null };
+      c.used = true;
+      return { data: true, error: null };
+    }
     if (fn === "account_deletion_begin") {
       if (!userExists) return { data: null, error: { message: "account_deletion_no_user" } };
       if (!r) requests.set(u, { state: "requested", listed: new Set(), counted: false, lastError: null });
@@ -56,8 +85,20 @@ function world(files: File[], opts: { userExists?: boolean } = {}) {
   let storageDown = false;
   const deps = (over: Partial<DeletionDeps> = {}): DeletionDeps => ({
     enabled: true,
-    getUser: async () => ({ id: A, email: "a@example.com", authAt: NOW / 1000 - 60 }),
+    getUser: async () => ({ id: A, email: "a@example.com" }),
     verifyPassword: async (_e, p) => p === "right-password",
+    async sendCode(email) {
+      calls.push("sendCode");
+      codes.set(email, { code: String(++codeNo), userId: accounts[email] });
+      return { error: null };
+    },
+    async verifyCode(email, code) {
+      calls.push("verifyCode");
+      const c = codes.get(email);
+      if (!c || c.code !== code) return null;
+      codes.delete(email); // single-use at the auth server
+      return { userId: c.userId };
+    },
     rpc,
     async removeFiles(bucket, names) {
       calls.push(`remove:${names.length}`);
@@ -72,7 +113,7 @@ function world(files: File[], opts: { userExists?: boolean } = {}) {
     signOutOthers: async () => { calls.push("signOutOthers"); return { error: null }; },
     deleteAuthUser: async (id) => { calls.push(`deleteUser:${id}`); userExists = false; requests.delete(id); return { error: null }; },
     limiter: createRateLimiter({ limit: 1000, windowMs: 60_000 }),
-    now: () => NOW,
+    now: () => clock,
     ...over,
   });
   return {
@@ -83,10 +124,15 @@ function world(files: File[], opts: { userExists?: boolean } = {}) {
     failFiles: (n: number) => { failNext = n; },
     setStorageDown: (v: boolean) => { storageDown = v; },
     files: (u: string) => [...storage.values()].filter((f) => f.name.startsWith(`${u}/`)).length,
+    /** the code the auth server last sent to this e-mail (what the person reads in the letter) */
+    letter: (email: string) => codes.get(email)?.code ?? null,
+    advance: (ms: number) => { clock += ms; },
+    challenge: (u: string) => challenges.get(u) ?? null,
   };
 }
 const post = (body: unknown) => new Request("http://x/api/account/delete", { method: "POST", body: JSON.stringify(body) });
-const ok = { confirm: "УДАЛИТЬ" };
+const word = { confirm: "УДАЛИТЬ" };
+const ok = { ...word, password: "right-password" };
 const filesOf = (u: string, n: number, bucket = "journal-attachments"): File[] => Array.from({ length: n }, (_, i) => ({ bucket, name: `${u}/f${i}.webp`, owner: u }));
 
 describe("Q4.7-Б1 account deletion route", () => {
@@ -97,16 +143,16 @@ describe("Q4.7-Б1 account deletion route", () => {
     expect(w.calls).toEqual([]);
   });
 
-  it("the typed confirmation and a recent proof are required; nothing starts without them", async () => {
+  it("the typed confirmation and a proof made now are required; nothing starts without them", async () => {
     const w = world(filesOf(A, 2));
-    expect((await handleAccountDeletion(post({ confirm: "yes" }), w.deps())).body).toMatchObject({ error: "confirm_required" });
-    const old = w.deps({ getUser: async () => ({ id: A, email: "a@example.com", authAt: NOW / 1000 - REAUTH_MAX_AGE_S - 1 }) });
-    expect((await handleAccountDeletion(post(ok), old)).body).toMatchObject({ error: "reauth_required" });
-    expect((await handleAccountDeletion(post({ ...ok, password: "wrong" }), old)).body).toMatchObject({ error: "wrong_password" });
+    expect((await handleAccountDeletion(post({ confirm: "yes", password: "right-password" }), w.deps())).body).toMatchObject({ error: "confirm_required" });
+    // no proof at all — whatever the session (a sign-in a second ago, a magic link, a recovery link, a refresh): refused
+    expect((await handleAccountDeletion(post(word), w.deps())).body).toEqual({ error: "reauth_required", methods: ["password", "code"] });
+    expect((await handleAccountDeletion(post({ ...word, password: "wrong" }), w.deps())).body).toMatchObject({ error: "wrong_password" });
+    expect((await handleAccountDeletion(post({ ...word, password: 42 }), w.deps())).body).toMatchObject({ error: "reauth_required" });
     expect(w.calls).toEqual([]);
     expect(w.files(A)).toBe(2);
-    // the password proves it when the sign-in is old
-    expect((await handleAccountDeletion(post({ ...ok, password: "right-password" }), old)).body).toEqual({ state: "deleted" });
+    expect((await handleAccountDeletion(post(ok), w.deps())).body).toEqual({ state: "deleted" });
   });
 
   it("one file: the request, other devices signed out, the file removed, checked, the auth user deleted — in this order", async () => {
@@ -191,50 +237,118 @@ describe("Q4.7-Б1 account deletion route", () => {
     expect(g).toEqual({ status: 200, body: { state: null } });
   });
 
-  it("the sign-in time: the newest amr timestamp of a proven method only — never iat (a refresh), never another method", () => {
-    const tok = (claims: object) => `x.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.y`;
-    // password and e-mail code: the newest one
-    expect(newestAuthTime(tok({ amr: [{ method: "password", timestamp: 100 }, { method: "otp", timestamp: 300 }], iat: 999 }))).toBe(300);
-    // registration (e-mail sign-up), a magic link
-    expect(newestAuthTime(tok({ amr: [{ method: "email/signup", timestamp: 200 }] }))).toBe(200);
-    expect(newestAuthTime(tok({ amr: [{ method: "magiclink", timestamp: 250 }] }))).toBe(250);
-    // a token refresh keeps the sign-in's amr: a fresh iat proves nothing
-    expect(newestAuthTime(tok({ amr: [{ method: "password", timestamp: 100 }], iat: 99_999 }))).toBe(100);
-    // other methods are not a proof: OAuth, SSO, a recovery link, anonymous, an unknown one
-    for (const method of ["oauth", "sso/saml", "recovery", "anonymous", "token_refresh", "web3", "invite"]) {
-      expect(newestAuthTime(tok({ amr: [{ method, timestamp: 999 }] }))).toBeNull();
+  it("the e-mail code: a challenge, the letter, the auth server's check — then the deletion; the challenge is spent", async () => {
+    const w = world(filesOf(A, 1));
+    const sent = await handleAccountDeletion(post({ ...word, action: "send_code" }), w.deps());
+    expect(sent).toEqual({ status: 200, body: { challenge: "sent", expiresInSec: 600, maxTries: 5 } });
+    expect(w.calls).toEqual(["account_deletion_challenge_issue", "sendCode"]);
+    const code = w.letter("a@example.com")!;
+    expect((await handleAccountDeletion(post({ ...word, code }), w.deps())).body).toEqual({ state: "deleted" });
+    expect(w.calls.slice(2, 5)).toEqual(["account_deletion_challenge_try", "verifyCode", "account_deletion_challenge_use"]);
+    expect(w.challenge(A)?.used).toBe(true);
+  });
+
+  it("a code needs the typed word too, and a challenge opened by the route (a code from any other letter alone is not enough)", async () => {
+    const w = world(filesOf(A, 1));
+    expect((await handleAccountDeletion(post({ action: "send_code" }), w.deps())).body).toMatchObject({ error: "confirm_required" });
+    // a code the auth server sent for something else (a sign-in letter): no challenge of the deletion → refused, unchecked
+    await w.deps().sendCode("a@example.com");
+    expect((await handleAccountDeletion(post({ ...word, code: w.letter("a@example.com") }), w.deps())).body).toEqual({ error: "code_required" });
+    expect(w.calls).not.toContain("verifyCode");
+    expect(w.files(A)).toBe(1);
+  });
+
+  it("a wrong code spends a try; after 5 the challenge is closed even for the right code", async () => {
+    const w = world(filesOf(A, 1));
+    await handleAccountDeletion(post({ ...word, action: "send_code" }), w.deps());
+    const code = w.letter("a@example.com")!;
+    for (let i = 0; i < 5; i++) expect((await handleAccountDeletion(post({ ...word, code: "000000" }), w.deps())).body).toEqual({ error: "code_invalid" });
+    expect((await handleAccountDeletion(post({ ...word, code }), w.deps())).body).toEqual({ error: "code_too_many" });
+    expect(w.files(A)).toBe(1);
+    // not a code at all: refused before anything is counted or sent to the auth server
+    const before = w.challenge(A)!.tries;
+    for (const bad of ["12345", "abcdef", "1234567890123", "12 34 56"]) {
+      expect((await handleAccountDeletion(post({ ...word, code: bad }), w.deps())).body).toEqual({ error: "code_invalid" });
     }
-    // a proven method next to another: only the proven one counts
-    expect(newestAuthTime(tok({ amr: [{ method: "oauth", timestamp: 999 }, { method: "password", timestamp: 100 }] }))).toBe(100);
-    // no amr, a broken amr, a bad token
-    expect(newestAuthTime(tok({ iat: 999 }))).toBeNull();
-    expect(newestAuthTime(tok({ amr: [{ method: "password" }], iat: 999 }))).toBeNull();
-    expect(newestAuthTime(tok({ amr: "password" }))).toBeNull();
-    expect(newestAuthTime("garbage")).toBeNull();
+    expect(w.challenge(A)!.tries).toBe(before);
   });
 
-  it("an old session restored (a sign-in long ago, refreshed since): the password is required every time", async () => {
+  it("an expired challenge: refused, the code is not even checked", async () => {
     const w = world(filesOf(A, 1));
-    const restored = w.deps({ getUser: async () => ({ id: A, email: "a@example.com", authAt: NOW / 1000 - 7 * 86400 }) });
-    expect((await handleAccountDeletion(post(ok), restored)).body).toMatchObject({ error: "reauth_required" });
-    // a repeated call is asked again (nothing is remembered between calls)
-    expect((await handleAccountDeletion(post(ok), restored)).body).toMatchObject({ error: "reauth_required" });
-    expect(w.calls).toEqual([]);
+    await handleAccountDeletion(post({ ...word, action: "send_code" }), w.deps());
+    const code = w.letter("a@example.com")!;
+    w.advance(600_000);
+    const verifies = w.calls.filter((c) => c === "verifyCode").length;
+    expect((await handleAccountDeletion(post({ ...word, code }), w.deps())).body).toEqual({ error: "code_expired" });
+    expect(w.calls.filter((c) => c === "verifyCode").length).toBe(verifies);
+    expect(w.files(A)).toBe(1);
   });
 
-  it("no proven sign-in time (another method, no amr): only the password", async () => {
+  it("a code used once cannot be used again: not with the spent challenge, not with a new one", async () => {
+    const w = world([...filesOf(A, 1)]);
+    let fails = 1; // the first deletion stops half-way, so the account is still there to try again
+    const deps = () => w.deps({ deleteAuthUser: async () => (fails-- > 0 ? { error: "auth_delete_failed" } : { error: null }) });
+    await handleAccountDeletion(post({ ...word, action: "send_code" }), deps());
+    const code = w.letter("a@example.com")!;
+    expect((await handleAccountDeletion(post({ ...word, code }), deps())).body).toMatchObject({ error: "auth_delete_failed", retry: true });
+    expect((await handleAccountDeletion(post({ ...word, code }), deps())).body).toEqual({ error: "code_used" });
+    w.advance(61_000);
+    await handleAccountDeletion(post({ ...word, action: "send_code" }), deps());
+    expect((await handleAccountDeletion(post({ ...word, code }), deps())).body).toEqual({ error: "code_invalid" });
+    // the new letter's code continues it
+    expect((await handleAccountDeletion(post({ ...word, code: w.letter("a@example.com")! }), deps())).body).toEqual({ state: "deleted" });
+  });
+
+  it("another account's code (or the auth server naming another account): refused; the challenge is not spent", async () => {
+    const w = world([...filesOf(A, 1), ...filesOf(B, 1)]);
+    await handleAccountDeletion(post({ ...word, action: "send_code" }), w.deps());
+    await w.deps().sendCode("b@example.com");
+    expect((await handleAccountDeletion(post({ ...word, code: w.letter("b@example.com")! }), w.deps())).body).toEqual({ error: "code_invalid" });
+    const lying = w.deps({ verifyCode: async () => ({ userId: B }) });
+    expect((await handleAccountDeletion(post({ ...word, code: "123456" }), lying)).body).toEqual({ error: "code_invalid" });
+    expect(w.challenge(A)!.used).toBe(false);
+    expect(w.files(A)).toBe(1);
+    expect(w.files(B)).toBe(1);
+  });
+
+  it("fails closed: the database or the auth server answering oddly is a refusal, never a pass", async () => {
     const w = world(filesOf(A, 1));
-    const other = w.deps({ getUser: async () => ({ id: A, email: "a@example.com", authAt: null }) });
-    expect((await handleAccountDeletion(post(ok), other)).body).toMatchObject({ error: "reauth_required" });
-    expect((await handleAccountDeletion(post({ ...ok, password: "right-password" }), other)).body).toEqual({ state: "deleted" });
+    await handleAccountDeletion(post({ ...word, action: "send_code" }), w.deps());
+    const code = w.letter("a@example.com")!;
+    const rpcWith = (fn: string, answer: { data: unknown; error: { message?: string } | null }): Partial<DeletionDeps> => {
+      const base = w.deps().rpc;
+      return { rpc: async (f, a) => (f === fn ? answer : base(f, a)) };
+    };
+    expect((await handleAccountDeletion(post({ ...word, code }), w.deps(rpcWith("account_deletion_challenge_try", { data: null, error: { message: "x" } })))).status).toBe(503);
+    expect((await handleAccountDeletion(post({ ...word, code }), w.deps(rpcWith("account_deletion_challenge_try", { data: { ok: "yes" }, error: null })))).body).toEqual({ error: "code_required" });
+    expect((await handleAccountDeletion(post({ ...word, code }), w.deps(rpcWith("account_deletion_challenge_try", { data: { ok: false, reason: "new" }, error: null })))).body).toEqual({ error: "code_required" });
+    // the auth server accepted it, but the challenge was spent meanwhile (a request racing this one)
+    expect((await handleAccountDeletion(post({ ...word, code }), w.deps(rpcWith("account_deletion_challenge_use", { data: false, error: null })))).body).toEqual({ error: "code_used" });
+    expect(w.files(A)).toBe(1);
+    expect(w.calls).not.toContain("account_deletion_begin");
   });
 
-  it("a continued deletion asks again for the word and the proof", async () => {
+  it("sending a code: at most once a minute (the database), the auth server's limit too; no e-mail, no code", async () => {
+    const w = world([]);
+    expect((await handleAccountDeletion(post({ ...word, action: "send_code" }), w.deps())).status).toBe(200);
+    expect((await handleAccountDeletion(post({ ...word, action: "send_code" }), w.deps())).body).toEqual({ error: "code_too_soon" });
+    expect(w.calls.filter((c) => c === "sendCode")).toHaveLength(1);
+    w.advance(61_000);
+    expect((await handleAccountDeletion(post({ ...word, action: "send_code" }), w.deps({ sendCode: async () => ({ error: "rate_limited" }) }))).body).toEqual({ error: "code_too_soon" });
+    w.advance(61_000);
+    expect((await handleAccountDeletion(post({ ...word, action: "send_code" }), w.deps({ sendCode: async () => ({ error: "failed" }) }))).body).toEqual({ error: "code_not_sent" });
+    expect((await handleAccountDeletion(post({ ...word, action: "send_code" }), w.deps({ getUser: async () => ({ id: A, email: null }) }))).body).toEqual({ error: "code_unavailable" });
+    expect((await handleAccountDeletion(post({ ...word, action: "other" }), w.deps())).body).toEqual({ error: "bad_request" });
+  });
+
+  it("a continued deletion asks again for the word and a proof made now", async () => {
     const w = world(filesOf(A, 2));
     w.failFiles(2);
     expect((await handleAccountDeletion(post(ok), w.deps())).body).toMatchObject({ error: "storage_error" });
-    const stale = w.deps({ getUser: async () => ({ id: A, email: "a@example.com", authAt: NOW / 1000 - REAUTH_MAX_AGE_S - 5 }) });
-    expect((await handleAccountDeletion(post(ok), stale)).body).toMatchObject({ error: "reauth_required" });
-    expect((await handleAccountDeletion(post({ confirm: "no" }), w.deps())).body).toMatchObject({ error: "confirm_required" });
+    expect((await handleAccountDeletion(post(word), w.deps())).body).toMatchObject({ error: "reauth_required" });
+    expect((await handleAccountDeletion(post({ confirm: "no", password: "right-password" }), w.deps())).body).toMatchObject({ error: "confirm_required" });
+    // a code works for it too (the challenge opens while the account is being deleted)
+    await handleAccountDeletion(post({ ...word, action: "send_code" }), w.deps());
+    expect((await handleAccountDeletion(post({ ...word, code: w.letter("a@example.com")! }), w.deps())).body).toEqual({ state: "deleted" });
   });
 });

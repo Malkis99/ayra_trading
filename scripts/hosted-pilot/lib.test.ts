@@ -23,8 +23,10 @@ const SERVICE = jwt(PILOT, "service_role");
 function deps(over: Partial<DeletionDeps> = {}): DeletionDeps {
   return {
     enabled: true,
-    getUser: async () => ({ id: "00000000-0000-0000-0000-0000000000a1", email: "a@example.com", authAt: null }),
+    getUser: async () => ({ id: "00000000-0000-0000-0000-0000000000a1", email: "a@example.com" }),
     verifyPassword: async () => true,
+    sendCode: async () => ({ error: null }),
+    verifyCode: async () => null,
     rpc: async (fn) => {
       if (fn === "account_deletion_manifest") return { data: { pending: [{ bucket: "journal-attachments", name: "x/1.webp" }], pendingCount: 1 }, error: null };
       if (fn === "account_deletion_status") return { data: { state: "files_listed", listed: 1, gone: 0 }, error: null };

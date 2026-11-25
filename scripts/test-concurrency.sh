@@ -860,6 +860,22 @@ wait
   && ok "Q4: a journal row in flight during the deletion: none left (it commits before the cascade, or its foreign key refuses it)" \
   || bad "Q4: rows=$(q "SELECT count(*) FROM public.journal_notes WHERE user_id = '$U4'") err=$(cat "$TMP"/up_4.err)"
 
+# R. 0024 (Q4.7 P5 remediation): one challenge, used by 5 requests at once (a double click, two tabs with the same code):
+#    exactly one use; 10 tries at once: at most 5 counted
+psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase/migrations/0024_account_deletion_reauth.sql >/dev/null 2>"$TMP/r0.err" \
+  && ok "R0: 0024 on PostgreSQL" || bad "R0: $(cat "$TMP/r0.err")"
+R1=00000000-0000-0000-0000-00000024e001
+q "INSERT INTO auth.users (id, email) VALUES ('$R1', 'r1@example.com');
+   SET ROLE service_role; SELECT public.account_deletion_challenge_issue('$R1'); SELECT public.account_deletion_challenge_try('$R1');" >/dev/null
+for k in 1 2 3 4 5; do echo "SELECT CASE WHEN public.account_deletion_challenge_use('$R1') THEN 'used' ELSE 'refused' END;"; done | parallel
+[ "$(count_out used)" = 1 ] && [ "$(count_out refused)" = 4 ] && [ "$(cat "$TMP"/out/*.err | grep -c ERROR)" = 0 ] \
+  && ok "R1: 5 uses of one challenge at once → exactly one" || bad "R1: used=$(count_out used) refused=$(count_out refused) errs=$(cat "$TMP"/out/*.err)"
+R2=00000000-0000-0000-0000-00000024e002
+q "INSERT INTO auth.users (id, email) VALUES ('$R2', 'r2@example.com'); SET ROLE service_role; SELECT public.account_deletion_challenge_issue('$R2');" >/dev/null
+for k in $(seq 1 10); do echo "SELECT public.account_deletion_challenge_try('$R2') ->> 'ok';"; done | parallel
+[ "$(count_out true)" = 5 ] && [ "$(count_out false)" = 5 ] && [ "$(q "SELECT tries FROM public.account_deletion_challenges WHERE user_id = '$R2'")" = 5 ] \
+  && ok "R2: 10 tries at once → 5 counted, 5 refused" || bad "R2: true=$(count_out true) false=$(count_out false) errs=$(cat "$TMP"/out/*.err)"
+
 psql -X -q -d postgres -c "DROP DATABASE IF EXISTS $DB" >/dev/null
 rm -rf "$TMP"
 [ "$FAILED" = 0 ] && echo "ALL CONCURRENCY TESTS PASSED" || echo "SOME CONCURRENCY TESTS FAILED"

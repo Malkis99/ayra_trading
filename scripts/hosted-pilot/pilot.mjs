@@ -12,7 +12,9 @@
 //   migrate                   P1  applies supabase/migrations 0001…0023 in order (each once; the list is kept in the marker table)
 //   race [--only P2.2]        P2/P3 uploads against a deletion, ordered by locks (no sleeps); --only P2.2 runs that one
 //   auth-after-delete         P4  what Auth answers a deleted account's tokens
-//   amr                       P5  the amr of every sign-in method and of a refresh, through the app's own newestAuthTime
+//   amr                       P5  the amr of every sign-in method and of a refresh (observed; the app no longer reads it)
+//   reauth                    P5b the deletion's proof made now (password / one-time code) through the app's own handler and
+//                                 auth checks, against the pilot's Auth; stops before the deletion starts (nothing deleted)
 //   delete                    P6  the whole deletion through the app's route (a local `serve` of this repo)
 //   resume                    P7  a deletion that fails half-way, continued through the route
 //   volume [--files N]        P8  many files, timed
@@ -43,7 +45,7 @@ const opt = (flag, dflt) => {
   const i = argv.indexOf(flag);
   return i >= 0 ? argv[i + 1] : dflt;
 };
-const WRITE_STEPS = new Set(["init-marker", "migrate", "race", "auth-after-delete", "amr", "delete", "resume", "volume", "cleanup", "rollback", "forget-secrets"]);
+const WRITE_STEPS = new Set(["init-marker", "migrate", "race", "auth-after-delete", "amr", "reauth", "delete", "resume", "volume", "cleanup", "rollback", "forget-secrets"]);
 const READ_STEPS = new Set(["preflight", "check-schema", "leftovers", "serve"]);
 // never in any output: the keys, the database address, and every password / token this run holds (redact())
 const secrets = new Set();
@@ -306,6 +308,8 @@ async function snapshot(db, u) {
   const names = (await db.query("SELECT name FROM storage.objects WHERE bucket_id = $1 AND owner_id = $2 ORDER BY name", [BUCKET, u.id])).rows.map((r) => r.name);
   return JSON.stringify({ users: l.auth_users, rows: l.public_rows, files: names });
 }
+
+const decode = (t) => JSON.parse(Buffer.from(t.split(".")[1], "base64url").toString("utf8"));
 
 // ================================================================ steps
 const steps = {
@@ -576,10 +580,11 @@ const steps = {
   },
 
   async amr() {
-    const { newestAuthTime, REAUTH_MAX_AGE_S } = await import("../../lib/account-deletion/handler.ts");
+    // what the auth server writes into the token's amr for each way of signing in (P5 found: a recovery link is «otp» like
+    // a magic link, so since the P5 remediation the app never takes a sign-in as a proof — see «reauth»)
+    const newestAuthTime = (t) => Math.max(...(decode(t).amr || []).map((a) => a.timestamp).filter((x) => typeof x === "number"));
     const db = await connect();
     await requireMarker(db);
-    const decode = (t) => JSON.parse(Buffer.from(t.split(".")[1], "base64url").toString("utf8"));
     const now = () => Math.floor(Date.now() / 1000);
     const show = (t) => (decode(t).amr || []).map((a) => ({ method: a.method, age_s: now() - a.timestamp }));
     const admin = service().auth.admin;
@@ -609,15 +614,12 @@ const steps = {
     cases.push(["recovery link (must NOT count)", vr.data?.session?.access_token, vr.error, false]);
 
     for (const [, token] of cases) if (token) secrets.add(token);
-    for (const [name, token, error, proven] of cases) {
+    for (const [name, token, error] of cases) {
       if (!token) {
         check(`amr: ${name} — a session was issued`, false, { error: errInfo(error) });
         continue;
       }
-      const at = newestAuthTime(token);
       note(`amr: ${name}`, { amr: show(token) });
-      check(`amr: ${name} — the app ${proven ? "counts it as a fresh sign-in" : "does not count it"}`,
-        proven ? at !== null && now() - at <= REAUTH_MAX_AGE_S : at === null, { authAt_age_s: at === null ? null : now() - at });
     }
 
     // refresh: the sign-in time the app reads must stay the sign-in's, never the refresh's
@@ -632,8 +634,182 @@ const steps = {
       else {
         note("amr after a refresh", { amr: show(token) });
         const after = newestAuthTime(token);
-        check("after a refresh the app reads the ORIGINAL sign-in time (a refresh is not a sign-in)", after !== null && Math.abs(after - before) <= 1, { moved_s: after === null ? null : after - before });
+        check("after a refresh the amr keeps the ORIGINAL sign-in time (a refresh is not a sign-in)", Number.isFinite(after) && Math.abs(after - before) <= 1, { moved_s: after - before });
       }
+    }
+    await db.end();
+    finish();
+  },
+
+  async reauth() {
+    // P5b — the deletion's proof made now, through the app's own handler and auth checks (lib/account-deletion), against
+    // the pilot's Auth. The deletion never starts: account_deletion_begin is answered «stop» here, so «reached begin» means
+    // «the proof was accepted». The challenge (0024) is the database's when the pilot has 0024, else an in-memory stand-in
+    // with the same limits (0024 is not applied to the pilot without the owner's word). A letter is not sent: the Free
+    // project's mailer only writes to the team's addresses — the same one-time code is made by the admin API instead.
+    const { handleAccountDeletion } = await import("../../lib/account-deletion/handler.ts");
+    const { authProofs } = await import("../../lib/account-deletion/auth-proofs.ts");
+    const { createRateLimiter } = await import("../../lib/game-server/rate-limit.ts");
+    const db = await connect();
+    await requireMarker(db);
+    const has0024 = (await db.query("SELECT to_regprocedure('public.account_deletion_challenge_issue(uuid)') IS NOT NULL AS ok")).rows[0].ok;
+    note("the challenge store", { store: has0024 ? "the pilot database (0024)" : "in-memory stand-in (0024 not on the pilot)" });
+    let clock = Date.now();
+    const mem = new Map();
+    const memRpc = (fn, u) => {
+      const c = mem.get(u);
+      if (fn === "account_deletion_challenge_issue") {
+        if (c && c.issuedAt > clock - 60_000) return { data: null, error: { message: "account_deletion_challenge_too_soon" } };
+        mem.set(u, { issuedAt: clock, expiresAt: clock + 600_000, tries: 0, used: false });
+        return { data: { expiresInSec: 600, maxTries: 5 }, error: null };
+      }
+      if (fn === "account_deletion_challenge_try") {
+        if (!c) return { data: { ok: false, reason: "none" }, error: null };
+        if (c.used) return { data: { ok: false, reason: "used" }, error: null };
+        if (c.expiresAt <= clock) return { data: { ok: false, reason: "expired" }, error: null };
+        if (c.tries >= 5) return { data: { ok: false, reason: "too_many" }, error: null };
+        c.tries++;
+        return { data: { ok: true, tryNo: c.tries }, error: null };
+      }
+      if (fn === "account_deletion_challenge_use") {
+        if (!c || c.used || c.expiresAt <= clock || c.tries < 1) return { data: false, error: null };
+        c.used = true;
+        return { data: true, error: null };
+      }
+      return null;
+    };
+    const svc = service();
+    const admin = svc.auth.admin;
+    const proofs = authProofs(T.url, T.anonKey);
+    const letters = new Map(); // e-mail -> the code the admin API made (stands for the letter)
+    const counters = { verifyCode: 0 };
+    let reached = false;
+    const deps = (token) => ({
+      enabled: true,
+      // the auth server checks the session's own token, as the route does
+      getUser: async () => {
+        const { data, error } = await anon().auth.getUser(token);
+        return error || !data.user ? null : { id: data.user.id, email: data.user.email ?? null };
+      },
+      verifyPassword: proofs.verifyPassword,
+      sendCode: async (email) => {
+        const { data, error } = await admin.generateLink({ type: "magiclink", email });
+        if (error || !data?.properties?.email_otp) return { error: "failed" };
+        secrets.add(data.properties.email_otp);
+        letters.set(email, data.properties.email_otp);
+        return { error: null };
+      },
+      verifyCode: async (email, code) => {
+        counters.verifyCode++;
+        return proofs.verifyCode(email, code);
+      },
+      rpc: async (fn, args) => {
+        if (fn === "account_deletion_begin") {
+          reached = true; // the proof was accepted; the deletion itself is not part of this step
+          return { data: null, error: { message: "pilot_stop_before_begin" } };
+        }
+        if (!has0024 && fn.startsWith("account_deletion_challenge_")) return memRpc(fn, String(args.p_user));
+        const { data, error } = await svc.rpc(fn, args);
+        return { data, error: error ? { code: error.code, message: error.message } : null };
+      },
+      removeFiles: async () => ({ removed: [], error: "not_in_this_step" }),
+      signOutOthers: async () => ({ error: "not_in_this_step" }),
+      deleteAuthUser: async () => ({ error: "not_in_this_step" }),
+      limiter: createRateLimiter({ limit: 1000, windowMs: 60_000 }),
+      now: () => clock,
+    });
+    const call = async (token, body) => {
+      reached = false;
+      const r = await handleAccountDeletion(new Request("http://pilot/api/account/delete", { method: "POST", body: JSON.stringify(body) }), deps(token));
+      return { status: r.status, error: r.body.error ?? null, reached };
+    };
+    const word = { confirm: "DELETE" };
+    const sessionsOf = async (id) => Number((await db.query("SELECT count(*) n FROM auth.sessions WHERE user_id = $1", [id])).rows[0].n);
+    const refused = (r, error) => r.status === 403 && r.error === error && !r.reached;
+
+    const U = await newUser(db, "reauth", { cloud: false });
+    const V = await newUser(db, "reauthb", { cloud: false });
+    const pw = await signIn(U);
+
+    // 1. no proof — whatever the session: a password sign-in a second ago, after a refresh, a magic link, a recovery link
+    let r = await call(pw.session.access_token, word);
+    check("P5b.1 a password sign-in a moment ago, no proof: refused (reauth_required)", refused(r, "reauth_required"), r);
+    const rf = await anon().auth.refreshSession({ refresh_token: pw.session.refresh_token });
+    if (rf.data?.session) secrets.add(rf.data.session.access_token), secrets.add(rf.data.session.refresh_token);
+    r = rf.data?.session ? await call(rf.data.session.access_token, word) : { status: null, error: errInfo(rf.error), reached: false };
+    check("P5b.1 after token_refresh, no proof: refused", refused(r, "reauth_required"), r);
+    const ml = await admin.generateLink({ type: "magiclink", email: U.email });
+    const vm = await anon().auth.verifyOtp({ token_hash: ml.data?.properties?.hashed_token, type: "magiclink" });
+    if (vm.data?.session) secrets.add(vm.data.session.access_token), secrets.add(vm.data.session.refresh_token);
+    r = vm.data?.session ? await call(vm.data.session.access_token, word) : { status: null, error: errInfo(vm.error), reached: false };
+    check("P5b.1 a magic-link session, no proof: refused", refused(r, "reauth_required"), r);
+    const rl = await admin.generateLink({ type: "recovery", email: U.email });
+    const vr = await anon().auth.verifyOtp({ token_hash: rl.data?.properties?.hashed_token, type: "recovery" });
+    if (vr.data?.session) secrets.add(vr.data.session.access_token), secrets.add(vr.data.session.refresh_token);
+    r = vr.data?.session ? await call(vr.data.session.access_token, word) : { status: null, error: errInfo(vr.error), reached: false };
+    check("P5b.1 a recovery-link session, no proof: refused", refused(r, "reauth_required"), r);
+
+    // 2. the password, checked by the pilot's Auth
+    r = await call(pw.session.access_token, { ...word, password: "not-the-password" });
+    check("P5b.2 a wrong password: refused", refused(r, "wrong_password"), r);
+    const before = await sessionsOf(U.id);
+    r = await call(pw.session.access_token, { ...word, password: U.password });
+    check("P5b.2 the right password: accepted (the deletion would start)", r.reached, r);
+    check("P5b.2 the password check keeps no session", (await sessionsOf(U.id)) === before, { sessions_before: before, after: await sessionsOf(U.id) });
+
+    // 3. the one-time code: challenge → code → the pilot's Auth checks it → accepted once
+    r = await call(pw.session.access_token, { ...word, code: "123456" });
+    check("P5b.3 a code without a challenge of the deletion: refused, not even checked", refused(r, "code_required") && counters.verifyCode === 0, r);
+    let sent = await call(pw.session.access_token, { ...word, action: "send_code" });
+    check("P5b.3 a code is made for the account (the letter)", sent.status === 200 && letters.has(U.email), sent);
+    const codeU = letters.get(U.email);
+    r = await call(pw.session.access_token, { ...word, code: codeU === "000000" ? "111111" : "000000" });
+    check("P5b.3 a wrong code: refused by the pilot's Auth", refused(r, "code_invalid"), r);
+    const beforeCode = await sessionsOf(U.id);
+    r = await call(pw.session.access_token, { ...word, code: codeU });
+    check("P5b.3 the right code: accepted (the deletion would start)", r.reached, r);
+    check("P5b.3 the code check keeps no session", (await sessionsOf(U.id)) === beforeCode, { sessions_before: beforeCode, after: await sessionsOf(U.id) });
+
+    // 4. reused: with the spent challenge, and with a new challenge (the auth server refuses the used code itself)
+    r = await call(pw.session.access_token, { ...word, code: codeU });
+    check("P5b.4 the same code again: refused (the challenge is spent)", refused(r, "code_used"), r);
+    clock += 61_000;
+    if (has0024) await db.query("UPDATE public.account_deletion_challenges SET issued_at = issued_at - interval '61 seconds' WHERE user_id = $1", [U.id]);
+    sent = await call(pw.session.access_token, { ...word, action: "send_code" });
+    const verifiesBefore = counters.verifyCode;
+    r = await call(pw.session.access_token, { ...word, code: codeU });
+    check("P5b.4 the used code with a new challenge: refused by the pilot's Auth (single-use there)", sent.status === 200 && refused(r, "code_invalid") && counters.verifyCode === verifiesBefore + 1, r);
+
+    // 5. another account's code
+    await deps(null).sendCode(V.email);
+    r = await call(pw.session.access_token, { ...word, code: letters.get(V.email) });
+    check("P5b.5 another account's valid code: refused", refused(r, "code_invalid"), r);
+
+    // 6. an expired challenge: refused before the auth server sees the code
+    clock += 61_000;
+    if (has0024) await db.query("UPDATE public.account_deletion_challenges SET issued_at = issued_at - interval '61 seconds' WHERE user_id = $1", [U.id]);
+    await call(pw.session.access_token, { ...word, action: "send_code" });
+    const fresh = letters.get(U.email);
+    clock += 600_000;
+    if (has0024) await db.query("UPDATE public.account_deletion_challenges SET issued_at = now() - interval '11 minutes', expires_at = now() - interval '1 minute' WHERE user_id = $1", [U.id]);
+    const v0 = counters.verifyCode;
+    r = await call(pw.session.access_token, { ...word, code: fresh });
+    check("P5b.6 an expired challenge: refused, the code not checked", refused(r, "code_expired") && counters.verifyCode === v0, r);
+
+    // 7. what a recovery letter's code is to the auth server (observed): it proves the inbox like any letter's code, but only
+    //    inside an open challenge of the deletion
+    clock += 61_000;
+    if (has0024) await db.query("UPDATE public.account_deletion_challenges SET issued_at = now() - interval '20 minutes', expires_at = now() + interval '5 minutes' WHERE user_id = $1", [U.id]);
+    await call(pw.session.access_token, { ...word, action: "send_code" });
+    const rec = await admin.generateLink({ type: "recovery", email: U.email });
+    if (rec.data?.properties?.email_otp) secrets.add(rec.data.properties.email_otp);
+    r = await call(pw.session.access_token, { ...word, code: rec.data?.properties?.email_otp ?? "" });
+    note("P5b.7 a recovery letter's code inside an open challenge", { accepted: r.reached, answer: r.error });
+
+    // the two test accounts own nothing: removed by this step (only them)
+    for (const u of [U, V]) {
+      const del = await admin.deleteUser(u.id);
+      check(`the step's own test account ${u.role} removed`, !del.error, { error: errInfo(del.error) });
     }
     await db.end();
     finish();
@@ -670,7 +846,7 @@ const steps = {
   },
 
   async resume() {
-    const { handleAccountDeletion, newestAuthTime } = await import("../../lib/account-deletion/handler.ts");
+    const { handleAccountDeletion } = await import("../../lib/account-deletion/handler.ts");
     const { createRateLimiter } = await import("../../lib/game-server/rate-limit.ts");
     const db = await connect();
     await requireMarker(db);
@@ -682,8 +858,10 @@ const steps = {
     // the app's own handler with the real database and Storage — except that the first removal removes only half and fails
     const res = await handleAccountDeletion(new Request("http://pilot/api/account/delete", { method: "POST", body: JSON.stringify({ confirm: "DELETE", password: A.password }) }), {
       enabled: true,
-      getUser: async () => ({ id: A.id, email: A.email, authAt: newestAuthTime(s.session.access_token) }),
+      getUser: async () => ({ id: A.id, email: A.email }),
       verifyPassword: async (email, password) => !(await anon().auth.signInWithPassword({ email, password })).error,
+      sendCode: async () => ({ error: "failed" }),
+      verifyCode: async () => null,
       rpc: async (fn, args) => {
         const { data, error } = await svc.rpc(fn, args);
         return { data, error: error ? { code: error.code, message: error.message } : null };
