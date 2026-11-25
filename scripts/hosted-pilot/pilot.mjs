@@ -10,7 +10,7 @@
 // Writing into the PILOT (each needs --confirm <ref>; all but init-marker also need the pilot marker in the database):
 //   init-marker               marks the empty project as the pilot (public.ayra_pilot_marker)
 //   migrate                   P1  applies supabase/migrations 0001…0023 in order (each once; the list is kept in the marker table)
-//   race                      P2/P3 uploads against a deletion, ordered by locks (no sleeps)
+//   race [--only P2.2]        P2/P3 uploads against a deletion, ordered by locks (no sleeps); --only P2.2 runs that one
 //   auth-after-delete         P4  what Auth answers a deleted account's tokens
 //   amr                       P5  the amr of every sign-in method and of a refresh, through the app's own newestAuthTime
 //   delete                    P6  the whole deletion through the app's route (a local `serve` of this repo)
@@ -219,6 +219,20 @@ async function waitWaiters(db, key, n, ms) {
   return false;
 }
 
+/** who holds and who waits on the account's lock now: our own sessions by name, every other one as «storage server» */
+async function lockPicture(db, key, ours) {
+  const r = await db.query(
+    `SELECT l.pid, l.mode, l.granted, a.application_name, a.wait_event_type, left(regexp_replace(coalesce(a.query, ''), '\\s+', ' ', 'g'), 60) AS query,
+            a.xact_start
+       FROM pg_locks l LEFT JOIN pg_stat_activity a ON a.pid = l.pid
+      WHERE l.locktype = 'advisory' AND l.objsubid = 1
+        AND l.classid::bigint = (($1::bigint >> 32) & 4294967295) AND l.objid::bigint = ($1::bigint & 4294967295)
+      ORDER BY l.granted DESC, a.xact_start`, [key]);
+  // the query text only as a short prefix, and never one that carries request claims (e-mail, role) or a token
+  const safe = (q) => (/jwt|claim|token|password|secret/i.test(q) ? "[hidden]" : q.slice(0, 40));
+  return r.rows.map((x) => ({ who: ours[x.pid] ?? "storage server", mode: x.mode, granted: x.granted, waiting_on: x.wait_event_type, query: safe(x.query) }));
+}
+
 // ---------------------------------------------------------------- the app's route (a local build of this repo against the pilot)
 const APP = opt("--app", "http://localhost:3200");
 async function routeSession(u) {
@@ -385,12 +399,19 @@ const steps = {
   },
 
   async race() {
+    const only = opt("--only", null);
+    if (only !== null && only !== "P2.2") {
+      console.error("REFUSED --only takes P2.2");
+      process.exit(2);
+    }
     const db = await connect();
     await requireMarker(db);
     const big = fileBytes(4.5 * 1024 * 1024); // the bucket allows 5 MB: long enough for the bytes to be written after the check
+    let A0 = null;
+    if (only === null) {
 
     // P2.0 control: an ordinary upload lands (row, owner_id = the uploader)
-    const A0 = await newUser(db, "race0");
+    A0 = await newUser(db, "race0");
     const s0 = await signIn(A0);
     const up0 = await upload(s0.client, A0, "plain");
     const owner0 = (await db.query("SELECT owner_id FROM storage.objects WHERE bucket_id = $1 AND name = $2", [BUCKET, `${A0.id}/plain.webp`])).rows[0]?.owner_id;
@@ -424,44 +445,84 @@ const steps = {
       const del = await service().auth.admin.deleteUser(A.id);
       check("P2.1 the account is then deleted (no file owned)", !del.error, { error: errInfo(del.error) });
     }
+    }
 
-    // P2.2 the final insert arrives between ready and the auth user's deletion: refused
-    {
+    // P2.2 the final insert arrives between ready and the auth user's deletion: refused.
+    //   Order, fixed by the account lock (never by timing): (1) the Storage check passes BEFORE the deletion starts; (2) one
+    //   transaction takes the lock and runs begin → manifest → ready, and keeps the lock open; (3) the upload's FINAL insert
+    //   is then seen waiting on that lock — after ready, before the auth user's deletion; (4) commit → the insert reads the
+    //   committed «files_deleted» and is refused; (5) only then the auth user is deleted. Every step is stamped; the lock
+    //   picture at (3) is kept as evidence.
+    await (async () => {
+      const t0 = Date.now();
+      const timeline = [];
+      const mark = (event, extra = {}) => timeline.push({ t_ms: Date.now() - t0, event, ...extra });
       const A = await newUser(db, "race2");
       const s = await signIn(A);
       const key = await lockKey(db, A.id);
       const hold = await connect();
+      const deletionTx = await connect();
+      const ours = {
+        [(await hold.query("SELECT pg_backend_pid() p")).rows[0].p]: "test: holds the lock (stands for nothing yet)",
+        [(await deletionTx.query("SELECT pg_backend_pid() p")).rows[0].p]: "deletion transaction (begin → manifest → ready)",
+      };
       await hold.query("BEGIN");
       await hold.query("SELECT pg_advisory_xact_lock($1::bigint)", [key]);
-      const up = upload(s.client, A, "late", big);
+      mark("test holds the account lock");
+      let settled = null;
+      const up = upload(s.client, A, "late", big).then((r) => { settled = Date.now() - t0; return r; });
       const probeWaits = await waitWaiters(db, key, 1, 20_000);
-      const beginner = await connect();
-      const begin = beginner.query("SELECT public.account_deletion_begin($1)", [A.id]);
-      await waitWaiters(db, key, 2, 10_000);
+      mark("(1) the Storage check waits on the lock", { seen: probeWaits });
+      // the deletion transaction queues BEHIND the check: the check passes first, then the deletion takes the lock and keeps it
+      await deletionTx.query("BEGIN");
+      const begin = deletionTx.query("SELECT public.account_deletion_begin($1) ->> 'state' AS s", [A.id]);
+      const beginQueued = await waitWaiters(db, key, 2, 10_000);
+      mark("the deletion queued behind the check", { seen: beginQueued });
       await hold.query("COMMIT");
-      await begin;
-      // ready in an open transaction: it holds the account lock until COMMIT, so the upload's final insert waits behind it
-      const readyTx = await connect();
-      await readyTx.query("BEGIN");
-      await readyTx.query("SELECT public.account_deletion_manifest($1)", [A.id]);
-      const ready = (await readyTx.query("SELECT public.account_deletion_ready($1) AS r", [A.id])).rows[0].r;
-      let settledEarly = false;
-      up.then(() => (settledEarly = true));
-      const finalWaits = await waitWaiters(db, key, 1, 30_000);
-      await readyTx.query("COMMIT");
+      mark("test releases the lock: the check goes first (passes), then the deletion");
+      const begun = (await begin).rows[0].s;
+      mark("(2) begin returned inside the deletion transaction", { state: begun, upload_settled: settled !== null });
+      const manifest = (await deletionTx.query("SELECT (public.account_deletion_manifest($1) ->> 'pendingCount')::int AS n", [A.id])).rows[0].n;
+      const ready = (await deletionTx.query("SELECT public.account_deletion_ready($1) ->> 'state' AS s", [A.id])).rows[0].s;
+      mark("(2) manifest and ready returned; the transaction still holds the lock", { pending: manifest, ready, upload_settled: settled !== null });
+      const settledBeforeReady = settled !== null;
+      const finalWaits = await waitWaiters(db, key, 1, 60_000);
+      const picture = await lockPicture(db, key, ours);
+      // taken NOW: the upload must not have answered while its insert waits, and the waiter must be the Storage server
+      const settledAtWait = settled !== null;
+      const storageWaits = picture.some((x) => !x.granted && x.who === "storage server");
+      mark("(3) the upload's final insert is seen waiting on the lock (after ready, before the auth deletion)", { seen: finalWaits, storage_waits: storageWaits, upload_settled: settledAtWait });
+      await deletionTx.query("COMMIT");
+      mark("(4) the deletion transaction commits (files_deleted)");
       const res = await up;
+      mark("(4) the upload answered", { ok: res.ok, error: res.error });
       const landed = await rowExists(db, `${A.id}/late.webp`);
-      check("P2.2 the Storage check passed before the request", probeWaits);
-      check("P2.2 the upload's final insert was positioned after ready (seen waiting)", finalWaits && !settledEarly, { ready: ready?.state ?? null });
-      check("P2.2 refused; no row", !res.ok && !landed, { upload_error: res.error });
-      await hold.end();
-      await beginner.end();
-      await readyTx.end();
       const del = await service().auth.admin.deleteUser(A.id);
-      check("P2.2 the account is then deleted", !del.error, { error: errInfo(del.error) });
+      mark("(5) the auth user deleted", { error: errInfo(del.error) });
+      note("P2.2 timeline", { timeline });
+      note("P2.2 lock picture at step (3)", { locks: picture });
+      const reproduced = probeWaits && beginQueued && begun === "requested" && ready === "files_deleted" && !settledBeforeReady && finalWaits && storageWaits && !settledAtWait;
+      if (!reproduced) {
+        // honest: the order was not reached on the hosted project — never reported as P2.2 (and never as P2.1 either)
+        note("P2.2 NOT REPRODUCED — the order was not reached", { probeWaits, beginQueued, begun, ready, settledBeforeReady, finalWaits, storageWaits, settledAtWait });
+        check("P2.2 order reached (NOT REPRODUCED — see the note)", false);
+      } else {
+        check("P2.2 (1) the Storage check passed before the deletion started (seen waiting, queued ahead)", probeWaits && beginQueued);
+        check("P2.2 (2) begin → manifest → ready in one transaction holding the lock", begun === "requested" && manifest === 0 && ready === "files_deleted");
+        check("P2.2 (3) the final insert waited on the lock after ready (the upload had not answered)", finalWaits && storageWaits && !settledBeforeReady && !settledAtWait,
+          { waiting: picture.filter((x) => !x.granted).map((x) => x.who) });
+        check("P2.2 (4) refused after the commit; no row", !res.ok && !landed, { upload_error: res.error });
+      }
+      check("P2.2 (5) the account is then deleted", !del.error, { error: errInfo(del.error) });
+      await hold.end();
+      await deletionTx.end();
       // P2.4 after the deletion, with the still valid old token: refused
       const after = await upload(s.client, A, "after");
       check("P2.4 an upload with the deleted account's old token is refused; no row", !after.ok && !(await rowExists(db, `${A.id}/after.webp`)), { error: after.error });
+    })();
+    if (only === "P2.2") {
+      await db.end();
+      return finish();
     }
 
     // P2.3 uploads after the request: between the request and the list, between the list and ready
@@ -483,8 +544,13 @@ const steps = {
       const n = Number((await db.query("SELECT count(*) n FROM storage.objects WHERE bucket_id = $1 AND name LIKE $2", [BUCKET, `%/${name}.webp`])).rows[0].n);
       check(`P3 no metadata row for the refused «${name}»`, n === 0);
     }
-    await s0.client.storage.from(BUCKET).remove([`${A0.id}/plain.webp`]);
-    await service().auth.admin.deleteUser(A0.id);
+    // the P2.0 control's teardown: its file is removed with the service key (the person may not remove a fresh file
+    // without a journal row: 0005's orphan_min_age_hours), checked gone, and only then its auth user is deleted (Supabase
+    // Auth would delete a user that still owns files and leave them behind)
+    const rm0 = await service().storage.from(BUCKET).remove([`${A0.id}/plain.webp`]);
+    const gone0 = !(await rowExists(db, `${A0.id}/plain.webp`));
+    check("teardown: the P2.0 control's file removed through the Storage API", !rm0.error && gone0, { error: errInfo(rm0.error) });
+    if (gone0) await service().auth.admin.deleteUser(A0.id);
     await db.end();
     finish();
   },
