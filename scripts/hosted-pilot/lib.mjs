@@ -160,6 +160,35 @@ export function redact(text, secrets) {
   return s;
 }
 
+// ------------------------------------------------------------------ server messages: NOTICE / WARNING / INFO
+const NOTICE_TEXT_MAX = 300;
+/**
+ * What a server message may put into a report: severity, SQLSTATE, message and hint — redacted, then cut short. Never its
+ * `detail`, `where` or `internalQuery` (they can quote row values or whole statements).
+ */
+export function formatNotice(msg, secrets, context = null) {
+  const cut = (v) => (v == null ? null : redact(String(v), secrets).slice(0, NOTICE_TEXT_MAX));
+  const m = msg && typeof msg === "object" ? msg : { message: msg };
+  return {
+    severity: String(m.severity || "NOTICE").toUpperCase(),
+    code: typeof m.code === "string" ? m.code : null,
+    message: cut(m.message),
+    hint: cut(m.hint),
+    context: context == null ? null : String(context),
+  };
+}
+/** Collects every server message of a pg client into `sink`; `getContext` names what ran (e.g. the migration file). */
+export function attachNoticeLog(client, sink, secrets, getContext = () => null) {
+  client.on("notice", (msg) => sink.push(formatNotice(msg, secrets, getContext())));
+  return client;
+}
+/** { NOTICE: n, WARNING: n, … } */
+export function noticeCounts(notices) {
+  const out = {};
+  for (const n of notices) out[n.severity] = (out[n.severity] || 0) + 1;
+  return out;
+}
+
 // ------------------------------------------------------------------ E. cleanup: all or nothing
 export const PILOT_EMAIL_RE = /^ayra-pilot-[0-9]{14}-[a-z0-9]{1,16}-[0-9a-f]{6}@example\.com$/;
 /**

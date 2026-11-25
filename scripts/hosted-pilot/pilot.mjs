@@ -31,8 +31,8 @@ import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { PilotTargetError, describeEnv, loadPilotEnvFile, resolvePilotTarget } from "./env.mjs";
 import {
-  PILOT_EMAIL_RE, SECRETS_DIR, buildServeEnv, forgetSecrets, isDeletedResponse, isRetryResponse, nextEnvFiles, planCleanup,
-  readRegistry, redact, secureDir, serveEnvProblems, verifyKeysOwnership, writeSecretFile,
+  PILOT_EMAIL_RE, SECRETS_DIR, attachNoticeLog, buildServeEnv, forgetSecrets, isDeletedResponse, isRetryResponse, nextEnvFiles,
+  noticeCounts, planCleanup, readRegistry, redact, secureDir, serveEnvProblems, verifyKeysOwnership, writeSecretFile,
 } from "./lib.mjs";
 
 const BUCKET = "journal-attachments";
@@ -74,6 +74,9 @@ if (!/^[0-9]{14}$/.test(run)) {
 const outDir = path.join("pilot-runs", run);
 mkdirSync(outDir, { recursive: true });
 const results = [];
+// every NOTICE / WARNING / INFO the database sends on any connection of this step (formatNotice: no detail, redacted)
+const notices = [];
+let noticeContext = null;
 const say = (line) => console.log(redact(line, secrets));
 function check(name, pass, detail = {}) {
   results.push({ name, pass: !!pass, ...detail });
@@ -84,12 +87,17 @@ function note(name, detail) {
   say(`NOTE ${name} ${JSON.stringify(detail)}`);
 }
 function finish() {
-  let text = JSON.stringify({ step, run, at: new Date().toISOString(), results }, null, 2);
+  if (notices.length) {
+    say(`NOTE server messages ${JSON.stringify(noticeCounts(notices))}`);
+    for (const n of notices) if (n.severity !== "NOTICE" && n.severity !== "DEBUG" && n.severity !== "LOG") say(`${n.severity} ${JSON.stringify(n)}`);
+  }
+  const report = () => ({ step, run, at: new Date().toISOString(), results, notices });
+  let text = JSON.stringify(report(), null, 2);
   const clean = redact(text, secrets);
   if (clean !== text) {
     // a secret reached the report: it is not written, and the step fails
     results.push({ name: "no secret in the report", pass: false });
-    text = redact(JSON.stringify({ step, run, at: new Date().toISOString(), results }, null, 2), secrets);
+    text = redact(JSON.stringify(report(), null, 2), secrets);
     console.log("FAIL no secret in the report (redacted before writing)");
   } else text = clean;
   writeFileSync(path.join(outDir, `${step}.json`), text);
@@ -112,6 +120,7 @@ if (step !== "forget-secrets") {
 const dbCa = readFileSync(T.dbCaFile, "utf8");
 async function connect({ readOnly = false } = {}) {
   const c = new pg.Client({ connectionString: T.dbUrl, ssl: { ca: dbCa, rejectUnauthorized: true }, application_name: "ayra-pilot" });
+  attachNoticeLog(c, notices, secrets, () => noticeContext);
   await c.connect();
   if (readOnly) await c.query("SET default_transaction_read_only = on");
   return c;
@@ -341,6 +350,7 @@ const steps = {
     for (const f of files) {
       if (done.has(f)) continue;
       const t0 = Date.now();
+      noticeContext = f;
       try {
         // each file manages its own transaction (BEGIN … COMMIT); a failure stops here, nothing later is applied
         await db.query(readFileSync(path.join("supabase/migrations", f), "utf8"));
@@ -352,6 +362,7 @@ const steps = {
         break;
       }
     }
+    noticeContext = null;
     await db.end();
     finish();
   },
@@ -765,10 +776,12 @@ const steps = {
 };
 
 steps[step]().catch((e) => {
-  console.error(`ERROR ${String(e?.message ?? e).slice(0, 300)}`);
+  // an error text can quote what failed: redacted like every other output
+  const message = redact(String(e?.message ?? e), secrets).slice(0, 300);
+  console.error(`ERROR ${message}`);
   try {
-    results.push({ name: "error", pass: false, message: String(e?.message ?? e).slice(0, 300) });
-    writeFileSync(path.join(outDir, `${step}.json`), JSON.stringify({ step, run, results }, null, 2));
+    results.push({ name: "error", pass: false, message });
+    writeFileSync(path.join(outDir, `${step}.json`), redact(JSON.stringify({ step, run, results, notices }, null, 2), secrets));
   } catch {
     // nothing more to save
   }

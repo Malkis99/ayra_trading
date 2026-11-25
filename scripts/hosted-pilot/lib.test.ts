@@ -6,8 +6,8 @@ import path from "node:path";
 import { handleAccountDeletion, type DeletionDeps } from "@/lib/account-deletion/handler";
 import { createRateLimiter } from "@/lib/game-server/rate-limit";
 import {
-  PILOT_EMAIL_RE, buildServeEnv, forgetSecrets, isDeletedResponse, isRetryResponse, keyFormatProblem, keyKind, nextEnvFiles,
-  planCleanup, readRegistry, redact, secureDir, serveEnvProblems, verifyKeysOwnership, writeSecretFile,
+  PILOT_EMAIL_RE, attachNoticeLog, buildServeEnv, formatNotice, forgetSecrets, isDeletedResponse, isRetryResponse, keyFormatProblem, keyKind, nextEnvFiles,
+  noticeCounts, planCleanup, readRegistry, redact, secureDir, serveEnvProblems, verifyKeysOwnership, writeSecretFile,
   // @ts-expect-error a plain .mjs module (the pilot runs with node directly)
 } from "./lib.mjs";
 
@@ -242,5 +242,48 @@ describe("E. cleanup: the whole list first, all or nothing", () => {
     rmSync(root, { recursive: true, force: true });
     expect(PILOT_EMAIL_RE.test(a.email)).toBe(true);
     expect(PILOT_EMAIL_RE.test("ayra-pilot-2026-del-0a1b2c@example.com")).toBe(false);
+  });
+});
+
+describe("server messages (NOTICE / WARNING) in the reports", () => {
+  const msg = (over: Record<string, unknown> = {}) => ({
+    severity: "WARNING", code: "01000", message: "something to know", hint: "a hint",
+    detail: "Key (user_id)=(row value) is quoted here", where: "PL/pgSQL function f() line 3", internalQuery: "SELECT secret", ...over,
+  });
+
+  it("keeps severity, SQLSTATE, message, hint and what ran; never detail, where or the internal query", () => {
+    const n = formatNotice(msg(), new Set(), "0023_account_deletion.sql");
+    expect(n).toEqual({ severity: "WARNING", code: "01000", message: "something to know", hint: "a hint", context: "0023_account_deletion.sql" });
+    expect(JSON.stringify(n)).not.toMatch(/row value|line 3|SELECT secret/);
+  });
+
+  it("redacts every known secret, then cuts long texts", () => {
+    const secret = "sb_secret_abcdefghijklmnopqrst";
+    const n = formatNotice(msg({ message: `oops ${secret} ${"x".repeat(1000)}`, hint: secret }), new Set([secret]));
+    expect(JSON.stringify(n)).not.toContain(secret);
+    expect(n.message.startsWith("oops [redacted]")).toBe(true);
+    expect(n.message.length).toBe(300);
+    expect(n.hint).toBe("[redacted]");
+  });
+
+  it("tolerates odd input: a bare string, no severity, a non-string code", () => {
+    expect(formatNotice("plain text", new Set())).toEqual({ severity: "NOTICE", code: null, message: "plain text", hint: null, context: null });
+    expect(formatNotice({ severity: "notice", code: 42, message: "m" }, new Set()).severity).toBe("NOTICE");
+    expect(formatNotice({ severity: "notice", code: 42, message: "m" }, new Set()).code).toBeNull();
+  });
+
+  it("collects every message of a client with the context current at that moment, and counts them", async () => {
+    const { EventEmitter } = await import("node:events");
+    const client = new EventEmitter();
+    const sink: Array<{ severity: string; context: string | null }> = [];
+    let ctx: string | null = "0001_init.sql";
+    attachNoticeLog(client, sink, new Set(), () => ctx);
+    client.emit("notice", msg({ severity: "NOTICE" }));
+    ctx = "0002_profile_defaults.sql";
+    client.emit("notice", msg());
+    ctx = null;
+    client.emit("notice", msg({ severity: "INFO" }));
+    expect(sink.map((n) => [n.severity, n.context])).toEqual([["NOTICE", "0001_init.sql"], ["WARNING", "0002_profile_defaults.sql"], ["INFO", null]]);
+    expect(noticeCounts(sink)).toEqual({ NOTICE: 1, WARNING: 1, INFO: 1 });
   });
 });
