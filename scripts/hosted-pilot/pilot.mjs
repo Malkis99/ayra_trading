@@ -656,11 +656,12 @@ const steps = {
     note("the challenge store", { store: has0024 ? "the pilot database (0024)" : "in-memory stand-in (0024 not on the pilot)" });
     let clock = Date.now();
     const mem = new Map();
-    const memRpc = (fn, u) => {
+    const uuidOf = (hex) => `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+    const memRpc = (fn, u, challenge) => {
       const c = mem.get(u);
       if (fn === "account_deletion_challenge_issue") {
         if (c && c.issuedAt > clock - 60_000) return { data: null, error: { message: "account_deletion_challenge_too_soon" } };
-        mem.set(u, { issuedAt: clock, expiresAt: clock + 600_000, tries: 0, used: false });
+        mem.set(u, { id: randomBytes(16).toString("hex"), issuedAt: clock, expiresAt: clock + 600_000, tries: 0, used: false });
         return { data: { expiresInSec: 600, maxTries: 5 }, error: null };
       }
       if (fn === "account_deletion_challenge_try") {
@@ -669,10 +670,10 @@ const steps = {
         if (c.expiresAt <= clock) return { data: { ok: false, reason: "expired" }, error: null };
         if (c.tries >= 5) return { data: { ok: false, reason: "too_many" }, error: null };
         c.tries++;
-        return { data: { ok: true, tryNo: c.tries }, error: null };
+        return { data: { ok: true, tryNo: c.tries, challengeId: uuidOf(c.id) }, error: null };
       }
       if (fn === "account_deletion_challenge_use") {
-        if (!c || c.used || c.expiresAt <= clock || c.tries < 1) return { data: false, error: null };
+        if (!c || uuidOf(c.id) !== challenge || c.used || c.expiresAt <= clock || c.tries < 1 || c.tries > 5) return { data: false, error: null };
         c.used = true;
         return { data: true, error: null };
       }
@@ -708,7 +709,7 @@ const steps = {
           reached = true; // the proof was accepted; the deletion itself is not part of this step
           return { data: null, error: { message: "pilot_stop_before_begin" } };
         }
-        if (!has0024 && fn.startsWith("account_deletion_challenge_")) return memRpc(fn, String(args.p_user));
+        if (!has0024 && fn.startsWith("account_deletion_challenge_")) return memRpc(fn, String(args.p_user), args.p_challenge);
         const { data, error } = await svc.rpc(fn, args);
         return { data, error: error ? { code: error.code, message: error.message } : null };
       },

@@ -18,6 +18,7 @@ import type { RateLimiter } from "@/lib/game-server/rate-limit";
 
 /** A one-time e-mail code as the auth server makes them (its length is a project setting: 6–10 digits). */
 export const CODE_RE = /^[0-9]{6,10}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** What the person types to confirm (either language). */
 export const DELETE_PHRASES = ["УДАЛИТЬ", "DELETE"] as const;
 /** At most this many rounds of «list → remove» per request (each removes up to a page of 1000 files). */
@@ -90,13 +91,17 @@ async function proveItIsThem(deps: DeletionDeps, user: DeletionUser, body: { pas
     if (!user.email || !CODE_RE.test(code)) return refuse("code_invalid");
     // the try is counted before the auth server sees the code (a wrong code spends it)
     const t = await deps.rpc("account_deletion_challenge_try", { p_user: user.id });
-    const tr = t.data as { ok?: unknown; reason?: unknown } | null;
+    const tr = t.data as { ok?: unknown; reason?: unknown; challengeId?: unknown } | null;
     if (t.error || !tr || typeof tr !== "object") return { status: 503, body: { error: "unavailable" } };
     if (tr.ok !== true) return refuse(CHALLENGE_REFUSAL[String(tr.reason)] ?? "code_required");
+    // the challenge this try was counted on — from the database only, never from the request
+    const challengeId = typeof tr.challengeId === "string" && UUID_RE.test(tr.challengeId) ? tr.challengeId : null;
+    if (!challengeId) return refuse("code_required");
     const v = await deps.verifyCode(user.email, code);
     if (!v || v.userId !== user.id) return refuse("code_invalid");
-    // spent once: a second use (or one racing this) gets FALSE
-    const used = await deps.rpc("account_deletion_challenge_use", { p_user: user.id });
+    // spent once and only while it is still that challenge: a second use, one racing this, or a challenge opened again
+    // during the check all get FALSE
+    const used = await deps.rpc("account_deletion_challenge_use", { p_user: user.id, p_challenge: challengeId });
     if (used.error || used.data !== true) return refuse("code_used");
     return null;
   }

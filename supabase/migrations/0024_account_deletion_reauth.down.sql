@@ -3,6 +3,7 @@
 
 BEGIN;
 
+DROP FUNCTION IF EXISTS public.account_deletion_challenge_use(UUID, UUID);
 DROP FUNCTION IF EXISTS public.account_deletion_challenge_use(UUID);
 DROP FUNCTION IF EXISTS public.account_deletion_challenge_try(UUID);
 DROP FUNCTION IF EXISTS public.account_deletion_challenge_issue(UUID);

@@ -1012,7 +1012,7 @@ export function createFakeSupabase() {
         if (!exists) return raise("account_deletion_no_user");
         const c = challenges.get(uid);
         if (c && c.issuedAt > Date.now() - 60_000) return raise("account_deletion_challenge_too_soon");
-        challenges.set(uid, { issuedAt: Date.now(), expiresAt: Date.now() + 600_000, tries: 0, used: false });
+        challenges.set(uid, { id: crypto.randomUUID(), issuedAt: Date.now(), expiresAt: Date.now() + 600_000, tries: 0, used: false });
         return send(200, { expiresInSec: 600, maxTries: 5 });
       }
       if (fn === "account_deletion_challenge_try") {
@@ -1022,11 +1022,11 @@ export function createFakeSupabase() {
         if (c.expiresAt <= Date.now()) return send(200, { ok: false, reason: "expired" });
         if (c.tries >= 5) return send(200, { ok: false, reason: "too_many" });
         c.tries++;
-        return send(200, { ok: true, tryNo: c.tries });
+        return send(200, { ok: true, tryNo: c.tries, challengeId: c.id });
       }
       if (fn === "account_deletion_challenge_use") {
         const c = challenges.get(uid);
-        if (!c || c.used || c.expiresAt <= Date.now() || c.tries < 1 || c.tries > 5) return send(200, false);
+        if (!c || c.id !== body.p_challenge || c.used || c.expiresAt <= Date.now() || c.tries < 1 || c.tries > 5) return send(200, false);
         c.used = true;
         return send(200, true);
       }

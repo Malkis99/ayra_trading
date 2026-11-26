@@ -860,21 +860,97 @@ wait
   && ok "Q4: a journal row in flight during the deletion: none left (it commits before the cascade, or its foreign key refuses it)" \
   || bad "Q4: rows=$(q "SELECT count(*) FROM public.journal_notes WHERE user_id = '$U4'") err=$(cat "$TMP"/up_4.err)"
 
-# R. 0024 (Q4.7 P5 remediation): one challenge, used by 5 requests at once (a double click, two tabs with the same code):
-#    exactly one use; 10 tries at once: at most 5 counted
+# R. 0024 (Q4.7 P5 remediation): the challenge under concurrency. Every use names the challenge id its try answered.
+#   R1 — 5 uses of one challenge at once (a double click, two tabs with the same code): exactly one.
+#   R2 — 10 tries at once: 5 counted, 5 refused.
+#   R3 — deterministic: a use holds the row (not committed) → a second use of the same challenge is SEEN waiting on it →
+#        the first commits → the second finds it spent: false.
+#   R4 — deterministic: a try on the old challenge → a new challenge is opened and held (not committed) → the use of the
+#        old try is SEEN waiting on it → commit → the use finds another id: false; the new challenge is untouched.
+#   R5 — in order, each step committed: a try on the old challenge → a new challenge → a try on the NEW one (another tab)
+#        → the old try's use: false; the new challenge (tried, open) is spent only by its own id. Without the id check
+#        the old use would spend the new, already tried challenge (the mutation check of this test).
+#   The order is set by gates (q_gate) and seen in pg_stat_activity, never by timing.
 psql -X -q -v ON_ERROR_STOP=1 -d "$DB" -f supabase/migrations/0024_account_deletion_reauth.sql >/dev/null 2>"$TMP/r0.err" \
   && ok "R0: 0024 on PostgreSQL" || bad "R0: $(cat "$TMP/r0.err")"
+rissue() { q "SET ROLE service_role; SELECT public.account_deletion_challenge_issue('$1');" >/dev/null; }
+rtry() { q "SET ROLE service_role; SELECT public.account_deletion_challenge_try('$1') ->> 'challengeId';"; }
+rage() { q "UPDATE public.account_deletion_challenges SET issued_at = now() - interval '61 seconds' WHERE user_id = '$1'" >/dev/null; }
+# waits until a session runs the given function and waits on a lock
+rwait_lock() {
+  local i
+  for i in $(seq 1 100); do
+    [ "$(q "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%$1%' AND pid <> pg_backend_pid()")" -ge 1 ] && return 0
+    sleep 0.1
+  done
+  return 1
+}
+# waits until a held session is parked in its gate (its first statement done, its transaction open)
+rwait_gate() {
+  local i
+  for i in $(seq 1 100); do
+    [ "$(q "SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND query LIKE '%q_gate%$1%' AND pid <> pg_backend_pid()")" -ge 1 ] && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
 R1=00000000-0000-0000-0000-00000024e001
-q "INSERT INTO auth.users (id, email) VALUES ('$R1', 'r1@example.com');
-   SET ROLE service_role; SELECT public.account_deletion_challenge_issue('$R1'); SELECT public.account_deletion_challenge_try('$R1');" >/dev/null
-for k in 1 2 3 4 5; do echo "SELECT CASE WHEN public.account_deletion_challenge_use('$R1') THEN 'used' ELSE 'refused' END;"; done | parallel
-[ "$(count_out used)" = 1 ] && [ "$(count_out refused)" = 4 ] && [ "$(cat "$TMP"/out/*.err | grep -c ERROR)" = 0 ] \
-  && ok "R1: 5 uses of one challenge at once → exactly one" || bad "R1: used=$(count_out used) refused=$(count_out refused) errs=$(cat "$TMP"/out/*.err)"
+q "INSERT INTO auth.users (id, email) VALUES ('$R1', 'r1@example.com');" >/dev/null
+rissue "$R1"; R1C=$(rtry "$R1")
+for k in 1 2 3 4 5; do echo "SELECT CASE WHEN public.account_deletion_challenge_use('$R1', '$R1C') THEN 'used' ELSE 'refused' END;"; done | parallel
+[ -n "$R1C" ] && [ "$(count_out used)" = 1 ] && [ "$(count_out refused)" = 4 ] && [ "$(cat "$TMP"/out/*.err | grep -c ERROR)" = 0 ] \
+  && ok "R1: 5 uses of one challenge at once → exactly one" || bad "R1: id=$R1C used=$(count_out used) refused=$(count_out refused) errs=$(cat "$TMP"/out/*.err)"
+
 R2=00000000-0000-0000-0000-00000024e002
-q "INSERT INTO auth.users (id, email) VALUES ('$R2', 'r2@example.com'); SET ROLE service_role; SELECT public.account_deletion_challenge_issue('$R2');" >/dev/null
+q "INSERT INTO auth.users (id, email) VALUES ('$R2', 'r2@example.com');" >/dev/null
+rissue "$R2"
 for k in $(seq 1 10); do echo "SELECT public.account_deletion_challenge_try('$R2') ->> 'ok';"; done | parallel
 [ "$(count_out true)" = 5 ] && [ "$(count_out false)" = 5 ] && [ "$(q "SELECT tries FROM public.account_deletion_challenges WHERE user_id = '$R2'")" = 5 ] \
   && ok "R2: 10 tries at once → 5 counted, 5 refused" || bad "R2: true=$(count_out true) false=$(count_out false) errs=$(cat "$TMP"/out/*.err)"
+
+R3=00000000-0000-0000-0000-00000024e003
+q "INSERT INTO auth.users (id, email) VALUES ('$R3', 'r3@example.com');" >/dev/null
+rissue "$R3"; R3C=$(rtry "$R3")
+psql -X -q -At -v ON_ERROR_STOP=1 -d "$DB" -c "BEGIN;" -c "SET LOCAL ROLE service_role;" \
+  -c "SELECT CASE WHEN public.account_deletion_challenge_use('$R3', '$R3C') THEN 'used' ELSE 'refused' END;" \
+  -c "RESET ROLE;" -c "$(qgate_wait_sql r3_first)" -c "COMMIT;" >"$TMP/r3a.out" 2>"$TMP/r3a.err" &
+rwait_gate r3_first || bad "R3: the first use did not park"
+psql -X -q -At -v ON_ERROR_STOP=1 -d "$DB" -c "SET ROLE service_role;" \
+  -c "SELECT CASE WHEN public.account_deletion_challenge_use('$R3', '$R3C') THEN 'used' ELSE 'refused' END;" >"$TMP/r3b.out" 2>"$TMP/r3b.err" &
+r3_waits=$(rwait_lock account_deletion_challenge_use && echo yes || echo no)
+qgate_open r3_first
+wait
+[ "$r3_waits" = yes ] && [ "$(grep -c -x used "$TMP/r3a.out")" = 1 ] && [ "$(grep -c -x refused "$TMP/r3b.out")" = 1 ] && [ ! -s "$TMP/r3a.err" ] && [ ! -s "$TMP/r3b.err" ] \
+  && ok "R3: the second use waited on the first (seen), then found it spent → exactly one" \
+  || bad "R3: waits=$r3_waits a=$(cat "$TMP/r3a.out" "$TMP/r3a.err") b=$(cat "$TMP/r3b.out" "$TMP/r3b.err")"
+
+R4=00000000-0000-0000-0000-00000024e004
+q "INSERT INTO auth.users (id, email) VALUES ('$R4', 'r4@example.com');" >/dev/null
+rissue "$R4"; R4OLD=$(rtry "$R4"); rage "$R4"
+psql -X -q -At -v ON_ERROR_STOP=1 -d "$DB" -c "BEGIN;" -c "SET LOCAL ROLE service_role;" \
+  -c "SELECT public.account_deletion_challenge_issue('$R4') ->> 'expiresInSec';" \
+  -c "RESET ROLE;" -c "$(qgate_wait_sql r4_issue)" -c "COMMIT;" >"$TMP/r4a.out" 2>"$TMP/r4a.err" &
+rwait_gate r4_issue || bad "R4: the new challenge did not park"
+psql -X -q -At -v ON_ERROR_STOP=1 -d "$DB" -c "SET ROLE service_role;" \
+  -c "SELECT CASE WHEN public.account_deletion_challenge_use('$R4', '$R4OLD') THEN 'used' ELSE 'refused' END;" >"$TMP/r4b.out" 2>"$TMP/r4b.err" &
+r4_waits=$(rwait_lock account_deletion_challenge_use && echo yes || echo no)
+qgate_open r4_issue
+wait
+r4_row=$(q "SELECT (challenge_id <> '$R4OLD')::text || ',' || (used_at IS NULL)::text || ',' || tries FROM public.account_deletion_challenges WHERE user_id = '$R4'")
+[ "$r4_waits" = yes ] && [ "$(grep -c -x refused "$TMP/r4b.out")" = 1 ] && [ "$r4_row" = "true,true,0" ] && [ ! -s "$TMP/r4a.err" ] && [ ! -s "$TMP/r4b.err" ] \
+  && ok "R4: a challenge opened again during the check: the old try's use waited (seen), then refused; the new one untouched" \
+  || bad "R4: waits=$r4_waits b=$(cat "$TMP/r4b.out" "$TMP/r4b.err") row=$r4_row a=$(cat "$TMP/r4a.err")"
+
+R5=00000000-0000-0000-0000-00000024e005
+q "INSERT INTO auth.users (id, email) VALUES ('$R5', 'r5@example.com');" >/dev/null
+rissue "$R5"; R5OLD=$(rtry "$R5"); rage "$R5"; rissue "$R5"; R5NEW=$(rtry "$R5")
+r5_old=$(q "SET ROLE service_role; SELECT CASE WHEN public.account_deletion_challenge_use('$R5', '$R5OLD') THEN 'used' ELSE 'refused' END;")
+r5_mid=$(q "SELECT (used_at IS NULL)::text || ',' || tries FROM public.account_deletion_challenges WHERE user_id = '$R5'")
+r5_own=$(q "SET ROLE service_role; SELECT CASE WHEN public.account_deletion_challenge_use('$R5', '$R5NEW') THEN 'used' ELSE 'refused' END;")
+[ "$r5_old" = refused ] && [ "$r5_mid" = "true,1" ] && [ "$r5_own" = used ] && [ -n "$R5NEW" ] && [ "$R5NEW" != "$R5OLD" ] \
+  && ok "R5: after the new challenge was tried, the old try's use is refused; only the new id spends it" \
+  || bad "R5: old=$r5_old mid=$r5_mid own=$r5_own"
 
 psql -X -q -d postgres -c "DROP DATABASE IF EXISTS $DB" >/dev/null
 rm -rf "$TMP"
