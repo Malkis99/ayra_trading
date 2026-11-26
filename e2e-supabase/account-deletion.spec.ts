@@ -130,7 +130,7 @@ test.describe("Q4.7-Б1 deleting one's own account (fake Supabase)", () => {
     expect(await files(request, a.userId)).toEqual([]);
   });
 
-  test("an old sign-in without the password: asked to confirm it is them, nothing starts; the password is enough", async ({ page, request }) => {
+  test("an old sign-in without a proof: asked to confirm it is them, nothing starts; the password is enough", async ({ page, request }) => {
     const email = `DelOld_${Date.now()}_${Math.round(Math.random() * 1e4)}@example.com`;
     await request.get(`${FAKE_SUPABASE}/__test/auth-age?email=${encodeURIComponent(email)}&seconds=1800`); // its sign-ins count as 30 minutes old
     await signIn(page, email);
@@ -151,11 +151,26 @@ test.describe("Q4.7-Б1 deleting one's own account (fake Supabase)", () => {
     await request.get(`${FAKE_SUPABASE}/__test/auth-age?email=${encodeURIComponent(email)}&seconds=0`);
   });
 
-  test("a sign-in of a few minutes ago is enough without the password", async ({ page, request }) => {
+  test("a sign-in a moment ago is no proof (P5): asked to confirm; a one-time code from the e-mail is — a wrong one is not", async ({ page, request }) => {
     const a = await account(page, request, "DelFresh");
     await putFiles(request, a.email, 1);
     await openDelete(page);
     await page.getByTestId("delete-account-phrase").fill("УДАЛИТЬ");
+    await page.getByTestId("delete-account-submit").click();
+    await expect(page.getByTestId("delete-account-error")).toHaveAttribute("data-code", "reauth_required");
+    expect((await deletion(request, a.email)).deletion).toBeNull();
+    // the code instead of the password: the letter comes only after the typed word, then the code is checked by the auth server
+    await page.getByTestId("delete-account-switch-proof").click();
+    await expect(page.getByTestId("delete-account-submit")).toBeDisabled();
+    await page.getByTestId("delete-account-send-code").click();
+    await expect(page.getByTestId("delete-account-code-sent")).toContainText(a.email);
+    const code = (await (await request.get(`${FAKE_SUPABASE}/__test/last-code?email=${encodeURIComponent(a.email)}`)).json()).code as string;
+    const wrong = code === "111111" ? "222222" : "111111";
+    await page.getByTestId("delete-account-code").fill(wrong);
+    await page.getByTestId("delete-account-submit").click();
+    await expect(page.getByTestId("delete-account-error")).toHaveAttribute("data-code", "code_invalid");
+    expect((await deletion(request, a.email)).deletion).toBeNull();
+    await page.getByTestId("delete-account-code").fill(code);
     await page.getByTestId("delete-account-submit").click();
     await page.waitForURL((u) => u.pathname === "/login", { timeout: 30_000 });
     expect((await deletion(request, a.email)).exists).toBe(false);

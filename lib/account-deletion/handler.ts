@@ -2,19 +2,23 @@
  * Q4.7-Б1 — deleting one's own account, files included (docs/q4-7-b1-account-deletion-storage.md).
  *
  *   GET  /api/account/delete   — the state of the person's own deletion (none / requested / files_listed / files_deleted)
- *   POST /api/account/delete   { confirm, password? } — starts or continues it, until the account is gone
+ *   POST /api/account/delete   { confirm, action: "send_code" } — a one-time code to the account's e-mail (0024)
+ *   POST /api/account/delete   { confirm, password? | code? } — starts or continues it, until the account is gone
  *
- * The person is the verified session's user only (never an id from the request). A POST needs the typed confirmation and a
- * recent proof that it is them: their password (checked by the auth server), or a sign-in within REAUTH_MAX_AGE_S (the
- * token's `amr` time — a refreshed token keeps the time of the sign-in). Then, with the service key and the database's
+ * The person is the verified session's user only (never an id from the request). Every POST needs the typed confirmation
+ * and a proof made now that it is them (P5 remediation: a recent sign-in is not one — the token's `amr` cannot tell a
+ * password-recovery link from a magic link): their password, checked by the auth server, or a one-time e-mail code — the
+ * database opens a challenge for this account and this deletion (expiry, tries, one use), the auth server sends the code
+ * and later checks it, and the account it belongs to must be this one. Then, with the service key and the database's
  * steps (0023): the request (no more journal writes or uploads), the other devices signed out, the server's file list,
  * removal through the Storage API until nothing is left, the database's check, the auth user deleted (every row goes
  * with it). Any failure answers «retry» with what is left; nothing is called done before the auth user is deleted.
  */
 import type { RateLimiter } from "@/lib/game-server/rate-limit";
 
-/** A sign-in at most this old may delete the account without the password (seconds). */
-export const REAUTH_MAX_AGE_S = 10 * 60;
+/** A one-time e-mail code as the auth server makes them (its length is a project setting: 6–10 digits). */
+export const CODE_RE = /^[0-9]{6,10}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** What the person types to confirm (either language). */
 export const DELETE_PHRASES = ["УДАЛИТЬ", "DELETE"] as const;
 /** At most this many rounds of «list → remove» per request (each removes up to a page of 1000 files). */
@@ -24,8 +28,6 @@ export const DELETION_RATE = { limit: 10, windowMs: 60_000 };
 export interface DeletionUser {
   id: string;
   email: string | null;
-  /** when the person last signed in (the newest `amr` timestamp of the verified token), seconds; null when unknown */
-  authAt: number | null;
 }
 
 export type DeletionState = null | "requested" | "files_listed" | "files_deleted";
@@ -43,6 +45,10 @@ export interface DeletionDeps {
   getUser(): Promise<DeletionUser | null>;
   /** the auth server checks the password (no session is kept from it) */
   verifyPassword(email: string, password: string): Promise<boolean>;
+  /** the auth server sends a one-time code to this e-mail (never creates an account) */
+  sendCode(email: string): Promise<{ error: null | "rate_limited" | "failed" }>;
+  /** the auth server checks the code for this e-mail: the account it belongs to (no session is kept), or null */
+  verifyCode(email: string, code: string): Promise<{ userId: string } | null>;
   rpc(fn: string, args: Record<string, unknown>): Promise<{ data: unknown; error: { code?: string; message?: string } | null }>;
   /** the Storage API with the service key: removes these names of the bucket; answers the names it removed */
   removeFiles(bucket: string, names: string[]): Promise<{ removed: string[]; error: string | null }>;
@@ -60,39 +66,46 @@ export interface DeletionResult {
 
 export { accountDeletionEnabled } from "./flag";
 
-/**
- * The sign-in methods whose `amr` time proves the person themselves just proved who they are to the auth server: the
- * password, or a code / link sent to their e-mail (the ways AYRA signs people in). Any other method (OAuth, SSO, a
- * recovery link, an anonymous session, one the auth server adds later) is not taken as a recent proof: the password is
- * asked instead. A token refresh is not a sign-in (it keeps the sign-in's `amr`).
- */
-export const PROVEN_AUTH_METHODS = ["password", "otp", "magiclink", "email/signup"] as const;
-
-/**
- * When the person last proved who they are: the newest `amr` timestamp of a proven method (above) in an access token
- * the auth server has JUST verified. Seconds, or null when there is none (no `amr`, only other methods, a bad token).
- */
-export function newestAuthTime(accessToken: string | null | undefined): number | null {
-  const part = accessToken?.split(".")[1];
-  if (!part) return null;
-  try {
-    const claims = JSON.parse(Buffer.from(part, "base64url").toString("utf8")) as { amr?: Array<{ method?: unknown; timestamp?: unknown }> };
-    const times = (Array.isArray(claims.amr) ? claims.amr : [])
-      .filter((a) => typeof a?.method === "string" && (PROVEN_AUTH_METHODS as readonly string[]).includes(a.method))
-      .map((a) => a.timestamp)
-      .filter((t): t is number => typeof t === "number" && Number.isFinite(t));
-    return times.length ? Math.max(...times) : null;
-  } catch {
-    return null;
-  }
-}
-
 const errorCode = (message: string | undefined) => (message?.match(/account_deletion_[a-z_]+/)?.[0] ?? null);
 
 async function status(deps: DeletionDeps, userId: string): Promise<DeletionStatus | null> {
   const { data, error } = await deps.rpc("account_deletion_status", { p_user: userId });
   if (error || !data || typeof data !== "object") return null;
   return data as DeletionStatus;
+}
+
+const refuse = (error: string, extra: Record<string, unknown> = {}): DeletionResult => ({ status: 403, body: { error, ...extra } });
+const CHALLENGE_REFUSAL: Record<string, string> = { none: "code_required", expired: "code_expired", used: "code_used", too_many: "code_too_many" };
+
+/**
+ * A proof made now that it is the person, or the refusal. Fails closed: anything unexpected (a database or auth server
+ * error, an answer of another shape, another account) is a refusal, never a pass.
+ */
+async function proveItIsThem(deps: DeletionDeps, user: DeletionUser, body: { password?: unknown; code?: unknown }): Promise<DeletionResult | null> {
+  if (typeof body.password === "string" && body.password.length > 0) {
+    if (!user.email || !(await deps.verifyPassword(user.email, body.password))) return refuse("wrong_password");
+    return null;
+  }
+  if (typeof body.code === "string" && body.code.trim().length > 0) {
+    const code = body.code.trim();
+    if (!user.email || !CODE_RE.test(code)) return refuse("code_invalid");
+    // the try is counted before the auth server sees the code (a wrong code spends it)
+    const t = await deps.rpc("account_deletion_challenge_try", { p_user: user.id });
+    const tr = t.data as { ok?: unknown; reason?: unknown; challengeId?: unknown } | null;
+    if (t.error || !tr || typeof tr !== "object") return { status: 503, body: { error: "unavailable" } };
+    if (tr.ok !== true) return refuse(CHALLENGE_REFUSAL[String(tr.reason)] ?? "code_required");
+    // the challenge this try was counted on — from the database only, never from the request
+    const challengeId = typeof tr.challengeId === "string" && UUID_RE.test(tr.challengeId) ? tr.challengeId : null;
+    if (!challengeId) return refuse("code_required");
+    const v = await deps.verifyCode(user.email, code);
+    if (!v || v.userId !== user.id) return refuse("code_invalid");
+    // spent once and only while it is still that challenge: a second use, one racing this, or a challenge opened again
+    // during the check all get FALSE
+    const used = await deps.rpc("account_deletion_challenge_use", { p_user: user.id, p_challenge: challengeId });
+    if (used.error || used.data !== true) return refuse("code_used");
+    return null;
+  }
+  return refuse("reauth_required", { methods: ["password", "code"] });
 }
 
 export async function handleAccountDeletion(req: Request, deps: DeletionDeps): Promise<DeletionResult> {
@@ -108,7 +121,7 @@ export async function handleAccountDeletion(req: Request, deps: DeletionDeps): P
   }
   if (req.method !== "POST") return { status: 405, body: { error: "method_not_allowed" } };
 
-  let body: { confirm?: unknown; password?: unknown };
+  let body: { confirm?: unknown; password?: unknown; code?: unknown; action?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -118,12 +131,25 @@ export async function handleAccountDeletion(req: Request, deps: DeletionDeps): P
   if (typeof body.confirm !== "string" || !(DELETE_PHRASES as readonly string[]).includes(body.confirm.trim())) {
     return { status: 400, body: { error: "confirm_required" } };
   }
-  // it is really them: the password, or a recent sign-in
-  if (typeof body.password === "string" && body.password.length > 0) {
-    if (!user.email || !(await deps.verifyPassword(user.email, body.password))) return { status: 403, body: { error: "wrong_password" } };
-  } else if (user.authAt === null || deps.now() / 1000 - user.authAt > REAUTH_MAX_AGE_S) {
-    return { status: 403, body: { error: "reauth_required", maxAgeSec: REAUTH_MAX_AGE_S } };
+  // a one-time code to the account's e-mail: a new challenge first (the database limits how often), then the letter
+  if (body.action === "send_code") {
+    if (!user.email) return refuse("code_unavailable");
+    const issued = await deps.rpc("account_deletion_challenge_issue", { p_user: user.id });
+    if (issued.error) {
+      const code = errorCode(issued.error.message);
+      return code === "account_deletion_challenge_too_soon" ? { status: 429, body: { error: "code_too_soon" } } : { status: 503, body: { error: "unavailable" } };
+    }
+    const sent = await deps.sendCode(user.email);
+    if (sent.error === "rate_limited") return { status: 429, body: { error: "code_too_soon" } };
+    if (sent.error) return { status: 503, body: { error: "code_not_sent" } };
+    const info = (issued.data && typeof issued.data === "object" ? issued.data : {}) as { expiresInSec?: number; maxTries?: number };
+    return { status: 200, body: { challenge: "sent", expiresInSec: info.expiresInSec ?? null, maxTries: info.maxTries ?? null } };
   }
+  if (body.action !== undefined) return { status: 400, body: { error: "bad_request" } };
+
+  // it is really them, every time (also when continuing an unfinished deletion)
+  const refused = await proveItIsThem(deps, user, body);
+  if (refused) return refused;
 
   const fail = async (code: string, http = 503): Promise<DeletionResult> => {
     await deps.rpc("account_deletion_failed", { p_user: user.id, p_code: code });

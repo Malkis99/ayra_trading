@@ -57,6 +57,8 @@ export function createFakeSupabase() {
   const sessionAuthAt = new Map(); // auth session id -> when it signed in (seconds): the token's amr timestamp
   // Q4.7-Б1 (0023 stand-in): accounts being deleted — user id -> { state, attempts, listed: Set<path>, counted, lastError }
   const deletions = new Map();
+  // 0024: the deletion's proof challenges (user id -> { issuedAt, expiresAt, tries, used }) — the same limits as the migration
+  const challenges = new Map();
   const deletionStats = { requests: 0, retries: 0, accounts_deleted: 0, files_deleted: 0 };
   let storageDeleteFailLeft = 0; // the service key's next N file removals fail (the Storage API answers without them)
   const deletedUsers = []; // ids the admin API deleted
@@ -404,7 +406,13 @@ export function createFakeSupabase() {
     // ---- GoTrue ----
     if (path === "/auth/v1/otp" && req.method === "POST") {
       const body = await readBody(req);
+      // «shouldCreateUser: false» (the deletion's code): no account is made for an unknown e-mail, like GoTrue
+      if (body.create_user === false && !usersByEmail.has(body.email)) return send(422, { code: "otp_disabled", error_code: "otp_disabled", msg: "Signups not allowed for otp" });
       const user = getOrCreateUser(body.email);
+      // the letter also carries a 6-digit code ({{ .Token }}), checked with type «email»
+      const token = String(crypto.randomInt(100000, 1000000));
+      emailCodes.set(user.email, { token, type: "magiclink" });
+      lastCodeByEmail.set(user.email, token);
       const code = crypto.randomUUID();
       pendingCodes.set(code, { email: user.email, challenge: body.code_challenge, method: body.code_challenge_method });
       const redirectTo = url.searchParams.get("redirect_to") || "http://localhost:3001/auth/callback";
@@ -464,7 +472,7 @@ export function createFakeSupabase() {
     if (path === "/auth/v1/verify" && req.method === "POST") {
       const body = await readBody(req);
       const pending = emailCodes.get(body.email);
-      const typeOk = pending && (body.type === pending.type || (body.type === "email" && pending.type === "signup"));
+      const typeOk = pending && (body.type === pending.type || (body.type === "email" && ["signup", "magiclink"].includes(pending.type)));
       if (!pending || pending.token !== body.token || !typeOk) {
         return send(403, { code: "otp_expired", error_code: "otp_expired", msg: "Token has expired or is invalid" });
       }
@@ -1000,6 +1008,28 @@ export function createFakeSupabase() {
       };
       const raise = (code) => send(400, { code: "22023", message: code, details: null, hint: null });
       if (fn === "account_deletion_status") return send(200, status());
+      if (fn === "account_deletion_challenge_issue") {
+        if (!exists) return raise("account_deletion_no_user");
+        const c = challenges.get(uid);
+        if (c && c.issuedAt > Date.now() - 60_000) return raise("account_deletion_challenge_too_soon");
+        challenges.set(uid, { id: crypto.randomUUID(), issuedAt: Date.now(), expiresAt: Date.now() + 600_000, tries: 0, used: false });
+        return send(200, { expiresInSec: 600, maxTries: 5 });
+      }
+      if (fn === "account_deletion_challenge_try") {
+        const c = challenges.get(uid);
+        if (!c) return send(200, { ok: false, reason: "none" });
+        if (c.used) return send(200, { ok: false, reason: "used" });
+        if (c.expiresAt <= Date.now()) return send(200, { ok: false, reason: "expired" });
+        if (c.tries >= 5) return send(200, { ok: false, reason: "too_many" });
+        c.tries++;
+        return send(200, { ok: true, tryNo: c.tries, challengeId: c.id });
+      }
+      if (fn === "account_deletion_challenge_use") {
+        const c = challenges.get(uid);
+        if (!c || c.id !== body.p_challenge || c.used || c.expiresAt <= Date.now() || c.tries < 1 || c.tries > 5) return send(200, false);
+        c.used = true;
+        return send(200, true);
+      }
       if (fn === "account_deletion_begin") {
         if (!exists) return raise("account_deletion_no_user");
         if (!d) { deletions.set(uid, { state: "requested", attempts: 0, listed: new Set(), counted: false, lastError: null }); deletionStats.requests++; }

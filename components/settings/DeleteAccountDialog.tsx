@@ -14,7 +14,8 @@ type ErrorKey = keyof ReturnType<typeof useApp>["dict"]["account"]["deletion"]["
 
 /**
  * Q4.7-Б1 — «Delete account» (docs/q4-7-b1-account-deletion-storage.md): what is deleted, that it cannot be undone, the
- * typed confirmation and a proof that it is the person (the password, or a sign-in within 10 minutes — the server decides).
+ * typed confirmation and a proof made now that it is the person — the password, or a one-time code the server has sent to
+ * the account's e-mail (P5 remediation: a recent sign-in is no proof). The server decides; this form only collects them.
  * The server deletes the files first and the account last; until it answers «deleted» nothing is called done, and a
  * failed step can be repeated safely. After it: this device's copy of the account is erased and the person is signed out.
  */
@@ -25,6 +26,9 @@ export function DeleteAccountDialog({ isOpen, onClose, resuming = false }: Props
   const router = useRouter();
   const [phrase, setPhrase] = useState("");
   const [password, setPassword] = useState("");
+  const [method, setMethod] = useState<"password" | "code">("password");
+  const [code, setCode] = useState("");
+  const [codeSent, setCodeSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ErrorKey | null>(null);
   const [left, setLeft] = useState<number | null>(null);
@@ -33,11 +37,40 @@ export function DeleteAccountDialog({ isOpen, onClose, resuming = false }: Props
     if (!isOpen) return;
     setPhrase("");
     setPassword("");
+    setCode("");
+    setCodeSent(false);
+    setMethod(user?.hasPassword ? "password" : "code");
     setError(null);
     setLeft(null);
-  }, [isOpen]);
+  }, [isOpen, user?.hasPassword]);
 
   const confirmed = phrase.trim() === t.phrase;
+  const showError = (body: { error?: string }, status: number) => {
+    setError((body.error && body.error in t.errors ? body.error : status === 429 ? "rate_limited" : "generic") as ErrorKey);
+  };
+
+  const sendCode = async () => {
+    if (busy || !confirmed || !user) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/account/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ confirm: phrase.trim(), action: "send_code" }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { challenge?: string; error?: string };
+      if (res.ok && body.challenge === "sent") {
+        setCodeSent(true);
+        setCode("");
+      } else showError(body, res.status);
+    } catch {
+      setError("unavailable");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,7 +82,7 @@ export function DeleteAccountDialog({ isOpen, onClose, resuming = false }: Props
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ confirm: phrase.trim(), ...(password ? { password } : {}) }),
+        body: JSON.stringify({ confirm: phrase.trim(), ...(method === "password" ? (password ? { password } : {}) : code.trim() ? { code: code.trim() } : {}) }),
       });
       const body = (await res.json().catch(() => ({}))) as { state?: string; error?: string; listed?: number; gone?: number };
       if (res.ok && body.state === "deleted") {
@@ -63,8 +96,7 @@ export function DeleteAccountDialog({ isOpen, onClose, resuming = false }: Props
         router.replace("/login");
         return;
       }
-      const code = (body.error && body.error in t.errors ? body.error : res.status === 429 ? "rate_limited" : "generic") as ErrorKey;
-      setError(code);
+      showError(body, res.status);
       setLeft(typeof body.listed === "number" && typeof body.gone === "number" ? Math.max(0, body.listed - body.gone) : null);
     } catch {
       setError("unavailable");
@@ -96,11 +128,33 @@ export function DeleteAccountDialog({ isOpen, onClose, resuming = false }: Props
           <input value={phrase} onChange={(e) => setPhrase(e.target.value)} className="input w-full text-sm" autoComplete="off" spellCheck={false}
             data-testid="delete-account-phrase" disabled={busy} />
         </label>
-        {user?.hasPassword ? (
+        <p className="text-[11px] text-mu">{t.proofLead}</p>
+        {method === "password" ? (
           <PasswordInput label={t.password} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password"
             showLabel={dict.account.password.show} hideLabel={dict.account.password.hide} data-testid="delete-account-password" />
         ) : (
-          <p className="text-[11px] text-mu" data-testid="delete-account-fresh-hint">{t.freshHint}</p>
+          <div className="space-y-2" data-testid="delete-account-code-block">
+            {codeSent && (
+              <p className="text-[11px] text-mu" data-testid="delete-account-code-sent">{t.codeSent.replace("{email}", user?.email ?? "")}</p>
+            )}
+            {codeSent && (
+              <label className="block space-y-1 text-xs">
+                <span className="text-mu">{t.codeLabel}</span>
+                <input value={code} onChange={(e) => setCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 10))} className="input w-full text-sm tracking-widest"
+                  inputMode="numeric" autoComplete="one-time-code" spellCheck={false} data-testid="delete-account-code" disabled={busy} />
+              </label>
+            )}
+            <button type="button" onClick={sendCode} disabled={!confirmed || busy} className="btn-ghost px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+              data-testid="delete-account-send-code">
+              {codeSent ? t.resendCode : t.sendCode}
+            </button>
+          </div>
+        )}
+        {user?.hasPassword && (
+          <button type="button" className="text-[11px] text-vi underline-offset-2 hover:underline focus-visible:underline" disabled={busy}
+            onClick={() => { setMethod(method === "password" ? "code" : "password"); setError(null); }} data-testid="delete-account-switch-proof">
+            {method === "password" ? t.useCode : t.usePassword}
+          </button>
         )}
 
         <div aria-live="polite">
@@ -116,7 +170,7 @@ export function DeleteAccountDialog({ isOpen, onClose, resuming = false }: Props
 
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="ghost" onClick={onClose} disabled={busy}>{t.cancel}</Button>
-          <button type="submit" disabled={!confirmed || busy} className="btn-danger px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+          <button type="submit" disabled={!confirmed || busy || (method === "code" && !codeSent)} className="btn-danger px-4 py-2 text-xs disabled:cursor-not-allowed disabled:opacity-50"
             data-testid="delete-account-submit">
             {error ? t.retry : t.submit}
           </button>

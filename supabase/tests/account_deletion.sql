@@ -243,7 +243,7 @@ DECLARE
 BEGIN
   SELECT string_agg(c.table_name, ', ') INTO v_missing FROM information_schema.columns c
   JOIN information_schema.tables tb ON tb.table_schema = c.table_schema AND tb.table_name = c.table_name AND tb.table_type = 'BASE TABLE'
-  WHERE c.table_schema = 'public' AND c.table_name NOT IN ('account_deletions', 'account_deletion_objects')
+  WHERE c.table_schema = 'public' AND c.table_name NOT IN ('account_deletions', 'account_deletion_objects', 'account_deletion_challenges') -- the procedure's own (0024: challenges open during a deletion)
     AND (c.column_name = 'user_id' OR (c.table_name = 'profiles' AND c.column_name = 'id'))
     AND NOT EXISTS (SELECT 1 FROM pg_trigger g WHERE g.tgrelid = ('public.' || quote_ident(c.table_name))::regclass AND g.tgname = 'tr_' || c.table_name || '_account_deletion');
   IF v_missing IS NOT NULL THEN RAISE EXCEPTION 'D8: tables without the deletion guard: %', v_missing; END IF;

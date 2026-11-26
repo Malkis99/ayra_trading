@@ -771,6 +771,28 @@ const fail = (m) => { console.log("FAIL", m); process.exitCode = 1; };
   await db.close();
 }
 
+// X. 0024: a proof made now before an account deletion (Q4.7 P5 remediation) on top of 0023 — applied twice; its tests;
+//    0023's tests still pass; only the service role calls it; rollback removes it
+{
+  const base = ["0001_init", "0002_profile_defaults", "0003_nickname_cooldown", "0004_journal_sync", "0005_journal_attachments", "0008_market_sync",
+    "0011_notifications", "0014_game_economy",
+    "0015_game_days", "0016_game_day_api", "0018_game_economy_sessions", "0019_game_migration_import", "0020_game_achievements",
+    "0021_game_achievement_proof", "0022_game_achievement_bulk_review", "0023_account_deletion"];
+  const db = await fresh();
+  for (const f of base) await db.exec(read(`supabase/migrations/${f}.sql`));
+  await db.exec(read("supabase/migrations/0024_account_deletion_reauth.sql"));
+  await db.exec(read("supabase/migrations/0024_account_deletion_reauth.sql")); ok("X: 0024 applied twice");
+  for (const t of ["account_deletion_reauth", "account_deletion"]) {
+    try { await db.exec(read(`supabase/tests/${t}.sql`)); ok(`X: tests/${t}.sql pass with 0024`); }
+    catch (e) { await db.exec("ROLLBACK").catch(() => {}); fail(`X: ${t} with 0024: ${e.message}`); }
+  }
+  await db.exec(read("supabase/migrations/0024_account_deletion_reauth.down.sql"));
+  const after = (await db.query(`SELECT to_regclass('public.account_deletion_challenges') IS NULL
+    AND to_regprocedure('public.account_deletion_challenge_issue(uuid)') IS NULL AND to_regprocedure('public.account_deletion_begin(uuid)') IS NOT NULL AS ok`)).rows[0];
+  after.ok ? ok("X: rollback removes 0024 and keeps 0023") : fail("X: rollback of 0024");
+  await db.close();
+}
+
 // S. Supabase compatibility (found on the official supabase/postgres image, Q4.5-2): «GRANT <role> TO CURRENT_USER»
 //    crashes the server process there (supautils, signal 11) — role grants must name the role (format(... %I, current_user))
 {

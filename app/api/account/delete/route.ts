@@ -3,12 +3,14 @@ import { createClient } from "@supabase/supabase-js";
 import { cleanApiKey, cleanSupabaseUrl } from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createRateLimiter } from "@/lib/game-server/rate-limit";
-import { DELETION_RATE, accountDeletionEnabled, handleAccountDeletion, newestAuthTime, type DeletionUser } from "@/lib/account-deletion/handler";
+import { DELETION_RATE, accountDeletionEnabled, handleAccountDeletion, type DeletionUser } from "@/lib/account-deletion/handler";
+import { authProofs } from "@/lib/account-deletion/auth-proofs";
 
 /**
  * Q4.7-Б1 — deleting one's own account, files included (docs/q4-7-b1-account-deletion-storage.md).
  *   GET  /api/account/delete              — the state of the person's own deletion
- *   POST /api/account/delete { confirm, password? } — starts or continues it
+ *   POST /api/account/delete { confirm, action: "send_code" } — a one-time code to the account's e-mail
+ *   POST /api/account/delete { confirm, password? | code? } — starts or continues it
  * The user comes only from the verified session. The service key is used here, on the server, for the database's steps
  * (0023), the Storage API and the auth server's admin calls — never sent to the browser. Off unless
  * NEXT_PUBLIC_AYRA_ACCOUNT_DELETION=1 (404) — the owner turns it on after migration 0023 is applied.
@@ -34,19 +36,14 @@ async function handle(req: Request) {
       const { data: s } = await session!.auth.getSession();
       jwt = s.session?.access_token ?? null;
       if (!jwt) return null;
-      // the auth server checks this very token; its sign-in time is read only after that
+      // the auth server checks this very token (how the person signed in is not read: it is no proof — the handler asks
+      // for one made now)
       const { data, error } = await session!.auth.getUser(jwt);
       if (error || !data.user) return null;
-      return { id: data.user.id, email: data.user.email ?? null, authAt: newestAuthTime(jwt) };
+      return { id: data.user.id, email: data.user.email ?? null };
     },
-    async verifyPassword(email, password) {
-      // a separate client: the check keeps no session (it is ended right away)
-      const check = createClient(url, anonKey, opts);
-      const { data, error } = await check.auth.signInWithPassword({ email, password });
-      if (error || !data.session) return false;
-      await check.auth.signOut({ scope: "local" }).catch(() => undefined);
-      return true;
-    },
+    // the password or a one-time e-mail code, checked by the auth server (shared with the hosted pilot)
+    ...authProofs(url, anonKey),
     async rpc(fn, args) {
       const { data, error } = await service!.rpc(fn, args);
       return { data, error: error ? { code: error.code, message: error.message } : null };

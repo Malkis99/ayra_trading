@@ -4,7 +4,7 @@ WITH user_tables AS (
   SELECT c.relname
   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
   WHERE n.nspname = 'public' AND c.relkind = 'r'
-    AND c.relname NOT IN ('account_deletions', 'account_deletion_objects')
+    AND c.relname NOT IN ('account_deletions', 'account_deletion_objects', 'account_deletion_challenges')
     AND (EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attname = 'user_id' AND NOT a.attisdropped)
          OR c.relname = 'profiles')
 ), guarded AS (
