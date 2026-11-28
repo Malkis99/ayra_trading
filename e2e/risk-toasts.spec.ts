@@ -90,7 +90,7 @@ test.describe("Risk warnings come before reward messages", () => {
     test(`${label}: the first trade at 80% of the daily limit — the warning stays, the reward comes after it, nothing is lost`, async ({ context, page }) => {
       await page.setViewportSize({ width, height });
       await seed(context, [account({ daily: 5000 })]);
-      await page.goto("/journal");
+      await page.goto("/journal?tab=trades");
       await saveTrade(page, "Edge Prop (USD)", "EURUSD", "-4000");
       await expectWarningHolds(page, "Дневной лимит использован на 80%");
       // on screen within the viewport (phone too), a large enough target to close
@@ -112,7 +112,7 @@ test.describe("Risk warnings come before reward messages", () => {
 
   test("the first trade reaches the daily limit — «limit reached» stays; the reward follows when its time runs out", async ({ context, page }) => {
     await seed(context, [account({ daily: 5000 })]);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     await saveTrade(page, "Edge Prop (USD)", "EURUSD", "-6000");
     await expectWarningHolds(page, "Лимит дня достигнут: проверь правила своей фирмы");
     // a warning's own time (7 s) ends; then the waiting reward
@@ -121,14 +121,14 @@ test.describe("Risk warnings come before reward messages", () => {
 
   test("a total-drawdown warning with the first-trade reward", async ({ context, page }) => {
     await seed(context, [account({ daily: 20000, drawdown: 10000 })]);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     await saveTrade(page, "Edge Prop (USD)", "EURUSD", "-8000");
     await expectWarningHolds(page, "Общая просадка использована на 80%");
   });
 
   test("two warnings in a short time: both are shown, in order; re-saving a trade repeats no warning; a reload shows none", async ({ context, page }) => {
     await seed(context, [account({ daily: 5000 })]);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     await saveTrade(page, "Edge Prop (USD)", "EURUSD", "-4000");
     await expect(page.getByText("Дневной лимит использован на 80%")).toBeVisible();
     await saveTrade(page, "Edge Prop (USD)", "GBPUSD", "-1500");
@@ -156,7 +156,7 @@ test.describe("Risk warnings come before reward messages", () => {
 
   test("an ordinary reward without a warning is shown as before", async ({ context, page }) => {
     await seed(context, [personal]);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     await saveTrade(page, "Main (USD)", "EURUSD", "100");
     await expect(toast(page)).toHaveAttribute("data-level", "info");
     await expect(toast(page)).toContainText("Впервые: сделка! +20 Coins, +20 XP");
@@ -165,7 +165,7 @@ test.describe("Risk warnings come before reward messages", () => {
 
   test("English: the warning stays and is read out as a risk warning", async ({ context, page }) => {
     await seed(context, [account({ daily: 5000 })], "en");
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     await saveTrade(page, "Edge Prop (USD)", "EURUSD", "-4000", "Add trade");
     await expectWarningHolds(page, "Daily limit used at 80%");
     await expect(riskAlert(page)).toContainText("Risk warning");

@@ -46,7 +46,7 @@ for (const size of [
     await seed(page);
 
     // the first trade: one-time reward + the daily quest «Trade log» (closed by the app)
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     await page.getByRole("button", { name: "Добавить сделку" }).first().click();
     const drawer = page.getByTestId("add-trade-drawer");
     await page.getByTestId("instrument-input").fill("us30");
