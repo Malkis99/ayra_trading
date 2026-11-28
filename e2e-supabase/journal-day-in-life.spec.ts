@@ -15,7 +15,7 @@ const SCREENSHOT = path.join(process.cwd(), "e2e/fixtures/test-screenshot.png");
 
 async function addTrade(page: Page, instrument: string, opts: { firstAccount?: string; navigate?: boolean } = {}) {
   // offline a page cannot be loaded: then the trade is added on the already open journal
-  if (opts.navigate !== false) await page.goto("/journal");
+  if (opts.navigate !== false) await page.goto("/journal?tab=trades");
   await page.getByRole("button", { name: "Добавить сделку" }).first().click();
   const drawer = page.getByTestId("add-trade-drawer");
   await expect(drawer).toBeVisible();
@@ -113,7 +113,7 @@ async function syncedPair(browser: Browser, request: APIRequestContext, email: s
   await signIn(B.page, email);
   await B.page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
   await expect(B.page.getByText("Журнал загружен из облака")).toBeVisible({ timeout: 15000 });
-  await B.page.goto("/journal");
+  await B.page.goto("/journal?tab=trades");
   await expect(B.page.getByTestId("trades-table")).toContainText("NAS100", { timeout: 15000 });
   return { A, B, userId };
 }
@@ -139,13 +139,13 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
       userId = ((await (await request.get(`${FAKE_SUPABASE}/__test/profile?email=${encodeURIComponent(email)}`)).json()).id) as string;
       await addTrade(A.page, "nas100", { firstAccount: "Main" }); // the owner's real journal before the flag
       await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${encodeURIComponent(email)}&on=1`);
-      await A.page.goto("/journal");
+      await A.page.goto("/journal?tab=trades");
       await expect(badge(A.page)).toHaveAttribute("data-state", "waitingInitial", { timeout: 15000 });
       await expect(A.page.getByTestId("initial-sync-button")).toBeVisible();
 
       const before = await deviceCounts(A.page);
       expect(before).toEqual({ journal_accounts: 1, journal_trades: 1 });
-      await A.page.goto("/journal");
+      await A.page.goto("/journal?tab=trades");
       await A.page.getByTestId("initial-sync-button").click();
       const dialog = A.page.getByTestId("initial-sync-dialog");
       const counts = dialog.getByTestId("initial-sync-counts");
@@ -173,7 +173,7 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
       await B.page.setViewportSize({ width: 360, height: 740 });
       await shot(B.page, "counters-360", "device-journal-counts");
       await B.page.setViewportSize({ width: 1440, height: 900 }); // trades are edited on the desktop table below
-      await B.page.goto("/journal");
+      await B.page.goto("/journal?tab=trades");
       await expect(B.page.getByTestId("initial-sync-button")).toHaveCount(0);
       await expect(B.page.getByTestId("trades-table")).toContainText("NAS100");
     });
@@ -185,7 +185,7 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
       await expect(B.page.getByTestId("trades-table")).toContainText("EURUSD", { timeout: 15000 });
       await editInstrument(B.page, "EURUSD", "gbpusd");
       await expect.poll(() => liveInstruments(request, email), { timeout: 15000 }).toEqual(["GBPUSD", "NAS100"]);
-      await A.page.goto("/journal");
+      await A.page.goto("/journal?tab=trades");
       await expect(A.page.getByTestId("trades-table")).toContainText("GBPUSD", { timeout: 15000 });
       await deleteTrade(A.page, "GBPUSD");
       await expect.poll(() => liveInstruments(request, email), { timeout: 15000 }).toEqual(["NAS100"]);
@@ -204,7 +204,7 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
       await B.context.setOffline(false);
       await expect.poll(() => liveInstruments(request, email), { timeout: 30000 }).toEqual(["NAS100", "USDJPY"]);
       await expect(badge(B.page)).toHaveAttribute("data-state", "synced", { timeout: 15000 });
-      await A.page.goto("/journal");
+      await A.page.goto("/journal?tab=trades");
       await expect(A.page.getByTestId("trades-table")).toContainText("USDJPY", { timeout: 15000 });
     });
 
@@ -263,7 +263,7 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
     const { A, B, userId } = await syncedPair(browser, request, email, `DayB${stamp % 100000}`);
 
     await test.step("21: import TradeTrack on A → on B, no XP; «Undo import» → gone on B, the rest stays", async () => {
-      await A.page.goto("/journal");
+      await A.page.goto("/journal?tab=trades");
       const xpBefore = await accountXp(A.page, userId);
       await A.page.getByTestId("journal-import").click();
       const wizard = A.page.getByTestId("import-wizard");
@@ -291,7 +291,7 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
     });
 
     await test.step("22: screenshot added on A → B downloads it from the cloud by itself (0005)", async () => {
-      await A.page.goto("/journal");
+      await A.page.goto("/journal?tab=trades");
       await A.page.keyboard.press("Escape");
       await A.page.click("tr:has-text('NAS100')");
       await A.page.locator("input[type='file'][accept='image/*']").setInputFiles(SCREENSHOT);
@@ -300,7 +300,7 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
       await expect
         .poll(async () => ((await cloudRows(request, email)).find((r) => r.table === "journal_trades" && r.data.instrument === "NAS100")?.data.attachmentIds as string[] | undefined)?.length ?? 0, { timeout: 15000 })
         .toBe(1);
-      await B.page.goto("/journal");
+      await B.page.goto("/journal?tab=trades");
       await expect.poll(async () => ((await local(B.page, `ayra:${userId}:ayra_journal_v1`)).trades as Row["data"][]).find((t) => t.instrument === "NAS100")?.attachmentIds, { timeout: 15000 }).toHaveLength(1);
       await B.page.reload();
       await B.page.click("tr:has-text('NAS100')");
@@ -352,14 +352,14 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
       await plainSignOut(A.page);
       await signIn(A.page, otherEmail);
       await completeOnboarding(A.page, `DayO${stamp % 100000}`);
-      await A.page.goto("/journal");
+      await A.page.goto("/journal?tab=trades");
       await expect(badge(A.page)).toHaveCount(0);
       await expect(A.page.locator("main")).not.toContainText("NAS100");
       await addTrade(A.page, "spx500", { firstAccount: "Test" });
       await plainSignOut(A.page);
       await signIn(A.page, email);
       await A.page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
-      await A.page.goto("/journal");
+      await A.page.goto("/journal?tab=trades");
       await expect(badge(A.page)).toBeVisible({ timeout: 15000 });
       await expect(A.page.getByTestId("trades-table")).toContainText("NAS100", { timeout: 15000 });
       await expect(A.page.getByTestId("trades-table")).not.toContainText("SPX500");
@@ -374,14 +374,14 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
       await B.page.getByRole("button", { name: "Продолжить без входа" }).click();
       await B.page.waitForURL((url) => url.pathname !== "/login", { timeout: 10000 });
       if (new URL(B.page.url()).pathname.startsWith("/awakening")) await completeOnboarding(B.page, `Guest${stamp % 100000}`);
-      await B.page.goto("/journal");
+      await B.page.goto("/journal?tab=trades");
       await expect(badge(B.page)).toHaveCount(0);
       await expect(B.page.locator("main")).not.toContainText("NAS100");
       await addTrade(B.page, "ger40", { firstAccount: "Guest" });
       await signIn(B.page, email);
       await B.page.waitForURL((url) => url.pathname === "/" || url.pathname.startsWith("/profile-select"), { timeout: 10000 });
       if (new URL(B.page.url()).pathname.startsWith("/profile-select")) await B.page.click("button:has-text('Не переносить')");
-      await B.page.goto("/journal");
+      await B.page.goto("/journal?tab=trades");
       await expect(B.page.getByTestId("trades-table")).toContainText("NAS100", { timeout: 15000 });
       await expect(B.page.getByTestId("trades-table")).not.toContainText("GER40");
       await B.page.waitForTimeout(1500);
@@ -400,7 +400,7 @@ test.describe("Cloud journal: a day in the life (T7b-4f)", () => {
     await test.step("25: flag off — no badge, the journal works locally, nothing deleted, nothing sent", async () => {
       const cloudBefore = await ownerCloud();
       await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${encodeURIComponent(email)}&on=0`);
-      await A.page.goto("/journal");
+      await A.page.goto("/journal?tab=trades");
       await expect(badge(A.page)).toHaveCount(0, { timeout: 15000 });
       await expect(A.page.getByTestId("trades-table")).toContainText("NAS100");
       await addTrade(A.page, "btcusd");

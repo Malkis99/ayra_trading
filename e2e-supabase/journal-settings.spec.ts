@@ -56,7 +56,7 @@ test.describe("Settings → Journal", () => {
       );
     }, userId);
     await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${q(email)}&on=1`);
-    await A.goto("/journal");
+    await A.goto("/journal?tab=trades");
     await A.getByTestId("initial-sync-button").click();
     await A.getByTestId("initial-sync-start").click();
     await expect(A.getByTestId("initial-sync-done")).toBeVisible({ timeout: 15000 });
@@ -86,7 +86,7 @@ test.describe("Settings → Journal", () => {
     await shot(A, "settings-journal-1440", "journal-settings");
 
     // the Journal opens in $; a new trade gets Prop and London
-    await A.goto("/journal");
+    await A.goto("/journal?tab=trades");
     await expect(A.getByRole("radiogroup", { name: "Единицы" }).getByRole("radio", { name: "$" })).toHaveAttribute("aria-checked", "true");
     await A.getByRole("button", { name: "Добавить сделку" }).first().click();
     const drawer = A.getByTestId("add-trade-drawer");
@@ -140,7 +140,7 @@ test.describe("Settings → Journal", () => {
         (r) => r.table === "journal_trades" && !r.data.deletedAt
       ).length;
     const addTrade = async (instrument: string, firstAccount = false) => {
-      await page.goto("/journal");
+      await page.goto("/journal?tab=trades");
       await page.getByRole("button", { name: "Добавить сделку" }).first().click();
       const drawer = page.getByTestId("add-trade-drawer");
       if (firstAccount) {

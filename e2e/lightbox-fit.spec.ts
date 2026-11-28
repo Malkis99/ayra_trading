@@ -92,7 +92,7 @@ async function expectFitted(page: Page) {
 
 async function run(page: Page, label: string) {
   await seed(page);
-  await page.goto("/journal");
+  await page.goto("/journal?tab=trades");
   await page.getByText("EURUSD").locator("visible=true").first().click();
   const card = page.getByTestId("trade-quick-view");
   await expect(card).toBeVisible();

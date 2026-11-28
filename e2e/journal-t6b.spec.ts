@@ -46,14 +46,14 @@ test.describe("T6b Journal Dashboard, Calendar & Reports E2E Flow", () => {
         })
       );
     });
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
   });
 
   test("Dashboard demo mode -> KPI & Equity Curve -> Calendar Month -> Reports Slices & Matrix -> Exit Demo -> Add Real Trade", async ({
     page,
   }) => {
     // 1. Enable Demo Mode from empty state
-    await openJournalTab(page, "Аналитика");
+    await openJournalTab(page, "Дешборд");
     await expect(page.locator("button:has-text('Показать пример')")).toBeVisible();
     await page.click("button:has-text('Показать пример')");
 
@@ -86,7 +86,7 @@ test.describe("T6b Journal Dashboard, Calendar & Reports E2E Flow", () => {
     await expect(page.locator("table")).toBeVisible();
 
     // 5. Exit Demo Mode
-    await openJournalTab(page, "Аналитика");
+    await openJournalTab(page, "Дешборд");
     await page.click("button:has-text('Выйти из примера')");
     await expect(page.locator("text=Демо-данные (только просмотр)")).not.toBeVisible();
 

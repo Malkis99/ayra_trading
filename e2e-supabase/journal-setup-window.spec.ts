@@ -51,7 +51,7 @@ test.describe("Journal first-run setup window", () => {
     const email = `Setup1_${Date.now()}@example.com`;
     await signIn(page, email);
     await completeOnboarding(page, `Su1${Date.now() % 100000}`, { after: "left" });
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     const win = page.getByTestId("journal-setup");
     await expect(win).toBeVisible({ timeout: 15000 });
     await expect(win).toContainText("Настроим Журнал");
@@ -83,7 +83,7 @@ test.describe("Journal first-run setup window", () => {
     const email = `Setup2_${Date.now()}@example.com`;
     await signIn(page, email);
     await completeOnboarding(page, `Su2${Date.now() % 100000}`, { after: "left" });
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     await expect(page.getByTestId("journal-setup")).toBeVisible({ timeout: 15000 });
     await page.getByTestId("journal-setup-skip").click();
     await expect(page.getByTestId("journal-setup")).toBeHidden();
@@ -100,7 +100,7 @@ test.describe("Journal first-run setup window", () => {
     await signIn(page, email);
     await completeOnboarding(page, `Su3${Date.now() % 100000}`, { after: "left" });
     await seedJournal(page, await userIdOf(request, email));
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     await expect(page.getByTestId("trades-table")).toContainText("EURUSD");
     await page.waitForTimeout(2000);
     await expect(page.getByTestId("journal-setup")).toHaveCount(0);
@@ -110,7 +110,7 @@ test.describe("Journal first-run setup window", () => {
     await g.page.goto("/login");
     await g.page.getByRole("button", { name: "Продолжить без входа" }).click();
     await g.page.waitForURL((url) => url.pathname !== "/login");
-    await g.page.goto("/journal");
+    await g.page.goto("/journal?tab=trades");
     await g.page.waitForTimeout(2000);
     await expect(g.page.getByTestId("journal-setup")).toHaveCount(0);
     await g.ctx.close();
@@ -125,7 +125,7 @@ test.describe("Journal first-run setup window", () => {
       await completeOnboarding(page, `Su4a${Date.now() % 100000}`, { after: "left" });
       await seedJournal(page, await userIdOf(request, email));
       await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${q(email)}&on=1`);
-      await page.goto("/journal");
+      await page.goto("/journal?tab=trades");
       const win = page.getByTestId("journal-setup");
       await expect(win).toBeVisible({ timeout: 15000 });
       await expect(page.getByTestId("journal-setup-cloud").getByRole("radio", { name: "Автоматически" })).toHaveAttribute("aria-checked", "true");
@@ -146,7 +146,7 @@ test.describe("Journal first-run setup window", () => {
       await completeOnboarding(page, `Su4m${Date.now() % 100000}`, { after: "left" });
       await seedJournal(page, await userIdOf(request, email));
       await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${q(email)}&on=1`);
-      await page.goto("/journal");
+      await page.goto("/journal?tab=trades");
       await expect(page.getByTestId("journal-setup")).toBeVisible({ timeout: 15000 });
       await page.getByTestId("journal-setup-cloud").getByRole("radio", { name: "Вручную" }).click();
       await expect(page.getByTestId("journal-setup-upload-note")).toContainText("когда ты нажмёшь «Загрузить в облако»");
@@ -168,7 +168,7 @@ test.describe("Journal first-run setup window", () => {
     await signIn(A.page, email);
     await completeOnboarding(A.page, `Su5${Date.now() % 100000}`, { after: "left" });
     await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${q(email)}&on=1`);
-    await A.page.goto("/journal");
+    await A.page.goto("/journal?tab=trades");
     await expect(A.page.getByTestId("journal-setup")).toBeVisible({ timeout: 15000 });
     await A.page.getByTestId("journal-setup-unit").getByRole("radio", { name: "%" }).click();
     await A.page.getByTestId("journal-setup-save").click();
@@ -180,7 +180,7 @@ test.describe("Journal first-run setup window", () => {
     const B = await device(browser, 360, 740);
     await signIn(B.page, email);
     await B.page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 10000 });
-    await B.page.goto("/journal");
+    await B.page.goto("/journal?tab=trades");
     const win = B.page.getByTestId("journal-setup");
     await expect(win).toBeVisible({ timeout: 15000 });
     await expect(win).toContainText("Настройки Журнала уже пришли с другого устройства");

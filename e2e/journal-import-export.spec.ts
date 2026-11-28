@@ -48,9 +48,9 @@ test.describe("Journal tabs", () => {
   test("desktop: all tabs in one row, no 'More' menu", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await seed(page);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     const tabs = page.getByRole("tablist", { name: "Журнал" }).getByRole("tab");
-    await expect(tabs).toHaveText(["Сделки", "Аналитика", "План", "Отчёты", "Стратегии", "Счета", "Заметки"]);
+    await expect(tabs).toHaveText(["Дешборд", "Сделки", "План", "Заметки", "Отчёты", "Стратегии", "Счета"]);
     const boxes = await tabs.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().toJSON()));
     expect(new Set(boxes.map((b) => Math.round(b.top))).size).toBe(1);
     await expect(page.getByRole("tab", { name: /Ещё/ })).toHaveCount(0);
@@ -82,7 +82,7 @@ test.describe("Import", () => {
 
   test("universal CSV: manual mapping, row errors, import, idempotent re-import, undo", async ({ page }) => {
     await seed(page);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     let wizard = await importFile(page, "universal.csv");
     await expect(wizard).toContainText("Формат не узнан");
     await wizard.getByTestId("import-next").click(); // → mapping
@@ -126,7 +126,7 @@ test.describe("Import", () => {
 
   test("documented-only platforms are marked beta; import says it gives no XP and really gives none", async ({ page }) => {
     await seed(page);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     const xpBefore = await page.evaluate(() => JSON.parse(localStorage.getItem("ayra_demo_v1") || "{}").xp ?? 0);
     await page.getByTestId("journal-import").click();
     const wizard = page.getByTestId("import-wizard");
@@ -153,7 +153,7 @@ test.describe("Import", () => {
 
   test("MetaTrader 4 HTML report is detected automatically; undo right after import", async ({ page }) => {
     await seed(page);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     const wizard = await importFile(page, "mt4.html");
     await expect(wizard).toContainText("Формат: MetaTrader 4");
     await wizard.getByTestId("import-next").click();
@@ -174,7 +174,7 @@ test.describe("Import", () => {
 
   test("too large / empty files show a clear error", async ({ page }) => {
     await seed(page);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     await page.getByTestId("journal-import").click();
     const wizard = page.getByTestId("import-wizard");
     await wizard.getByTestId("import-next").click();
@@ -212,7 +212,7 @@ test.describe("Export", () => {
 
   test("CSV with BOM, injection guard and the table filter scope", async ({ page }) => {
     await seed(page, [trade("t1", "EURUSD", 120, 2), trade("t2", "XAUUSD", -50, 3)]);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     await page.getByTestId("filter-result").click();
     await page.getByRole("listbox").getByRole("option", { name: "Победа" }).click();
     await page.getByTestId("journal-export").click();
@@ -232,7 +232,7 @@ test.describe("Export", () => {
 
   test("JSON round trip: exported file imported back is recognised as duplicates", async ({ page }) => {
     await seed(page, [trade("t1", "EURUSD", 120, 2), trade("t2", "XAUUSD", -50, 3)]);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     await page.getByTestId("journal-export").click();
     const dialog = page.getByTestId("export-dialog");
     await dialog.getByRole("radio", { name: "JSON AYRA" }).click();
@@ -255,7 +255,7 @@ test.describe("Export", () => {
   test("360px: wizard is a bottom sheet", async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 740 });
     await seed(page);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     await page.getByTestId("journal-import").click();
     const box = (await page.getByTestId("import-wizard").boundingBox())!;
     expect(Math.round(box.x)).toBe(0);

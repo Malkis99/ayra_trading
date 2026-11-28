@@ -40,7 +40,7 @@ test.describe("Screenshots in the cloud on WebKit (0005-B)", () => {
     const userId = (await (await request.get(`${FAKE_SUPABASE}/__test/profile?email=${encodeURIComponent(email)}`)).json()).id as string;
     await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${encodeURIComponent(email)}&on=1`);
     await markFirstSyncDone(A, userId);
-    await A.goto("/journal");
+    await A.goto("/journal?tab=trades");
     await A.getByRole("button", { name: "Добавить сделку" }).first().click();
     const drawer = A.getByTestId("add-trade-drawer");
     await drawer.getByPlaceholder("Название счёта").fill("Main");
@@ -68,7 +68,7 @@ test.describe("Screenshots in the cloud on WebKit (0005-B)", () => {
 
       const openTrade = async () => {
         // right after a reload the app may pass through its sign-in check (/auth/continue) and come back by itself
-        await B.goto("/journal").catch((e: unknown) => {
+        await B.goto("/journal?tab=trades").catch((e: unknown) => {
           if (!/interrupted by another navigation/.test(String(e))) throw e;
         });
         await B.waitForURL((url) => url.pathname === "/journal", { timeout: 15000 });

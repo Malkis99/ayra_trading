@@ -50,7 +50,7 @@ test.describe("T6c-2b Screenshot Attachments E2E Flow", () => {
         })
       );
     });
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
   });
 
   test("Add Trade with Screenshot -> Lightbox Viewer -> Rejection of SVG/Disguised files -> Persistence & Deletion", async ({
@@ -128,7 +128,7 @@ test.describe("T6c-2b Screenshot Attachments E2E Flow", () => {
 
   test("Mobile 360px viewport responsiveness check", async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 640 });
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
 
     await expect(page.getByRole("heading", { name: "Журнал" })).toBeVisible();
     await openJournalTab(page, "Сделки");

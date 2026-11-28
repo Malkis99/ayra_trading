@@ -10,7 +10,7 @@ const SCREENSHOT = path.join(process.cwd(), "e2e/fixtures/test-screenshot.png");
 // its Storage stand-in (same rules as migration 0005). The flag is on ONLY for test users of the fake server.
 
 async function addTrade(page: Page, instrument: string, firstAccount = false) {
-  await page.goto("/journal");
+  await page.goto("/journal?tab=trades");
   await page.getByRole("button", { name: "Добавить сделку" }).first().click();
   const drawer = page.getByTestId("add-trade-drawer");
   await expect(drawer).toBeVisible();
@@ -69,7 +69,7 @@ async function twoDevices(browser: Browser, request: APIRequestContext, opts: { 
   await signIn(B.page, email);
   await B.page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
   await markFirstSyncDone(B.page, userId);
-  await B.page.goto("/journal");
+  await B.page.goto("/journal?tab=trades");
   await expect(B.page.getByTestId("trades-table")).toContainText("NAS100", { timeout: 15000 });
   // «Manual» only after the journal arrived: in manual mode an empty device does not download it by itself
   if (opts.manualB) {
@@ -80,7 +80,7 @@ async function twoDevices(browser: Browser, request: APIRequestContext, opts: { 
 }
 
 async function openTrade(page: Page) {
-  await page.goto("/journal");
+  await page.goto("/journal?tab=trades");
   await page.click("tr:has-text('NAS100')");
   await expect(page.getByTestId("trade-quick-view")).toBeVisible();
 }
@@ -233,14 +233,14 @@ test.describe("Screenshots in the cloud (0005-B)", () => {
     await expect(thumbnails(B.page)).toHaveCount(1, { timeout: 15000 });
 
     // B offline deletes the trade (its screenshot goes with it); A edits the trade
-    await B.page.goto("/journal");
+    await B.page.goto("/journal?tab=trades");
     await B.page.click("tr:has-text('NAS100')");
     await B.context.setOffline(true);
     await B.page.getByTestId("trade-quick-view").locator("button:has-text('Удалить')").click();
     await B.page.locator("button:has-text('Удалить')").first().click();
     await expect(B.page.locator("main")).not.toContainText("NAS100");
 
-    await A.page.goto("/journal");
+    await A.page.goto("/journal?tab=trades");
     await A.page.click("tr:has-text('NAS100')");
     await A.page.click("button:has-text('Редактировать')");
     await expect(A.page.getByTestId("instrument-input")).toHaveValue("NAS100");
@@ -280,7 +280,7 @@ test.describe("Screenshots in the cloud (0005-B)", () => {
       await expect(A.page.getByTestId("cloud-sync-no-space")).toContainText("Место для скриншотов в облаке закончилось (200 МБ)");
 
       // B has the new version of the trade (with the screenshot id) before its card is opened
-      await B.page.goto("/journal");
+      await B.page.goto("/journal?tab=trades");
       await expect
         .poll(async () => (await B.page.evaluate((id) => JSON.parse(localStorage.getItem(`ayra:${id}:ayra_journal_v1`) || "{}").trades?.[0]?.attachmentIds?.length ?? 0, userId)), { timeout: 15000 })
         .toBe(1);

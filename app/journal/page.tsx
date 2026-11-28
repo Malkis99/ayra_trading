@@ -41,8 +41,7 @@ import { evaluatePropToastAlert } from "@/lib/journal/prop-toast";
 import { AppStorage } from "@/lib/storage";
 import { InitialSyncButton } from "@/components/journal/InitialSyncDialog";
 
-const JOURNAL_TABS = ["trades", "analytics", "plan", "reports", "strategies", "accounts", "notes"] as const;
-type JournalTab = (typeof JOURNAL_TABS)[number];
+import { JOURNAL_TABS, journalTab, type JournalTab } from "@/lib/journal/trades-view";
 const KPI_PERIOD_KEY = "ayra_journal_kpi_period";
 
 export default function JournalPage() {
@@ -77,30 +76,31 @@ export default function JournalPage() {
   const [tradesSubtab, setTradesSubtab] = useState<"trades" | "noTrade">("trades");
 
   const searchParams = useSearchParams();
-  // Trades first; rare sections live in the "More" menu.
-  const [activeTab, setActiveTabState] = useState<JournalTab>("trades");
+  // The URL is the durable tab state, including Back/Forward and legacy analytics links.
+  const [activeTab, setActiveTabState] = useState<JournalTab>(() => journalTab(searchParams.get("tab")));
   const setActiveTab = (tab: JournalTab) => {
     setActiveTabState(tab);
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
+      if (url.searchParams.get("tab") === tab) return;
       url.searchParams.set("tab", tab);
-      window.history.replaceState(window.history.state, "", url.toString());
+      window.history.pushState(window.history.state, "", url.toString());
     }
   };
 
   useEffect(() => {
-    const getTabFromUrl = () => {
-      if (typeof window !== "undefined" && window.location.search) {
-        return new URLSearchParams(window.location.search).get("tab");
+    const restore = () => {
+      const url = new URL(window.location.href);
+      const raw = url.searchParams.get("tab");
+      setActiveTabState(journalTab(raw));
+      if (raw === "analytics") {
+        url.searchParams.set("tab", "dashboard");
+        window.history.replaceState(window.history.state, "", url.toString());
       }
-      return searchParams.get("tab");
     };
-
-    const tabParam = getTabFromUrl();
-    const mapped = tabParam === "dashboard" ? "analytics" : tabParam;
-    if (mapped && (JOURNAL_TABS as readonly string[]).includes(mapped)) {
-      setActiveTabState(mapped as JournalTab);
-    }
+    restore();
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
   }, [searchParams]);
 
   // Demo Mode State
@@ -211,15 +211,7 @@ export default function JournalPage() {
   };
 
   // All sections are visible at once (no "More" menu); the row scrolls on phones.
-  const journalTabs: Array<{ id: JournalTab; label: string }> = [
-    { id: "trades", label: dict.journal.tabs.trades },
-    { id: "analytics", label: dict.journal.tabs.analytics },
-    { id: "plan", label: dict.journal.tabs.plan },
-    { id: "reports", label: dict.journal.tabs.reports },
-    { id: "strategies", label: dict.journal.tabs.strategies },
-    { id: "accounts", label: dict.journal.tabs.accounts },
-    { id: "notes", label: dict.journal.tabs.notes },
-  ];
+  const journalTabs = JOURNAL_TABS.map(id => ({ id, label: dict.journal.tabs[id] }));
 
   // Export JSON (guaranteed to export only real journal data, never demo data)
   const handleExportJSON = () => {
@@ -520,6 +512,7 @@ export default function JournalPage() {
         <div className="order-2 min-w-0 space-y-4 xl:order-1">
           <Tabs<JournalTab> items={journalTabs} value={activeTab} onChange={setActiveTab} label={dict.journal.title} idPrefix="journal" />
 
+      <div role="tabpanel" id={`journal-panel-${activeTab}`} aria-labelledby={`journal-tab-${activeTab}`} tabIndex={0} className="min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vi">
       {/* TRADES */}
       {activeTab === "trades" && (
         <div className="space-y-4">
@@ -562,7 +555,7 @@ export default function JournalPage() {
       )}
 
       {/* TAB 0: DASHBOARD */}
-      {activeTab === "analytics" && (
+      {activeTab === "dashboard" && (
         <div className="space-y-6">
           <DashboardTab
             trades={activeTrades}
@@ -758,6 +751,7 @@ export default function JournalPage() {
       )}
 
       {activeTab === "notes" && <NotesTab />}
+      </div>
         </div>
 
         <div className="order-1 xl:sticky xl:top-4 xl:order-2">

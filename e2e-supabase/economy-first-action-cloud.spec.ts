@@ -15,7 +15,7 @@ const markFirstSyncDone = (page: Page, userId: string) =>
   page.evaluate((id) => localStorage.setItem(`ayra:${id}:ayra_sync_state`, JSON.stringify({ initialSyncAt: new Date().toISOString() })), userId);
 
 async function addTrade(page: Page, instrument: string, firstAccount = false) {
-  await page.goto("/journal");
+  await page.goto("/journal?tab=trades");
   await page.getByRole("button", { name: "Добавить сделку" }).first().click();
   const drawer = page.getByTestId("add-trade-drawer");
   await expect(drawer).toBeVisible();
@@ -49,7 +49,7 @@ test("first trade on A is rewarded once; on B, after the journal came from the c
   const B = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
   await signIn(B, email);
   await B.waitForURL((url) => url.pathname === "/", { timeout: 15000 });
-  await B.goto("/journal");
+  await B.goto("/journal?tab=trades");
   await expect(B.getByTestId("trades-table")).toContainText("US30", { timeout: 15000 });
   const before = await game(B, userId);
   await addTrade(B, "ger40");

@@ -67,12 +67,12 @@ async function seed(page: Page) {
 test.describe("Journal page", () => {
   test.use({ reducedMotion: "reduce" });
 
-  test("trades first, KPI strip by period, Today panel with plan, checklist and daily R limit", async ({ page }) => {
+  test("dashboard first, KPI strip by period, Today panel with plan, checklist and daily R limit", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await seed(page);
     await page.goto("/journal");
 
-    await expect(page.getByRole("tab", { name: "Сделки" })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: "Дешборд" })).toHaveAttribute("aria-selected", "true");
 
     const kpis = page.getByTestId("journal-kpis");
     await kpis.getByRole("radio", { name: "День" }).click();
@@ -95,10 +95,10 @@ test.describe("Journal page", () => {
     await expect(page.getByTestId("today-panel").getByRole("checkbox", { name: "Определил направление рынка" })).toBeChecked();
   });
 
-  test("table: grouped by day, filter chips, sorting, density, quick view drawer", async ({ page }) => {
+  test("table: grouped by day, filter chips, sorting, real day view, quick view drawer", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await seed(page);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     const table = page.getByTestId("trades-table");
     await expect(table.locator("tbody")).toHaveCount(2); // today, yesterday
     await expect(table.locator("tbody").first().locator("tr")).toHaveCount(3); // day header + 2 trades
@@ -111,13 +111,14 @@ test.describe("Journal page", () => {
     await expect(table.locator("tbody tr:not(:has(th))")).toHaveCount(3);
 
     await table.locator("thead").getByRole("button", { name: "Результат" }).click(); // sort by result, desc
-    const firstRow = table.locator("tbody tr").first();
+    const firstRow = table.locator("tbody tr:not(:has(th))").first();
     await expect(firstRow).toContainText("XAUUSD");
 
-    await table.getByRole("radio", { name: "Компактная" }).click();
+    await table.getByRole("radio", { name: "По дням" }).click();
     await page.reload();
-    await expect(page.getByTestId("trades-table").getByRole("radio", { name: "Компактная" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByTestId("trades-table").getByRole("radio", { name: "По дням" })).toHaveAttribute("aria-checked", "true");
 
+    await page.getByTestId("trades-table").getByRole("radio", { name: "Список", exact: true }).click();
     await page.getByTestId("trades-table").locator("tr", { hasText: "EURUSD" }).click();
     const view = page.getByTestId("trade-quick-view");
     await expect(view.getByRole("heading", { name: "Карточка сделки" })).toBeVisible();
@@ -145,7 +146,7 @@ test.describe("Journal page", () => {
   test("tabs keep the chosen section in the URL (?tab=)", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await seed(page);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     await openJournalTab(page, "Счета");
     await expect(page.getByRole("tab", { name: /Счета/ })).toHaveAttribute("aria-selected", "true");
     expect(new URL(page.url()).searchParams.get("tab")).toBe("accounts");
@@ -156,7 +157,7 @@ test.describe("Journal page", () => {
   test("360px: Today collapses, cards instead of table, no horizontal scroll", async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 740 });
     await seed(page);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     const today = page.getByTestId("today-panel");
     const toggle = today.getByRole("button", { name: /Сегодня/ });
     await expect(toggle).toHaveAttribute("aria-expanded", "false");

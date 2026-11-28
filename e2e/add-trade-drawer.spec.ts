@@ -28,7 +28,7 @@ async function seed(page: Page) {
 const drawer = (page: Page) => page.getByTestId("add-trade-drawer");
 
 async function openDrawer(page: Page) {
-  await page.goto("/journal");
+  await page.goto("/journal?tab=trades");
   await page.getByRole("button", { name: "Добавить сделку" }).first().click();
   await expect(drawer(page)).toBeVisible();
 }

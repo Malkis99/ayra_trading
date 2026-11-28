@@ -55,7 +55,7 @@ test.describe("Import: TradeTrack file through the universal CSV wizard", () => 
   test("29 trades, 1 open, 0 duplicates; strategies matched or created; re-import = 29 duplicates with reasons; analytics calculated", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await seed(page);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     let wizard = await openWizardWithFile(page, fs.readFileSync(FILE));
 
     // columns found by name, exit date is used
@@ -104,7 +104,7 @@ test.describe("Import: TradeTrack file through the universal CSV wizard", () => 
     await expect(table).toContainText("Итог дня");
 
     // analytics: Winrate and Profit Factor calculated (all-time key metrics)
-    await page.getByRole("tab", { name: "Аналитика", exact: true }).first().click();
+    await page.getByRole("tab", { name: "Дешборд", exact: true }).first().click();
     const metrics = page.locator("main");
     await expect(metrics).toContainText("Winrate");
     await expect(metrics).toContainText("46.4%");
@@ -125,7 +125,7 @@ test.describe("Import: TradeTrack file through the universal CSV wizard", () => 
   test("without the RR column the table shows money instead of '—', day totals in money, money metrics calculated", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await seed(page);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     // drop the RR column from the file
     const noRR = fs
       .readFileSync(FILE, "utf8")
@@ -143,7 +143,7 @@ test.describe("Import: TradeTrack file through the universal CSV wizard", () => 
     await expect(table).toContainText(/\+1\s002,58\s\$/);
     await expect(table).toContainText(/Итог дня: -491,16\s\$/);
 
-    await page.getByRole("tab", { name: "Аналитика", exact: true }).first().click();
+    await page.getByRole("tab", { name: "Дешборд", exact: true }).first().click();
     await expect(page.locator("main")).toContainText("R известен: 0 из 28");
     await expect(page.locator("main")).toContainText("46.4%");
   });

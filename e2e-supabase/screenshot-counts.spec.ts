@@ -19,7 +19,7 @@ const markFirstSyncDone = (page: Page, userId: string) =>
 
 /** The journal page, also when the app passes through its sign-in check right after a reload. */
 async function gotoJournal(page: Page) {
-  await page.goto("/journal").catch((e: unknown) => {
+  await page.goto("/journal?tab=trades").catch((e: unknown) => {
     if (!/interrupted by another navigation/.test(String(e))) throw e;
   });
   await page.waitForURL((url) => url.pathname === "/journal", { timeout: 15000 });

@@ -17,7 +17,7 @@ async function newAccount(page: Page, request: APIRequestContext, tag: string) {
 }
 
 async function addTrade(page: Page, instrument: string, firstAccount = false) {
-  await page.goto("/journal");
+  await page.goto("/journal?tab=trades");
   await page.getByRole("button", { name: "Добавить сделку" }).first().click();
   const drawer = page.getByTestId("add-trade-drawer");
   await expect(drawer).toBeVisible();

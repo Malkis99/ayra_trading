@@ -8,7 +8,7 @@ const FAKE_SUPABASE = "http://127.0.0.1:54329";
 // The flag is on ONLY for test users of the fake server; nothing here touches a real project.
 
 async function addTrade(page: Page, instrument: string, firstAccount = false, navigate = true) {
-  if (navigate) await page.goto("/journal");
+  if (navigate) await page.goto("/journal?tab=trades");
   await page.getByRole("button", { name: "Добавить сделку" }).first().click();
   const drawer = page.getByTestId("add-trade-drawer");
   await expect(drawer).toBeVisible();

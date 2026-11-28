@@ -45,7 +45,7 @@ async function makeConflict(browser: Browser, request: APIRequestContext, kind: 
   const userId = ((await (await request.get(`${FAKE_SUPABASE}/__test/profile?email=${encodeURIComponent(email)}`)).json()).id) as string;
   await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${encodeURIComponent(email)}&on=1`);
   await markFirstSyncDone(A.page, userId);
-  await A.page.goto("/journal");
+  await A.page.goto("/journal?tab=trades");
   await A.page.getByRole("button", { name: "Добавить сделку" }).first().click();
   const drawer = A.page.getByTestId("add-trade-drawer");
   await drawer.getByPlaceholder("Название счёта").fill("Main");
@@ -63,13 +63,13 @@ async function makeConflict(browser: Browser, request: APIRequestContext, kind: 
   await signIn(B.page, email);
   await B.page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
   await markFirstSyncDone(B.page, userId);
-  await B.page.goto("/journal");
+  await B.page.goto("/journal?tab=trades");
   await expect(B.page.getByTestId("trades-table")).toContainText("NAS100", { timeout: 15000 });
 
   await B.context.setOffline(true);
   await editInstrument(B.page, "NAS100", "ger40");
 
-  await A.page.goto("/journal");
+  await A.page.goto("/journal?tab=trades");
   if (kind === "delete") {
     await A.page.click("tr:has-text('NAS100')");
     await A.page.click("button:has-text('Удалить')");

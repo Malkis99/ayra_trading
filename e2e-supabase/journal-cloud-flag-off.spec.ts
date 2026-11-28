@@ -27,7 +27,7 @@ test.describe("Cloud journal with the sync flag off", () => {
     await completeOnboarding(page, `Off${Date.now() % 100000}`, { after: "none" });
     await page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
 
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     await page.getByRole("button", { name: "Добавить сделку" }).first().click();
     const drawer = page.getByTestId("add-trade-drawer");
     await expect(drawer).toBeVisible();
