@@ -71,7 +71,7 @@ async function accountWithLocalData(browser: Browser, request: APIRequestContext
     );
   }, [userId, trades] as const);
   await request.get(`${FAKE_SUPABASE}/__test/cloud-flag?email=${encodeURIComponent(email)}&on=1`);
-  await page.goto("/journal");
+  await page.goto("/journal?tab=trades");
   return { email, userId, context, page };
 }
 
@@ -152,7 +152,7 @@ test.describe("Cloud journal: first upload and empty device", () => {
     await signIn(bPage, A.email);
     await bPage.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
     await expect(bPage.getByText("Журнал загружен из облака")).toBeVisible({ timeout: 15000 });
-    await bPage.goto("/journal");
+    await bPage.goto("/journal?tab=trades");
     await expect(bPage.getByTestId("trades-table")).toContainText("NAS100");
     await expect(bPage.getByTestId("initial-sync-button")).toHaveCount(0);
 
@@ -163,7 +163,7 @@ test.describe("Cloud journal: first upload and empty device", () => {
     await cPage.setViewportSize({ width: 1440, height: 900 });
     await signIn(cPage, A.email);
     await cPage.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
-    await cPage.goto("/journal");
+    await cPage.goto("/journal?tab=trades");
     await expect(cPage.getByTestId("initial-sync-button")).toBeVisible({ timeout: 15000 });
     await expect(cPage.getByTestId("trades-table")).toContainText("USDJPY");
     await expect(cPage.getByTestId("trades-table")).not.toContainText("NAS100");

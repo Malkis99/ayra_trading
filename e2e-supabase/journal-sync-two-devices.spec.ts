@@ -9,7 +9,7 @@ const FAKE_SUPABASE = "http://127.0.0.1:54329";
 
 async function addTrade(page: Page, instrument: string, firstAccount = false, navigate = true) {
   // offline a page cannot be loaded: then the trade is added on the already open journal
-  if (navigate) await page.goto("/journal");
+  if (navigate) await page.goto("/journal?tab=trades");
   await page.getByRole("button", { name: "Добавить сделку" }).first().click();
   const drawer = page.getByTestId("add-trade-drawer");
   await expect(drawer).toBeVisible();
@@ -68,7 +68,7 @@ test.describe("Cloud journal: two devices of one account", () => {
     await signIn(B.page, email);
     await B.page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
     await markFirstSyncDone(B.page, userId);
-    await B.page.goto("/journal");
+    await B.page.goto("/journal?tab=trades");
     await expect(B.page.getByTestId("trades-table")).toContainText("NAS100", { timeout: 15000 });
 
     // B goes offline and edits the trade; meanwhile A deletes it
@@ -82,7 +82,7 @@ test.describe("Cloud journal: two devices of one account", () => {
     await expect(B.page.getByTestId("trades-table")).toContainText("GER40");
     await expect.poll(async () => ((await local(B.page, userId, "ayra_sync_outbox")) || []).length).toBeGreaterThan(0);
 
-    await A.page.goto("/journal");
+    await A.page.goto("/journal?tab=trades");
     await A.page.click("tr:has-text('NAS100')");
     await A.page.click("button:has-text('Удалить')");
     await expect(A.page.locator("text=Удалить сделку?")).toBeVisible();
@@ -125,7 +125,7 @@ test.describe("Cloud journal: two devices of one account", () => {
     await signIn(B.page, email);
     await B.page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
     await markFirstSyncDone(B.page, userId);
-    await B.page.goto("/journal");
+    await B.page.goto("/journal?tab=trades");
     await expect(B.page.getByTestId("trades-table")).toContainText("EURUSD", { timeout: 15000 });
 
     await B.context.setOffline(true);

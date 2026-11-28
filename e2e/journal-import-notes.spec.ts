@@ -66,7 +66,7 @@ test.describe("Journal: notes from AYRA JSON", () => {
 
   test("notes and a backtest result come in with no reward; a newer local note is kept; a second import adds nothing; undo removes them", async ({ page }) => {
     await seed(page);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     const before = await game(page);
 
     let wizard = await toPreview(page);

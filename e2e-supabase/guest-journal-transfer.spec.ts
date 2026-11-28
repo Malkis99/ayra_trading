@@ -58,7 +58,7 @@ test.describe("Guest journal into the account (variant A)", () => {
     await page.waitForURL((url) => url.pathname === "/", { timeout: 10000 });
 
     await expect.poll(() => cloudLiveTrades(request, email), { timeout: 20000 }).toBe(2);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     await expect(page.getByTestId("trades-table")).toContainText("EURUSD");
     await expect(page.getByTestId("sync-badge")).toHaveAttribute("data-state", "synced", { timeout: 15000 });
 

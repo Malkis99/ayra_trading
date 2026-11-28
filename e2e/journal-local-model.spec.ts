@@ -20,7 +20,7 @@ test("old journal (v4) opens with every trade; a deleted trade disappears but st
     localStorage.setItem("ayra_journal_v1", journal);
   }, V4);
 
-  await page.goto("/journal");
+  await page.goto("/journal?tab=trades");
   await openJournalTab(page, "Сделки");
   await expect(page.locator("tr:has-text('XAUUSD')")).toBeVisible();
   await expect(page.locator("tr:has-text('NAS100')")).toBeVisible();

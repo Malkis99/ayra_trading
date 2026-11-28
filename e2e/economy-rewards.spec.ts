@@ -61,7 +61,7 @@ const oldTrade = {
 };
 
 async function addTrade(page: Page, instrument: string) {
-  await page.goto("/journal");
+  await page.goto("/journal?tab=trades");
   await page.getByRole("button", { name: "Добавить сделку" }).first().click();
   const drawer = page.getByTestId("add-trade-drawer");
   await expect(drawer).toBeVisible();
@@ -76,7 +76,7 @@ test.describe("Rewards: only new actions, once per account", () => {
 
   test("editing and saving an existing trade gives no coins, no XP and closes no quest", async ({ page }) => {
     await seed(page, { trades: [oldTrade] });
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     await page.click("tr:has-text('US30')");
     await page.click("button:has-text('Редактировать')");
     await expect(page.getByTestId("instrument-input")).toHaveValue("US30");

@@ -52,7 +52,7 @@ test.describe("Import: TradeTrack (CSV) preset", () => {
   test("detected automatically; columns by the preset; 29 trades (1 open); re-import = 29 duplicates", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await seed(page);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     let wizard = await chooseFile(page);
     await expect(wizard.getByTestId("import-file-summary")).toContainText("Формат: TradeTrack");
     await expect(wizard.getByTestId("import-file-summary")).not.toContainText("бета");
@@ -80,7 +80,7 @@ test.describe("Import: TradeTrack (CSV) preset", () => {
     const batches = await page.evaluate(() => JSON.parse(localStorage.getItem("ayra_import_batches") || "[]"));
     expect(batches.at(-1)).toMatchObject({ formatId: "tradetrack", tradeCount: 29 });
 
-    await page.getByRole("tab", { name: "Аналитика", exact: true }).first().click();
+    await page.getByRole("tab", { name: "Дешборд", exact: true }).first().click();
     await expect(page.locator("main")).toContainText("46.4%");
     await expect(page.locator("main")).toContainText("R известен: 28 из 28");
 
@@ -97,7 +97,7 @@ test.describe("Import: TradeTrack (CSV) preset", () => {
   test("Match-Trader picked by hand: explains which columns are missing, cannot continue, offers TradeTrack", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await seed(page);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     const wizard = await chooseFile(page, /^Match-Trader/);
     const alert = wizard.getByTestId("import-format-mismatch");
     await expect(alert).toContainText("Файл не похож на выгрузку Match-Trader");
@@ -113,7 +113,7 @@ test.describe("Import: TradeTrack (CSV) preset", () => {
   test("360px: the preset hint and the mismatch explanation fit the bottom sheet", async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 740 });
     await seed(page);
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
     const wizard = await chooseFile(page, /^Match-Trader/);
     await expect(wizard.getByTestId("import-format-mismatch")).toBeVisible();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

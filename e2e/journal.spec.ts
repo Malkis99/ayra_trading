@@ -30,7 +30,7 @@ test.describe("T6a Journal v1 E2E Flow", () => {
       };
       localStorage.setItem("ayra_demo_v1", JSON.stringify(state));
     });
-    await page.goto("/journal");
+    await page.goto("/journal?tab=trades");
   });
 
   test("Create account -> Add trade -> Verify persistence -> Switch units -> Edit -> Delete -> Export JSON", async ({
